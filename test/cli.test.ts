@@ -1409,6 +1409,59 @@ describe("commands.tools", () => {
     const text = out.join("\n");
     expect(text).toContain("enabled but binary not on PATH");
   });
+
+  test("enable codegraph --yes provisions (install + index) when the binary is missing", () => {
+    // Binary absent in CI → enable --yes must RUN the install plan via the spawner,
+    // not just warn. This is the "config-only enable" gap closing.
+    const ran: string[] = [];
+    const code = tools(
+      "enable",
+      ["codegraph"],
+      { yes: true },
+      {
+        base: dir,
+        spawner: (cmd, args) => {
+          ran.push(`${cmd} ${args.join(" ")}`);
+          return { status: 0 };
+        },
+      },
+    );
+    expect(code).toBe(0);
+    // install plan ran: global npm install + the per-repo index build (codegraph init -i).
+    expect(ran.some((s) => s.startsWith("npm i -g"))).toBe(true);
+    expect(ran.some((s) => s.includes("init -i"))).toBe(true);
+    const text = out.join("\n");
+    expect(text).toContain("installed and indexed");
+  });
+
+  test("enable codegraph --yes returns nonzero when a provisioning step fails", () => {
+    const code = tools(
+      "enable",
+      ["codegraph"],
+      { yes: true },
+      { base: dir, spawner: () => ({ status: 1 }) },
+    );
+    expect(code).toBe(1);
+  });
+
+  test("enable codegraph WITHOUT --yes stays config-only and never spawns", () => {
+    let spawned = false;
+    const code = tools(
+      "enable",
+      ["codegraph"],
+      {},
+      {
+        base: dir,
+        spawner: () => {
+          spawned = true;
+          return { status: 0 };
+        },
+      },
+    );
+    expect(code).toBe(0);
+    expect(spawned).toBe(false);
+    expect(out.join("\n")).toContain("binary not found on PATH");
+  });
 });
 
 describe("commands.skills init", () => {

@@ -83,6 +83,7 @@ import {
 } from "./settings.js";
 import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/registry.js";
 import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
+import * as codegraphTool from "./tools/codegraph.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
 import { Spinner, StatusLine, link, panel, progressBar, table } from "./ui.js";
@@ -1888,29 +1889,81 @@ function writeToolConfigs(base: string, settings: VibeSettings): void {
   printCopilotMcp(base, settings, languages);
 }
 
-/** `vf tools enable|disable <tool>` — flip the flag in SETTINGS.json and report. */
-function toolsToggle(base: string, name: ToolName, on: boolean): number {
+/** `vf tools enable|disable <tool>` — flip the flag in SETTINGS.json and report. When enabling
+ * with `--yes`, also PROVISION the tool (install the binary if missing, build the index if
+ * absent) and report honest readiness, instead of only warning about a missing binary. */
+function toolsToggle(
+  base: string,
+  name: ToolName,
+  on: boolean,
+  opts: { approved?: boolean; spawner?: StepSpawner } = {},
+): number {
   const settings = writeSettings(base, { tools: { ...readSettings(base).tools, [name]: on } });
   const word = on ? c.green("enabled") : c.yellow("disabled");
   console.log(`${word} ${c.bold(TOOLS[name].title)} in ${settingsPath(base)}`);
   writeToolConfigs(base, settings);
   console.log(`  wrote MCP config to ${join(base, CLAUDE_MCP_FILE)}`);
-  // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on PATH the
-  // MCP server can't start and dispatched engines silently get no navigation. Warn loudly + point
-  // at the install command, rather than reporting a clean success for dead config.
   if (on && !TOOLS[name].detect()) {
-    console.log(
-      c.yellow(
-        `  ! ${TOOLS[name].title} binary not found on PATH — the MCP server will not start until it is installed.`,
-      ),
-    );
-    console.log(c.dim(`    Run \`vf tools install ${name}\` to see the install plan.`));
+    // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on
+    // PATH the MCP server can't start and dispatched engines silently get no navigation.
+    if (opts.approved && opts.spawner && name === "codegraph") {
+      const rc = provisionCodegraph(base, opts.spawner);
+      if (rc !== 0) return rc;
+    } else {
+      console.log(
+        c.yellow(
+          `  ! ${TOOLS[name].title} binary not found on PATH — the MCP server will not start until it is installed.`,
+        ),
+      );
+      console.log(
+        c.dim(
+          `    Run \`vf tools enable ${name} --yes\` to install + index it now, or \`vf tools install ${name}\` for the plan.`,
+        ),
+      );
+    }
+  } else if (on && opts.approved && opts.spawner && name === "codegraph") {
+    // Binary present but the per-repo index may be missing — build it so navigation works.
+    const rc = ensureCodegraphIndex(base, opts.spawner);
+    if (rc !== 0) return rc;
   }
   console.log(
     c.dim(
       settings.tools[name] === on ? "Re-run `vf init` to regenerate instructions." : "no change",
     ),
   );
+  return 0;
+}
+
+/** Install codegraph (if the binary is missing) then build its per-repo index. Returns an
+ * exit code: 0 on success, nonzero if any spawned step fails. */
+function provisionCodegraph(base: string, spawner: StepSpawner): number {
+  const plan = TOOLS.codegraph.installPlan({ workspace: base, languages: repoLanguages(base) });
+  for (const step of plan.steps) {
+    console.log(c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    const { status } = spawner(step.cmd, step.args);
+    if (status !== 0) {
+      console.error(c.red(`✗ step failed (${status}). codegraph is enabled but not provisioned.`));
+      return 1;
+    }
+  }
+  console.log(c.green(`  ✓ ${TOOLS.codegraph.title} installed and indexed.`));
+  return 0;
+}
+
+/** Build the codegraph index only when it's absent (binary already present). */
+function ensureCodegraphIndex(base: string, spawner: StepSpawner): number {
+  if (existsSync(join(base, codegraphTool.INDEX_DIR))) {
+    console.log(c.dim(`  ${codegraphTool.INDEX_DIR}/ index present.`));
+    return 0;
+  }
+  const step = codegraphTool.indexBuildStep();
+  console.log(c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+  const { status } = spawner(step.cmd, step.args);
+  if (status !== 0) {
+    console.error(c.red(`✗ index build failed (${status}).`));
+    return 1;
+  }
+  console.log(c.green(`  ✓ built ${codegraphTool.INDEX_DIR}/ index.`));
   return 0;
 }
 
@@ -1965,12 +2018,13 @@ export function tools(
     console.error(c.red(`Usage: vf tools ${sub} <${VALID_TOOLS.join("|")}>`));
     return 2;
   }
-  if (sub === "enable") return toolsToggle(base, name as ToolName, true);
+  const spawner: StepSpawner =
+    inject.spawner ??
+    ((cmd, args) => ({ status: spawnSync(cmd, args, { stdio: "inherit" }).status ?? 0 }));
+  if (sub === "enable")
+    return toolsToggle(base, name as ToolName, true, { approved: Boolean(flags.yes), spawner });
   if (sub === "disable") return toolsToggle(base, name as ToolName, false);
   if (sub === "install") {
-    const spawner: StepSpawner =
-      inject.spawner ??
-      ((cmd, args) => ({ status: spawnSync(cmd, args, { stdio: "inherit" }).status ?? 0 }));
     return toolsInstall(base, name as ToolName, Boolean(flags.yes), spawner);
   }
   console.error(c.red(`Unknown: vf tools ${sub}`));

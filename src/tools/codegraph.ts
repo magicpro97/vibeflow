@@ -38,6 +38,19 @@ export function detect(opts?: DetectOpts): boolean {
   return has(BINARY);
 }
 
+/** Relative path of the per-repo index that `codegraph init -i` builds. */
+export const INDEX_DIR = ".codegraph";
+
+/** The single index-build step (also the 2nd step of installPlan), exposed so `enable`
+ * can build the index without re-running the global npm install. */
+export function indexBuildStep(): { cmd: string; args: string[]; description: string } {
+  return {
+    cmd: BINARY,
+    args: [...INIT_ARGS],
+    description: "Build the per-repo CodeGraph index into .codegraph/.",
+  };
+}
+
 /**
  * Install plan: global npm install (portable, no curl|sh piping) then a per-repo index
  * build. The caller runs these only after explicit approval.
