@@ -41,6 +41,46 @@ import { TOOLS, TOOL_ORDER } from "./tools/index.js";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const pageHtml = readFileSync(new URL("./server.html", import.meta.url), "utf8");
 
+/** Static UI assets live beside server.html (split out of the old monolith + vendored fonts/gsap).
+ * Served same-origin so they satisfy the strict CSP (style-src/script-src 'self'). */
+const ASSETS_DIR = new URL("./assets/", import.meta.url);
+
+const ASSET_TYPES: Record<string, string> = {
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".svg": "image/svg+xml",
+};
+
+/**
+ * Serve a file from {@link ASSETS_DIR} for a `/assets/<name>` request. Path-traversal safe: the
+ * resolved file URL must stay inside ASSETS_DIR, and only an allowlisted extension is served.
+ * Returns true when the response was written (hit or hard-fail), false to fall through to 404.
+ */
+function serveAsset(res: ServerResponse, url: string): boolean {
+  const rel = url.slice("/assets/".length);
+  if (!rel || rel.includes("..") || rel.includes("\0")) return false;
+  const fileUrl = new URL(rel, ASSETS_DIR);
+  if (!fileUrl.href.startsWith(ASSETS_DIR.href)) return false; // escaped the assets dir
+  const ext = rel.slice(rel.lastIndexOf("."));
+  const type = ASSET_TYPES[ext];
+  if (!type) return false;
+  let body: Buffer;
+  try {
+    body = readFileSync(fileUrl);
+  } catch {
+    return false;
+  }
+  res.writeHead(200, {
+    "content-type": type,
+    "x-content-type-options": "nosniff",
+    "cache-control": "no-cache",
+  });
+  res.end(body);
+  return true;
+}
+
 /** Exact host/origin match — guards against DNS-rebinding and cross-origin writes. */
 function hostAllowed(req: IncomingMessage): boolean {
   const host = (req.headers.host || "").replace(/:\d+$/, "");
@@ -445,6 +485,10 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
         sendJson(res, 400, { error: (err as Error).message });
       }
       return;
+    }
+
+    if (method === "GET" && url.startsWith("/assets/")) {
+      if (serveAsset(res, url)) return;
     }
 
     res.writeHead(404);

@@ -17,7 +17,7 @@
   },
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "bun build ./src/cli.ts --target=node --outfile=dist/cli.js --banner='#!/usr/bin/env node' && cp src/server.html dist/server.html && chmod +x dist/cli.js",
+    "build": "bun build ./src/cli.ts --target=node --outfile=dist/cli.js --banner='#!/usr/bin/env node' && cp src/server.html dist/server.html && cp -R src/assets dist/assets && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src test",
     "format": "biome format --write src test",

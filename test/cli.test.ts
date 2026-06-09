@@ -405,6 +405,22 @@ describe("server", () => {
     server.close();
   });
 
+  test("serves same-origin /assets/* (CSP-safe) and guards traversal + bad extensions", async () => {
+    const { server, url } = await startServer(0);
+    // A real shipped asset resolves with the right content-type (served from src/assets).
+    const css = await fetch(`${url}/assets/probe.css`);
+    expect(css.status).toBe(200);
+    expect(css.headers.get("content-type")).toContain("text/css");
+    expect(css.headers.get("x-content-type-options")).toBe("nosniff");
+    // Path traversal out of the assets dir is refused.
+    const traversal = await fetch(`${url}/assets/..%2fserver.ts`);
+    expect(traversal.status).toBe(404);
+    // Non-allowlisted extensions are not served even if the file exists.
+    const ts = await fetch(`${url}/assets/probe.ts`);
+    expect(ts.status).toBe(404);
+    server.close();
+  });
+
   test("POST /api/init generates a workflow and rejects a missing CSRF token", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-srv-"));
     const orig = process.cwd();
