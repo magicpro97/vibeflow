@@ -40,6 +40,7 @@ import { findScopeConflicts, policyGates } from "./gates.js";
 import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
+import { appendJournal, ensureIndex } from "./journal.js";
 import {
   type AsyncResearcher,
   type RiskClass,
@@ -363,6 +364,9 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   if (!opts.dry && (ctx.settings?.tools.codegraph || ctx.settings?.tools.lsp)) {
     writeToolConfigs(base, ctx.settings);
   }
+  // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
+  // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
+  if (!opts.dry) ensureIndex(base);
   return { files: written, state, readiness: gate.readiness, refused: false };
 }
 
@@ -970,6 +974,14 @@ export async function orchestrate(
     verdict.verdict === "met" ? c.green : verdict.verdict === "blocked" ? c.red : c.yellow;
   console.log(color(`\ngoal: ${verdict.verdict}`));
   for (const reason of verdict.reasons) console.log(c.dim(`  - ${reason}`));
+  // Append a machine event to the work journal — real runs only (dry is read-only).
+  if (mode !== "dry") {
+    appendJournal(base, "dispatch", `${engine} → goal ${verdict.verdict}`, [
+      `${ran.length} unit(s) dispatched (${mode}, concurrency ${concurrency})`,
+      ...ran.map((u) => `- ${u.name}: ${u.status} @ ${u.confidence}`),
+      ...reviews.map((r) => `- review ${r.unit}: ${r.pass ? "pass" : "fail"} — ${r.reason}`),
+    ]);
+  }
   if (mode === "dry") {
     console.log(
       c.dim(
@@ -1678,9 +1690,17 @@ export function verify(): number {
 
   if (failed > 0) {
     console.log(c.red(`\n${failed} gate(s) failed.`));
+    appendJournal(base, "verify", "fail", [
+      `${failed} gate(s) failed`,
+      ...report.failures.map((f) => `- ${f}`),
+    ]);
     return 1;
   }
   console.log(c.green("\nAll configured gates passed."));
+  appendJournal(base, "verify", "pass", [
+    `${report.passed.length} gate(s) passed`,
+    ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
+  ]);
   return 0;
 }
 

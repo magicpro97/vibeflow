@@ -1,6 +1,7 @@
 ---
 name: vibeflow-conventions
 description: Coding conventions, architecture, and development guidelines for @magicpro97/vibeflow. Use when writing or reviewing code in this project.
+status: verified
 ---
 
 # VibeFlow CLI Conventions

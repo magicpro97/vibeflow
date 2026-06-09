@@ -1,6 +1,7 @@
 ---
 name: vibeflow-specs
 description: Reference to VibeFlow specification documents. Use when needing details about workflow, work units, skills system, hooks, security, or generated files.
+status: verified
 ---
 
 # VibeFlow Specification Index
