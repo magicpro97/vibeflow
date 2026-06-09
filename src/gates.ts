@@ -4,6 +4,11 @@ export interface GateReport {
   ok: boolean;
   failures: string[];
   passed: string[];
+  /**
+   * Non-fatal advisories. The skill gate emits here; warnings NEVER affect `ok`.
+   * The regex classifier and engine self-reported `skills_used` are too weak to FAIL on.
+   */
+  warnings: string[];
 }
 
 /** Normalize a scope glob/prefix to a comparable path prefix. */
@@ -49,8 +54,14 @@ export function findScopeConflicts(
 export function policyGates(state: WorkflowState | null): GateReport {
   const failures: string[] = [];
   const passed: string[] = [];
+  const warnings: string[] = [];
   if (!state) {
-    return { ok: true, failures: [], passed: ["no workflow state — nothing to gate"] };
+    return {
+      ok: true,
+      failures: [],
+      passed: ["no workflow state — nothing to gate"],
+      warnings: [],
+    };
   }
   const units = state.work_units ?? [];
 
@@ -94,5 +105,43 @@ export function policyGates(state: WorkflowState | null): GateReport {
   }
   if (!overlapFound) passed.push("scope: no overlapping work-unit scopes");
 
-  return { ok: failures.length === 0, failures, passed };
+  // Skill gate — WARN/report only, NEVER fail (see GateReport.warnings).
+  // Acts only on units that CLAIM completion AND were classified knowledge-heavy at dispatch.
+  // `=== true` is deliberate: legacy/undefined units (pre-feature) are skipped, not gated.
+  const khDone = units.filter((u) => u.knowledge_heavy === true && u.status === "done");
+  let waived = 0;
+  for (const u of khDone) {
+    if (u.skill_waiver?.reason) {
+      waived++;
+      passed.push(`skills: "${u.name}" closed under waiver (${u.skill_waiver.reason})`);
+      continue;
+    }
+    if (u.knowledge_heavy_source === "regex") {
+      warnings.push(
+        `skills(warn): "${u.name}" flagged knowledge-heavy by heuristic; verify manually`,
+      );
+      continue;
+    }
+    const required = u.skills_required ?? [];
+    if (!required.length) {
+      warnings.push(
+        `skills(warn): "${u.name}" knowledge-heavy but no verified skill matched — author one or record a waiver (vf units waiver "${u.name}" --reason ...)`,
+      );
+      continue;
+    }
+    const used = new Set(u.skills_used ?? []);
+    if (required.some((r) => used.has(r))) {
+      passed.push(`skills: "${u.name}" applied a required skill`);
+    } else {
+      // FUTURE: a persisted reviewer gap-flag turns this into a real failure.
+      // Until that signal exists, never FAIL on skill grounds — self-report is untrusted.
+      warnings.push(
+        `skills(warn): "${u.name}" did not report using a required skill (required: ${required.join(", ")}; used: ${[...used].join(", ") || "none"}) — reviewer should confirm from the diff`,
+      );
+    }
+  }
+  if (!khDone.length) passed.push("skills: no knowledge-heavy completed units to check");
+  if (waived) warnings.push(`skills: ${waived} unit(s) closed under skill waiver`);
+
+  return { ok: failures.length === 0, failures, passed, warnings };
 }

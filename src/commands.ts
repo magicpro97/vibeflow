@@ -145,6 +145,9 @@ export async function doctor(
   }
   console.log(table(["", "tool", "status"], toolRows));
   console.log(`\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
+  console.log(
+    `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`,
+  );
 
   const probe = Boolean(flags.probe);
   let readiness: EngineReadiness[];
@@ -392,6 +395,19 @@ function normalizeUnit(input: Partial<WorkUnit> & { name: string }): WorkUnit {
     confidence: typeof input.confidence === "number" ? input.confidence : 0,
     owner_agent: input.owner_agent,
     skills_used: input.skills_used,
+    knowledge_heavy: typeof input.knowledge_heavy === "boolean" ? input.knowledge_heavy : undefined,
+    knowledge_heavy_source:
+      input.knowledge_heavy_source === "risk" || input.knowledge_heavy_source === "regex"
+        ? input.knowledge_heavy_source
+        : undefined,
+    skills_injected: Array.isArray(input.skills_injected) ? input.skills_injected : undefined,
+    skills_required: Array.isArray(input.skills_required) ? input.skills_required : undefined,
+    skill_waiver:
+      input.skill_waiver &&
+      typeof input.skill_waiver === "object" &&
+      typeof input.skill_waiver.reason === "string"
+        ? input.skill_waiver
+        : undefined,
     scope: input.scope,
     spec: input.spec,
     gates: {
@@ -739,6 +755,20 @@ function makeDispatcher(
     const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
     const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
     const skillGap = knowledgeHeavy && skillNames.length === 0;
+    // The full mixed-trust list actually injected into the prompt vs the VERIFIED-only subset
+    // that a downstream skills-first gate is allowed to count as satisfying the requirement.
+    const skillsInjected = skillNames;
+    const skillsRequired = skillMatches
+      .filter((m) => m.skill.status === "verified")
+      .map((m) => m.skill.name);
+    // Why the unit is knowledge-heavy: risk class first, else the UX/UI regex, else undefined.
+    const knowledgeHeavySource: WorkUnit["knowledge_heavy_source"] = !knowledgeHeavy
+      ? undefined
+      : riskClass === "feature" || riskClass === "architecture"
+        ? "risk"
+        : looksUiUx
+          ? "regex"
+          : undefined;
     const prompt = buildEnginePrompt(engine, ctx, [
       { name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap },
     ]);
@@ -778,6 +808,11 @@ function makeDispatcher(
       confidence,
       evidence,
       gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      knowledge_heavy: knowledgeHeavy,
+      knowledge_heavy_source: knowledgeHeavySource,
+      skills_injected: skillsInjected,
+      skills_required: skillsRequired,
+      skills_used: result.summary?.skills_used ?? [],
     };
   };
 }
@@ -1237,6 +1272,25 @@ export function units(
       console.log(c.green(`- deleted unit ${c.bold(name)}`));
       return 0;
     }
+    case "waiver": {
+      const name = rest[0]?.trim();
+      const reason = typeof flags.reason === "string" ? flags.reason.trim() : "";
+      if (!name || !reason) {
+        console.error(c.red('Usage: vf units waiver <name> --reason "<why no verified skill>"'));
+        return 2;
+      }
+      const patch: Partial<WorkUnit> & { name: string } = {
+        name,
+        skill_waiver: { reason, at: new Date().toISOString(), by: "human" },
+      };
+      const next = mutateUnits(cwd(), "update", patch);
+      if (!next) {
+        console.error(c.red(`No such work unit: ${name}`));
+        return 1;
+      }
+      console.log(c.green(`~ waived skill gate for ${c.bold(name)} (${reason})`));
+      return 0;
+    }
     default:
       console.error(c.red(`Unknown: vf units ${sub}`));
       return 2;
@@ -1452,6 +1506,35 @@ export function hookSelftest(inject: { base?: string; now?: () => string } = {})
   return 0;
 }
 
+/** True when .claude/settings.json wires a PreToolUse hook whose command delegates to
+ * `vf hook` — the only way the live per-tool-call guardrail is actually armed. Parses the
+ * JSON and inspects the PreToolUse entries so an unrelated mention of "vf hook" can't read
+ * as ON. */
+export function liveGuardrailArmed(base: string): boolean {
+  try {
+    const raw = readFileSync(join(base, ".claude", "settings.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      hooks?: { PreToolUse?: Array<{ hooks?: Array<{ command?: unknown }> }> };
+    };
+    const pre = parsed.hooks?.PreToolUse;
+    if (!Array.isArray(pre)) return false;
+    return pre.some((entry) =>
+      (entry.hooks ?? []).some(
+        (h) => typeof h.command === "string" && /\bvf\s+hook\b/.test(h.command),
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** A loud, actionable note when the live guardrail is OFF — silence reads as "protected". */
+function guardrailOffNote(): string {
+  return c.yellow(
+    "live guardrail: OFF — risky tool calls are NOT intercepted. Run `vf hooks emit --yes` to arm the PreToolUse gate.",
+  );
+}
+
 export function hooks(
   sub: string | undefined,
   flags: Record<string, string | boolean> = {},
@@ -1471,6 +1554,9 @@ export function hooks(
           ? `core.hooksPath = ${path}`
           : c.yellow("core.hooksPath not set — run `vf hooks install`"),
       );
+      // The live per-tool-call guardrail only exists if .claude/settings.json delegates a
+      // PreToolUse hook to `vf hook`. Report it LOUDLY — a silent "OFF" reads as "protected".
+      console.log(liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
       return 0;
     }
     case "emit": {
@@ -1584,6 +1670,7 @@ export function verify(): number {
   // Policy gates (confidence / evidence / scope) over the workflow ledger.
   const report = policyGates(readState());
   for (const ok of report.passed) console.log(c.green(`✓ ${ok}`));
+  for (const w of report.warnings) console.log(c.yellow(`⚠ ${w}`));
   for (const f of report.failures) {
     failed++;
     console.log(c.red(`✗ ${f}`));

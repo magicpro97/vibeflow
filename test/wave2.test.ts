@@ -186,6 +186,105 @@ describe("policy gates", () => {
     };
     expect(policyGates(state).ok).toBe(true);
   });
+
+  // --- Skill gate: WARN-only, never FAIL (the key anti-regression). ---
+  const cleanUnit = (over: Partial<WorkflowState["work_units"][number]>) => ({
+    name: "u",
+    status: "done" as const,
+    confidence: 1,
+    gates: {
+      build: "pass" as const,
+      lint: "pass" as const,
+      test: "pass" as const,
+      review: "pass" as const,
+    },
+    resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    evidence: ["evidence/x.log"],
+    ...over,
+  });
+
+  test("regex-classified knowledge-heavy unit only warns, never fails", () => {
+    const state = {
+      ...base,
+      work_units: [cleanUnit({ knowledge_heavy: true, knowledge_heavy_source: "regex" })],
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.startsWith("skills(warn)") && w.includes("heuristic"))).toBe(
+      true,
+    );
+  });
+
+  test("knowledge-heavy with no verified skill warns (skill-gap), ok stays true", () => {
+    const state = {
+      ...base,
+      work_units: [
+        cleanUnit({ knowledge_heavy: true, knowledge_heavy_source: "risk", skills_required: [] }),
+      ],
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.includes("no verified skill matched"))).toBe(true);
+  });
+
+  test("required skill not reported used → WARN, NOT fail", () => {
+    const state = {
+      ...base,
+      work_units: [
+        cleanUnit({
+          knowledge_heavy: true,
+          knowledge_heavy_source: "risk",
+          skills_required: ["compose-screen-ux"],
+          skills_used: [],
+        }),
+      ],
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.failures.length).toBe(0);
+    expect(r.warnings.some((w) => w.includes("did not report using a required skill"))).toBe(true);
+  });
+
+  test("required skill reported used → passed, no warning", () => {
+    const state = {
+      ...base,
+      work_units: [
+        cleanUnit({
+          knowledge_heavy: true,
+          knowledge_heavy_source: "risk",
+          skills_required: ["s"],
+          skills_used: ["s"],
+        }),
+      ],
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.passed.some((p) => p.includes("applied a required skill"))).toBe(true);
+  });
+
+  test("waiver clears the skill gate and is reported", () => {
+    const state = {
+      ...base,
+      work_units: [
+        cleanUnit({
+          knowledge_heavy: true,
+          knowledge_heavy_source: "risk",
+          skills_required: ["s"],
+          skill_waiver: { reason: "none authored", at: "2026-06-09T00:00:00Z", by: "human" },
+        }),
+      ],
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.passed.some((p) => p.includes("under waiver"))).toBe(true);
+  });
+
+  test("non-knowledge-heavy done unit is ignored by the skill gate", () => {
+    const state = { ...base, work_units: [cleanUnit({ skills_required: [] })] };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.startsWith("skills(warn)"))).toBe(false);
+  });
 });
 
 describe("skill resolver (demand-driven)", () => {

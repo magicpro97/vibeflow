@@ -142,6 +142,24 @@ describe("adapters", () => {
     expect(policy).toContain("vf orchestrate");
   });
 
+  test("canonical WORKFLOW_POLICY documents the knowledge write-back loop", () => {
+    const policy = canonicalFiles(defaultContext())[`${CTX_DIR}/WORKFLOW_POLICY.md`] as string;
+    expect(policy).toContain("log.md");
+    expect(policy).toContain("index.md");
+    expect(policy).toContain("append-only");
+  });
+
+  test("engine instruction files instruct knowledge write-back", () => {
+    const ctx = defaultContext();
+    for (const engine of ["claude", "codex", "copilot"] as const) {
+      const files = engineFiles(engine, ctx, false);
+      const body = Object.values(files).join("\n");
+      expect(body).toContain("log.md");
+      expect(body).toContain("index.md");
+      expect(body).toContain("append");
+    }
+  });
+
   test("each engine produces its canonical instruction file", () => {
     const ctx = defaultContext();
     expect(Object.keys(engineFiles("claude", ctx))).toContain("CLAUDE.md");

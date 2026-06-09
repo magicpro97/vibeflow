@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hookSelftest } from "../src/commands.js";
+import { hookSelftest, liveGuardrailArmed } from "../src/commands.js";
 import type { HookInput } from "../src/core.js";
 import {
   claudeHookConfig,
@@ -357,6 +357,50 @@ describe("hookSelftest dogfood (item 3)", () => {
       expect(report.failed).toBe(0);
       expect(report.cases.length).toBeGreaterThan(0);
       expect(report.cases.every((c) => c.pass)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("live guardrail detection", () => {
+  test("OFF when .claude/settings.json missing or empty", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-"));
+    try {
+      expect(liveGuardrailArmed(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("ON only when a PreToolUse hook delegates to `vf hook`", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-"));
+    try {
+      const claude = join(dir, ".claude");
+      mkdirSync(claude, { recursive: true });
+      writeFileSync(join(claude, "settings.json"), '{"hooks":{}}');
+      expect(liveGuardrailArmed(dir)).toBe(false);
+      writeFileSync(
+        join(claude, "settings.json"),
+        '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"vf hook"}]}]}}',
+      );
+      expect(liveGuardrailArmed(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("false-positive guard: 'vf hook' outside a PreToolUse command reads as OFF", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-"));
+    try {
+      const claude = join(dir, ".claude");
+      mkdirSync(claude, { recursive: true });
+      // mentions vf hook AND PreToolUse, but the command is something else
+      writeFileSync(
+        join(claude, "settings.json"),
+        '{"note":"run vf hook manually","hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo hi"}]}]}}',
+      );
+      expect(liveGuardrailArmed(dir)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -115,6 +115,41 @@ describe("orchestrateUnits — reviewer blocks on failed review (defect #4)", ()
     });
     expect(reviews.map((r) => r.unit)).toEqual(["a", "b", "c"]);
   });
+
+  test("applyOutcome carries the skills-first fields onto the unit", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("a")],
+      dispatcher: async () => ({
+        status: "verifying",
+        confidence: 1,
+        evidence: ["e"],
+        knowledge_heavy: true,
+        knowledge_heavy_source: "regex",
+        skills_injected: ["x", "y"],
+        skills_required: ["x"],
+        skills_used: ["x"],
+      }),
+      reviewer: () => ({ pass: true, reason: "ok" }),
+    });
+    const a = units.find((u) => u.name === "a");
+    expect(a?.knowledge_heavy).toBe(true);
+    expect(a?.knowledge_heavy_source).toBe("regex");
+    expect(a?.skills_injected).toEqual(["x", "y"]);
+    expect(a?.skills_required).toEqual(["x"]);
+    expect(a?.skills_used).toEqual(["x"]);
+  });
+
+  test("applyOutcome keeps existing field values when the outcome omits them", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("a", { knowledge_heavy: true, skills_required: ["pre"] })],
+      // dispatcher reports nothing skills-related → existing values must survive (no undefined clobber).
+      dispatcher: async () => ({ status: "verifying", confidence: 1, evidence: ["e"] }),
+      reviewer: () => ({ pass: true, reason: "ok" }),
+    });
+    const a = units.find((u) => u.name === "a");
+    expect(a?.knowledge_heavy).toBe(true);
+    expect(a?.skills_required).toEqual(["pre"]);
+  });
 });
 
 describe("investigateUnit — bounded async investigation (defect #5)", () => {

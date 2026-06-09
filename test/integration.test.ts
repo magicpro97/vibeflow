@@ -510,3 +510,50 @@ describe("workflow command", () => {
     }
   });
 });
+
+describe("normalizeUnit round-trips skills-first fields (anti-regression)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = freshRepo();
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("an update through mutateUnits→normalizeUnit preserves all five new fields", () => {
+    mutateUnits(dir, "add", { name: "auth" });
+    mutateUnits(dir, "update", {
+      name: "auth",
+      knowledge_heavy: true,
+      knowledge_heavy_source: "risk",
+      skills_injected: ["a", "b"],
+      skills_required: ["a"],
+      skill_waiver: { reason: "no verified skill yet", at: "2026-06-09", by: "linh" },
+    });
+    const u = (readState(dir) as WorkflowState).work_units.find((x) => x.name === "auth");
+    expect(u?.knowledge_heavy).toBe(true);
+    expect(u?.knowledge_heavy_source).toBe("risk");
+    expect(u?.skills_injected).toEqual(["a", "b"]);
+    expect(u?.skills_required).toEqual(["a"]);
+    expect(u?.skill_waiver).toEqual({
+      reason: "no verified skill yet",
+      at: "2026-06-09",
+      by: "linh",
+    });
+  });
+
+  test("normalizeUnit rejects malformed field values", () => {
+    mutateUnits(dir, "add", { name: "auth" });
+    mutateUnits(dir, "update", {
+      name: "auth",
+      // intentionally malformed inputs that the whitelist must drop
+      knowledge_heavy_source: "bogus" as never,
+      skills_injected: "notarray" as never,
+      skill_waiver: { at: "2026-06-09" } as never, // missing string `reason`
+    });
+    const u = (readState(dir) as WorkflowState).work_units.find((x) => x.name === "auth");
+    expect(u?.knowledge_heavy_source).toBeUndefined();
+    expect(u?.skills_injected).toBeUndefined();
+    expect(u?.skill_waiver).toBeUndefined();
+  });
+});
