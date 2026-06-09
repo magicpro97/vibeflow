@@ -1,0 +1,27 @@
+/* Self-hosted fonts — served same-origin from /assets/fonts so they satisfy the page CSP
+   (style-src/font-src 'self'); no external CDN. All three are variable fonts: one file each
+   spans the full weight range. font-display:swap keeps text visible during load. */
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/assets/fonts/bricolage-grotesque.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/assets/fonts/hanken-grotesk.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/assets/fonts/jetbrains-mono.woff2") format("woff2");
+}

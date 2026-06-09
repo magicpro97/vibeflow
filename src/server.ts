@@ -330,7 +330,7 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
         "content-security-policy":
-          "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'",
+          "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'",
         "x-content-type-options": "nosniff",
       });
       res.end(html);
