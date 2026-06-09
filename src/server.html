@@ -806,7 +806,6 @@
     </header>
 
     <main>
-      <div id="triage" hidden></div>
       <div class="feedback-modal hidden" id="feedbackModal">
         <div class="feedback-panel">
           <button class="feedback-close" id="feedbackClose">×</button>
@@ -1318,7 +1317,7 @@
         </div>
         <div class="actions">
           <button
-            style="width: stretch"
+            style="width: 100%"
             type="submit"
             form="intakeForm"
             class="btn primary"
@@ -1336,6 +1335,7 @@
         var GATES = ["build", "lint", "test", "review"];
         var prev = {},
           firstPaint = true;
+        var latestState = null;
         var reduce = window.matchMedia(
           "(prefers-reduced-motion: reduce)",
         ).matches;
@@ -1700,6 +1700,7 @@
         }
 
         function render(s) {
+          latestState = s || null;
           var meter = document.getElementById("meter");
           var board = document.getElementById("board");
           var dispatchSec = document.getElementById("dispatchSec");
@@ -2395,13 +2396,15 @@
             feedbackLog.textContent = "Loading system information…";
             feedbackText.value = "";
             // Generate log
-            var state = readState ? readState(activeRepo) : null;
+            // Use the latest state the client already rendered (server-side
+            // readState/activeRepo don't exist in the browser).
+            var state = latestState;
             var logData = {
               timestamp: new Date().toISOString(),
               url: window.location.href,
               userAgent: navigator.userAgent,
               state: state ? JSON.stringify(state, null, 2) : "N/A",
-              repoPath: activeRepo || "N/A",
+              repoPath: (state && state.repo) || "N/A",
             };
             feedbackLog.textContent =
               "timestamp: " +
