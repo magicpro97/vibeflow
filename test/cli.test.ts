@@ -1431,7 +1431,7 @@ describe("commands.tools", () => {
     expect(ran.some((s) => s.startsWith("npm i -g"))).toBe(true);
     expect(ran.some((s) => s.includes("init -i"))).toBe(true);
     const text = out.join("\n");
-    expect(text).toContain("installed and indexed");
+    expect(text).toContain("installed");
   });
 
   test("enable codegraph --yes returns nonzero when a provisioning step fails", () => {

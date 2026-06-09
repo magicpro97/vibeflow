@@ -83,7 +83,6 @@ import {
 } from "./settings.js";
 import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/registry.js";
 import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
-import * as codegraphTool from "./tools/codegraph.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
 import { Spinner, StatusLine, link, panel, progressBar, table } from "./ui.js";
@@ -1906,8 +1905,8 @@ function toolsToggle(
   if (on && !TOOLS[name].detect()) {
     // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on
     // PATH the MCP server can't start and dispatched engines silently get no navigation.
-    if (opts.approved && opts.spawner && name === "codegraph") {
-      const rc = provisionCodegraph(base, opts.spawner);
+    if (opts.approved && opts.spawner) {
+      const rc = provisionTool(base, name, opts.spawner);
       if (rc !== 0) return rc;
     } else {
       console.log(
@@ -1921,9 +1920,9 @@ function toolsToggle(
         ),
       );
     }
-  } else if (on && opts.approved && opts.spawner && name === "codegraph") {
-    // Binary present but the per-repo index may be missing — build it so navigation works.
-    const rc = ensureCodegraphIndex(base, opts.spawner);
+  } else if (on && opts.approved && opts.spawner) {
+    // Binary present but the per-repo artifact (e.g. code index) may be missing — build it.
+    const rc = ensureToolIndex(base, name, opts.spawner);
     if (rc !== 0) return rc;
   }
   console.log(
@@ -1934,36 +1933,45 @@ function toolsToggle(
   return 0;
 }
 
-/** Install codegraph (if the binary is missing) then build its per-repo index. Returns an
- * exit code: 0 on success, nonzero if any spawned step fails. */
-function provisionCodegraph(base: string, spawner: StepSpawner): number {
-  const plan = TOOLS.codegraph.installPlan({ workspace: base, languages: repoLanguages(base) });
-  for (const step of plan.steps) {
+/** Run an ordered set of install steps via the spawner, stopping on the first failure.
+ * Generic over any tool — drives entirely off the registry's plans, no per-tool branching. */
+function runToolSteps(steps: { cmd: string; args: string[] }[], spawner: StepSpawner): boolean {
+  for (const step of steps) {
     console.log(c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
     const { status } = spawner(step.cmd, step.args);
     if (status !== 0) {
-      console.error(c.red(`✗ step failed (${status}). codegraph is enabled but not provisioned.`));
-      return 1;
+      console.error(c.red(`✗ step failed (${status}).`));
+      return false;
     }
   }
-  console.log(c.green(`  ✓ ${TOOLS.codegraph.title} installed and indexed.`));
+  return true;
+}
+
+/** Install a tool (its full install plan) then build its per-repo index if it has one.
+ * Generic: reads installPlan/indexPlan off the registry descriptor. Returns an exit code. */
+function provisionTool(base: string, name: ToolName, spawner: StepSpawner): number {
+  const tool = TOOLS[name];
+  const ctx = { workspace: base, languages: repoLanguages(base) };
+  if (!runToolSteps(tool.installPlan(ctx).steps, spawner)) {
+    console.error(c.red(`  ${tool.title} is enabled but not provisioned.`));
+    return 1;
+  }
+  console.log(c.green(`  ✓ ${tool.title} installed.`));
   return 0;
 }
 
-/** Build the codegraph index only when it's absent (binary already present). */
-function ensureCodegraphIndex(base: string, spawner: StepSpawner): number {
-  if (existsSync(join(base, codegraphTool.INDEX_DIR))) {
-    console.log(c.dim(`  ${codegraphTool.INDEX_DIR}/ index present.`));
+/** Build a tool's per-repo artifact only when its descriptor reports it absent. Tools with no
+ * per-repo artifact (no indexPresent/indexPlan) are no-ops. */
+function ensureToolIndex(base: string, name: ToolName, spawner: StepSpawner): number {
+  const tool = TOOLS[name];
+  if (!tool.indexPlan || !tool.indexPresent) return 0;
+  if (tool.indexPresent(base)) {
+    console.log(c.dim(`  ${tool.title} index present.`));
     return 0;
   }
-  const step = codegraphTool.indexBuildStep();
-  console.log(c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
-  const { status } = spawner(step.cmd, step.args);
-  if (status !== 0) {
-    console.error(c.red(`✗ index build failed (${status}).`));
-    return 1;
-  }
-  console.log(c.green(`  ✓ built ${codegraphTool.INDEX_DIR}/ index.`));
+  const ctx = { workspace: base, languages: repoLanguages(base) };
+  if (!runToolSteps(tool.indexPlan(ctx).steps, spawner)) return 1;
+  console.log(c.green(`  ✓ built ${tool.title} index.`));
   return 0;
 }
 

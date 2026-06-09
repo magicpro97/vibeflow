@@ -13,6 +13,8 @@
  * binding at module-eval time.
  */
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Engine } from "../core.js";
 import * as codegraph from "./codegraph.js";
 import * as lsp from "./lsp.js";
@@ -91,6 +93,12 @@ export interface ToolDescriptor {
   detect(opts?: DetectOpts): boolean;
   installPlan(ctx: ToolContext): InstallPlan;
   mcpEntries(engine: Engine, ctx: ToolContext): McpEntry[];
+  /** True when the per-repo artifact (e.g. a code index) the tool needs already exists.
+   * Tools with no per-repo artifact (e.g. lsp) omit this — treated as always-present. */
+  indexPresent?(base: string): boolean;
+  /** Steps to (re)build the per-repo artifact when `indexPresent` is false. Omitted for
+   * tools that need none. Lets `enable --yes` provision generically off the registry. */
+  indexPlan?(ctx: ToolContext): InstallPlan;
 }
 
 /**
@@ -136,6 +144,8 @@ export const TOOLS: Record<ToolName, ToolDescriptor> = {
     detect: (opts) => codegraph.detect(opts),
     installPlan: () => codegraph.installPlan(),
     mcpEntries: (engine) => [codegraph.mcpConfigFor(engine)],
+    indexPresent: (base) => existsSync(join(base, codegraph.INDEX_DIR)),
+    indexPlan: () => ({ steps: [codegraph.indexBuildStep()] }),
   },
   lsp: {
     name: "lsp",
