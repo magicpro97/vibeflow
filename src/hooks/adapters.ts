@@ -109,6 +109,32 @@ export function gitPreCommit(): string {
   ].join("\n");
 }
 
+/** Re-index code-navigation tools when the working tree's branch changes, so a code graph
+ * never goes stale. `post-checkout` gets ($1 prev, $2 new, $3 flag); flag=1 means a branch
+ * checkout (vs a file checkout) — only then is a re-index warranted. Best-effort: never
+ * blocks the checkout (|| true), and `vf tools sync` itself is a no-op unless codegraph is
+ * enabled AND its binary is present. */
+export function gitPostCheckout(): string {
+  return [
+    "#!/usr/bin/env sh",
+    "# VibeFlow: keep the code-navigation index in sync on branch change.",
+    "# Args: $1=prev-HEAD $2=new-HEAD $3=branch-flag (1 = branch checkout).",
+    '[ "${3:-0}" = "1" ] || exit 0',
+    "vf tools sync >/dev/null 2>&1 || true",
+    "",
+  ].join("\n");
+}
+
+/** Re-index after a merge brings in new code (post-merge has no branch-flag arg). Best-effort. */
+export function gitPostMerge(): string {
+  return [
+    "#!/usr/bin/env sh",
+    "# VibeFlow: refresh the code-navigation index after a merge pulls in new code.",
+    "vf tools sync >/dev/null 2>&1 || true",
+    "",
+  ].join("\n");
+}
+
 /** All engine hook configs as a path→content map for a target repo. */
 export function engineHookFiles(): Record<string, string> {
   return {
@@ -116,5 +142,7 @@ export function engineHookFiles(): Record<string, string> {
     ".codex/hooks.json": codexHookConfig(),
     ".github/copilot-hooks.json": copilotHookConfig(),
     ".githooks/pre-commit": gitPreCommit(),
+    ".githooks/post-checkout": gitPostCheckout(),
+    ".githooks/post-merge": gitPostMerge(),
   };
 }

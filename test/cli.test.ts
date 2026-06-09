@@ -1501,6 +1501,25 @@ describe("commands.tools", () => {
     expect(code).toBe(0);
     expect(spawned).toBe(false);
   });
+
+  test("tools sync is a no-op (never spawns) when no indexable tool is enabled", () => {
+    let spawned = false;
+    const code = tools(
+      "sync",
+      [],
+      {},
+      {
+        base: dir,
+        spawner: () => {
+          spawned = true;
+          return { status: 0 };
+        },
+      },
+    );
+    expect(code).toBe(0);
+    expect(spawned).toBe(false);
+    expect(out.join("\n")).toContain("nothing to sync");
+  });
 });
 
 describe("commands.skills init", () => {

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
@@ -1587,7 +1587,16 @@ export function hooks(
       }
       // --yes: write per-engine hook configs into the active repo, all delegating to `vf hook`.
       for (const [rel, content] of Object.entries(files)) {
-        writeFileSafe(join(cwd(), rel), content);
+        const dest = join(cwd(), rel);
+        writeFileSafe(dest, content);
+        // Git only runs hooks under core.hooksPath if they're executable — chmod the shell hooks.
+        if (rel.startsWith(".githooks/")) {
+          try {
+            chmodSync(dest, 0o755);
+          } catch {
+            /* best-effort: non-POSIX filesystems may not support the bit */
+          }
+        }
         console.log(`${c.green("+")} ${rel}`);
       }
       return 0;
@@ -2042,8 +2051,33 @@ export function tools(
   if (sub === "install") {
     return toolsInstall(base, name as ToolName, Boolean(flags.yes), spawner);
   }
+  if (sub === "sync") return toolsSync(base, spawner);
   console.error(c.red(`Unknown: vf tools ${sub}`));
   return 2;
+}
+
+/** `vf tools sync` — re-index every enabled tool whose binary is present and that has a
+ * per-repo index. Called by the post-checkout/post-merge git hooks so a code graph never
+ * goes stale across branch switches. A no-op (exit 0) when nothing is enabled/installed, so
+ * it's safe to wire as a best-effort hook. Always rebuilds (the index is branch-specific). */
+export function toolsSync(base: string, spawner: StepSpawner): number {
+  const settings = readSettings(base);
+  let synced = 0;
+  for (const name of VALID_TOOLS) {
+    const tool = TOOLS[name];
+    if (!settings.tools[name]) continue; // not enabled
+    if (!tool.indexPlan || !tool.indexPresent) continue; // no per-repo index (e.g. lsp)
+    if (!tool.detect()) continue; // binary not installed — nothing to run
+    const ctx = { workspace: base, languages: repoLanguages(base) };
+    console.log(c.cyan(`▶ re-indexing ${tool.title}`));
+    if (!runToolSteps(tool.indexPlan(ctx).steps, spawner)) {
+      console.error(c.red(`✗ ${tool.title} re-index failed.`));
+      return 1;
+    }
+    synced++;
+  }
+  console.log(synced ? c.green(`✓ synced ${synced} tool index(es).`) : c.dim("nothing to sync."));
+  return 0;
 }
 
 export function printVersion(): number {

@@ -10,6 +10,9 @@ import {
   copilotHookConfig,
   downgradeBannerText,
   engineEnforcement,
+  engineHookFiles,
+  gitPostCheckout,
+  gitPostMerge,
   gitPreCommit,
 } from "../src/hooks/adapters.js";
 import { scoreRisk } from "../src/hooks/risk.js";
@@ -404,5 +407,27 @@ describe("live guardrail detection", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("adapters: branch-sync hooks re-index code navigation (PR-B)", () => {
+  test("post-checkout only re-indexes on a branch checkout (flag=1), best-effort", () => {
+    const sh = gitPostCheckout();
+    // guards on the 3rd arg (branch-checkout flag) and never blocks the checkout
+    expect(sh).toContain('"${3:-0}" = "1"');
+    expect(sh).toContain("vf tools sync");
+    expect(sh).toContain("|| true");
+  });
+
+  test("post-merge re-indexes after a merge, best-effort", () => {
+    const sh = gitPostMerge();
+    expect(sh).toContain("vf tools sync");
+    expect(sh).toContain("|| true");
+  });
+
+  test("engineHookFiles ships the new branch-sync hooks", () => {
+    const files = engineHookFiles();
+    expect(Object.keys(files)).toContain(".githooks/post-checkout");
+    expect(Object.keys(files)).toContain(".githooks/post-merge");
   });
 });
