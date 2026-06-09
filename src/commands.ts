@@ -2060,17 +2060,21 @@ export function tools(
  * per-repo index. Called by the post-checkout/post-merge git hooks so a code graph never
  * goes stale across branch switches. A no-op (exit 0) when nothing is enabled/installed, so
  * it's safe to wire as a best-effort hook. Always rebuilds (the index is branch-specific). */
-export function toolsSync(base: string, spawner: StepSpawner): number {
+export function toolsSync(
+  base: string,
+  spawner: StepSpawner,
+  inject: { detect?: (name: ToolName) => boolean } = {},
+): number {
   const settings = readSettings(base);
+  const detect = inject.detect ?? ((name: ToolName) => TOOLS[name].detect());
   let synced = 0;
   for (const name of VALID_TOOLS) {
     const tool = TOOLS[name];
     if (!settings.tools[name]) continue; // not enabled
     if (!tool.indexPlan || !tool.indexPresent) continue; // no per-repo index (e.g. lsp)
-    if (!tool.detect()) continue; // binary not installed — nothing to run
-    const ctx = { workspace: base, languages: repoLanguages(base) };
+    if (!detect(name)) continue; // binary not installed — nothing to run
     console.log(c.cyan(`▶ re-indexing ${tool.title}`));
-    if (!runToolSteps(tool.indexPlan(ctx).steps, spawner)) {
+    if (!runToolSteps(tool.indexPlan({ workspace: base, languages: [] }).steps, spawner)) {
       console.error(c.red(`✗ ${tool.title} re-index failed.`));
       return 1;
     }

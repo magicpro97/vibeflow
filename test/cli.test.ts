@@ -17,6 +17,7 @@ import {
   skillForFile,
   skills,
   tools,
+  toolsSync,
   units,
 } from "../src/commands.js";
 import {
@@ -630,6 +631,8 @@ describe("hooks emit is non-destructive by default (bug 2)", () => {
     ".codex/hooks.json",
     ".github/copilot-hooks.json",
     ".githooks/pre-commit",
+    ".githooks/post-checkout",
+    ".githooks/post-merge",
   ];
 
   test("emit without --yes writes NO files (dry-run)", () => {
@@ -1519,6 +1522,28 @@ describe("commands.tools", () => {
     expect(code).toBe(0);
     expect(spawned).toBe(false);
     expect(out.join("\n")).toContain("nothing to sync");
+  });
+
+  test("toolsSync re-indexes an enabled tool whose binary is detected", () => {
+    writeSettings(dir, { tools: { codegraph: true, lsp: false } });
+    const ran: string[] = [];
+    const code = toolsSync(
+      dir,
+      (cmd, args) => {
+        ran.push(`${cmd} ${args.join(" ")}`);
+        return { status: 0 };
+      },
+      { detect: (name) => name === "codegraph" }, // stub PATH presence
+    );
+    expect(code).toBe(0);
+    expect(ran.some((s) => s.includes("init -i"))).toBe(true);
+    expect(out.join("\n")).toContain("synced 1 tool");
+  });
+
+  test("toolsSync returns nonzero when a re-index step fails", () => {
+    writeSettings(dir, { tools: { codegraph: true, lsp: false } });
+    const code = toolsSync(dir, () => ({ status: 1 }), { detect: () => true });
+    expect(code).toBe(1);
   });
 });
 
