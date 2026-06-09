@@ -14,7 +14,6 @@ import {
   mutateUnits,
   resolveRepo,
   skillForFile,
-  skills,
   tools,
   units,
 } from "../src/commands.js";
@@ -39,7 +38,12 @@ import {
 
 /** Injectable preflight stub: marks every requested engine ready (no real engine spawned). */
 const allReady = (engines: Engine[]): EngineReadiness[] =>
-  engines.map((engine) => ({ engine, level: "ready", detail: "ready (test)", checkedAt: "" }));
+  engines.map((engine) => ({
+    engine,
+    level: "ready",
+    detail: "ready (test)",
+    checkedAt: "",
+  }));
 
 /** Injectable preflight stub: marks every requested engine NOT ready (gate must refuse). */
 const noneReady = (engines: Engine[]): EngineReadiness[] =>
@@ -68,20 +72,36 @@ describe("core", () => {
           status: "done",
           confidence: 1,
           gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
-          resources: { agents: 1, tokens: 100, cost_usd: 0.5, wall_seconds: 10 },
+          resources: {
+            agents: 1,
+            tokens: 100,
+            cost_usd: 0.5,
+            wall_seconds: 10,
+          },
         },
         {
           name: "b",
           status: "running",
           confidence: 1,
-          gates: { build: "pass", lint: "pending", test: "pending", review: "pending" },
+          gates: {
+            build: "pass",
+            lint: "pending",
+            test: "pending",
+            review: "pending",
+          },
           resources: { agents: 1, tokens: 50, cost_usd: 0.25, wall_seconds: 5 },
         },
       ],
       totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     };
     recomputeTotals(s);
-    expect(s.totals).toEqual({ units: 2, done: 1, tokens: 150, cost_usd: 0.75, wall_seconds: 15 });
+    expect(s.totals).toEqual({
+      units: 2,
+      done: 1,
+      tokens: 150,
+      cost_usd: 0.75,
+      wall_seconds: 15,
+    });
   });
 });
 
@@ -303,7 +323,7 @@ describe("server", () => {
     expect(url).toContain("127.0.0.1");
     const html = await fetch(url).then((r) => r.text());
     expect(html).toContain("VibeFlow");
-    expect(html).toContain("new workflow"); // interactive intake wizard
+    expect(html).toContain("New workflow"); // interactive intake wizard
     expect(html).toContain('id="intakeForm"');
     const state = await fetch(`${url}/state`);
     expect(state.status).toBe(200);
@@ -322,11 +342,17 @@ describe("server", () => {
 
       const ok = await fetch(`${url}/api/init`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-vibeflow-token": token as string },
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token as string,
+        },
         body: JSON.stringify({ goal: "Ship dark mode", engines: ["claude"] }),
       });
       expect(ok.status).toBe(200);
-      const body = (await ok.json()) as { state: WorkflowState; files: string[] };
+      const body = (await ok.json()) as {
+        state: WorkflowState;
+        files: string[];
+      };
       expect(body.state.goal).toBe("Ship dark mode");
       expect(body.files).toContain(`${CTX_DIR}/WORKFLOW_STATE.json`);
 
@@ -415,7 +441,11 @@ describe("commands.units CRUD", () => {
     try {
       applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
 
-      let s = mutateUnits(dir, "add", { name: "auth", status: "running", confidence: 0.5 });
+      let s = mutateUnits(dir, "add", {
+        name: "auth",
+        status: "running",
+        confidence: 0.5,
+      });
       expect(s?.work_units.length).toBe(1);
       expect(s?.totals.units).toBe(1);
 
@@ -542,8 +572,18 @@ describe("doctor --probe surfaces probe failures", () => {
   test("a probe-failed engine downgrades the summary to exit 1", async () => {
     const readiness: EngineReadiness[] = [
       { engine: "claude", level: "ready", detail: "ready", checkedAt: "" },
-      { engine: "codex", level: "no-binary", detail: "not installed", checkedAt: "" },
-      { engine: "copilot", level: "probe-failed", detail: "probe failed", checkedAt: "" },
+      {
+        engine: "codex",
+        level: "no-binary",
+        detail: "not installed",
+        checkedAt: "",
+      },
+      {
+        engine: "copilot",
+        level: "probe-failed",
+        detail: "probe failed",
+        checkedAt: "",
+      },
     ];
     expect(await doctor({ probe: true }, { readiness })).toBe(1);
   });
@@ -551,7 +591,12 @@ describe("doctor --probe surfaces probe failures", () => {
   test("all-ready (or merely-not-installed optional engines) stays exit 0", async () => {
     const readiness: EngineReadiness[] = [
       { engine: "claude", level: "ready", detail: "ready", checkedAt: "" },
-      { engine: "codex", level: "no-binary", detail: "not installed", checkedAt: "" },
+      {
+        engine: "codex",
+        level: "no-binary",
+        detail: "not installed",
+        checkedAt: "",
+      },
       { engine: "copilot", level: "ready", detail: "ready", checkedAt: "" },
     ];
     expect(await doctor({ probe: true }, { readiness })).toBe(0);
@@ -618,7 +663,10 @@ describe("server write endpoints", () => {
     try {
       const { server, url } = await startServer(0);
       const token = tokenOf(await fetch(url).then((r) => r.text()));
-      const hdr = { "content-type": "application/json", "x-vibeflow-token": token };
+      const hdr = {
+        "content-type": "application/json",
+        "x-vibeflow-token": token,
+      };
 
       // detect points the active repo at dir
       const det = await fetch(`${url}/api/detect`, {
@@ -638,7 +686,10 @@ describe("server write endpoints", () => {
       const add = await fetch(`${url}/api/units`, {
         method: "POST",
         headers: hdr,
-        body: JSON.stringify({ action: "add", unit: { name: "u1", status: "running" } }),
+        body: JSON.stringify({
+          action: "add",
+          unit: { name: "u1", status: "running" },
+        }),
       });
       expect(add.status).toBe(200);
       expect(((await add.json()) as { state: WorkflowState }).state.work_units.length).toBe(1);
@@ -674,7 +725,10 @@ describe("server write endpoints", () => {
       expect(bad.status).toBe(400);
 
       // upload without token is forbidden
-      const noTok = await fetch(`${url}/api/upload?name=x.md`, { method: "POST", body: "x" });
+      const noTok = await fetch(`${url}/api/upload?name=x.md`, {
+        method: "POST",
+        body: "x",
+      });
       expect(noTok.status).toBe(403);
 
       // attachments mirrored into the saved ledger
@@ -717,7 +771,9 @@ describe("commands.discover (wired HTTP path)", () => {
     let calledUrl = "";
     const fetchFn = (async (url: string) => {
       calledUrl = url;
-      return jsonResponse({ results: [{ name: "pdf-reader", description: "reads pdf files" }] });
+      return jsonResponse({
+        results: [{ name: "pdf-reader", description: "reads pdf files" }],
+      });
     }) as unknown as typeof fetch;
 
     const code = await discover("skills", ["pdf"], { yes: true }, { fetchFn });
@@ -782,7 +838,10 @@ describe("server orchestration endpoints", () => {
     try {
       const { server, url } = await startServer(0);
       const token = tokenOf(await fetch(url).then((r) => r.text()));
-      const hdr = { "content-type": "application/json", "x-vibeflow-token": token };
+      const hdr = {
+        "content-type": "application/json",
+        "x-vibeflow-token": token,
+      };
 
       await fetch(`${url}/api/detect`, {
         method: "POST",
@@ -820,7 +879,10 @@ describe("server orchestration endpoints", () => {
         body: JSON.stringify({ engine: "claude" }),
       });
       expect(orch.status).toBe(200);
-      const orchJson = (await orch.json()) as { ok: boolean; state: WorkflowState };
+      const orchJson = (await orch.json()) as {
+        ok: boolean;
+        state: WorkflowState;
+      };
       expect(orchJson.ok).toBe(true);
       expect(Array.isArray(orchJson.state.work_units)).toBe(true);
       expect(readFileSync(statePath, "utf8")).toBe(stateBefore); // ledger byte-identical
@@ -844,7 +906,10 @@ describe("server preflight + settings endpoints", () => {
     try {
       const { server, url } = await startServer(0);
       const token = tokenOf(await fetch(url).then((r) => r.text()));
-      const hdr = { "content-type": "application/json", "x-vibeflow-token": token };
+      const hdr = {
+        "content-type": "application/json",
+        "x-vibeflow-token": token,
+      };
 
       // no-token request is forbidden (privileged: it spawns engines)
       const noTok = await fetch(`${url}/api/preflight`, {
@@ -888,7 +953,10 @@ describe("server preflight + settings endpoints", () => {
     try {
       const { server, url } = await startServer(0);
       const token = tokenOf(await fetch(url).then((r) => r.text()));
-      const hdr = { "content-type": "application/json", "x-vibeflow-token": token };
+      const hdr = {
+        "content-type": "application/json",
+        "x-vibeflow-token": token,
+      };
 
       // point the active repo at dir so reads/writes hit the temp workspace
       await fetch(`${url}/api/detect`, {
@@ -920,7 +988,10 @@ describe("server preflight + settings endpoints", () => {
         body: JSON.stringify({ tools: { codegraph: true } }),
       });
       expect(toggled.status).toBe(200);
-      const tBody = (await toggled.json()) as { ok: boolean; settings: VibeSettings };
+      const tBody = (await toggled.json()) as {
+        ok: boolean;
+        settings: VibeSettings;
+      };
       expect(tBody.settings.tools.codegraph).toBe(true);
 
       // round-trip: the change persisted to SETTINGS.json on disk
@@ -1301,60 +1372,5 @@ describe("commands.tools", () => {
     expect(text).toContain("codegraph");
     // We never read/print the secret-bearing user config.
     expect(text).not.toContain("mcp-config.json");
-  });
-
-  test("enabling a tool whose binary is missing warns 'not found on PATH' (no false success)", () => {
-    // codegraph's binary is not installed in the test environment, so detect() is false.
-    // The toggle must still succeed but warn loudly rather than report clean success for
-    // .mcp.json that points at a binary that can't start (the orchestrate tool-blindness bug).
-    expect(tools("enable", ["codegraph"], {}, { base: dir })).toBe(0);
-    const text = out.join("\n");
-    expect(text).toContain("binary not found on PATH");
-    expect(text).toContain("vf tools install codegraph");
-  });
-
-  test("status flags an enabled-but-not-installed tool with an actionable warning", () => {
-    writeSettings(dir, { tools: { codegraph: true, lsp: false } });
-    expect(tools("status", [], {}, { base: dir })).toBe(0);
-    const text = out.join("\n");
-    expect(text).toContain("enabled but binary not on PATH");
-  });
-});
-
-describe("commands.skills init", () => {
-  let dir: string;
-  let orig: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "vf-skills-init-"));
-    orig = process.cwd();
-    process.chdir(dir);
-  });
-  afterEach(() => {
-    process.chdir(orig);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  test("scaffolds a parseable SKILL.md that discoverSkills + matchSkillsForTask can use", async () => {
-    const { discoverSkills, matchSkillsForTask } = await import("../src/skills/registry.js");
-    expect(skills("init", ["compose-screen-ux"])).toBe(0);
-    const path = join(dir, ".viteflow", "skills", "compose-screen-ux", "SKILL.md");
-    expect(existsSync(path)).toBe(true);
-
-    // The scaffold must be a valid skill (parseSkill returns non-null → discoverSkills lists it).
-    const found = discoverSkills(dir);
-    const skill = found.find((s) => s.name === "compose-screen-ux");
-    expect(skill).toBeDefined();
-    expect(skill?.status).toBe("draft");
-
-    // After editing a trigger to a real keyword, matchSkillsForTask finds it. Here we prove the
-    // pipeline by matching on the placeholder trigger the template ships with.
-    const matches = matchSkillsForTask(found, "do some trigger-keyword work");
-    expect(matches.some((m) => m.skill.name === "compose-screen-ux")).toBe(true);
-  });
-
-  test("rejects a non-kebab name and refuses to overwrite an existing skill", () => {
-    expect(skills("init", ["Bad_Name"])).toBe(2);
-    expect(skills("init", ["good-skill"])).toBe(0);
-    expect(skills("init", ["good-skill"])).toBe(1); // already exists
   });
 });

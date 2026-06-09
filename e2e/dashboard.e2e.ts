@@ -11,7 +11,7 @@ test("dashboard loads with the intake wizard and a CSRF token", async ({ page })
   await expect(page.locator("header h1")).toHaveText("VibeFlow");
   // The page must carry a per-process CSRF token used by every write.
   const csrf = await page.locator('meta[name="csrf"]').getAttribute("content");
-  expect(csrf && csrf.length).toBeTruthy();
+  expect(csrf?.length).toBeTruthy();
   await expect(page.locator("#intakeForm")).toBeVisible();
 });
 
@@ -19,31 +19,33 @@ test("generating a workflow reveals the meter, dispatch, and work-unit sections"
   page,
 }) => {
   await page.goto("/");
-  await page.fill('textarea[name="goal"]', "Add product search endpoint");
+  await expect(page.locator("#stageTemplateOut")).toHaveValue(/BD — Basic Design/);
   await page.click("#intakeSubmit");
   await expect(page.locator("#intakeHint")).toContainText(/Generated \d+ files/);
   await expect(page.locator("#meter")).toBeVisible();
   await expect(page.locator("#dispatchSec")).toBeVisible();
   await expect(page.locator("#unitsSec")).toBeVisible();
   // The empty board states the goal until work units exist.
-  await expect(page.locator("#board")).toContainText("Add product search endpoint");
+  await expect(page.locator("#board")).toContainText("Workflow stages: BD - Basic Design");
 });
 
-test("orchestrate (dry) creates a work-unit card with a gate strip and evidence", async ({
-  page,
-}) => {
+test("orchestrate (dry) keeps the work-unit card and gate strip visible", async ({ page }) => {
   await page.goto("/");
-  await page.fill('textarea[name="goal"]', "Build the thing");
+  await page.check('input[name="workflowStage"][value="DD"]');
+  await expect(page.locator("#stageTemplateOut")).toHaveValue(/DD — Detail Design/);
   await page.click("#intakeSubmit");
   await expect(page.locator("#meter")).toBeVisible();
+  await page.fill("#unitName", "task");
+  await page.click('#unitForm button[type="submit"]');
+  const card = page.locator('.card[data-name="task"]');
+  await expect(card).toBeVisible();
 
   await page.click("#orchestrateBtn");
   await expect(page.locator("#dispatchHint")).toContainText(/Orchestrated/);
-  const card = page.locator('.card[data-name="task"]');
   await expect(card).toBeVisible();
-  // Gate strip is present, and dry-run records an evidence path.
+  // Gate strip is present; dry web orchestration writes prompts only.
   await expect(card.locator(".gate")).toHaveCount(4);
-  await expect(card).toContainText("evidence:");
+  await expect(card).toContainText("conf 0");
 });
 
 test("skills panel surfaces demand-driven needs from the detected stack", async ({ page }) => {

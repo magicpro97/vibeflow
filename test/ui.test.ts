@@ -52,7 +52,7 @@ describe("ui: progressBar", () => {
 
 describe("ui: panel", () => {
   test("renders bordered title and body", () => {
-    const out = panel("Test", "hello\nworld");
+    const out = panel("Test", "hello\nworld", (s) => s);
     expect(out).toContain("Test");
     expect(out).toContain("hello");
     expect(out).toContain("world");
@@ -69,7 +69,13 @@ describe("ui: panel", () => {
 
 describe("ui: link", () => {
   test("non-TTY fallback appends URL in parens", () => {
-    const out = link("click here", "https://example.com");
+    const r = Bun.spawnSync([
+      "bun",
+      "-e",
+      'import { link } from "./src/ui.js"; process.stdout.write(link("click here", "https://example.com"));',
+    ]);
+    const out = new TextDecoder().decode(r.stdout);
+    expect(r.exitCode).toBe(0);
     expect(out).toBe("click here (https://example.com)");
   });
 });
