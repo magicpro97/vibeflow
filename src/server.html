@@ -584,6 +584,12 @@
           animation: none;
         }
       }
+      /* When GSAP drives the entrance, suppress the CSS-keyframe fallback so panels
+         don't animate twice (JS adds .gsap-active on the root before first paint). */
+      .gsap-active main > *,
+      .gsap-active header {
+        animation: none;
+      }
       #actionSec {
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -1359,6 +1365,7 @@
       </section>
     </main>
 
+    <script src="/assets/vendor/gsap.min.js"></script>
     <script>
       (function () {
         var GATES = ["build", "lint", "test", "review"];
@@ -2532,6 +2539,25 @@
           loadSettings();
         }
         window.addEventListener("load", boot);
+
+        // Progressive enhancement: if GSAP loaded, let it drive a smoother staggered
+        // entrance and switch off the CSS-keyframe fallback so panels don't animate twice.
+        // Honors prefers-reduced-motion; degrades to the CSS entrance if GSAP is absent.
+        (function gsapEntrance() {
+          if (reduce || typeof window.gsap === "undefined") return;
+          document.documentElement.classList.add("gsap-active");
+          window.addEventListener("load", function () {
+            var panels = [].slice.call(document.querySelectorAll("main > *"));
+            window.gsap.from(["header"].concat(panels), {
+              opacity: 0,
+              y: 12,
+              duration: 0.5,
+              ease: "power2.out",
+              stagger: 0.06,
+              clearProps: "all",
+            });
+          });
+        })();
       })();
     </script>
   </body>
