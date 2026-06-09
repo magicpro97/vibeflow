@@ -193,6 +193,13 @@ export function writeFileSafe(path: string, content: string): void {
   writeFileSync(path, content.endsWith("\n") ? content : `${content}\n`);
 }
 
+/** Coerce an untrusted value (parsed engine JSON / hand-edited ledger) to a string array;
+ * anything that isn't an array of strings becomes []. Used to harden skill-field reads so
+ * malformed shapes can't crash the skill gate / `vf verify`. */
+export function strArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
 /** Append content to a file, creating the parent dir if absent. Unlike writeFileSafe this never
  * truncates and never mutates the input — callers control exact spacing (e.g. the work journal). */
 export function appendFileSafe(path: string, content: string): void {

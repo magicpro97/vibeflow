@@ -285,6 +285,24 @@ describe("policy gates", () => {
     expect(r.ok).toBe(true);
     expect(r.warnings.some((w) => w.startsWith("skills(warn)"))).toBe(false);
   });
+
+  test("malformed skills fields (non-array) do not crash the gate", () => {
+    // Simulates parsed engine JSON or a hand-edited ledger with the wrong shape.
+    const bad = cleanUnit({ knowledge_heavy: true, knowledge_heavy_source: "risk" }) as Record<
+      string,
+      unknown
+    >;
+    bad.skills_required = { not: "an array" };
+    bad.skills_used = "compose-screen-ux";
+    const state = { ...base, work_units: [bad as never] };
+    let r: ReturnType<typeof policyGates> | undefined;
+    expect(() => {
+      r = policyGates(state);
+    }).not.toThrow();
+    expect(r?.ok).toBe(true);
+    // non-array skills_required coerces to [] → treated as skill-gap warning, never a crash.
+    expect(r?.warnings.some((w) => w.includes("no verified skill matched"))).toBe(true);
+  });
 });
 
 describe("skill resolver (demand-driven)", () => {

@@ -1,4 +1,4 @@
-import type { WorkUnit, WorkflowState } from "../core.js";
+import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -69,10 +69,15 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
         ? outcome.knowledge_heavy_source
         : unit.knowledge_heavy_source,
     skills_injected:
-      outcome.skills_injected !== undefined ? outcome.skills_injected : unit.skills_injected,
+      outcome.skills_injected !== undefined
+        ? strArray(outcome.skills_injected)
+        : unit.skills_injected,
     skills_required:
-      outcome.skills_required !== undefined ? outcome.skills_required : unit.skills_required,
-    skills_used: outcome.skills_used !== undefined ? outcome.skills_used : unit.skills_used,
+      outcome.skills_required !== undefined
+        ? strArray(outcome.skills_required)
+        : unit.skills_required,
+    skills_used:
+      outcome.skills_used !== undefined ? strArray(outcome.skills_used) : unit.skills_used,
   };
 }
 

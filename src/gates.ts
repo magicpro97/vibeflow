@@ -1,4 +1,4 @@
-import type { WorkflowState } from "./core.js";
+import { type WorkflowState, strArray } from "./core.js";
 
 export interface GateReport {
   ok: boolean;
@@ -122,14 +122,14 @@ export function policyGates(state: WorkflowState | null): GateReport {
       );
       continue;
     }
-    const required = u.skills_required ?? [];
+    const required = strArray(u.skills_required);
     if (!required.length) {
       warnings.push(
         `skills(warn): "${u.name}" knowledge-heavy but no verified skill matched — author one or record a waiver (vf units waiver "${u.name}" --reason ...)`,
       );
       continue;
     }
-    const used = new Set(u.skills_used ?? []);
+    const used = new Set(strArray(u.skills_used));
     if (required.some((r) => used.has(r))) {
       passed.push(`skills: "${u.name}" applied a required skill`);
     } else {
