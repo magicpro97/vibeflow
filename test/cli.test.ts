@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalFiles, defaultContext, dispatchPrompt, engineFiles } from "../src/adapters.js";
@@ -329,6 +337,52 @@ describe("commands.init preserves human-curated TASK_CONTEXT.md (data-loss P1)",
     expect(body).toContain("BRAND NEW EXPLICIT GOAL");
     expect(body).not.toContain("OLD GOAL");
     expect(result.files).toContain(`${CTX_DIR}/TASK_CONTEXT.md`);
+  });
+});
+
+describe("commands.init preserves human-curated ROOT engine files (data-loss P1)", () => {
+  let dir: string;
+  const claudePath = () => join(dir, "CLAUDE.md");
+  const backupRoot = () => join(dir, `${CTX_DIR}/backup`);
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "vf-engine-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("a hand-edited CLAUDE.md is preserved AND backed up on re-init (no data loss)", () => {
+    // First init produces a managed (fenced) CLAUDE.md.
+    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    // User replaces it with their own hand-written file (no markers, no generation marker).
+    const precious = "# My own CLAUDE.md\n\nPRECIOUS HUMAN INSTRUCTIONS that must never be lost.\n";
+    writeFileSync(claudePath(), precious);
+
+    const result = applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const body = readFileSync(claudePath(), "utf8");
+    // Human content survives, and the managed block is appended (not a clobber).
+    expect(body).toContain("PRECIOUS HUMAN INSTRUCTIONS that must never be lost.");
+    expect(body).toContain("<!-- vibeflow:start -->");
+    // The pre-merge original was archived under .viteflow/backup/<run>/CLAUDE.md.
+    expect(result.backedUp).toContain("CLAUDE.md");
+    const runs = readdirSync(backupRoot());
+    expect(runs.length).toBe(1);
+    const run = runs[0] as string;
+    const archived = readFileSync(join(backupRoot(), run, "CLAUDE.md"), "utf8");
+    expect(archived).toBe(precious);
+  });
+
+  test("re-init over a managed CLAUDE.md only swaps the block; no backup, idempotent", () => {
+    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    // User edits OUTSIDE the markers — that edit must survive and must NOT trigger a backup.
+    const managed = readFileSync(claudePath(), "utf8");
+    writeFileSync(claudePath(), `${managed}\n## My notes outside the fence\n`);
+
+    const result = applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const body = readFileSync(claudePath(), "utf8");
+    expect(body).toContain("## My notes outside the fence");
+    expect(result.backedUp ?? []).not.toContain("CLAUDE.md");
+    expect(existsSync(backupRoot())).toBe(false);
   });
 });
 

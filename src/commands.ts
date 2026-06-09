@@ -63,6 +63,7 @@ import {
   readyEngines,
 } from "./preflight.js";
 import {
+  BACKUP_SUBDIR,
   type Checkpoint,
   type GitRunner,
   createCheckpoint,
@@ -95,6 +96,7 @@ import {
   importWorkflow,
   planDelete,
 } from "./workflow/lifecycle.js";
+import { ENGINE_INSTRUCTION_FILES, mergeManagedBlock } from "./workflow/merge.js";
 
 export { skillForFile };
 
@@ -273,6 +275,8 @@ export interface ApplyIntakeResult {
   readiness?: EngineReadiness[];
   /** True when the gate refused creation because no engine was ready. */
   refused?: boolean;
+  /** Relative paths of hand-edited engine files archived under .viteflow/backup before merge. */
+  backedUp?: string[];
 }
 
 /**
@@ -344,13 +348,35 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // an explicit intent to overwrite. PROJECT_CONTEXT.md is scanner-derived and keeps regenerating.
   const explicitGoal = Boolean(answers.goal?.trim());
   const written: string[] = [];
+  const backedUp: string[] = [];
+  // One backup run-dir per init so a re-init that rescues several hand-edited files groups them.
+  const backupRun = join(base, BACKUP_SUBDIR, `init-${Date.now()}`);
+  const engineFileSet = new Set(ENGINE_INSTRUCTION_FILES);
   for (const [rel, content] of Object.entries(files)) {
     const isTaskContext = rel.endsWith("TASK_CONTEXT.md");
     if (isTaskContext && !explicitGoal && existsSync(join(base, rel))) {
       // Preserve the user's hand-curated TASK_CONTEXT.md; don't claim to write what we skipped.
       continue;
     }
-    if (!opts.dry) writeFileSafe(join(base, rel), content);
+    const abs = join(base, rel);
+    // Root engine instruction files (CLAUDE.md/AGENTS.md/copilot-instructions.md) can collide
+    // with files a human wrote. Merge into the marked region instead of truncating, and archive
+    // any hand-edited original before we touch it (the data-loss P1 fix). Everything else lives
+    // under .viteflow/ — VibeFlow's own namespace — and keeps the simple write.
+    if (engineFileSet.has(rel)) {
+      const existing = existsSync(abs) ? readFileSync(abs, "utf8") : null;
+      const merged = mergeManagedBlock(existing, content);
+      if (!opts.dry) {
+        if (merged.backup && existing != null) {
+          writeFileSafe(join(backupRun, rel), existing);
+          backedUp.push(rel);
+        }
+        writeFileSafe(abs, merged.content);
+      }
+      written.push(rel);
+      continue;
+    }
+    if (!opts.dry) writeFileSafe(abs, content);
     written.push(rel);
   }
   // SETTINGS.json is owned by the settings layer, not the canonical templates: seed it with
@@ -369,7 +395,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
   // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
   if (!opts.dry) ensureIndex(base);
-  return { files: written, state, readiness: gate.readiness, refused: false };
+  return { files: written, state, readiness: gate.readiness, refused: false, backedUp };
 }
 
 /** Generate (and persist) the dispatch prompt for an engine using the saved goal. */
