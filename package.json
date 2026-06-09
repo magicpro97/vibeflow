@@ -24,6 +24,7 @@
     "fix": "biome check --write src test",
     "test": "bun test",
     "test:e2e": "playwright test",
+    "smoke": "node scripts/smoke.mjs",
     "check": "bun run typecheck && bun run lint && bun run test",
     "prepare": "git config core.hooksPath .githooks || true",
     "prepublishOnly": "bun run build"

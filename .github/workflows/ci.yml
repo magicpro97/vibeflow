@@ -19,5 +19,11 @@ jobs:
       - run: bun run lint
       - run: bun run test
       - run: bun run build
-      - name: Smoke test built CLI
+      - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version
+      - name: Ship-gate — real bridge dispatch must complete (no "nothing works")
+        run: bun run smoke
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+      - name: Web UI e2e (real dashboard in Chromium)
+        run: bun run test:e2e

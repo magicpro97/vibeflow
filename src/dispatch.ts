@@ -67,14 +67,15 @@ interface AsyncResult {
  * explicitly rather than inferred from the 124 status. With no `timeoutMs` no timer is ever armed.
  */
 export function makeAsyncSpawner(
-  opts: { timeoutMs?: number; graceMs?: number } = {},
+  opts: { timeoutMs?: number; graceMs?: number; shell?: boolean } = {},
 ): AsyncSpawner {
-  const { timeoutMs, graceMs = DEFAULT_GRACE_MS } = opts;
+  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, shell = false } = opts;
   return (cmd, args, input) =>
     new Promise<AsyncResult>((resolve) => {
       const child = spawn(cmd, args, {
         stdio: ["pipe", "pipe", "inherit"],
         detached: timeoutMs != null,
+        shell,
       });
       let stdout = "";
       let timedOut = false;
@@ -335,7 +336,15 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
   if (mode === "bridge") {
     const cmd = bridgeCommand(opts);
     if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
-    return buildResult(opts, spawn(cmd, [], prompt), "bridge command failed");
+    // VIBEFLOW_AI is a shell command string (may include args) — spawn via shell unless a
+    // test injected its own spawner.
+    const bridgeSpawn =
+      opts.spawner ??
+      ((c: string, a: string[], input: string) => {
+        const r = spawnSync(c, a, { input, encoding: "utf8", shell: true });
+        return { status: r.status ?? 1, stdout: r.stdout ?? "" };
+      });
+    return buildResult(opts, bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
@@ -356,7 +365,10 @@ export async function runDispatchAsync(
   if (mode === "bridge") {
     const cmd = bridgeCommand(opts);
     if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
-    return buildResult(opts, await spawn(cmd, [], prompt), "bridge command failed");
+    // VIBEFLOW_AI is a shell command string (may include args), consistent with aiGenerate's
+    // shell:true spawn. Use a shell-aware spawner unless a test injected its own.
+    const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: true });
+    return buildResult(opts, await bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };

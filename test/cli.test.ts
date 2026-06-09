@@ -1161,6 +1161,31 @@ describe("commands.applyIntake hard creation gate", () => {
     expect(result.refused).toBe(false);
     expect(existsSync(join(dir, "CLAUDE.md"))).toBe(true);
   });
+
+  test("VIBEFLOW_AI (bridge) skips the named-engine preflight so init isn't blocked offline", () => {
+    const prev = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "node scripts/fake-engine.mjs";
+    let probed = false;
+    try {
+      const result = applyIntake(
+        { goal: "g", engines: ["claude"] },
+        {
+          base: dir,
+          preflight: (e) => {
+            probed = true;
+            return noneReady(e);
+          },
+        },
+      );
+      // Bridge mode never spawns the named engine, so its readiness must not gate init.
+      expect(probed).toBe(false);
+      expect(result.refused).toBe(false);
+      expect(existsSync(join(dir, "CLAUDE.md"))).toBe(true);
+    } finally {
+      // Restore: empty string reads as unset for VIBEFLOW_AI (resolveMode checks truthiness).
+      process.env.VIBEFLOW_AI = prev ?? "";
+    }
+  });
 });
 
 describe("commands.applyIntake preserves SETTINGS.json", () => {

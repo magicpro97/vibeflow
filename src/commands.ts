@@ -287,7 +287,9 @@ function gateEngines(
 ): { engines: Engine[]; readiness?: EngineReadiness[]; refused: boolean } {
   const chosen = chosenEngines(answers.engines);
   const skip = opts.skipPreflight ?? opts.useAi === false;
-  if (skip || opts.dry) return { engines: chosen, refused: false };
+  // Bridge mode (VIBEFLOW_AI set) never spawns the named engine CLI — dispatch goes through
+  // the bridge command — so a missing/unauthed named-engine binary must not block init.
+  if (skip || opts.dry || process.env.VIBEFLOW_AI) return { engines: chosen, refused: false };
   const probe = opts.preflight ?? ((e: Engine[]) => preflightAll(e, { probe: true }));
   const readiness = probe(chosen);
   if (!anyReady(readiness)) return { engines: [], readiness, refused: true };
@@ -927,8 +929,10 @@ export async function orchestrate(
 
   // Build the dispatch spawner honoring the configured per-unit timeout (0 disables it). An
   // injected spawner (tests/headless) always wins so suites never launch a real engine.
+  // Bridge mode runs $VIBEFLOW_AI (a shell command string, possibly with args) — spawn via
+  // shell so it parses, consistent with aiGenerate.
   const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
-  const spawner = inject.spawner ?? makeAsyncSpawner({ timeoutMs });
+  const spawner = inject.spawner ?? makeAsyncSpawner({ timeoutMs, shell: mode === "bridge" });
 
   // Scope-conflict gate: refuse to dispatch overlapping scopes in parallel — serialize them.
   const conflicts = findScopeConflicts(units);

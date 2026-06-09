@@ -110,6 +110,15 @@ describe("dispatch", () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("VIBEFLOW_AI");
   });
+
+  test("bridge spawns VIBEFLOW_AI as a shell command (args parse, not a bare binary)", () => {
+    // A bridge command WITH args must run via the shell. `printf` emits a valid JSON summary;
+    // before the shell fix this failed because spawn treated the whole string as one binary.
+    const cmd = `printf '%s' '${'```json\n{"confidence":1}\n```'}'`;
+    const r = runDispatch({ engine: "claude", prompt: "ignored", mode: "bridge", bridgeCmd: cmd });
+    expect(r.ok).toBe(true);
+    expect(r.summary?.confidence).toBe(1);
+  });
 });
 
 describe("hook adapters", () => {
