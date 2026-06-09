@@ -1907,7 +1907,14 @@ function toolsToggle(
     // PATH the MCP server can't start and dispatched engines silently get no navigation.
     if (opts.approved && opts.spawner) {
       const rc = provisionTool(base, name, opts.spawner);
-      if (rc !== 0) return rc;
+      if (rc !== 0) {
+        console.error(
+          c.yellow(
+            `  note: ${name} stays enabled in ${settingsPath(base)} but is NOT provisioned — re-run \`vf tools enable ${name} --yes\` after fixing the failure, or \`vf tools disable ${name}\`.`,
+          ),
+        );
+        return rc;
+      }
     } else {
       console.log(
         c.yellow(
@@ -1961,8 +1968,8 @@ function provisionTool(base: string, name: ToolName, spawner: StepSpawner): numb
 }
 
 /** Build a tool's per-repo artifact only when its descriptor reports it absent. Tools with no
- * per-repo artifact (no indexPresent/indexPlan) are no-ops. */
-function ensureToolIndex(base: string, name: ToolName, spawner: StepSpawner): number {
+ * per-repo artifact (no indexPresent/indexPlan) are no-ops. Exported for direct testing. */
+export function ensureToolIndex(base: string, name: ToolName, spawner: StepSpawner): number {
   const tool = TOOLS[name];
   if (!tool.indexPlan || !tool.indexPresent) return 0;
   if (tool.indexPresent(base)) {
