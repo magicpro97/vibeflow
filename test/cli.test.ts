@@ -14,6 +14,7 @@ import {
   mutateUnits,
   resolveRepo,
   skillForFile,
+  skills,
   tools,
   units,
 } from "../src/commands.js";
@@ -1372,5 +1373,60 @@ describe("commands.tools", () => {
     expect(text).toContain("codegraph");
     // We never read/print the secret-bearing user config.
     expect(text).not.toContain("mcp-config.json");
+  });
+
+  test("enabling a tool whose binary is missing warns 'not found on PATH' (no false success)", () => {
+    // codegraph's binary is not installed in the test environment, so detect() is false.
+    // The toggle must still succeed but warn loudly rather than report clean success for
+    // .mcp.json that points at a binary that can't start (the orchestrate tool-blindness bug).
+    expect(tools("enable", ["codegraph"], {}, { base: dir })).toBe(0);
+    const text = out.join("\n");
+    expect(text).toContain("binary not found on PATH");
+    expect(text).toContain("vf tools install codegraph");
+  });
+
+  test("status flags an enabled-but-not-installed tool with an actionable warning", () => {
+    writeSettings(dir, { tools: { codegraph: true, lsp: false } });
+    expect(tools("status", [], {}, { base: dir })).toBe(0);
+    const text = out.join("\n");
+    expect(text).toContain("enabled but binary not on PATH");
+  });
+});
+
+describe("commands.skills init", () => {
+  let dir: string;
+  let orig: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "vf-skills-init-"));
+    orig = process.cwd();
+    process.chdir(dir);
+  });
+  afterEach(() => {
+    process.chdir(orig);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("scaffolds a parseable SKILL.md that discoverSkills + matchSkillsForTask can use", async () => {
+    const { discoverSkills, matchSkillsForTask } = await import("../src/skills/registry.js");
+    expect(skills("init", ["compose-screen-ux"])).toBe(0);
+    const path = join(dir, ".viteflow", "skills", "compose-screen-ux", "SKILL.md");
+    expect(existsSync(path)).toBe(true);
+
+    // The scaffold must be a valid skill (parseSkill returns non-null → discoverSkills lists it).
+    const found = discoverSkills(dir);
+    const skill = found.find((s) => s.name === "compose-screen-ux");
+    expect(skill).toBeDefined();
+    expect(skill?.status).toBe("draft");
+
+    // After editing a trigger to a real keyword, matchSkillsForTask finds it. Here we prove the
+    // pipeline by matching on the placeholder trigger the template ships with.
+    const matches = matchSkillsForTask(found, "do some trigger-keyword work");
+    expect(matches.some((m) => m.skill.name === "compose-screen-ux")).toBe(true);
+  });
+
+  test("rejects a non-kebab name and refuses to overwrite an existing skill", () => {
+    expect(skills("init", ["Bad_Name"])).toBe(2);
+    expect(skills("init", ["good-skill"])).toBe(0);
+    expect(skills("init", ["good-skill"])).toBe(1); // already exists
   });
 });

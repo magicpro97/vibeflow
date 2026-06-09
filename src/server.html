@@ -1655,6 +1655,16 @@
                   .join(" · ") +
                 "</div>"
               : "") +
+            (u.scope && u.scope.length
+              ? '<div class="res">scope: ' +
+                u.scope
+                  .map(function (p) {
+                    return "<b>" + esc(p) + "</b>";
+                  })
+                  .join(" · ") +
+                "</div>"
+              : "") +
+            (u.spec ? '<div class="res">spec: ' + esc(u.spec) + "</div>" : "") +
             '<div class="ctl"><select class="u-status" title="status">' +
             statusOpts +
             "</select>" +
