@@ -106,3 +106,52 @@ test("optional-tools panel lists codegraph + lsp with persisted toggles", async 
   await page.locator("#optionsSec > summary").click();
   await expect(page.locator('#toolList .tool-toggle[data-tool="codegraph"]')).toBeChecked();
 });
+
+// --- Real interaction flows (not just "it rendered"): full units CRUD round-trips through
+// the live server, a multi-unit board, deletion, and input validation. ---
+
+test("adding multiple work units renders a card per unit and persists across reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.click("#intakeSubmit");
+  await expect(page.locator("#unitsSec")).toBeVisible();
+  // The e2e suite shares one workspace/ledger across tests, so count from a baseline
+  // rather than assume a clean slate. Use unique names to avoid colliding with prior tests.
+  const base = await page.locator(".card[data-name]").count();
+  const names = ["mu-alpha", "mu-beta", "mu-gamma"];
+  for (const name of names) {
+    await page.fill("#unitName", name);
+    await page.click('#unitForm button[type="submit"]');
+    await expect(page.locator(`.card[data-name="${name}"]`)).toBeVisible();
+  }
+  await expect(page.locator(".card[data-name]")).toHaveCount(base + names.length);
+  // State persists server-side: a reload re-renders the units from the ledger.
+  await page.reload();
+  for (const name of names) {
+    await expect(page.locator(`.card[data-name="${name}"]`)).toBeVisible();
+  }
+});
+
+test("deleting a work unit removes its card from the board", async ({ page }) => {
+  await page.goto("/");
+  await page.click("#intakeSubmit");
+  await page.fill("#unitName", "to-remove");
+  await page.click('#unitForm button[type="submit"]');
+  const card = page.locator('.card[data-name="to-remove"]');
+  await expect(card).toBeVisible();
+  // The delete button posts immediately (no confirm dialog) and re-renders the board.
+  await card.locator(".u-del").click();
+  await expect(card).toHaveCount(0);
+});
+
+test("adding a unit with a blank name is rejected (no empty card created)", async ({ page }) => {
+  await page.goto("/");
+  await page.click("#intakeSubmit");
+  const before = await page.locator(".card[data-name]").count();
+  await page.fill("#unitName", "   ");
+  await page.click('#unitForm button[type="submit"]');
+  // The blank submit must not create a work-unit card; the count is unchanged.
+  await expect(page.locator(".card[data-name]")).toHaveCount(before);
+});
+

@@ -30,8 +30,11 @@ writeFileSync(resolve(WORKSPACE, "README.md"), "# E2E Demo\n\nA demo service for
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.e2e.ts",
-  timeout: 30_000,
-  expect: { timeout: 7_000 },
+  // Per-test budget. Some specs drive real round-trips (settings save + reload, the engine
+  // probe) that are machine-dependent and can run long on a loaded CI box; 60s leaves
+  // headroom so a slow-but-correct round-trip isn't flagged as a failure.
+  timeout: 60_000,
+  expect: { timeout: 10_000 },
   fullyParallel: false,
   retries: 0,
   reporter: [["list"]],
