@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug vf CLI: doctor",
+      "type": "bun",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": ["doctor", "--probe"],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "runtime": "bun",
+      "runtimeArgs": []
+    },
+    {
+      "name": "Debug vf CLI: init",
+      "type": "bun",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": ["init"],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "runtime": "bun",
+      "runtimeArgs": []
+    },
+    {
+      "name": "Debug vf CLI: help",
+      "type": "bun",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": ["--help"],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "runtime": "bun",
+      "runtimeArgs": []
+    },
+    {
+      "name": "Debug vf CLI: custom args",
+      "type": "bun",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "runtime": "bun",
+      "runtimeArgs": []
+    }
+  ]
+}
