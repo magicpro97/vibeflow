@@ -128,6 +128,8 @@ export interface EngineProbe {
 export interface EngineInvocation {
   cmd: string;
   args: string[];
+  /** Copilot CLI requires the prompt as the `-p` option value; other engines read stdin. */
+  promptMode?: "stdin" | "arg";
   /** Non-fatal advisory surfaced to the caller (does not block dispatch). */
   warning?: string;
 }
@@ -157,8 +159,9 @@ function copilotVersion(cmd = "copilot"): string | undefined {
  * Headless invocation per engine (verified against current CLI docs):
  *   claude  -> claude -p --output-format json   (print mode, JSON envelope on stdout)
  *   codex   -> codex exec -                      (non-interactive, `-` reads prompt from stdin)
- *   copilot -> copilot -p                        (non-interactive prompt)
- * The prompt is always provided on stdin so we never hit argv length limits or shell-inject.
+ *   copilot -> copilot -p <prompt> --allow-all-tools
+ * Claude and Codex receive the prompt on stdin; Copilot's current CLI requires it as the
+ * `-p/--prompt` option value, so we pass it as a single argv element without a shell.
  * `gh -p` is NOT a valid fallback (gh has no global -p flag) so copilot resolves to an explicit
  * unavailability when the binary is absent rather than a bogus command.
  */
@@ -184,7 +187,7 @@ export function engineCommand(engine: Engine, probe: EngineProbe = {}): EngineCo
         : "could not determine `copilot --version`; verify `copilot -p` still works (github/copilot-cli#1606)";
       // `--allow-all-tools` is REQUIRED for non-interactive `-p` mode; without it the CLI
       // blocks waiting for per-tool approval that never comes (verified against copilot docs).
-      return { cmd: "copilot", args: ["-p", "--allow-all-tools"], warning };
+      return { cmd: "copilot", args: ["-p", "--allow-all-tools"], promptMode: "arg", warning };
     }
   }
 }
@@ -291,18 +294,38 @@ function resolveCli(
   engine: Engine,
   hasSpawner: boolean,
   has: (cmd: string) => boolean = hasCommand,
-): { ok: true; cmd: string; args: string[]; warning?: string } | { ok: false; reason: string } {
+):
+  | { ok: true; cmd: string; args: string[]; promptMode?: "stdin" | "arg"; warning?: string }
+  | { ok: false; reason: string } {
   // With an injected spawner we never touch the real PATH, so treat the engine as present.
   const invocation = engineCommand(engine, hasSpawner ? { has: () => true } : { has });
   if (isUnavailable(invocation)) return { ok: false, reason: invocation.unavailable };
   if (!hasSpawner && !has(invocation.cmd)) {
     return { ok: false, reason: `${invocation.cmd} CLI not found` };
   }
-  return { ok: true, cmd: invocation.cmd, args: invocation.args, warning: invocation.warning };
+  return {
+    ok: true,
+    cmd: invocation.cmd,
+    args: invocation.args,
+    promptMode: invocation.promptMode,
+    warning: invocation.warning,
+  };
 }
 
 function bridgeCommand(opts: DispatchOpts): string | undefined {
   return opts.bridgeCmd ?? process.env.VIBEFLOW_AI;
+}
+
+function materializePrompt(
+  cli: { cmd: string; args: string[]; promptMode?: "stdin" | "arg" },
+  prompt: string,
+): { cmd: string; args: string[]; input: string } {
+  if (cli.promptMode !== "arg") return { cmd: cli.cmd, args: cli.args, input: prompt };
+  const promptFlag = cli.args.findIndex((arg) => arg === "-p" || arg === "--prompt");
+  if (promptFlag === -1) return { cmd: cli.cmd, args: [...cli.args, prompt], input: "" };
+  const args = [...cli.args];
+  args.splice(promptFlag + 1, 0, prompt);
+  return { cmd: cli.cmd, args, input: "" };
 }
 
 function buildResult(
@@ -348,7 +371,13 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
-  return buildResult(opts, spawn(cli.cmd, cli.args, prompt), `${cli.cmd} failed`, cli.warning);
+  const invocation = materializePrompt(cli, prompt);
+  return buildResult(
+    opts,
+    spawn(invocation.cmd, invocation.args, invocation.input),
+    `${cli.cmd} failed`,
+    cli.warning,
+  );
 }
 
 /**
@@ -372,9 +401,10 @@ export async function runDispatchAsync(
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
+  const invocation = materializePrompt(cli, prompt);
   return buildResult(
     opts,
-    await spawn(cli.cmd, cli.args, prompt),
+    await spawn(invocation.cmd, invocation.args, invocation.input),
     `${cli.cmd} failed`,
     cli.warning,
   );

@@ -61,6 +61,12 @@ describe("preflight: auth", () => {
     expect(r.level).toBe("ready");
     expect(calls.some((x) => x.cmd === "gh")).toBe(false);
     expect(calls.some((x) => x.cmd === "copilot")).toBe(true);
+    const probe = calls.find((x) => x.cmd === "copilot");
+    expect(probe?.args[0]).toBe("-p");
+    expect(probe?.args[1]).toContain("READY");
+    expect(probe?.args).toContain("--allow-all-tools");
+    expect(probe?.args).toContain("--silent");
+    expect(probe?.input).toBe("");
   });
 });
 
@@ -79,10 +85,22 @@ describe("preflight: live probe", () => {
   });
 
   test("codex probe uses doctor -> ready, exact argv", () => {
-    const { spawn, calls } = recordingSpawner(() => ({ status: 0, stdout: "Environment\n  ok" }));
+    const { spawn, calls } = recordingSpawner(() => ({
+      status: 0,
+      stdout: "17 ok · 1 idle · 0 warn · 0 fail ok",
+    }));
     const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
     expect(r.level).toBe("ready");
     expect(calls.find((x) => x.cmd === "codex")?.args).toEqual(["doctor"]);
+  });
+
+  test("codex doctor exits 0 with failing summary -> probe-failed", () => {
+    const { spawn } = recordingSpawner(() => ({
+      status: 0,
+      stdout: "12 ok · 1 idle · 5 notes · 3 warn · 2 fail failed",
+    }));
+    const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
+    expect(r.level).toBe("probe-failed");
   });
 
   test("codex doctor exits 0 but no healthy indicator -> probe-failed", () => {
@@ -199,7 +217,7 @@ describe("preflight: async checkEngineAsync", () => {
 describe("preflight: preflightAllAsync parallel aggregation", () => {
   function fixedSpawner(cmd: string): ReturnType<ProbeSpawner> {
     if (cmd === "claude") return { status: 0, stdout: JSON.stringify({ result: "READY" }) };
-    if (cmd === "codex") return { status: 0, stdout: "ok\n" };
+    if (cmd === "codex") return { status: 0, stdout: "17 ok · 1 idle · 0 warn · 0 fail ok" };
     return { status: 1, stdout: "" };
   }
 

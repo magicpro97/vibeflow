@@ -23,8 +23,8 @@ export interface EngineReadiness {
 
 /**
  * Injectable spawn seam — mirrors dispatch.ts's Spawner shape. The prompt is always passed via
- * `input` (stdin) and never interpolated into a shell string. Tests inject a fake to avoid
- * launching a real engine.
+ * argv or `input` (stdin) without shell interpolation. Tests inject a fake to avoid launching a
+ * real engine.
  */
 export type ProbeSpawner = (
   cmd: string,
@@ -45,26 +45,38 @@ export interface PreflightOpts {
 
 /** Bounded so a hung / never-logged-in engine cannot block the check forever. */
 const PROBE_TIMEOUT_MS = 20_000;
+/** Copilot CLI startup/model latency commonly exceeds 20s even for a one-token probe. */
+const COPILOT_PROBE_TIMEOUT_MS = 60_000;
 /** Trivial prompt whose reply proves the engine actually runs end-to-end. */
 const PROBE_PROMPT = "Reply with the single word READY and nothing else.";
 /** Token the engine must echo back for the probe to count as a success. */
 const EXPECTED_TOKEN = "READY";
 
+interface ProbeInvocation {
+  cmd: string;
+  args: string[];
+  input: string;
+}
+
+function probeTimeoutMs(engine: Engine): number {
+  return engine === "copilot" ? COPILOT_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS;
+}
+
 /** Default launcher: bounded spawnSync, prompt on stdin, no shell. */
-function defaultSpawner(cmd: string, args: string[], input: string) {
-  const r = spawnSync(cmd, args, { input, encoding: "utf8", timeout: PROBE_TIMEOUT_MS });
+function defaultSpawner(cmd: string, args: string[], input: string, timeout = PROBE_TIMEOUT_MS) {
+  const r = spawnSync(cmd, args, { input, encoding: "utf8", timeout });
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 /** Headless argv per engine — identical to dispatch.ts engineCommand so the probe is real. */
-function probeInvocation(engine: Engine): { cmd: string; args: string[] } {
+function probeInvocation(engine: Engine, prompt = PROBE_PROMPT): ProbeInvocation {
   switch (engine) {
     case "claude":
-      return { cmd: "claude", args: ["-p", "--output-format", "json"] };
+      return { cmd: "claude", args: ["-p", "--output-format", "json"], input: prompt };
     case "codex":
-      return { cmd: "codex", args: ["doctor"] };
+      return { cmd: "codex", args: ["doctor"], input: prompt };
     case "copilot":
-      return { cmd: "copilot", args: ["-p"] };
+      return { cmd: "copilot", args: ["-p", prompt, "--allow-all-tools", "--silent"], input: "" };
   }
 }
 
@@ -104,7 +116,7 @@ function checkAuth(
  */
 function probeSucceeded(engine: Engine, status: number, stdout: string): boolean {
   if (status !== 0) return false;
-  if (engine === "codex") return stdout.split("\n").some((l) => l.trim() === "ok");
+  if (engine === "codex") return /\b0 fail ok\b/i.test(stdout) || /\b0 fail\b/i.test(stdout);
   if (engine === "claude") {
     const fromJson = claudeResultText(stdout);
     if (fromJson !== undefined) return containsToken(fromJson);
@@ -135,9 +147,9 @@ function runProbe(
   engine: Engine,
   spawner: ProbeSpawner,
 ): { level: ReadinessLevel; detail: string } {
-  const { cmd, args } = probeInvocation(engine);
+  const { cmd, args, input } = probeInvocation(engine);
   try {
-    const { status, stdout } = spawner(cmd, args, PROBE_PROMPT);
+    const { status, stdout } = spawner(cmd, args, input);
     if (probeSucceeded(engine, status, stdout)) return { level: "ready", detail: "ready" };
     const reason = status !== 0 ? `nonzero exit ${status}` : `missing token ${EXPECTED_TOKEN}`;
     return { level: "probe-failed", detail: `${engine}: probe failed (${reason})` };
@@ -153,7 +165,10 @@ function runProbe(
  */
 export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineReadiness {
   const has = opts.has ?? hasCommand;
-  const spawner = opts.spawner ?? defaultSpawner;
+  const spawner =
+    opts.spawner ??
+    ((cmd: string, args: string[], input: string) =>
+      defaultSpawner(cmd, args, input, probeTimeoutMs(engine)));
   const now = opts.now ?? (() => new Date().toISOString());
   const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({
     engine,
@@ -199,7 +214,7 @@ export function checkEngineAsync(
     checkedAt: now(),
   });
 
-  const { cmd, args } = probeInvocation(engine);
+  const { cmd, args, input } = probeInvocation(engine);
   if (!has(cmd)) return Promise.resolve(stamp("no-binary", installHint(engine)));
 
   const spawner = opts.spawner;
@@ -224,7 +239,7 @@ export function checkEngineAsync(
     const timeout = setTimeout(() => {
       child.kill();
       resolve(stamp("probe-failed", `${engine}: probe timed out`));
-    }, PROBE_TIMEOUT_MS);
+    }, probeTimeoutMs(engine));
 
     let stdout = "";
     let stderr = "";
@@ -248,7 +263,7 @@ export function checkEngineAsync(
       clearTimeout(timeout);
       resolve(stamp("probe-failed", `${engine}: probe failed (${err.message})`));
     });
-    child.stdin.end(PROBE_PROMPT);
+    child.stdin.end(input);
   });
 }
 

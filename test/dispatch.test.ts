@@ -36,6 +36,7 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
     if (!isUnavailable(r)) {
       expect(r.cmd).toBe("copilot");
       expect(r.args).toEqual(["-p", "--allow-all-tools"]);
+      expect(r.promptMode).toBe("arg");
       expect(r.cmd).not.toBe("gh");
       expect(r.warning).toBeUndefined();
     }
@@ -76,6 +77,22 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     const r = runDispatch({ engine: "copilot", prompt: "p", mode: "cli", has: () => false });
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/copilot/i);
+  });
+
+  test("cli mode passes Copilot prompt as -p argument, not stdin", () => {
+    const calls: { cmd: string; args: string[]; input: string }[] = [];
+    const spawner = (cmd: string, args: string[], input: string) => {
+      calls.push({ cmd, args, input });
+      return { status: 0, stdout: "done" };
+    };
+    const r = runDispatch({ engine: "copilot", prompt: "hello copilot", mode: "cli", spawner });
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    const call = calls[0];
+    if (!call) throw new Error("expected one spawner call");
+    expect(call.cmd).toBe("copilot");
+    expect(call.args).toEqual(["-p", "hello copilot", "--allow-all-tools"]);
+    expect(call.input).toBe("");
   });
 });
 
