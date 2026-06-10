@@ -6,7 +6,7 @@ set -eu
 files=$(git diff --cached --name-only --diff-filter=ACM | sed 's/.*/"&"/' | paste -sd, -)
 event=$(printf '{"event":"pre-write","files":[%s]}' "$files")
 # Capture the decision; if node fails to run, fail closed.
-if ! decision=$(printf "%s" "$event" | node /Users/linhn/vibeflow-docs/dist/cli.js hook); then
+if ! decision=$(printf "%s" "$event" | bun src/cli.ts hook); then
   echo "vibeflow hook: could not evaluate changes — blocking (fail-closed)" >&2
   exit 1
 fi

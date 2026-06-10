@@ -2,4 +2,4 @@
 # VibeFlow: keep the code-navigation index in sync on branch change.
 # Args: $1=prev-HEAD $2=new-HEAD $3=branch-flag (1 = branch checkout).
 [ "${3:-0}" = "1" ] || exit 0
-node /Users/linhn/vibeflow-docs/dist/cli.js tools sync >/dev/null 2>&1 || true
+bun src/cli.ts tools sync >/dev/null 2>&1 || true
