@@ -398,7 +398,7 @@ describe("server", () => {
     expect(url).toContain("127.0.0.1");
     const html = await fetch(url).then((r) => r.text());
     expect(html).toContain("VibeFlow");
-    expect(html).toContain("New workflow"); // interactive intake wizard
+    expect(html).toContain("Project Info"); // interactive intake wizard
     expect(html).toContain('id="intakeForm"');
     const state = await fetch(`${url}/state`);
     expect(state.status).toBe(200);
@@ -1493,10 +1493,10 @@ describe("commands.tools", () => {
   });
 
   test("enabling a tool whose binary is missing warns 'not found on PATH' (no false success)", () => {
-    // codegraph's binary is not installed in the test environment, so detect() is false.
+    // Stub detection so the test is deterministic regardless of the host PATH.
     // The toggle must still succeed but warn loudly rather than report clean success for
     // .mcp.json that points at a binary that can't start (the orchestrate tool-blindness bug).
-    expect(tools("enable", ["codegraph"], {}, { base: dir })).toBe(0);
+    expect(tools("enable", ["codegraph"], {}, { base: dir, has: () => false })).toBe(0);
     const text = out.join("\n");
     expect(text).toContain("binary not found on PATH");
     expect(text).toContain("vf tools install codegraph");
@@ -1504,7 +1504,7 @@ describe("commands.tools", () => {
 
   test("status flags an enabled-but-not-installed tool with an actionable warning", () => {
     writeSettings(dir, { tools: { codegraph: true, lsp: false } });
-    expect(tools("status", [], {}, { base: dir })).toBe(0);
+    expect(tools("status", [], {}, { base: dir, has: () => false })).toBe(0);
     const text = out.join("\n");
     expect(text).toContain("enabled but binary not on PATH");
   });

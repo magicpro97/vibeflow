@@ -39,7 +39,6 @@ import { resolveSkillNeeds } from "./skills/resolver.js";
 import { TOOLS, TOOL_ORDER } from "./tools/index.js";
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-const pageHtml = readFileSync(new URL("./server.html", import.meta.url), "utf8");
 
 /** Static UI assets live beside server.html (split out of the old monolith + vendored fonts/gsap).
  * Served same-origin so they satisfy the strict CSP (style-src/script-src 'self'). */
@@ -313,6 +312,8 @@ function applySettings(repo: string, payload: Record<string, unknown>): VibeSett
 export function startServer(port = 0): Promise<{ server: Server; url: string }> {
   // Per-process CSRF token: embedded in the page, required on every write request.
   const token = randomUUID();
+
+  const pageHtml = readFileSync(new URL("./server.html", import.meta.url), "utf8");
   const html = pageHtml.replace(/__CSRF__/g, token);
   // Single active repo for this server; updated by POST /api/detect (default: cwd).
   let activeRepo = cwd();

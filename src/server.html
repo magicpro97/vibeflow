@@ -9,14 +9,14 @@
     <style>
       :root {
         color-scheme: light;
-        --color-signal-orange: #ff682c;
-        --color-sienna-bronze: #816729;
-        --color-carbon: #202020;
-        --color-graphite: #4d4d4d;
-        --color-slate: #828282;
-        --color-fog: #f5f5f5;
-        --color-mist: #efefef;
-        --color-chalk: #e8e8e8;
+        --color-signal-orange: #1c69d4;
+        --color-sienna-bronze: #f59e0b;
+        --color-carbon: #262626;
+        --color-graphite: #3c3c3c;
+        --color-slate: #6b6b6b;
+        --color-fog: #f7f7f7;
+        --color-mist: #ffffff;
+        --color-chalk: #e6e6e6;
         --color-paper: #ffffff;
         --bg: var(--color-mist);
         --panel: var(--color-paper);
@@ -24,10 +24,12 @@
         --line: var(--color-chalk);
         --ink: var(--color-carbon);
         --muted: var(--color-slate);
-        --accent: var(--color-signal-orange);
+        --accent: #1c69d4;
+        --accent-active: #0653b6;
         --pass: var(--color-carbon);
-        --fail: #b23a22;
-        --run: var(--color-signal-orange);
+        --fail: #dc2626;
+        --error: #e22718;
+        --run: #1c69d4;
         --pend: var(--color-slate);
         --warn: var(--color-sienna-bronze);
         --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
@@ -41,22 +43,25 @@
       }
       :root.dark-mode {
         color-scheme: dark;
-        --color-carbon: #f4efe7;
-        --color-graphite: #d8d0c3;
-        --color-slate: #9b9184;
-        --color-fog: #1c1b19;
-        --color-mist: #11100f;
-        --color-chalk: #2b2824;
-        --color-paper: #171613;
+        --color-carbon: #f2f4f7;
+        --color-graphite: #c9ced6;
+        --color-slate: #9aa1ab;
+        --color-fog: #222a33;
+        --color-mist: #11161c;
+        --color-chalk: #2b313a;
+        --color-paper: #1a2129;
         --bg: var(--color-mist);
         --panel: var(--color-paper);
         --panel-2: var(--color-fog);
         --line: var(--color-chalk);
         --ink: var(--color-carbon);
         --muted: var(--color-slate);
+        --accent: #4f8ef0;
+        --accent-active: #1c69d4;
         --pass: var(--color-carbon);
-        --fail: #ff8a65;
-        --warn: #d4a84b;
+        --fail: #f87171;
+        --error: #e22718;
+        --warn: #fbbf24;
         --shadow-soft:
           0 1px 3px rgba(0, 0, 0, 0.24), 0 4px 12px rgba(0, 0, 0, 0.18);
       }
@@ -265,39 +270,14 @@
       .empty code {
         color: var(--accent);
       }
-      details.intake {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--panel);
-        padding: 0 32px;
-        box-shadow: var(--shadow-soft);
-      }
-      details.intake > summary {
-        list-style: none;
-        cursor: pointer;
-        padding: 24px 0;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        color: var(--ink);
-        font: 400 32px/1.19 var(--display);
-        letter-spacing: -0.64px;
-      }
-      details.intake > summary::-webkit-details-marker {
-        display: none;
-      }
-      details.intake > summary::before {
-        content: "+";
-        color: var(--accent);
-        font: 500 18px/1 var(--sans);
-      }
-      details.intake[open] > summary::before {
-        content: "-";
+      section.intake {
+        display: grid;
+        gap: 20px;
       }
       .form {
         display: grid;
         gap: 20px;
-        padding: 0 0 32px;
+        padding: 0;
       }
       .form label {
         display: grid;
@@ -317,6 +297,14 @@
         width: 100%;
         resize: vertical;
       }
+      select {
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+      }
       input::placeholder,
       textarea::placeholder {
         color: var(--color-slate);
@@ -333,6 +321,29 @@
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 20px;
+      }
+      .grid2 > label {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .grid2 > label > input,
+      .grid2 > label > select,
+      .grid2 > label > textarea {
+        margin-top: auto;
+      }
+      .input-combo {
+        display: flex;
+        gap: 8px;
+        margin-top: auto;
+      }
+      .input-combo .combo-type {
+        flex: 0 0 auto;
+        width: 130px;
+      }
+      .input-combo > input {
+        flex: 1 1 auto;
+        min-width: 0;
       }
       fieldset.engines {
         border: 1px solid var(--line);
@@ -356,61 +367,715 @@
         padding: 16px;
         background: var(--color-fog);
       }
+      /* ── vfs-design dialect, shared card (.vfs-card) ── */
+      .vfs-card {
+        --vfs-blue: #1c69d4;
+        --vfs-blue-active: #0653b6;
+        --vfs-ink: #262626;
+        --vfs-body: #3c3c3c;
+        --vfs-muted: #6b6b6b;
+        --vfs-hairline: #e6e6e6;
+        --vfs-hairline-strong: #cccccc;
+        --vfs-canvas: #ffffff;
+        --vfs-card: #fafafa;
+        border: 1px solid var(--vfs-hairline-strong);
+        border-radius: 0;
+        background: var(--vfs-canvas);
+      }
+      :root.dark-mode .vfs-card {
+        --vfs-ink: #f2f4f7;
+        --vfs-body: #c9ced6;
+        --vfs-muted: #9aa1ab;
+        --vfs-hairline: #2b313a;
+        --vfs-hairline-strong: #3a424d;
+        --vfs-canvas: #1a2129;
+        --vfs-card: #222a33;
+      }
+      .vfs-card > .tool-details-head {
+        padding: 18px 24px;
+        border-bottom: 4px solid var(--vfs-blue);
+        color: var(--vfs-ink);
+        font: 700 13px/1.3 var(--sans);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
+      .vfs-card > .form {
+        padding: 24px;
+      }
+      .vfs-card .hint {
+        color: var(--vfs-muted);
+        font: 300 14px/1.55 var(--sans);
+      }
+      .vfs-card code {
+        color: var(--vfs-blue);
+      }
+      /* form controls inside a vfs card */
+      .vfs-card label {
+        color: var(--vfs-ink);
+        font: 700 13px/1.3 var(--sans);
+        letter-spacing: 0.3px;
+      }
+      .vfs-card legend {
+        color: var(--vfs-ink);
+        font: 700 13px/1.3 var(--sans);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
+      .vfs-card input:not([type="checkbox"]):not([type="radio"]),
+      .vfs-card select,
+      .vfs-card textarea {
+        border: 1px solid var(--vfs-hairline-strong);
+        border-radius: 0;
+        background: var(--vfs-canvas);
+        color: var(--vfs-ink);
+        font: 300 16px/1.55 var(--sans);
+      }
+      .vfs-card input:focus,
+      .vfs-card select:focus,
+      .vfs-card textarea:focus {
+        outline: none;
+        border-color: var(--vfs-ink);
+      }
+      .vfs-card .btn {
+        border-radius: 0;
+        border-color: var(--vfs-hairline-strong);
+        color: var(--vfs-ink);
+        font: 700 13px/1 var(--sans);
+        letter-spacing: 0.5px;
+      }
+      .vfs-card .btn.primary,
+      .vfs-card .btn.active,
+      .vfs-card .gm-btn.active {
+        background: var(--vfs-blue);
+        border-color: var(--vfs-blue);
+        color: #fff;
+      }
+      .vfs-card #toolList {
+        gap: 0;
+        border-top: 1px solid var(--vfs-hairline);
+        margin-top: 16px;
+      }
+      .vfs-card .att {
+        border: none;
+        border-bottom: 1px solid var(--vfs-hairline);
+        border-radius: 0;
+        background: var(--vfs-canvas);
+        padding: 18px 0;
+        gap: 16px;
+      }
+      .vfs-card .att .chk {
+        color: var(--vfs-ink) !important;
+        font: 700 18px/1.4 var(--sans) !important;
+        letter-spacing: 0;
+      }
+      .vfs-card .att .chk input {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--vfs-blue);
+        border-radius: 0;
+      }
+      .vfs-card .att .sk {
+        color: var(--vfs-blue);
+        font: 700 11px/1.3 var(--sans);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
+      .vfs-card .att .sz {
+        color: var(--vfs-body);
+        font: 300 14px/1.55 var(--sans);
+        margin-left: auto;
+        text-align: right;
+        max-width: 46%;
+      }
+      .vfs-card .att .hint code {
+        background: var(--vfs-card);
+        border: 1px solid var(--vfs-hairline);
+        border-radius: 0;
+        padding: 4px 8px;
+        font-family: var(--mono);
+      }
+      /* vfs dialect for builder controls & subgroups inside a card */
+      .vfs-card fieldset.subgroup {
+        border: 1px solid var(--vfs-hairline);
+        border-radius: 0;
+        background: var(--vfs-card);
+      }
+      .vfs-card fieldset.subgroup > legend {
+        color: var(--vfs-ink);
+        font: 700 12px/1 var(--sans);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
+      .vfs-card .goal-modes,
+      .vfs-card .wf-tab,
+      .vfs-card .wf-tab-add,
+      .vfs-card .gm-btn {
+        border-radius: 0 !important;
+      }
+      .vfs-card .goal-modes {
+        border-color: var(--vfs-hairline-strong);
+        background: var(--vfs-card);
+      }
+      .vfs-card .goal-modes .gm-btn.active,
+      .vfs-card .wf-tab.active {
+        background: var(--vfs-blue);
+        border-color: var(--vfs-blue);
+        color: #fff;
+      }
+      .vfs-card .wf-tab-add:hover {
+        border-color: var(--vfs-blue);
+        color: var(--vfs-blue);
+      }
+      .vfs-card .out,
+      .vfs-card pre,
+      .vfs-card .template-output textarea {
+        border-radius: 0;
+      }
+      /* Builder lives directly on the card's white canvas — drop the fog panel. */
+      .vfs-card .workflow-stages {
+        background: transparent;
+        border: none;
+        padding: 0;
+      }
+      fieldset.subgroup {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+        background: var(--panel);
+      }
+      fieldset.subgroup > legend {
+        color: var(--color-graphite);
+        font: 600 13px/1 var(--sans);
+        padding: 0 6px;
+      }
+      .wf-dispatch {
+        width: auto;
+        padding: 8px 14px;
+        font-size: 13px;
+      }
+      .soon-badge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--color-fog);
+        border: 1px solid var(--line);
+        color: var(--muted);
+        font: 600 10px/1.4 var(--sans);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        vertical-align: middle;
+      }
       .workflow-stages legend {
         color: var(--color-graphite);
         font: 500 13px/1 var(--sans);
         padding: 0 6px;
       }
-      .stage-list {
+      .detected-instructions {
+        margin-top: 8px;
+        font: 12px/1.5 var(--sans);
+        color: var(--muted);
+      }
+      .repo-remote {
+        margin-top: 8px;
+        font: 12px/1.5 var(--sans);
+        color: var(--muted);
+      }
+      .repo-remote .rr-label {
+        font-weight: 600;
+        color: var(--color-graphite);
+        margin-right: 6px;
+      }
+      .repo-remote .rr-link {
+        color: var(--accent);
+        font: 11px/1.6 var(--mono);
+        word-break: break-all;
+      }
+      .detected-instructions .di-label {
+        font-weight: 600;
+        color: var(--color-graphite);
+        margin-right: 6px;
+      }
+      .detected-instructions .di-list code {
+        background: var(--color-fog);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 1px 6px;
+        margin-right: 4px;
+        font: 11px/1.6 var(--mono);
+        color: var(--ink);
+      }
+      .goal-modebar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 4px;
+      }
+      .goal-modes {
+        display: inline-flex;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px;
+        background: var(--panel-2);
+      }
+      .goal-modes .gm-btn {
+        width: auto;
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        border-radius: 999px;
+        font: 600 12px/1 var(--sans);
+        padding: 7px 14px;
+        cursor: pointer;
+      }
+      .goal-modes .gm-btn.active {
+        background: var(--ink);
+        color: var(--color-paper);
+      }
+      .preset-open {
+        margin-left: auto;
+        width: auto;
+        padding: 8px 14px;
+        font-size: 13px;
+      }
+      .wf-tabs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 8px;
+      }
+      .wf-tab {
+        width: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--muted);
+        border-radius: 999px;
+        font: 600 12px/1 var(--sans);
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      .wf-tab.active {
+        background: var(--ink);
+        color: var(--color-paper);
+        border-color: var(--ink);
+      }
+      .wf-tab .wf-tab-close {
+        color: inherit;
+        opacity: 0.6;
+        font: 600 13px/1 var(--sans);
+        cursor: pointer;
+      }
+      .wf-tab .wf-tab-close:hover {
+        opacity: 1;
+      }
+      .wf-tab-add {
+        width: auto;
+        border: 1px dashed var(--line);
+        background: transparent;
+        color: var(--muted);
+        border-radius: 999px;
+        font: 600 12px/1 var(--sans);
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      .wf-tab-add:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .wf-meta {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .wf-meta .wf-name-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .wf-meta .wf-name-row input {
+        flex: 1;
+        font: 600 15px/1.2 var(--sans);
+      }
+      .wf-io {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .wf-io .field-label {
+        background: var(--color-fog);
+      }
+      .wf-path-row {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .wf-path-row input {
+        flex: 1;
+        font-size: 12px;
+      }
+      .wf-path-row .wf-browse {
+        width: auto;
+        flex: 0 0 auto;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--ink);
+        border-radius: 8px;
+        font: 600 12px/1 var(--sans);
+        padding: 0 12px;
+        cursor: pointer;
+      }
+      .wf-path-row .wf-browse:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      @media (max-width: 640px) {
+        .wf-io {
+          grid-template-columns: 1fr;
+        }
+      }
+      .step-list {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 12px;
+        gap: 10px;
       }
-      .stage-card {
+      .step-card {
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
         color: var(--ink);
         padding: 14px;
+        display: grid;
+        gap: 10px;
       }
-      .workflow-stages .stage-choice {
+      .step-card.dragging {
+        opacity: 0.5;
+      }
+      .step-card.drag-over {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px
+          color-mix(in oklab, var(--accent) 30%, transparent);
+      }
+      .step-head {
         display: flex;
         align-items: center;
         gap: 10px;
-        color: var(--ink);
-        font: 600 14px/1.2 var(--sans);
       }
-      .workflow-stages .stage-choice input[type="checkbox"] {
-        width: auto;
-        accent-color: var(--accent);
-      }
-      .workflow-stages .stage-choice small {
+      .step-handle {
+        cursor: grab;
         color: var(--muted);
-        font: 500 12px/1.2 var(--sans);
+        font: 14px/1 var(--sans);
+        user-select: none;
       }
-      .stage-files {
+      .step-handle:active {
+        cursor: grabbing;
+      }
+      .step-index {
+        color: var(--muted);
+        font: 700 20px/1 var(--mono);
+        flex: 0 0 auto;
+      }
+      .step-title {
+        flex: 1;
+        font-weight: 600;
+      }
+      .field {
+        position: relative;
+      }
+      .field-title {
+        flex: 1;
+      }
+      .field > .field-label {
+        position: absolute;
+        top: -7px;
+        left: 10px;
+        padding: 0 5px;
+        background: var(--panel);
+        color: var(--muted);
+        font: 500 11px/1 var(--sans);
+        pointer-events: none;
+      }
+      .field > input,
+      .field > textarea {
+        width: 100%;
+      }
+      .field:focus-within > .field-label {
+        color: var(--accent);
+      }
+      .field-display {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 2px 0;
+      }
+      .field-text {
+        flex: 1;
+        color: var(--ink);
+        font: 500 13px/1.4 var(--sans);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .field-title .field-text {
+        font: 600 15px/1.3 var(--sans);
+      }
+      .field-text.is-placeholder {
+        color: var(--muted);
+        font-style: italic;
+        font-weight: 500;
+      }
+      .field-edit {
+        width: auto;
+        flex: 0 0 auto;
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font: 13px/1 var(--sans);
+        padding: 2px 4px;
+        border-radius: 4px;
+        opacity: 0;
+        transition: opacity 0.12s;
+      }
+      .field:hover > .field-display > .field-edit,
+      .field-display:hover > .field-edit {
+        opacity: 1;
+      }
+      .field-edit:hover {
+        color: var(--accent);
+      }
+      /* Editable fields: floating label only matters while editing */
+      .field.editable > .field-label {
         display: none;
+      }
+      .field.editable.is-editing > .field-label {
+        display: block;
+      }
+      .field.editable > input,
+      .field.editable > textarea {
+        display: none;
+      }
+      .field.editable.is-editing > .field-display {
+        display: none;
+      }
+      .field.editable.is-editing > input,
+      .field.editable.is-editing > textarea {
+        display: block;
+      }
+      .step-remove {
+        border: none;
+        background: transparent;
+        color: var(--fail);
+        cursor: pointer;
+        font: 600 16px/1 var(--sans);
+        width: auto;
+        padding: 0 4px;
+        flex: 0 0 auto;
+      }
+      .step-fields {
+        display: grid;
+        gap: 8px;
+      }
+      .step-fields textarea {
+        font-size: 13px;
+        min-height: 52px;
+      }
+      .step-insert {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: -2px 0;
+      }
+      .step-insert button {
+        width: auto;
+        border: 1px dashed var(--line);
+        background: transparent;
+        color: var(--muted);
+        border-radius: 999px;
+        font: 600 11px/1 var(--sans);
+        padding: 4px 12px;
+        cursor: pointer;
+        opacity: 0.7;
+        transition:
+          opacity 0.15s,
+          border-color 0.15s,
+          color 0.15s;
+      }
+      .step-insert button:hover {
+        opacity: 1;
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .step-empty {
+        color: var(--muted);
+        font: 13px/1.5 var(--sans);
+        text-align: center;
+        padding: 16px;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+      }
+      .preset-panel {
+        max-width: 760px;
+      }
+      .preset-grid {
+        display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 12px;
-        margin-top: 12px;
+        margin-top: 8px;
       }
-      .stage-card.selected .stage-files {
-        display: grid;
-      }
-      .stage-file-field {
+      .preset-card {
+        text-align: left;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--ink);
+        padding: 14px;
+        cursor: pointer;
         display: grid;
         gap: 6px;
-        color: var(--color-graphite);
-        font: 500 12px/1.2 var(--sans);
+        width: 100%;
       }
-      .stage-file-field input {
-        padding: 8px;
-        font-size: 12px;
+      .preset-card:hover {
+        border-color: var(--accent);
       }
-      .stage-file-list {
+      .preset-card .pc-name {
+        font: 600 14px/1.2 var(--sans);
+      }
+      .preset-card .pc-desc {
         color: var(--muted);
         font: 12px/1.4 var(--sans);
-        min-height: 17px;
+      }
+      .preset-card .pc-steps {
+        color: var(--accent);
+        font: 600 11px/1 var(--mono);
+      }
+      @media (max-width: 760px) {
+        .preset-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+      .field-label {
+        color: var(--color-graphite);
+        font: 500 13px/1.2 var(--sans);
+      }
+      .chip-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--color-graphite);
+        font: 500 13px/1.2 var(--sans);
+        cursor: pointer;
+        user-select: none;
+        transition:
+          border-color 0.15s,
+          background 0.15s,
+          color 0.15s;
+      }
+      .chip:hover {
+        border-color: var(--accent);
+      }
+      .chip input {
+        width: auto;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+      .chip:has(input:checked) {
+        border-color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 14%, transparent);
+        color: var(--ink);
+      }
+      .group-list {
+        display: grid;
+        gap: 8px;
+      }
+      .group-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .group-row .combo-type {
+        flex: 0 0 auto;
+        width: 130px;
+      }
+      .group-row > input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .group-del {
+        flex: 0 0 auto;
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--muted);
+        font: 600 16px/1 var(--sans);
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          color 0.15s,
+          background 0.15s;
+      }
+      .group-del:hover {
+        border-color: var(--error);
+        color: var(--error);
+      }
+      .btn-add {
+        justify-self: start;
+        padding: 6px 12px;
+        border: 1px dashed var(--line);
+        background: transparent;
+        color: var(--accent);
+        font: 500 13px/1.2 var(--sans);
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      .btn-add:hover {
+        border-color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 8%, transparent);
+      }
+      .type-picker {
+        width: 100%;
+      }
+      .chip.removable {
+        border-color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 14%, transparent);
+        color: var(--ink);
+      }
+      .chip .chip-x {
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        font: 600 14px/1 var(--sans);
+        cursor: pointer;
+        padding: 0;
+        margin: 0;
+      }
+      .chip .chip-x:hover {
+        color: var(--error);
       }
       .template-output {
         display: grid;
@@ -447,22 +1112,23 @@
         background: transparent;
         color: var(--ink);
         border: 1px solid var(--ink);
-        border-radius: 20px;
-        font: 600 14px/1 var(--sans);
-        padding: 11px 18px;
+        border-radius: 0;
+        font: 700 14px/1 var(--sans);
+        letter-spacing: 0.3px;
+        padding: 13px 24px;
         cursor: pointer;
       }
       .btn:hover {
         background: var(--color-chalk);
       }
       .btn.primary {
-        background: var(--ink);
-        color: var(--color-paper);
-        border-color: var(--ink);
+        background: var(--accent);
+        color: #ffffff;
+        border-color: var(--accent);
       }
       .btn.primary:hover {
-        background: var(--color-graphite);
-        border-color: var(--color-graphite);
+        background: var(--accent-active);
+        border-color: var(--accent-active);
       }
       .btn:disabled {
         opacity: 0.45;
@@ -471,6 +1137,10 @@
       .hint {
         color: var(--muted);
         font: 13px/1.5 var(--sans);
+      }
+      .hint.is-error {
+        color: var(--error);
+        font-weight: 600;
       }
       .attachments {
         display: grid;
@@ -520,6 +1190,10 @@
         color: var(--ink);
         cursor: pointer;
         width: auto;
+      }
+      .card .ctl select {
+        padding-right: 28px;
+        background-position: right 9px center;
       }
       .card .ctl .del {
         color: var(--fail);
@@ -591,31 +1265,38 @@
         animation: none;
       }
       #actionSec {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--panel);
-        box-shadow: var(--shadow-soft);
-        padding: 20px 24px;
+        position: sticky;
+        bottom: 16px;
+        z-index: 5;
+        border: none;
+        border-radius: 0;
+        background: color-mix(in oklab, var(--panel) 70%, transparent);
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+        box-shadow: none;
+        padding: 16px 20px;
       }
-      .workflow-notes-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 12px;
+      #actionSec .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+        border-radius: 0;
+        font: 700 14px/1 var(--sans);
+        letter-spacing: 0.5px;
+        padding: 15px 32px;
+        min-height: 48px;
       }
-      .workflow-notes-toggle {
-        width: auto;
-        padding: 7px 12px;
-        font: 600 12px/1 var(--sans);
+      #actionSec .btn.primary:hover {
+        background: var(--accent-active);
+        border-color: var(--accent-active);
       }
       .workflow-notes {
         background: var(--color-fog);
         border: 1px solid var(--line);
-        border-radius: 8px;
+        border-radius: 0;
         padding: 16px;
         margin: 0 0 16px;
-        font: 13px/1.5 var(--sans);
+        font: 300 14px/1.55 var(--sans);
         color: var(--color-graphite);
       }
       .workflow-notes b {
@@ -628,8 +1309,24 @@
       .workflow-notes li {
         margin: 4px 0;
       }
-      #actionSec.notes-hidden .workflow-notes {
-        display: none;
+      .review-panel {
+        max-width: 720px;
+      }
+      .review-content-label {
+        display: grid;
+        gap: 8px;
+        margin: 4px 0 12px;
+        color: var(--color-graphite);
+        font: 500 13px/1.2 var(--sans);
+      }
+      .review-content-label textarea {
+        font: 12px/1.55 var(--mono);
+        min-height: 220px;
+        resize: vertical;
+      }
+      .review-actions {
+        margin-top: 14px;
+        align-items: center;
       }
       .feedback-btn {
         background: var(--ink);
@@ -692,7 +1389,6 @@
         padding: 16px;
         background: var(--panel-2);
         border-left: 3px solid var(--accent);
-        border-radius: 8px;
       }
       .feedback-log {
         background: var(--panel-2);
@@ -795,10 +1491,9 @@
         .stage-files {
           grid-template-columns: 1fr;
         }
-        details.intake {
-          padding: 0 20px;
+        section.intake {
+          padding: 20px;
         }
-        details.intake > summary,
         .section-label,
         .feedback-panel h2 {
           font-size: 28px;
@@ -815,6 +1510,49 @@
         #actionSec {
           padding: 16px;
         }
+      }
+
+      /* ── vfs corporate dialect: rectangular geometry, blue CTA, 700/300 type ── */
+      input,
+      select,
+      textarea,
+      .btn,
+      .att,
+      .card,
+      .chip,
+      .tile,
+      .meter > *,
+      .out,
+      pre,
+      .panel,
+      .feedback-panel,
+      .modal-card,
+      fieldset,
+      .tool-details {
+        border-radius: 0 !important;
+      }
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: var(--ink) !important;
+      }
+      .btn.primary,
+      button[type="submit"].primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .section-label {
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        font-weight: 700;
+      }
+      /* Keep circular affordances circular (avatars / icon buttons) */
+      .avatar,
+      .icon-btn,
+      [class*="circle"] {
+        border-radius: 9999px !important;
       }
     </style>
   </head>
@@ -875,362 +1613,271 @@
         </div>
       </div>
       <div id="triage" hidden></div>
-      <details class="intake" id="intake" open>
-        <summary>New workflow — initialize here</summary>
-        <form class="form" id="intakeForm">
+      <div class="feedback-modal hidden" id="presetModal">
+        <div class="feedback-panel preset-panel">
+          <button class="feedback-close" id="presetClose">×</button>
+          <h2>Choose a workflow preset</h2>
+          <div class="feedback-instructions">
+            Pick a ready-made workflow. Its steps load into the builder where
+            you can edit every title, description, prompt, and output.
+          </div>
+          <div class="preset-grid" id="presetGrid"></div>
+        </div>
+      </div>
+      <div class="feedback-modal hidden" id="dispatchModal">
+        <div class="feedback-panel">
+          <button class="feedback-close" id="dispatchModalClose">×</button>
+          <h2>
+            Dispatch workflow
+            <span class="soon-badge">coming soon</span>
+          </h2>
+          <div class="feedback-instructions">
+            Run <b id="dispatchWfName">this workflow</b> against an engine. Write
+            the dispatch prompt, then run it.
+          </div>
           <label
-            >Repository path
-            <div class="row">
-              <input
-                name="repoPath"
-                id="repoPath"
-                list="recentRepos"
-                placeholder="/path/to/your/repo (defaults to current dir)"
-                style="flex: 1"
-              />
-              <button type="button" class="btn" id="detectBtn">Detect</button>
-              <span class="hint" id="detectHint"></span>
-            </div>
-            <datalist id="recentRepos"></datalist>
+            >Dispatch prompt
+            <textarea
+              id="dispatchPrompt"
+              rows="6"
+              placeholder="Command/prompt that tells the engine how to run this workflow…"
+            ></textarea>
           </label>
-          <fieldset class="workflow-stages" id="workflowStages">
-            <legend>
-              Goal / task
-              <span class="hint">— select one or more workflow stages</span>
-            </legend>
-            <input type="hidden" name="goal" id="goalInput" />
-            <div class="stage-list">
-              <div class="stage-card" data-stage-card="BD">
-                <label class="stage-choice">
-                  <input
+          <div class="row" style="margin-top: 10px">
+            <button
+              type="button"
+              class="btn primary"
+              id="dispatchRunBtn"
+              disabled
+              title="Coming soon"
+            >
+              Run dispatch
+            </button>
+            <span class="hint">Execution is not wired yet — coming soon.</span>
+          </div>
+        </div>
+      </div>
+      <div class="feedback-modal hidden" id="reviewModal">
+        <div class="feedback-panel review-panel">
+          <button class="feedback-close" id="reviewClose">×</button>
+          <h2>Review &amp; generate workflow</h2>
+          <div class="feedback-instructions">
+            This is the workflow content that will be generated. You can edit it
+            directly before confirming.
+          </div>
+          <label class="review-content-label"
+            >Workflow content
+            <textarea id="reviewContent" rows="14" spellcheck="false"></textarea>
+          </label>
+          <div class="workflow-notes" id="reviewNotes">
+            <b>⚠ Before generating workflow:</b>
+            <ul>
+              <li>Repository path should be a valid Git repo</li>
+              <li>At least one engine must be ready (check readiness above)</li>
+              <li>Goal description should be clear and specific</li>
+              <li>
+                Work units will be auto-created or added manually after
+                generation
+              </li>
+            </ul>
+          </div>
+          <div class="row review-actions">
+            <button type="button" class="btn" id="reviewCancel">Cancel</button>
+            <button type="button" class="btn primary" id="reviewConfirm">
+              Confirm &amp; generate
+            </button>
+            <span class="hint" id="reviewHint"></span>
+          </div>
+        </div>
+      </div>
+      <section class="intake" id="intake">
+        <form class="form" id="intakeForm">
+          <!-- I. Project Info -->
+          <section class="tool-details vfs-card" id="projectSec">
+            <div class="tool-details-head">Project Info</div>
+            <div class="form">
+            <fieldset class="subgroup">
+              <legend>1 · Master</legend>
+              <div class="field">
+                <span class="field-label">Project docs source</span>
+                <div class="group-list" id="docSourceList"></div>
+                <button type="button" class="btn-add" id="docSourceAdd">
+                  + Add source
+                </button>
+              </div>
+              <div class="field">
+                <span class="field-label">Task / issue source</span>
+                <div class="group-list" id="taskSourceList"></div>
+                <button type="button" class="btn-add" id="taskSourceAdd">
+                  + Add source
+                </button>
+              </div>
+              <div class="field">
+                <span class="field-label">File types</span>
+                <select id="fileTypesSelect" class="combo-type type-picker">
+                  <option value="">Add file type…</option>
+                  <option value="md">md</option>
+                  <option value="docx">docx</option>
+                  <option value="xlsx">xlsx</option>
+                  <option value="pptx">pptx</option>
+                  <option value="pdf">pdf</option>
+                  <option value="csv">csv</option>
+                  <option value="json">json</option>
+                  <option value="png">png</option>
+                </select>
+                <div class="chip-group" id="fileTypesChips"></div>
+              </div>
+              <label
+                >Sample files (attach any number — AI picks a reader skill per
+                file)
+                <input type="file" id="attachInput" multiple />
+              </label>
+              <div id="attachList" class="attachments"></div>
+              <fieldset class="engines">
+                <legend>Check engine <span class="hint" id="engHint"></span></legend>
+                <label class="chk"
+                  ><input
                     type="checkbox"
-                    name="workflowStage"
-                    value="BD"
+                    name="engine"
+                    value="claude"
+                    id="eng-claude"
                     checked
                   />
-                  <span>BD <small>Basic Design</small></span>
-                </label>
-                <div class="stage-files">
-                  <label class="stage-file-field"
-                    >Input file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="BD"
-                      data-kind="input"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="BD-input"></span>
-                  </label>
-                  <label class="stage-file-field"
-                    >Output file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="BD"
-                      data-kind="output"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="BD-output"></span>
-                  </label>
-                </div>
+                  Claude Code</label
+                >
+                <label class="chk"
+                  ><input
+                    type="checkbox"
+                    name="engine"
+                    value="codex"
+                    id="eng-codex"
+                    checked
+                  />
+                  Codex</label
+                >
+                <label class="chk"
+                  ><input
+                    type="checkbox"
+                    name="engine"
+                    value="copilot"
+                    id="eng-copilot"
+                    checked
+                  />
+                  Copilot CLI</label
+                >
+              </fieldset>
+              <div class="row">
+                <button type="button" class="btn" id="checkEnginesBtn">
+                  Check engines
+                </button>
+                <span class="hint" id="engineStatusHint"
+                  >Probe runs locally — readiness gates Generate.</span
+                >
               </div>
-              <div class="stage-card" data-stage-card="DD">
-                <label class="stage-choice">
-                  <input type="checkbox" name="workflowStage" value="DD" />
-                  <span>DD <small>Detail Design</small></span>
-                </label>
-                <div class="stage-files">
-                  <label class="stage-file-field"
-                    >Input file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="DD"
-                      data-kind="input"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="DD-input"></span>
-                  </label>
-                  <label class="stage-file-field"
-                    >Output file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="DD"
-                      data-kind="output"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="DD-output"></span>
-                  </label>
+              <div
+                id="engineStatus"
+                class="attachments"
+                aria-live="polite"
+              ></div>
+            </fieldset>
+            <fieldset class="subgroup">
+              <legend>2 · Source code</legend>
+              <label
+                >Repository path
+                <span class="hint">— auto-detected; required to continue</span>
+                <div class="row">
+                  <input
+                    name="repoPath"
+                    id="repoPath"
+                    list="recentRepos"
+                    placeholder="/path/to/your/repo (defaults to current dir)"
+                    style="flex: 1"
+                  />
+                  <button type="button" class="btn" id="detectBtn">
+                    Detect
+                  </button>
+                  <span class="hint" id="detectHint"></span>
                 </div>
+                <datalist id="recentRepos"></datalist>
+                <div class="repo-remote" id="repoRemote" hidden>
+                  <span class="rr-label">Git remote:</span>
+                  <a class="rr-link" id="repoRemoteLink" target="_blank" rel="noopener noreferrer"></a>
+                </div>
+                <div
+                  class="detected-instructions"
+                  id="detectedInstructions"
+                  hidden
+                >
+                  <span class="di-label">Instruction files found:</span>
+                  <span class="di-list" id="detectedInstructionsList"></span>
+                </div>
+              </label>
+            </fieldset>
+            </div>
+          </section>
+
+          <!-- II. Workflow -->
+          <section class="tool-details vfs-card" id="workflowSec">
+            <div class="tool-details-head">
+              Goal / task — build steps or write raw content
+            </div>
+            <div class="form">
+          <fieldset class="workflow-stages" id="workflowStages" style="border:none;padding:0;margin:0">
+            <div class="goal-modebar">
+              <div class="goal-modes" id="goalModes" role="tablist">
+                <button
+                  type="button"
+                  class="gm-btn active"
+                  data-mode="builder"
+                >
+                  Builder
+                </button>
+                <button type="button" class="gm-btn" data-mode="raw">
+                  Raw content
+                </button>
               </div>
-              <div class="stage-card" data-stage-card="DEV">
-                <label class="stage-choice">
-                  <input type="checkbox" name="workflowStage" value="DEV" />
-                  <span>DEV <small>Implementation</small></span>
-                </label>
-                <div class="stage-files">
-                  <label class="stage-file-field"
-                    >Input file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="DEV"
-                      data-kind="input"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="DEV-input"></span>
-                  </label>
-                  <label class="stage-file-field"
-                    >Output file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="DEV"
-                      data-kind="output"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="DEV-output"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="stage-card" data-stage-card="UT">
-                <label class="stage-choice">
-                  <input type="checkbox" name="workflowStage" value="UT" />
-                  <span>UT <small>Unit Test</small></span>
-                </label>
-                <div class="stage-files">
-                  <label class="stage-file-field"
-                    >Input file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="UT"
-                      data-kind="input"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="UT-input"></span>
-                  </label>
-                  <label class="stage-file-field"
-                    >Output file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="UT"
-                      data-kind="output"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="UT-output"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="stage-card" data-stage-card="IT">
-                <label class="stage-choice">
-                  <input type="checkbox" name="workflowStage" value="IT" />
-                  <span>IT <small>Integration Test</small></span>
-                </label>
-                <div class="stage-files">
-                  <label class="stage-file-field"
-                    >Input file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="IT"
-                      data-kind="input"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="IT-input"></span>
-                  </label>
-                  <label class="stage-file-field"
-                    >Output file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="IT"
-                      data-kind="output"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="IT-output"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="stage-card" data-stage-card="ST">
-                <label class="stage-choice">
-                  <input type="checkbox" name="workflowStage" value="ST" />
-                  <span>ST <small>System Test</small></span>
-                </label>
-                <div class="stage-files">
-                  <label class="stage-file-field"
-                    >Input file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="ST"
-                      data-kind="input"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="ST-input"></span>
-                  </label>
-                  <label class="stage-file-field"
-                    >Output file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="ST"
-                      data-kind="output"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="ST-output"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="stage-card" data-stage-card="RV">
-                <label class="stage-choice">
-                  <input type="checkbox" name="workflowStage" value="RV" />
-                  <span>RV <small>Review / Verify</small></span>
-                </label>
-                <div class="stage-files">
-                  <label class="stage-file-field"
-                    >Input file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="RV"
-                      data-kind="input"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="RV-input"></span>
-                  </label>
-                  <label class="stage-file-field"
-                    >Output file
-                    <input
-                      type="file"
-                      class="stage-file"
-                      data-stage="RV"
-                      data-kind="output"
-                      multiple
-                    />
-                    <span class="stage-file-list" data-file-list="RV-output"></span>
-                  </label>
-                </div>
+              <button type="button" class="btn preset-open" id="presetOpenBtn">
+                Use a preset…
+              </button>
+              <button
+                type="button"
+                class="btn wf-dispatch"
+                id="wfDispatchBtn"
+                disabled
+                title="Available after Generate"
+              >
+                Dispatch
+              </button>
+            </div>
+            <input type="hidden" name="goal" id="goalInput" />
+            <div id="builderView">
+              <div class="wf-tabs" id="wfTabs"></div>
+              <div class="wf-meta" id="wfMeta"></div>
+              <div class="step-list" id="stepList"></div>
+              <div class="template-output" id="builderPreview">
+                <label for="stageTemplateOut">Generated content (preview)</label>
+                <textarea
+                  id="stageTemplateOut"
+                  rows="8"
+                  readonly
+                  aria-live="polite"
+                ></textarea>
               </div>
             </div>
-            <div class="template-output">
-              <label for="stageTemplateOut">Template Input / Output</label>
+            <div id="rawView" hidden>
               <textarea
-                id="stageTemplateOut"
-                rows="8"
-                readonly
-                aria-live="polite"
+                id="rawContent"
+                rows="14"
+                placeholder="Workflow content — write freely…"
               ></textarea>
             </div>
           </fieldset>
-          <fieldset class="engines">
-            <legend>Engines <span class="hint" id="engHint"></span></legend>
-            <label class="chk"
-              ><input
-                type="checkbox"
-                name="engine"
-                value="claude"
-                id="eng-claude"
-                checked
-              />
-              Claude Code</label
-            >
-            <label class="chk"
-              ><input
-                type="checkbox"
-                name="engine"
-                value="codex"
-                id="eng-codex"
-                checked
-              />
-              Codex</label
-            >
-            <label class="chk"
-              ><input
-                type="checkbox"
-                name="engine"
-                value="copilot"
-                id="eng-copilot"
-                checked
-              />
-              Copilot CLI</label
-            >
-          </fieldset>
-          <div class="row">
-            <button type="button" class="btn" id="checkEnginesBtn">
-              Check engines
-            </button>
-            <span class="hint" id="engineStatusHint"
-              >Probe runs locally — readiness gates Generate.</span
-            >
-          </div>
-          <div id="engineStatus" class="attachments" aria-live="polite"></div>
-          <div class="grid2">
-            <label
-              >Project docs source
-              <select name="docSource">
-                <option value="">Select docs source</option>
-                <option value="GitHub">GitHub</option>
-                <option value="GitLab">GitLab</option>
-                <option value="Google Drive">Google Drive</option>
-                <option value="Confluence">Confluence</option>
-                <option value="Notion">Notion</option>
-                <option value="Local folder">Local folder</option>
-                <option value="S3">S3</option>
-              </select>
-            </label>
-            <label
-              >Task / issue source
-              <select name="taskSource">
-                <option value="">Select task source</option>
-                <option value="Jira">Jira</option>
-                <option value="Linear">Linear</option>
-                <option value="GitHub Issues">GitHub Issues</option>
-                <option value="Trello">Trello</option>
-                <option value="Asana">Asana</option>
-                <option value="Slack">Slack</option>
-              </select>
-            </label>
-            <label
-              >File types
-              <select name="fileTypes">
-                <option value="">Select file type</option>
-                <option value="md">md</option>
-                <option value="docx">docx</option>
-                <option value="xlsx">xlsx</option>
-                <option value="pptx">pptx</option>
-                <option value="pdf">pdf</option>
-                <option value="csv">csv</option>
-                <option value="json">json</option>
-                <option value="png">png</option>
-              </select>
-            </label>
-            <label
-              >Sample / reference<input
-                name="sample"
-                placeholder="link or path to a template"
-            /></label>
-          </div>
-          <label
-            >Sample files (attach any number — AI picks a reader skill per file)
-            <input type="file" id="attachInput" multiple />
-          </label>
-          <div id="attachList" class="attachments"></div>
-          <label
-            >Expected result (Definition of Done)
-            <textarea
-              name="expectedResult"
-              rows="2"
-              placeholder="How will we know it is done?"
-            ></textarea>
-          </label>
+            </div>
+          </section>
         </form>
-      </details>
+      </section>
       <section class="meter" id="meter" hidden></section>
-      <section id="dispatchSec" hidden>
+      <!-- <section id="dispatchSec" hidden>
         <div class="section-label">dispatch</div>
         <div class="row" style="margin-top: 10px">
           <select id="dispatchEngine">
@@ -1273,8 +1920,8 @@
           <button class="btn" type="submit">+ add unit</button>
           <span class="hint" id="unitHint"></span>
         </form>
-      </section>
-      <section id="skillsSec" hidden>
+      </section> -->
+        <section id="skillsSec" hidden>
         <div class="section-label">
           Skills
           <span class="hint"
@@ -1284,8 +1931,8 @@
         <div id="skillsBox" class="attachments" style="margin-top: 10px"></div>
         <div id="needsBox" class="attachments" style="margin-top: 8px"></div>
       </section>
-      <details class="intake" id="optionsSec">
-        <summary>Optional tools — code navigation</summary>
+      <section class="tool-details vfs-card" id="optionsSec">
+        <div class="tool-details-head">Optional tools — code navigation</div>
         <div class="form" id="toolOptions">
           <p class="hint">
             Opt-in MCP tools give agents better code navigation. Toggling saves
@@ -1300,14 +1947,11 @@
           <div id="toolList" class="attachments"></div>
           <span class="hint" id="optionsHint"></span>
         </div>
-      </details>
-      <section id="discoverSec">
-        <div class="section-label">
-          Discovery
-          <span class="hint"
-            >— Context7 docs / skills (network requires approval)</span
-          >
-        </div>
+      </section>
+      <section class="tool-details vfs-card" id="discoverSec">
+        <div class="tool-details-head">Discovery — Context7 docs / skills</div>
+        <div class="form">
+        <p class="hint">Network requires approval.</p>
         <form class="row" id="discoverForm" style="margin-top: 10px">
           <select id="discoverKind">
             <option value="docs">docs</option>
@@ -1326,30 +1970,9 @@
           <span class="hint" id="discoverHint"></span>
         </form>
         <pre class="out" id="discoverOut" hidden></pre>
+        </div>
       </section>
       <section id="actionSec">
-        <div class="workflow-notes-head">
-          <b>⚠ Before generating workflow:</b>
-          <button
-            type="button"
-            class="btn workflow-notes-toggle"
-            id="workflowNotesToggle"
-            aria-controls="workflowNotes"
-            aria-expanded="true"
-          >
-            Hide notes
-          </button>
-        </div>
-        <div class="workflow-notes" id="workflowNotes">
-          <ul>
-            <li>Repository path should be a valid Git repo</li>
-            <li>At least one engine must be ready (check readiness above)</li>
-            <li>Goal description should be clear and specific</li>
-            <li>
-              Work units will be auto-created or added manually after generation
-            </li>
-          </ul>
-        </div>
         <div class="actions">
           <button
             style="width: 100%"
@@ -1377,57 +2000,472 @@
         ).matches;
         var CSRF =
           (document.querySelector('meta[name="csrf"]') || {}).content || "";
-        var STAGE_TEMPLATES = {
+        // Reusable stage library — each stage maps to an editable builder step.
+        var STAGE_LIBRARY = {
           BD: {
             title: "Basic Design",
-            input:
+            description:
               "Requirement summary, current system context, constraints, affected modules, non-functional requirements.",
             output:
               "Basic design document with scope, architecture approach, data/API impact, risks, assumptions, and acceptance points.",
           },
           DD: {
             title: "Detail Design",
-            input:
+            description:
               "Approved BD, target files/modules, interfaces, data contracts, edge cases, migration and rollback notes.",
             output:
               "Detail design document with implementation steps, file-level changes, function/class contracts, validation plan, and test matrix.",
           },
           DEV: {
             title: "Implementation",
-            input:
+            description:
               "Approved DD, coding standards, repository state, dependency constraints, and target branch/worktree.",
             output:
               "Code changes, minimal focused commits or patch set, updated docs/config where needed, and local build notes.",
           },
           UT: {
             title: "Unit Test",
-            input:
+            description:
               "Changed units, expected behavior, edge cases, mocks/fixtures, and existing test conventions.",
             output:
               "Unit tests covering happy paths, edge cases, regressions, and a command output proving the tests pass.",
           },
           IT: {
             title: "Integration Test",
-            input:
+            description:
               "Integrated workflow, service boundaries, test data, environment variables, and external dependency assumptions.",
             output:
               "Integration test cases, setup/teardown notes, verified command output, and observed cross-module behavior.",
           },
           ST: {
             title: "System Test",
-            input:
+            description:
               "End-to-end scenario list, release scope, environment baseline, test data, roles, and acceptance criteria.",
             output:
               "System test cases, execution evidence, defect list, retest notes, and release readiness summary.",
           },
           RV: {
             title: "Review / Verify",
-            input:
+            description:
               "Patch diff, generated artifacts, test outputs, risk notes, and definition of done.",
             output:
               "Review findings, resolved issues, remaining risks, verification evidence, and final completion decision.",
           },
         };
+
+        // Ready-made workflows shown in the preset modal. Each clones into
+        // editable builder steps (every title/description/prompt/output stays
+        // fully editable afterward). A preset is either a list of stage codes
+        // (resolved from STAGE_LIBRARY) or an explicit list of steps.
+        var WORKFLOW_PRESETS = [
+          {
+            key: "full",
+            name: "Full lifecycle",
+            desc: "BD → DD → DEV → UT → IT → ST → RV",
+            stages: ["BD", "DD", "DEV", "UT", "IT", "ST", "RV"],
+          },
+          {
+            key: "tdd",
+            name: "TDD",
+            desc: "Test-driven development: Red → Green → Refactor.",
+            steps: [
+              {
+                title: "Red — write a failing test",
+                description:
+                  "Capture the desired behavior as a small, specific test before any implementation exists.",
+                prompt:
+                  "Write the smallest test that expresses the next required behavior. Cover the happy path plus the relevant edge cases. Run it and confirm it FAILS for the right reason (the feature doesn't exist yet).",
+                output:
+                  "A new failing test with a clear assertion, plus the command output showing it fails as expected.",
+              },
+              {
+                title: "Green — make it pass",
+                description:
+                  "Write the minimum implementation needed to make the failing test pass.",
+                prompt:
+                  "Implement just enough code to make the failing test pass — no more. Avoid speculative features. Run the full test suite and confirm everything is green.",
+                output:
+                  "Minimal implementation plus command output showing the previously failing test (and all others) now pass.",
+              },
+              {
+                title: "Refactor — clean up",
+                description:
+                  "Improve the design while keeping all tests green.",
+                prompt:
+                  "Refactor the implementation and tests for clarity, removing duplication and improving names, without changing behavior. Re-run the suite after each change to keep it green. Note any remaining risks.",
+                output:
+                  "Refactored code with tests still passing, a summary of changes, and any remaining risks or follow-ups.",
+              },
+            ],
+          },
+          {
+            key: "sdd",
+            name: "SDD",
+            desc: "Spec-driven design: design before building.",
+            stages: ["BD", "DD", "DEV", "UT"],
+          },
+          {
+            key: "idsd",
+            name: "IDSD",
+            desc: "Iterative design through system test.",
+            stages: ["BD", "DD", "DEV", "UT", "IT", "ST"],
+          },
+          {
+            key: "gh-spec",
+            name: "GitHub task → spec",
+            desc: "Fetch a GitHub issue and analyze it into a spec + basic design.",
+            steps: [
+              {
+                title: "Fetch task from GitHub",
+                description:
+                  "Pull the issue/PR details (title, body, labels, comments) from GitHub.",
+                prompt:
+                  "Given a GitHub issue URL or number, fetch its title, body, labels, and comments. Summarize the request and any stated acceptance criteria.",
+              },
+              {
+                title: "Analyze spec",
+                description:
+                  "Turn the fetched task into a structured specification.",
+                prompt:
+                  "Analyze the fetched task. Produce a structured spec: goal, scope, constraints, affected modules, edge cases, and acceptance criteria.",
+                output:
+                  "Specification document covering goal, scope, constraints, affected modules, edge cases, and acceptance criteria.",
+              },
+              {
+                title: "Basic design",
+                description: "Design the approach for the analyzed spec.",
+                prompt:
+                  "From the spec, propose a basic design: architecture approach, data/API impact, risks, and assumptions.",
+                output:
+                  "Basic design document with scope, architecture approach, data/API impact, risks, and assumptions.",
+              },
+            ],
+          },
+        ];
+
+        // --- Goal builder state ---
+        // Multiple workflows; all are serialized into the single `goal` text on
+        // submit. A workflow references another simply by naming it in a prompt.
+        var workflows = [];
+        var activeWf = 0;
+        var goalStepSeq = 0;
+        var wfSeq = 0;
+        var goalMode = "builder";
+
+        function cwf() {
+          return workflows[activeWf] || workflows[0];
+        }
+
+        // --- Temporary persistence of builder state in localStorage ---
+        var BUILDER_STORE_KEY = "vibeflow-builder";
+        function saveBuilderState() {
+          try {
+            var raw = document.getElementById("rawContent");
+            localStorage.setItem(
+              BUILDER_STORE_KEY,
+              JSON.stringify({
+                workflows: workflows,
+                activeWf: activeWf,
+                goalMode: goalMode,
+                rawContent: raw ? raw.value : "",
+              }),
+            );
+          } catch (e) {
+            /* ignore quota/serialization errors */
+          }
+        }
+        function loadBuilderState() {
+          try {
+            var saved = localStorage.getItem(BUILDER_STORE_KEY);
+            if (!saved) return null;
+            var data = JSON.parse(saved);
+            if (!data || !Array.isArray(data.workflows) || !data.workflows.length)
+              return null;
+            return data;
+          } catch (e) {
+            return null;
+          }
+        }
+
+        // --- Persist every intake input (Project Info, source code, …) ---
+        var FORM_STORE_KEY = "vibeflow-form";
+        // Fields managed/derived elsewhere — never persisted by the generic layer.
+        var FORM_SKIP_IDS = {
+          goalInput: 1,
+          rawContent: 1,
+          stageTemplateOut: 1,
+          fileTypesSelect: 1,
+        };
+        function formFields() {
+          var form = document.getElementById("intakeForm");
+          if (!form) return [];
+          return Array.prototype.filter.call(
+            form.querySelectorAll("input, select, textarea"),
+            function (el) {
+              if (el.type === "file") return false;
+              var key = el.id || el.name;
+              return key && !FORM_SKIP_IDS[el.id];
+            },
+          );
+        }
+        function saveFormState() {
+          try {
+            var data = {};
+            formFields().forEach(function (el) {
+              var key = el.id || el.name;
+              if (el.type === "checkbox" || el.type === "radio") {
+                data[key] = { c: el.checked };
+              } else {
+                data[key] = { v: el.value };
+              }
+            });
+            data.__docSources = collectSources("docSourceList");
+            data.__taskSources = collectSources("taskSourceList");
+            data.__fileTypes = fileTypeValues.slice();
+            localStorage.setItem(FORM_STORE_KEY, JSON.stringify(data));
+          } catch (e) {
+            /* ignore quota/serialization errors */
+          }
+        }
+        function restoreFormState() {
+          var data = {};
+          try {
+            var saved = localStorage.getItem(FORM_STORE_KEY);
+            if (saved) data = JSON.parse(saved) || {};
+            formFields().forEach(function (el) {
+              var rec = data[el.id] || data[el.name];
+              if (!rec) return;
+              if (el.type === "checkbox" || el.type === "radio") {
+                if (typeof rec.c === "boolean") el.checked = rec.c;
+              } else if (rec.v != null) {
+                el.value = rec.v;
+              }
+            });
+          } catch (e) {
+            /* ignore */
+          }
+          restoreSources(data);
+        }
+        // Rebuild the repeatable source rows + file-type chips from saved data.
+        function restoreSources(data) {
+          var docList = document.getElementById("docSourceList");
+          var taskList = document.getElementById("taskSourceList");
+          if (docList) {
+            docList.textContent = "";
+            var docs = (data && data.__docSources) || [];
+            if (docs.length)
+              docs.forEach(function (v) {
+                addDocSource(v);
+              });
+            else addDocSource();
+          }
+          if (taskList) {
+            taskList.textContent = "";
+            var tasks = (data && data.__taskSources) || [];
+            if (tasks.length)
+              tasks.forEach(function (v) {
+                addTaskSource(v);
+              });
+            else addTaskSource();
+          }
+          fileTypeValues = ((data && data.__fileTypes) || []).slice();
+          renderFileTypeChips();
+        }
+
+        // --- Repeatable doc / task sources + file-type chips ---
+        var DOC_SOURCE_TYPES = [
+          "GitHub",
+          "GitLab",
+          "Google Drive",
+          "Confluence",
+          "Notion",
+          "Box",
+          "SharePoint",
+          "Network",
+          "Local folder",
+          "S3",
+        ];
+        var TASK_SOURCE_TYPES = [
+          "Jira",
+          "Linear",
+          "GitHub Issues",
+          "Trello",
+          "Asana",
+          "Slack",
+        ];
+
+        function makeSourceRow(types, value, placeholder) {
+          value = value || { type: "", ref: "" };
+          var row = document.createElement("div");
+          row.className = "group-row";
+          var sel = document.createElement("select");
+          sel.className = "combo-type group-type";
+          var opt0 = document.createElement("option");
+          opt0.value = "";
+          opt0.textContent = "Choose type…";
+          sel.appendChild(opt0);
+          types.forEach(function (t) {
+            var o = document.createElement("option");
+            o.value = t;
+            o.textContent = t;
+            if (t === value.type) o.selected = true;
+            sel.appendChild(o);
+          });
+          var inp = document.createElement("input");
+          inp.className = "group-ref";
+          inp.placeholder = placeholder;
+          inp.value = value.ref || "";
+          var del = document.createElement("button");
+          del.type = "button";
+          del.className = "group-del";
+          del.setAttribute("aria-label", "Remove");
+          del.textContent = "×";
+          del.addEventListener("click", function () {
+            row.parentNode.removeChild(row);
+            saveFormState();
+          });
+          row.appendChild(sel);
+          row.appendChild(inp);
+          row.appendChild(del);
+          return row;
+        }
+
+        function collectSources(listId) {
+          var list = document.getElementById(listId);
+          if (!list) return [];
+          return Array.prototype.map
+            .call(list.querySelectorAll(".group-row"), function (row) {
+              var sel = row.querySelector(".group-type");
+              var inp = row.querySelector(".group-ref");
+              return {
+                type: sel ? sel.value.trim() : "",
+                ref: inp ? inp.value.trim() : "",
+              };
+            })
+            .filter(function (s) {
+              return s.type || s.ref;
+            });
+        }
+
+        function addDocSource(value) {
+          var list = document.getElementById("docSourceList");
+          if (list)
+            list.appendChild(
+              makeSourceRow(
+                DOC_SOURCE_TYPES,
+                value,
+                "https://… or ./docs/spec.md",
+              ),
+            );
+        }
+        function addTaskSource(value) {
+          var list = document.getElementById("taskSourceList");
+          if (list)
+            list.appendChild(
+              makeSourceRow(TASK_SOURCE_TYPES, value, "https://… or issue link"),
+            );
+        }
+
+        // File-type chips driven by the dropdown.
+        var fileTypeValues = [];
+        function renderFileTypeChips() {
+          var box = document.getElementById("fileTypesChips");
+          if (!box) return;
+          box.textContent = "";
+          fileTypeValues.forEach(function (v) {
+            var chip = document.createElement("span");
+            chip.className = "chip removable";
+            chip.appendChild(document.createTextNode(v + " "));
+            var x = document.createElement("button");
+            x.type = "button";
+            x.className = "chip-x";
+            x.setAttribute("aria-label", "Remove " + v);
+            x.textContent = "×";
+            x.addEventListener("click", function () {
+              fileTypeValues = fileTypeValues.filter(function (t) {
+                return t !== v;
+              });
+              renderFileTypeChips();
+              saveFormState();
+            });
+            chip.appendChild(x);
+            box.appendChild(chip);
+          });
+        }
+
+        function initSourceControls() {
+          var docAdd = document.getElementById("docSourceAdd");
+          if (docAdd)
+            docAdd.addEventListener("click", function () {
+              addDocSource();
+              saveFormState();
+            });
+          var taskAdd = document.getElementById("taskSourceAdd");
+          if (taskAdd)
+            taskAdd.addEventListener("click", function () {
+              addTaskSource();
+              saveFormState();
+            });
+          var ftSel = document.getElementById("fileTypesSelect");
+          if (ftSel)
+            ftSel.addEventListener("change", function () {
+              var v = ftSel.value;
+              ftSel.value = "";
+              if (!v || fileTypeValues.indexOf(v) !== -1) return;
+              fileTypeValues.push(v);
+              renderFileTypeChips();
+              saveFormState();
+            });
+        }
+
+        function initFormPersistence() {
+          restoreFormState();
+          var form = document.getElementById("intakeForm");
+          if (!form) return;
+          form.addEventListener("input", saveFormState);
+          form.addEventListener("change", saveFormState);
+        }
+
+        function makeStep(data) {
+          data = data || {};
+          goalStepSeq += 1;
+          return {
+            id: "st" + goalStepSeq,
+            title: data.title || "",
+            description: data.description || "",
+            prompt: data.prompt || "",
+            output: data.output != null ? String(data.output) : "",
+          };
+        }
+
+        function makeWorkflow(data) {
+          data = data || {};
+          wfSeq += 1;
+          return {
+            id: "wf" + wfSeq,
+            name: data.name || "Workflow " + wfSeq,
+            description: data.description || "",
+            dod: data.dod || "",
+            steps: (data.steps || []).map(makeStep),
+            sampleInput: data.sampleInput || "",
+            sampleOutput: data.sampleOutput || "",
+            inputPath: data.inputPath || "",
+            outputPath: data.outputPath || "",
+          };
+        }
+
+        function presetStepData(preset) {
+          if (preset.steps) return preset.steps;
+          return (preset.stages || []).map(function (code) {
+            var s = STAGE_LIBRARY[code] || { title: code };
+            return {
+              title: code + " — " + s.title,
+              description: s.description || "",
+              prompt: "",
+              output: s.output || "",
+            };
+          });
+        }
 
         // Theme management
         function initTheme() {
@@ -1463,149 +2501,764 @@
           applyTheme(isDark ? "light" : "dark");
         }
 
-        function applyWorkflowNotesVisibility(hidden) {
-          var section = document.getElementById("actionSec");
-          var btn = document.getElementById("workflowNotesToggle");
-          if (!section || !btn) return;
-          section.classList.toggle("notes-hidden", hidden);
-          btn.textContent = hidden ? "Show notes" : "Hide notes";
-          btn.setAttribute("aria-expanded", hidden ? "false" : "true");
-          localStorage.setItem(
-            "vibeflow-workflow-notes",
-            hidden ? "hidden" : "visible",
-          );
+        // Generate workflow uses a two-step confirm: first click reveals the
+        // checklist notes; the next submit actually generates.
+        function openReviewModal() {
+          var m = document.getElementById("reviewModal");
+          if (m) m.classList.remove("hidden");
+        }
+        function closeReviewModal() {
+          var m = document.getElementById("reviewModal");
+          if (m) m.classList.add("hidden");
         }
 
-        function initWorkflowNotes() {
-          var hidden =
-            localStorage.getItem("vibeflow-workflow-notes") === "hidden";
-          applyWorkflowNotesVisibility(hidden);
+        // Turn a git remote into a clickable https URL when possible.
+        function remoteToHref(url) {
+          if (!url) return "";
+          var m = url.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+          if (m) return "https://" + m[1] + "/" + m[2];
+          var s = url.match(/^ssh:\/\/[^@]+@([^/]+)\/(.+?)(?:\.git)?$/);
+          if (s) return "https://" + s[1] + "/" + s[2];
+          if (/^https?:\/\//.test(url)) return url.replace(/\.git$/, "");
+          return "";
         }
 
-        function toggleWorkflowNotes() {
-          var section = document.getElementById("actionSec");
-          applyWorkflowNotesVisibility(
-            !(section && section.classList.contains("notes-hidden")),
-          );
+        function renderRepoRemote(url) {
+          var box = document.getElementById("repoRemote");
+          var link = document.getElementById("repoRemoteLink");
+          if (!box || !link) return;
+          if (!url) {
+            box.hidden = true;
+            link.textContent = "";
+            link.removeAttribute("href");
+            return;
+          }
+          box.hidden = false;
+          link.textContent = url;
+          var href = remoteToHref(url);
+          if (href) link.href = href;
+          else link.removeAttribute("href");
         }
 
-        function selectedWorkflowStages() {
-          return Array.prototype.slice
-            .call(
-              document.querySelectorAll(
-                'input[name="workflowStage"]:checked',
-              ),
-            )
-            .map(function (input) {
-              return input.value;
+        function renderDetectedInstructions(files) {
+          var box = document.getElementById("detectedInstructions");
+          var list = document.getElementById("detectedInstructionsList");
+          if (!box || !list) return;
+          if (!files || !files.length) {
+            box.hidden = true;
+            list.innerHTML = "";
+            return;
+          }
+          box.hidden = false;
+          list.innerHTML = files
+            .map(function (f) {
+              return "<code>" + esc(f) + "</code>";
+            })
+            .join("");
+        }
+
+        function buildStepCard(step, index) {
+          var card = document.createElement("div");
+          card.className = "step-card";
+          card.setAttribute("data-id", step.id);
+          card.setAttribute("draggable", "false");
+          card.innerHTML =
+            '<div class="step-head">' +
+            '<span class="step-handle" title="Drag to reorder">⠿</span>' +
+            '<span class="step-index">' +
+            (index + 1) +
+            "</span>" +
+            '<div class="field field-title editable" data-edit="title">' +
+            '<span class="field-label">Title</span>' +
+            '<div class="field-display"><span class="field-text"></span>' +
+            '<button type="button" class="field-edit" title="Edit">✎</button></div>' +
+            '<input class="step-title" placeholder="Step title">' +
+            "</div>" +
+            '<button type="button" class="step-remove" title="Remove step">×</button>' +
+            "</div>" +
+            '<div class="step-fields">' +
+            '<div class="field editable" data-edit="desc">' +
+            '<span class="field-label">Description</span>' +
+            '<div class="field-display"><span class="field-text"></span>' +
+            '<button type="button" class="field-edit" title="Edit">✎</button></div>' +
+            '<textarea class="sf-desc" rows="2" placeholder="What this step is about"></textarea>' +
+            "</div>" +
+            '<div class="field">' +
+            '<span class="field-label">Prompt</span>' +
+            '<textarea class="sf-prompt" rows="3" placeholder="Instructions for the agent"></textarea>' +
+            "</div>" +
+            '<div class="field">' +
+            '<span class="field-label">Output template (optional)</span>' +
+            '<textarea class="sf-output" rows="2" placeholder="Expected output"></textarea>' +
+            "</div></div>";
+          var titleEl = card.querySelector(".step-title");
+          var descEl = card.querySelector(".sf-desc");
+          var promptEl = card.querySelector(".sf-prompt");
+          var outEl = card.querySelector(".sf-output");
+          titleEl.value = step.title;
+          descEl.value = step.description;
+          promptEl.value = step.prompt;
+          outEl.value = step.output;
+          // Title & Description show as read-only text until the edit icon is
+          // clicked, which reveals the input/textarea. Prompt is always editable.
+          function setupEditable(fieldEl, inputEl, placeholder) {
+            var text = fieldEl.querySelector(".field-text");
+            function syncDisplay() {
+              var v = inputEl.value.trim();
+              text.textContent = v || placeholder;
+              text.classList.toggle("is-placeholder", !v);
+            }
+            function startEdit() {
+              fieldEl.classList.add("is-editing");
+              inputEl.focus();
+            }
+            syncDisplay();
+            fieldEl
+              .querySelector(".field-edit")
+              .addEventListener("click", startEdit);
+            inputEl.addEventListener("blur", function () {
+              fieldEl.classList.remove("is-editing");
+              syncDisplay();
             });
+          }
+          setupEditable(
+            card.querySelector('.field[data-edit="title"]'),
+            titleEl,
+            "Step title",
+          );
+          setupEditable(
+            card.querySelector('.field[data-edit="desc"]'),
+            descEl,
+            "What this step is about",
+          );
+          titleEl.addEventListener("input", function () {
+            step.title = titleEl.value;
+            updateContent();
+          });
+          descEl.addEventListener("input", function () {
+            step.description = descEl.value;
+            updateContent();
+          });
+          promptEl.addEventListener("input", function () {
+            step.prompt = promptEl.value;
+            updateContent();
+          });
+          outEl.addEventListener("input", function () {
+            step.output = outEl.value;
+            updateContent();
+          });
+          card
+            .querySelector(".step-remove")
+            .addEventListener("click", function () {
+              var steps = cwf().steps;
+              var idx = steps.indexOf(step);
+              if (idx !== -1) steps.splice(idx, 1);
+              renderSteps();
+              updateContent();
+            });
+          // Drag only starts from the handle, not the whole card.
+          var handle = card.querySelector(".step-handle");
+          handle.addEventListener("mousedown", function () {
+            card.setAttribute("draggable", "true");
+          });
+          handle.addEventListener("touchstart", function () {
+            card.setAttribute("draggable", "true");
+          });
+          card.addEventListener("dragstart", function (e) {
+            if (card.getAttribute("draggable") !== "true") {
+              e.preventDefault();
+              return;
+            }
+            dragStep = card;
+            card.classList.add("dragging");
+            if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+          });
+          card.addEventListener("dragend", function () {
+            card.classList.remove("dragging");
+            card.setAttribute("draggable", "false");
+            dragStep = null;
+            reorderStepsFromDom();
+          });
+          return card;
         }
 
-        function stageTemplateText(stages) {
-          if (!stages.length)
-            return "Select at least one workflow stage to generate its Input / Output template.";
-          return stages
-            .map(function (code) {
-              var t = STAGE_TEMPLATES[code];
-              var inputFiles = stageFiles(code, "input");
-              var outputFiles = stageFiles(code, "output");
+        function makeInsertRow(beforeStep) {
+          var row = document.createElement("div");
+          row.className = "step-insert";
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = "+ insert step";
+          btn.addEventListener("click", function () {
+            insertStep(beforeStep);
+          });
+          row.appendChild(btn);
+          return row;
+        }
+
+        function insertStep(beforeStep) {
+          var step = makeStep({});
+          var steps = cwf().steps;
+          if (beforeStep) {
+            var idx = steps.indexOf(beforeStep);
+            steps.splice(idx === -1 ? steps.length : idx, 0, step);
+          } else {
+            steps.push(step);
+          }
+          renderSteps();
+          updateContent();
+          var el = document.querySelector(
+            '.step-card[data-id="' + step.id + '"] .step-title',
+          );
+          if (el) el.focus();
+        }
+
+        var dragStep = null;
+        function stepDragAfter(list, y) {
+          var cards = Array.prototype.slice.call(
+            list.querySelectorAll(".step-card:not(.dragging)"),
+          );
+          var closest = { offset: -Infinity, el: null };
+          cards.forEach(function (c) {
+            var box = c.getBoundingClientRect();
+            var offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+              closest = { offset: offset, el: c };
+            }
+          });
+          return closest.el;
+        }
+
+        function reorderStepsFromDom() {
+          var list = document.getElementById("stepList");
+          if (!list) return;
+          var ids = Array.prototype.slice
+            .call(list.querySelectorAll(".step-card"))
+            .map(function (c) {
+              return c.getAttribute("data-id");
+            });
+          var byId = {};
+          goalSteps_each(cwf().steps, function (s) {
+            byId[s.id] = s;
+          });
+          cwf().steps = ids
+            .map(function (id) {
+              return byId[id];
+            })
+            .filter(Boolean);
+          renderSteps();
+          updateContent();
+        }
+
+        function goalSteps_each(arr, fn) {
+          Array.prototype.forEach.call(arr, fn);
+        }
+
+        function renderSteps() {
+          var list = document.getElementById("stepList");
+          if (!list) return;
+          var steps = cwf().steps;
+          list.innerHTML = "";
+          if (!steps.length) {
+            var empty = document.createElement("div");
+            empty.className = "step-empty";
+            empty.textContent = "No steps yet. Add one below or load a preset.";
+            list.appendChild(empty);
+            list.appendChild(makeInsertRow(null));
+            return;
+          }
+          steps.forEach(function (step, i) {
+            list.appendChild(makeInsertRow(step));
+            list.appendChild(buildStepCard(step, i));
+          });
+          list.appendChild(makeInsertRow(null));
+          if (!list.getAttribute("data-dnd")) {
+            list.setAttribute("data-dnd", "1");
+            list.addEventListener("dragover", function (e) {
+              if (!dragStep) return;
+              e.preventDefault();
+              var after = stepDragAfter(list, e.clientY);
+              if (after) list.insertBefore(dragStep, after);
+              else list.appendChild(dragStep);
+            });
+          }
+        }
+
+        // Renders the workflow tab bar (switch / add / remove workflows).
+        function renderWfTabs() {
+          var bar = document.getElementById("wfTabs");
+          if (!bar) return;
+          bar.innerHTML = "";
+          workflows.forEach(function (wf, i) {
+            var tab = document.createElement("button");
+            tab.type = "button";
+            tab.className = "wf-tab" + (i === activeWf ? " active" : "");
+            tab.innerHTML = "<span>" + esc(wf.name || "Workflow") + "</span>";
+            tab.addEventListener("click", function () {
+              activeWf = i;
+              renderBuilder();
+            });
+            if (workflows.length > 1) {
+              var close = document.createElement("span");
+              close.className = "wf-tab-close";
+              close.textContent = "×";
+              close.title = "Remove workflow";
+              close.addEventListener("click", function (e) {
+                e.stopPropagation();
+                if (!window.confirm('Remove workflow "' + wf.name + '"?'))
+                  return;
+                workflows.splice(i, 1);
+                if (activeWf >= workflows.length)
+                  activeWf = workflows.length - 1;
+                renderBuilder();
+                updateContent();
+              });
+              tab.appendChild(close);
+            }
+            bar.appendChild(tab);
+          });
+          var add = document.createElement("button");
+          add.type = "button";
+          add.className = "wf-tab-add";
+          add.textContent = "+ Workflow";
+          add.addEventListener("click", function () {
+            workflows.push(makeWorkflow({ steps: [{}] }));
+            activeWf = workflows.length - 1;
+            renderBuilder();
+            updateContent();
+          });
+          bar.appendChild(add);
+        }
+
+        // Renders the current workflow's name + sample input/output + paths.
+        function renderWfMeta() {
+          var box = document.getElementById("wfMeta");
+          if (!box) return;
+          var wf = cwf();
+          box.innerHTML =
+            '<div class="wf-name-row">' +
+            '<input class="wf-name" placeholder="Workflow name">' +
+            "</div>" +
+            '<div class="field">' +
+            '<span class="field-label">Description (optional)</span>' +
+            '<textarea class="wf-desc" rows="2" placeholder="What this workflow does"></textarea>' +
+            "</div>" +
+            '<div class="field">' +
+            '<span class="field-label">Expected result (Definition of Done)</span>' +
+            '<textarea class="wf-dod" rows="2" placeholder="How will we know this workflow is done?"></textarea>' +
+            "</div>" +
+            '<div class="wf-io">' +
+            '<div class="field">' +
+            '<span class="field-label">Sample input (optional)</span>' +
+            '<textarea class="wf-sample-in" rows="2" placeholder="Example input for this workflow"></textarea>' +
+            '<div class="wf-path-row">' +
+            '<input class="wf-in-path" placeholder="Input folder path (optional)">' +
+            '<button type="button" class="wf-browse" data-target="in">Browse…</button>' +
+            "</div></div>" +
+            '<div class="field">' +
+            '<span class="field-label">Sample output (optional)</span>' +
+            '<textarea class="wf-sample-out" rows="2" placeholder="Expected output for this workflow"></textarea>' +
+            '<div class="wf-path-row">' +
+            '<input class="wf-out-path" placeholder="Output folder path (optional)">' +
+            '<button type="button" class="wf-browse" data-target="out">Browse…</button>' +
+            "</div></div></div>";
+          var nameEl = box.querySelector(".wf-name");
+          var descEl = box.querySelector(".wf-desc");
+          var dodEl = box.querySelector(".wf-dod");
+          var inEl = box.querySelector(".wf-sample-in");
+          var outEl = box.querySelector(".wf-sample-out");
+          var inPathEl = box.querySelector(".wf-in-path");
+          var outPathEl = box.querySelector(".wf-out-path");
+          nameEl.value = wf.name;
+          descEl.value = wf.description;
+          dodEl.value = wf.dod;
+          inEl.value = wf.sampleInput;
+          outEl.value = wf.sampleOutput;
+          inPathEl.value = wf.inputPath;
+          outPathEl.value = wf.outputPath;
+          nameEl.addEventListener("input", function () {
+            wf.name = nameEl.value;
+            renderWfTabs();
+            updateContent();
+          });
+          descEl.addEventListener("input", function () {
+            wf.description = descEl.value;
+            updateContent();
+          });
+          dodEl.addEventListener("input", function () {
+            wf.dod = dodEl.value;
+            updateContent();
+          });
+          inEl.addEventListener("input", function () {
+            wf.sampleInput = inEl.value;
+            updateContent();
+          });
+          outEl.addEventListener("input", function () {
+            wf.sampleOutput = outEl.value;
+            updateContent();
+          });
+          inPathEl.addEventListener("input", function () {
+            wf.inputPath = inPathEl.value;
+            updateContent();
+          });
+          outPathEl.addEventListener("input", function () {
+            wf.outputPath = outPathEl.value;
+            updateContent();
+          });
+          Array.prototype.forEach.call(
+            box.querySelectorAll(".wf-browse"),
+            function (btn) {
+              btn.addEventListener("click", function () {
+                pickFolder(function (path) {
+                  if (btn.getAttribute("data-target") === "in") {
+                    wf.inputPath = path;
+                    inPathEl.value = path;
+                  } else {
+                    wf.outputPath = path;
+                    outPathEl.value = path;
+                  }
+                  updateContent();
+                });
+              });
+            },
+          );
+        }
+
+        // Native directory picker. Browsers expose only the relative path of the
+        // chosen folder (security), so we surface that as the path value.
+        function pickFolder(cb) {
+          var input = document.createElement("input");
+          input.type = "file";
+          input.setAttribute("webkitdirectory", "");
+          input.setAttribute("directory", "");
+          input.style.display = "none";
+          input.addEventListener("change", function () {
+            var f = input.files && input.files[0];
+            if (f) {
+              var rel = f.webkitRelativePath || f.name;
+              cb(rel.split("/")[0] || rel);
+            }
+            document.body.removeChild(input);
+          });
+          document.body.appendChild(input);
+          input.click();
+        }
+
+        function renderBuilder() {
+          renderWfTabs();
+          renderWfMeta();
+          renderSteps();
+        }
+
+        // Serialize a single workflow to text.
+        function buildWorkflowText(wf) {
+          var lines = [];
+          var steps = wf.steps || [];
+          if (wf.description && wf.description.trim())
+            lines.push("Description:\n" + wf.description.trim());
+          if (steps.length) {
+            var titles = steps.map(function (s, i) {
+              return s.title.trim() || "Step " + (i + 1);
+            });
+            lines.push("Steps: " + titles.join(" → "));
+          }
+          if (wf.inputPath && wf.inputPath.trim())
+            lines.push("Input path: " + wf.inputPath.trim());
+          if (wf.sampleInput && wf.sampleInput.trim())
+            lines.push("Sample input:\n" + wf.sampleInput.trim());
+          steps.forEach(function (s, i) {
+            var t = "\n" + (i + 1) + ". " + (s.title.trim() || "Step " + (i + 1));
+            if (s.description.trim())
+              t += "\nDescription:\n- " + s.description.trim();
+            if (s.prompt.trim()) t += "\nPrompt:\n- " + s.prompt.trim();
+            if (s.output.trim())
+              t += "\nOutput template:\n- " + s.output.trim();
+            lines.push(t);
+          });
+          if (wf.sampleOutput && wf.sampleOutput.trim())
+            lines.push("\nSample output:\n" + wf.sampleOutput.trim());
+          if (wf.outputPath && wf.outputPath.trim())
+            lines.push("Output path: " + wf.outputPath.trim());
+          if (wf.dod && wf.dod.trim())
+            lines.push("\nDefinition of Done:\n" + wf.dod.trim());
+          return lines.join("\n");
+        }
+
+        // Aggregate each workflow's Definition of Done across all workflows for
+        // the backend's single expectedResult field.
+        function collectExpectedResult() {
+          return workflows
+            .map(function (wf) {
+              var d = (wf.dod || "").trim();
+              if (!d) return "";
+              return workflows.length > 1
+                ? (wf.name || "Workflow") + ": " + d
+                : d;
+            })
+            .filter(Boolean)
+            .join("\n");
+        }
+
+        function buildContent() {
+          var nonEmpty = workflows.filter(function (wf) {
+            return (
+              (wf.steps && wf.steps.length) ||
+              wf.description.trim() ||
+              wf.dod.trim() ||
+              wf.sampleInput.trim() ||
+              wf.sampleOutput.trim() ||
+              wf.inputPath.trim() ||
+              wf.outputPath.trim()
+            );
+          });
+          if (!nonEmpty.length) return "";
+          if (workflows.length === 1) return buildWorkflowText(workflows[0]);
+          return workflows
+            .map(function (wf) {
               return (
-                code +
-                " — " +
-                t.title +
-                "\nInput:\n- " +
-                t.input +
-                "\n- Input files: " +
-                (inputFiles.length ? inputFiles.join(", ") : "none") +
-                "\nOutput:\n- " +
-                t.output +
-                "\n- Output files: " +
-                (outputFiles.length ? outputFiles.join(", ") : "none")
+                "# Workflow: " + (wf.name || "Workflow") + "\n" + buildWorkflowText(wf)
               );
             })
             .join("\n\n");
         }
 
-        function stageFiles(code, kind) {
-          var input = document.querySelector(
-            '.stage-file[data-stage="' +
-              code +
-              '"][data-kind="' +
-              kind +
-              '"]',
+        // Extract a labelled "- " bullet section from a step block.
+        function bulletSection(body, label) {
+          var re = new RegExp(
+            "(?:^|\\n)" + label + ":\\n((?:- ?.*(?:\\n|$))+)",
           );
-          return input && input.files
-            ? Array.prototype.slice.call(input.files).map(function (file) {
-                return file.name;
-              })
-            : [];
+          var m = body.match(re);
+          if (!m) return "";
+          return m[1]
+            .split("\n")
+            .map(function (l) {
+              return l.replace(/^\s*-\s?/, "");
+            })
+            .join("\n")
+            .trim();
         }
 
-        function refreshStageFileList(input) {
-          var key = input.getAttribute("data-stage") + "-" + input.getAttribute("data-kind");
-          var list = document.querySelector('[data-file-list="' + key + '"]');
-          var names = input.files
-            ? Array.prototype.slice.call(input.files).map(function (file) {
-                return file.name;
-              })
-            : [];
-          if (list) list.textContent = names.length ? names.join(", ") : "";
+        // Parse one workflow body (no "# Workflow:" header) into a workflow obj.
+        function parseWorkflowBody(name, src) {
+          src = String(src || "").replace(/\r\n/g, "\n").trim();
+          var meta = { name: name, steps: [] };
+          var descM = src.match(/(?:^|\n)Description:\n([\s\S]*?)(?=\n[A-Z][a-z]+ ?[a-z]*:|\n\d+\.\s|$)/);
+          if (descM) meta.description = descM[1].trim();
+          var dodM = src.match(/(?:^|\n)Definition of Done:\n([\s\S]*?)$/);
+          if (dodM) meta.dod = dodM[1].trim();
+          var inP = src.match(/(?:^|\n)Input path:\s*(.+)/);
+          if (inP) meta.inputPath = inP[1].trim();
+          var outP = src.match(/(?:^|\n)Output path:\s*(.+)/);
+          if (outP) meta.outputPath = outP[1].trim();
+          var inS = src.match(/(?:^|\n)Sample input:\n([\s\S]*?)(?=\n\d+\.\s|\nSample output:|\nOutput path:|$)/);
+          if (inS) meta.sampleInput = inS[1].trim();
+          var outS = src.match(/(?:^|\n)Sample output:\n([\s\S]*?)(?=\nOutput path:|\nDefinition of Done:|$)/);
+          if (outS) meta.sampleOutput = outS[1].trim();
+          // Numbered step blocks.
+          var stepArea = src.replace(/^[\s\S]*?(?=\n?\d+\.\s)/, "");
+          if (/\d+\.\s/.test(stepArea)) {
+            var blocks = stepArea.split(/\n(?=\d+\.\s)/);
+            blocks.forEach(function (block) {
+              block = block.trim();
+              if (!/^\d+\.\s/.test(block)) return;
+              var titleMatch = block.match(/^\d+\.\s*(.*)/);
+              meta.steps.push({
+                title: titleMatch ? titleMatch[1].trim() : "",
+                description: bulletSection(block, "Description"),
+                prompt: bulletSection(block, "Prompt"),
+                output: bulletSection(block, "Output template"),
+              });
+            });
+          }
+          return makeWorkflow(meta);
         }
 
-        function uploadStageFiles(input) {
-          if (!input.files || !input.files.length) return;
-          var stage = input.getAttribute("data-stage") || "stage";
-          var kind = input.getAttribute("data-kind") || "file";
-          Array.prototype.forEach.call(input.files, function (file) {
-            var uploadName = stage + "-" + kind + "-" + file.name;
-            send(
-              "POST",
-              "/api/upload?name=" + encodeURIComponent(uploadName),
-              file,
-              false,
-            )
-              .then(function (res) {
-                if (res.ok && res.j.attachments) renderAttachments(res.j.attachments);
-              })
-              .catch(function () {});
-          });
+        // Reverse of buildContent: raw text → workflows. Recognizes multiple
+        // "# Workflow: <name>" sections; otherwise treats the whole text as one.
+        function parseContent(text) {
+          var src = String(text || "").replace(/\r\n/g, "\n").trim();
+          if (!src) return [makeWorkflow({ steps: [{}] })];
+          if (/(^|\n)# Workflow:/.test(src)) {
+            var parts = src.split(/\n(?=# Workflow:)/);
+            var wfs = [];
+            parts.forEach(function (part) {
+              part = part.trim();
+              var m = part.match(/^# Workflow:\s*(.*)/);
+              if (!m) return;
+              var name = m[1].trim() || "Workflow";
+              var body = part.replace(/^# Workflow:.*\n?/, "");
+              wfs.push(parseWorkflowBody(name, body));
+            });
+            return wfs.length ? wfs : [makeWorkflow({ steps: [{}] })];
+          }
+          // Single workflow. Drop a legacy "Workflow steps:" summary line.
+          src = src.replace(/^Workflow steps:[^\n]*\n+/, "");
+          if (!/\d+\.\s/.test(src) && !/Sample (in|out)put:/.test(src)) {
+            return [makeWorkflow({ steps: [{ title: "Step 1", description: src }] })];
+          }
+          return [parseWorkflowBody("Workflow 1", src)];
         }
 
-        function syncStageCards(stages) {
+        function updateContent() {
+          var preview = document.getElementById("stageTemplateOut");
+          var goal = document.getElementById("goalInput");
+          if (goalMode === "raw") {
+            var raw = document.getElementById("rawContent");
+            if (goal) goal.value = raw ? raw.value : "";
+            saveBuilderState();
+            return;
+          }
+          var text = buildContent();
+          if (preview)
+            preview.value = text || "Add steps to generate workflow content.";
+          if (goal) goal.value = text;
+          saveBuilderState();
+        }
+
+        // Kept name so existing callers (form submit, boot) still work.
+        function renderWorkflowStageTemplates() {
+          updateContent();
+        }
+
+        function setActiveModeBtn(mode) {
           Array.prototype.forEach.call(
-            document.querySelectorAll(".stage-card"),
-            function (card) {
-              var code = card.getAttribute("data-stage-card");
-              var selected = stages.indexOf(code) !== -1;
-              card.classList.toggle("selected", selected);
-              Array.prototype.forEach.call(
-                card.querySelectorAll(".stage-file"),
-                function (input) {
-                  input.disabled = !selected;
-                },
+            document.querySelectorAll("#goalModes .gm-btn"),
+            function (b) {
+              b.classList.toggle(
+                "active",
+                b.getAttribute("data-mode") === mode,
               );
             },
           );
         }
 
-        function renderWorkflowStageTemplates() {
-          var stages = selectedWorkflowStages();
-          syncStageCards(stages);
-          var out = document.getElementById("stageTemplateOut");
-          var goal = document.getElementById("goalInput");
-          var text = stageTemplateText(stages);
-          if (out) out.value = text;
-          if (goal)
-            goal.value = stages.length
-              ? "Workflow stages: " +
-                stages
-                  .map(function (code) {
-                    return code + " - " + STAGE_TEMPLATES[code].title;
-                  })
-                  .join(", ") +
-                "\n\n" +
-                text
-              : "";
+        function setGoalMode(mode) {
+          if (mode === goalMode) return;
+          if (mode === "raw") {
+            if (
+              !window.confirm(
+                "Switch to Raw content? The builder's current steps will be turned into editable text.",
+              )
+            )
+              return;
+            var raw = document.getElementById("rawContent");
+            if (raw) raw.value = buildContent();
+            goalMode = "raw";
+            document.getElementById("builderView").hidden = true;
+            var pb = document.getElementById("presetOpenBtn");
+            if (pb) pb.style.display = "none";
+            document.getElementById("rawView").hidden = false;
+            setActiveModeBtn("raw");
+            updateContent();
+            return;
+          }
+          // Raw → Builder: parse the raw text back into editable steps.
+          var rawEl = document.getElementById("rawContent");
+          var rawText = rawEl ? rawEl.value : "";
+          if (
+            !window.confirm(
+              "Switch back to Builder? The raw content will be parsed into steps. Manual formatting that doesn't match the step structure may be lost.",
+            )
+          )
+            return;
+          workflows = parseContent(rawText);
+          activeWf = 0;
+          goalMode = "builder";
+          document.getElementById("rawView").hidden = true;
+          document.getElementById("builderView").hidden = false;
+          var pbtn = document.getElementById("presetOpenBtn");
+          if (pbtn) pbtn.style.display = "";
+          setActiveModeBtn("builder");
+          renderBuilder();
+          updateContent();
+        }
+
+        function openPresetModal() {
+          if (goalMode === "raw") {
+            window.alert("Presets only apply in Builder mode.");
+            return;
+          }
+          var grid = document.getElementById("presetGrid");
+          if (!grid) return;
+          grid.innerHTML = "";
+          WORKFLOW_PRESETS.forEach(function (p) {
+            var count = p.steps ? p.steps.length : (p.stages || []).length;
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "preset-card";
+            btn.innerHTML =
+              '<span class="pc-name">' +
+              esc(p.name) +
+              "</span>" +
+              '<span class="pc-desc">' +
+              esc(p.desc) +
+              "</span>" +
+              '<span class="pc-steps">' +
+              count +
+              " steps</span>";
+            btn.addEventListener("click", function () {
+              applyPreset(p);
+            });
+            grid.appendChild(btn);
+          });
+          document.getElementById("presetModal").classList.remove("hidden");
+        }
+
+        function closePresetModal() {
+          var m = document.getElementById("presetModal");
+          if (m) m.classList.add("hidden");
+        }
+
+        function applyPreset(preset) {
+          cwf().steps = presetStepData(preset).map(function (d) {
+            return makeStep(d);
+          });
+          renderBuilder();
+          updateContent();
+          closePresetModal();
+        }
+
+        function initGoalBuilder() {
+          var raw = document.getElementById("rawContent");
+          if (raw) raw.addEventListener("input", updateContent);
+          var saved = loadBuilderState();
+          if (saved) {
+            workflows = saved.workflows;
+            activeWf =
+              typeof saved.activeWf === "number" &&
+              saved.activeWf < workflows.length
+                ? saved.activeWf
+                : 0;
+            // Restore id sequence counters so new items don't collide.
+            workflows.forEach(function (wf) {
+              var n = parseInt(String(wf.id).replace(/\D/g, ""), 10);
+              if (n > wfSeq) wfSeq = n;
+              (wf.steps || []).forEach(function (s) {
+                var sn = parseInt(String(s.id).replace(/\D/g, ""), 10);
+                if (sn > goalStepSeq) goalStepSeq = sn;
+              });
+            });
+            if (saved.goalMode === "raw") {
+              goalMode = "raw";
+              if (raw) raw.value = saved.rawContent || "";
+              document.getElementById("builderView").hidden = true;
+              var pb = document.getElementById("presetOpenBtn");
+              if (pb) pb.style.display = "none";
+              document.getElementById("rawView").hidden = false;
+              setActiveModeBtn("raw");
+            }
+            renderBuilder();
+            updateContent();
+            return;
+          }
+          workflows = [
+            makeWorkflow({
+              name: WORKFLOW_PRESETS[0].name,
+              steps: presetStepData(WORKFLOW_PRESETS[0]),
+            }),
+          ];
+          activeWf = 0;
+          renderBuilder();
+          updateContent();
         }
 
         function esc(s) {
@@ -1742,9 +3395,9 @@
           var dispatchSec = document.getElementById("dispatchSec");
           var unitsSec = document.getElementById("unitsSec");
           if (!s) {
-            meter.hidden = true;
-            dispatchSec.hidden = true;
-            unitsSec.hidden = true;
+            if (meter) meter.hidden = true;
+            if (dispatchSec) dispatchSec.hidden = true;
+            if (unitsSec) unitsSec.hidden = true;
             return;
           }
           dispatchSec.hidden = false;
@@ -1755,6 +3408,7 @@
           var intake = document.getElementById("intake");
           if (intake && intake.open && firstPaint) intake.open = false;
           var t = s.totals || {};
+          if (meter) {
           meter.hidden = false;
           meter.innerHTML =
             tile(
@@ -1774,11 +3428,13 @@
               suffix: "s",
             });
           Array.prototype.forEach.call(meter.querySelectorAll(".v"), countUp);
+          }
 
           if (Array.isArray(s.attachments)) renderAttachments(s.attachments);
 
           var units = s.work_units || [];
           renderTriage(units);
+          if (board) {
           if (!units.length) {
             board.innerHTML =
               '<p class="empty">Goal set: <b>' +
@@ -1818,6 +3474,7 @@
             prev[u.name] = JSON.stringify(u);
           });
           firstPaint = false;
+          }
         }
 
         function renderAttachments(items) {
@@ -2098,12 +3755,21 @@
             .join("");
         }
         function loadSettings() {
+          var list = document.getElementById("toolList");
+          if (list && !list.innerHTML) list.innerHTML = '<div class="hint">Loading tools…</div>';
           fetch("/api/settings")
             .then(function (r) {
+              if (!r.ok) throw new Error("HTTP " + r.status);
               return r.json();
             })
             .then(renderTools)
-            .catch(function () {});
+            .catch(function (err) {
+              if (list)
+                list.innerHTML =
+                  '<div class="hint">Could not load tools — ' +
+                  esc(String((err && err.message) || err)) +
+                  '. Try refreshing.</div>';
+            });
         }
         function toggleTool(name, on) {
           var hint = document.getElementById("optionsHint");
@@ -2126,55 +3792,181 @@
           document
             .getElementById("themeToggle")
             .addEventListener("click", toggleTheme);
-          document
-            .getElementById("workflowNotesToggle")
-            .addEventListener("click", toggleWorkflowNotes);
-          document
-            .getElementById("workflowStages")
-            .addEventListener("change", renderWorkflowStageTemplates);
-          Array.prototype.forEach.call(
-            document.querySelectorAll(".stage-file"),
-            function (input) {
-              input.addEventListener("change", function () {
-                refreshStageFileList(input);
-                renderWorkflowStageTemplates();
-                uploadStageFiles(input);
-              });
-            },
-          );
+          var modes = document.getElementById("goalModes");
+          if (modes) {
+            modes.addEventListener("click", function (e) {
+              var btn = e.target.closest("[data-mode]");
+              if (btn) setGoalMode(btn.getAttribute("data-mode"));
+            });
+          }
+          var presetOpen = document.getElementById("presetOpenBtn");
+          if (presetOpen)
+            presetOpen.addEventListener("click", openPresetModal);
+          var presetClose = document.getElementById("presetClose");
+          if (presetClose)
+            presetClose.addEventListener("click", closePresetModal);
+          var presetModal = document.getElementById("presetModal");
+          if (presetModal) {
+            presetModal.addEventListener("click", function (e) {
+              if (e.target === presetModal) closePresetModal();
+            });
+          }
+          var dispatchBtn2 = document.getElementById("wfDispatchBtn");
+          var dispatchModal = document.getElementById("dispatchModal");
+          var dispatchClose = document.getElementById("dispatchModalClose");
+          if (dispatchBtn2 && dispatchModal) {
+            dispatchBtn2.addEventListener("click", function () {
+              if (dispatchBtn2.disabled) return;
+              var nameEl = document.getElementById("dispatchWfName");
+              if (nameEl) nameEl.textContent = cwf().name || "this workflow";
+              dispatchModal.classList.remove("hidden");
+            });
+          }
+          if (dispatchClose && dispatchModal)
+            dispatchClose.addEventListener("click", function () {
+              dispatchModal.classList.add("hidden");
+            });
+          if (dispatchModal)
+            dispatchModal.addEventListener("click", function (e) {
+              if (e.target === dispatchModal)
+                dispatchModal.classList.add("hidden");
+            });
           var form = document.getElementById("intakeForm");
+
+          // Build the "Master configuration" block from the intake fields so the
+          // review content shows config + steps together.
+          function buildMasterConfig(fd) {
+            function combo(type, ref) {
+              type = String(type || "").trim();
+              ref = String(ref || "").trim();
+              if (type && ref) return type + ": " + ref;
+              return ref || type || "";
+            }
+            var lines = [];
+            var repo = String(fd.get("repoPath") || "").trim();
+            if (repo) lines.push("- Repository: " + repo);
+            collectSources("docSourceList").forEach(function (s) {
+              var v = combo(s.type, s.ref);
+              if (v) lines.push("- Project docs source: " + v);
+            });
+            collectSources("taskSourceList").forEach(function (s) {
+              var v = combo(s.type, s.ref);
+              if (v) lines.push("- Task / issue source: " + v);
+            });
+            if (fileTypeValues.length)
+              lines.push("- File types: " + fileTypeValues.join(", "));
+            var engines = fd.getAll("engine").filter(Boolean);
+            if (engines.length)
+              lines.push("- Engines: " + engines.join(", "));
+            if (!lines.length) return "";
+            return "## Master configuration\n" + lines.join("\n");
+          }
+
+          // Compose the full review content: master config header + workflow body.
+          function composeReviewContent(fd, workflowBody) {
+            var config = buildMasterConfig(fd);
+            var body = String(workflowBody || "").trim();
+            if (!config) return body;
+            return config + "\n\n## Workflow\n" + body;
+          }
+
           form.addEventListener("submit", function (e) {
             e.preventDefault();
             renderWorkflowStageTemplates();
             var fd = new FormData(form);
             var hint = document.getElementById("intakeHint");
-            if (!String(fd.get("goal") || "").trim()) {
-              hint.textContent = "Select at least one workflow stage.";
+            var goal = String(fd.get("goal") || "").trim();
+            if (!goal) {
+              hint.textContent = "Add at least one step or write content.";
               return;
+            }
+            // Open the review modal with master config + editable content.
+            var ta = document.getElementById("reviewContent");
+            if (ta) ta.value = composeReviewContent(fd, goal);
+            var rh = document.getElementById("reviewHint");
+            if (rh) rh.textContent = "";
+            hint.textContent = "";
+            openReviewModal();
+          });
+
+          function submitIntake() {
+            var form = document.getElementById("intakeForm");
+            var fd = new FormData(form);
+            var hint = document.getElementById("intakeHint");
+            var reviewHint = document.getElementById("reviewHint");
+            // Use the (possibly edited) content from the review textarea.
+            var ta = document.getElementById("reviewContent");
+            var goal = ta
+              ? String(ta.value || "").trim()
+              : String(fd.get("goal") || "").trim();
+            if (!goal) {
+              if (reviewHint) {
+                reviewHint.textContent = "Content cannot be empty.";
+                reviewHint.classList.add("is-error");
+              }
+              return;
+            }
+            // Keep the hidden goal field + builder/raw view in sync with edits.
+            var goalInput = document.getElementById("goalInput");
+            if (goalInput) goalInput.value = goal;
+            function joinSources(listId) {
+              return collectSources(listId)
+                .map(function (s) {
+                  if (s.type && s.ref) return s.type + ": " + s.ref;
+                  return s.ref || s.type;
+                })
+                .filter(Boolean)
+                .join("; ");
             }
             var body = {
               repoPath: fd.get("repoPath"),
-              goal: fd.get("goal"),
+              goal: goal,
               engines: fd.getAll("engine"),
-              docSource: fd.get("docSource"),
-              taskSource: fd.get("taskSource"),
-              fileTypes: fd.getAll("fileTypes").filter(Boolean),
-              expectedResult: fd.get("expectedResult"),
-              sample: fd.get("sample"),
+              docSource: joinSources("docSourceList"),
+              taskSource: joinSources("taskSourceList"),
+              fileTypes: fileTypeValues.slice(),
+              expectedResult: collectExpectedResult(),
             };
-            hint.textContent = "Generating…";
+            if (reviewHint) {
+              reviewHint.textContent = "Generating…";
+              reviewHint.classList.remove("is-error");
+            }
             post("/api/init", body).then(function (res) {
               if (res.ok) {
+                closeReviewModal();
                 hint.textContent =
                   "Generated " + (res.j.files || []).length + " files.";
                 render(res.j.state);
                 loadAttachments();
-                document.getElementById("intake").open = false;
-              } else
-                hint.textContent =
+                var dbtn = document.getElementById("wfDispatchBtn");
+                if (dbtn) {
+                  dbtn.disabled = false;
+                  dbtn.title = "Dispatch this workflow";
+                }
+              } else if (reviewHint) {
+                reviewHint.textContent =
                   "Error: " + ((res.j && res.j.error) || "failed");
+                reviewHint.classList.add("is-error");
+              }
             });
-          });
+          }
+
+          var reviewConfirm = document.getElementById("reviewConfirm");
+          if (reviewConfirm)
+            reviewConfirm.addEventListener("click", submitIntake);
+          var reviewCancel = document.getElementById("reviewCancel");
+          if (reviewCancel)
+            reviewCancel.addEventListener("click", closeReviewModal);
+          var reviewCloseBtn = document.getElementById("reviewClose");
+          if (reviewCloseBtn)
+            reviewCloseBtn.addEventListener("click", closeReviewModal);
+          var reviewModal = document.getElementById("reviewModal");
+          if (reviewModal)
+            reviewModal.addEventListener("click", function (e) {
+              if (e.target === reviewModal) closeReviewModal();
+            });
+
+          initSourceControls();
 
           document
             .getElementById("detectBtn")
@@ -2210,6 +4002,8 @@
                 hint.textContent = res.j.isGit
                   ? "git repo ✓"
                   : "not a git repo";
+                renderRepoRemote(res.j.remote);
+                renderDetectedInstructions(res.j.instructions);
                 render(res.j.state);
                 loadAttachments();
               });
@@ -2271,6 +4065,7 @@
             });
 
           var board = document.getElementById("board");
+          if (board) {
           board.addEventListener("click", function (e) {
             var card = e.target.closest(".card");
             if (!card) return;
@@ -2303,9 +4098,11 @@
               if (res.ok) render(res.j.state);
             });
           });
+          }
 
-          document
-            .getElementById("unitForm")
+          var unitForm = document.getElementById("unitForm");
+          if (unitForm)
+            unitForm
             .addEventListener("submit", function (e) {
               e.preventDefault();
               var name = document.getElementById("unitName").value.trim();
@@ -2333,8 +4130,9 @@
               );
             });
 
-          document
-            .getElementById("dispatchBtn")
+          var dispatchBtnEl = document.getElementById("dispatchBtn");
+          if (dispatchBtnEl)
+            dispatchBtnEl
             .addEventListener("click", function () {
               var eng = document.getElementById("dispatchEngine").value;
               var hint = document.getElementById("dispatchHint");
@@ -2351,8 +4149,9 @@
               });
             });
 
-          document
-            .getElementById("orchestrateBtn")
+          var orchestrateBtnEl = document.getElementById("orchestrateBtn");
+          if (orchestrateBtnEl)
+            orchestrateBtnEl
             .addEventListener("click", function () {
               var eng = document.getElementById("dispatchEngine").value;
               var hint = document.getElementById("dispatchHint");
@@ -2517,9 +4316,9 @@
 
         function boot() {
           initTheme();
-          initWorkflowNotes();
-          renderWorkflowStageTemplates();
+          initGoalBuilder();
           wire();
+          initFormPersistence();
           var es = new EventSource("/events");
           es.onmessage = function (e) {
             render(JSON.parse(e.data));

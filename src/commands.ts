@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
@@ -217,17 +217,78 @@ void SKILL_BY_EXT_REMOVED;
 export interface RepoDetection {
   repo: string;
   isGit: boolean;
+  /** Origin remote URL when the repo is a git checkout with a remote configured. */
+  remote?: string;
   engines: Record<Engine, boolean>;
   clis: Record<Engine, boolean>;
+  /** Instruction/agent guidance files found in the repo (repo-relative paths). */
+  instructions: string[];
 }
 
-/** Detect which engines a repo already carries (by marker files) and which CLIs are present. */
+/** Well-known agent/instruction files an AI coding tool may already carry. */
+const INSTRUCTION_FILES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  ".github/copilot-instructions.md",
+  ".cursorrules",
+  ".windsurfrules",
+  ".clinerules",
+  ".aider.conf.yml",
+];
+
+/** Collect every guidance file the repo carries: fixed well-known paths + globbed dirs. */
+function detectInstructions(repo: string): string[] {
+  const found: string[] = [];
+  for (const rel of INSTRUCTION_FILES) {
+    if (existsSync(join(repo, rel))) found.push(rel);
+  }
+  // .github/instructions/*.instructions.md (VS Code path-specific instructions).
+  const instrDir = join(repo, ".github", "instructions");
+  try {
+    if (statSync(instrDir).isDirectory()) {
+      for (const name of readdirSync(instrDir)) {
+        if (name.endsWith(".instructions.md")) {
+          found.push(`.github/instructions/${name}`);
+        }
+      }
+    }
+  } catch {
+    /* directory absent — ignore */
+  }
+  // .cursor/rules/*.mdc (Cursor project rules).
+  const cursorRules = join(repo, ".cursor", "rules");
+  try {
+    if (statSync(cursorRules).isDirectory()) {
+      for (const name of readdirSync(cursorRules)) {
+        if (name.endsWith(".mdc") || name.endsWith(".md")) {
+          found.push(`.cursor/rules/${name}`);
+        }
+      }
+    }
+  } catch {
+    /* directory absent — ignore */
+  }
+  return found;
+}
+
+/** Read the origin remote URL of a git repo (empty string when none). */
+function detectGitRemote(repo: string): string | undefined {
+  const r = spawnSync("git", ["-C", repo, "remote", "get-url", "origin"], {
+    encoding: "utf8",
+  });
+  if (r.status !== 0) return undefined;
+  const url = String(r.stdout || "").trim();
+  return url || undefined;
+}
 export function detectRepo(path?: string): RepoDetection {
   const repo = resolveRepo(path);
   const has = (rel: string) => existsSync(join(repo, rel));
+  const isGit = has(".git");
   return {
     repo,
-    isGit: has(".git"),
+    isGit,
+    remote: isGit ? detectGitRemote(repo) : undefined,
     engines: {
       claude: has("CLAUDE.md") || has(".claude"),
       codex: has("AGENTS.md") || has(".codex"),
@@ -238,6 +299,7 @@ export function detectRepo(path?: string): RepoDetection {
       codex: hasCommand("codex"),
       copilot: hasCommand("copilot") || hasCommand("gh"),
     },
+    instructions: detectInstructions(repo),
   };
 }
 
@@ -1806,14 +1868,14 @@ function renderPriority(settings: VibeSettings): string {
 }
 
 /** `vf tools status` — show enabled/installed/priority for each optional tool. */
-function toolsStatus(base: string): number {
+function toolsStatus(base: string, has?: (cmd: string) => boolean): number {
   const settings = readSettings(base);
   const languages = repoLanguages(base);
   console.log(c.bold("Optional developer tools\n"));
   for (const name of VALID_TOOLS) {
     const tool = TOOLS[name];
     const enabled = settings.tools[name];
-    const installed = tool.detect();
+    const installed = tool.detect(has ? { has } : undefined);
     const en = enabled ? c.green("enabled") : c.dim("disabled");
     const inst = installed ? c.green("installed") : c.yellow("not installed");
     console.log(`  ${c.bold(tool.title)} [${en}, ${inst}]`);
@@ -2101,10 +2163,10 @@ export function tools(
   sub: string | undefined,
   rest: string[],
   flags: Record<string, string | boolean>,
-  inject: { spawner?: StepSpawner; base?: string } = {},
+  inject: { spawner?: StepSpawner; base?: string; has?: (cmd: string) => boolean } = {},
 ): number {
   const base = inject.base ?? cwd();
-  if (sub === undefined || sub === "status") return toolsStatus(base);
+  if (sub === undefined || sub === "status") return toolsStatus(base, inject.has);
   const name = rest[0];
   if ((sub === "enable" || sub === "disable" || sub === "install") && !isToolName(name)) {
     console.error(c.red(`Usage: vf tools ${sub} <${VALID_TOOLS.join("|")}>`));

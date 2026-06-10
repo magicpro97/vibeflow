@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import {
   discover,
   doctor,
@@ -36,10 +37,86 @@ function openBrowser(url: string): void {
   }
 }
 
+function promptYesNo(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) return Promise.resolve(false);
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<boolean>((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      const a = answer.trim().toLowerCase();
+      resolve(a === "y" || a === "yes");
+    });
+  });
+}
+
+// Start the server, but if a fixed port is already taken, tell the user it's used
+// by another process and ask whether to switch to a free port or stop.
+async function startServerResilient(
+  port: number,
+): Promise<Awaited<ReturnType<typeof startServer>>> {
+  try {
+    return await startServer(port);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === "EADDRINUSE" && port !== 0) {
+      console.error(c.yellow(`Port ${port} is already in use by another process.`));
+      const change = await promptYesNo("Switch to a different port? (y/N) ");
+      if (change) return await startServer(0);
+      console.error(c.dim("Stopped."));
+      process.exit(1);
+    }
+    throw err;
+  }
+}
+
 async function ui(flags: Record<string, string | boolean>): Promise<number> {
   const port = typeof flags.port === "string" ? Number(flags.port) : 0;
-  const { url } = await startServer(Number.isFinite(port) ? port : 0);
+  let { server, url } = await startServerResilient(Number.isFinite(port) ? port : 0);
   if (!flags["no-open"]) openBrowser(url);
+
+  // Interactive terminal shortcuts: press `r` to restart the server, `q`/Ctrl+C to quit.
+  const stdin = process.stdin;
+  let rawOk = false;
+  let restarting = false;
+  if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+    try {
+      stdin.setRawMode(true);
+      rawOk = true;
+    } catch {
+      /* raw mode unsupported in this terminal — skip key shortcuts */
+    }
+  }
+  if (rawOk) {
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    console.log(c.dim("  press r to restart · q to quit"));
+    stdin.on("data", (key: string) => {
+      if (key === "r" || key === "R") {
+        if (restarting) return;
+        restarting = true;
+        // Tear down the old server in the background (don't wait on keep-alive sockets).
+        const prev = server;
+        prev.closeAllConnections?.();
+        prev.close();
+        // Clear the screen and bring up a fresh server immediately.
+        process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+        startServer(Number.isFinite(port) ? port : 0)
+          .then((next) => {
+            ({ server, url } = next);
+            console.log(c.dim("  press r to restart · q to quit"));
+          })
+          .catch((err) => {
+            console.error(c.dim(`restart failed: ${(err as Error).message}`));
+          })
+          .finally(() => {
+            restarting = false;
+          });
+      } else if (key === "q" || key === "\u0003") {
+        process.exit(0);
+      }
+    });
+  }
+
   return await new Promise<number>(() => {
     /* keep the process alive until Ctrl+C */
   });
@@ -59,6 +136,10 @@ async function main(argv: string[]): Promise<number> {
 
   switch (cmd) {
     case undefined:
+      return await ui({
+        port: "7799",
+        dev: true,
+      });
     case "ui":
       return await ui(flags);
     case "doctor":
