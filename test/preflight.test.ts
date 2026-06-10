@@ -38,7 +38,7 @@ describe("preflight: presence", () => {
 });
 
 describe("preflight: auth", () => {
-  test("copilot with failing gh auth status -> no-auth", () => {
+  test("copilot ignores failing gh auth status and lets the live probe decide", () => {
     const { spawn, calls } = recordingSpawner((cmd, args) => {
       if (cmd === "gh" && args[0] === "auth")
         return { status: 1, stdout: "", stderr: "not logged in" };
@@ -48,11 +48,9 @@ describe("preflight: auth", () => {
       "copilot",
       opts({ has: (c: string) => c === "copilot" || c === "gh", spawner: spawn }),
     );
-    expect(r.level).toBe("no-auth");
-    expect(r.detail.toLowerCase()).toContain("gh auth");
-    // auth check ran but the live probe never did (short-circuit)
-    expect(calls.some((x) => x.cmd === "gh")).toBe(true);
-    expect(calls.some((x) => x.cmd === "copilot")).toBe(false);
+    expect(r.level).toBe("ready");
+    expect(calls.some((x) => x.cmd === "gh")).toBe(false);
+    expect(calls.some((x) => x.cmd === "copilot")).toBe(true);
   });
 
   test("copilot without gh skips auth and relies on the probe", () => {
@@ -67,6 +65,21 @@ describe("preflight: auth", () => {
     expect(probe?.args).toContain("--allow-all-tools");
     expect(probe?.args).toContain("--silent");
     expect(probe?.input).toBe("");
+  });
+
+  test("copilot retries without --silent when the installed CLI does not support it", () => {
+    const { spawn, calls } = recordingSpawner((_cmd, args) => {
+      if (args.includes("--silent")) {
+        return { status: 1, stdout: "", stderr: "error: unknown option '--silent'" };
+      }
+      return { status: 0, stdout: "READY" };
+    });
+    const r = checkEngine("copilot", opts({ has: (c: string) => c === "copilot", spawner: spawn }));
+    expect(r.level).toBe("ready");
+    const probes = calls.filter((x) => x.cmd === "copilot");
+    expect(probes).toHaveLength(2);
+    expect(probes[0]?.args).toContain("--silent");
+    expect(probes[1]?.args).not.toContain("--silent");
   });
 });
 
@@ -123,10 +136,14 @@ describe("preflight: live probe", () => {
   });
 
   test("nonzero exit -> probe-failed", () => {
-    const { spawn } = recordingSpawner(() => ({ status: 7, stdout: "" }));
+    const { spawn } = recordingSpawner(() => ({
+      status: 7,
+      stdout: "WARNING: noisy setup warning\n✗ reachability one endpoint is unreachable",
+    }));
     const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
     expect(r.level).toBe("probe-failed");
     expect(r.detail).toContain("7");
+    expect(r.detail).toContain("reachability");
   });
 
   test("a throwing spawner fails closed without crashing", () => {
@@ -202,15 +219,16 @@ describe("preflight: async checkEngineAsync", () => {
     expect(r.level).toBe("ready");
   });
 
-  test("no-auth returns immediately for copilot without gh auth", async () => {
+  test("copilot auth failures come from the copilot probe, not gh auth status", async () => {
     const r = await checkEngineAsync(
       "copilot",
       opts({
         has: (c: string) => c === "copilot" || c === "gh",
-        spawner: () => ({ status: 1, stdout: "", stderr: "not logged in" }),
+        spawner: () => ({ status: 1, stdout: "", stderr: "No authentication information found" }),
       }),
     );
-    expect(r.level).toBe("no-auth");
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("No authentication information found");
   });
 });
 
