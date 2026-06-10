@@ -1713,6 +1713,11 @@
           }
           dispatchSec.hidden = false;
           unitsSec.hidden = false;
+          // A workflow already exists: collapse the intake form-wall so returning users land
+          // on live status (meter/units), not a screenful of empty form fields. The form is
+          // still one click away via its summary. New/empty repos keep it open (the !s path).
+          var intake = document.getElementById("intake");
+          if (intake && intake.open && firstPaint) intake.open = false;
           var t = s.totals || {};
           meter.hidden = false;
           meter.innerHTML =

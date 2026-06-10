@@ -1049,7 +1049,15 @@ export function init(
   for (const rel of result.files) {
     console.log(dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
   }
-  if (!dry) console.log(c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+  if (!dry) {
+    console.log(c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+    for (const rel of result.backedUp ?? []) {
+      console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+    }
+    for (const rel of result.backedUp ?? []) {
+      console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+    }
+  }
   return 0;
 }
 
@@ -1079,6 +1087,12 @@ export async function initInteractive(_flags: Record<string, string | boolean>):
   if (result.refused) return reportPreflightRefusal(result.readiness);
   for (const rel of result.files) console.log(`${c.green("+")} ${rel}`);
   console.log(c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+  for (const rel of result.backedUp ?? []) {
+    console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+  }
+  for (const rel of result.backedUp ?? []) {
+    console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+  }
   return 0;
 }
 
