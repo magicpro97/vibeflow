@@ -7,7 +7,7 @@ import { ENGINES, type Engine, hasCommand, needsShellForCommand, resolveCommand 
  *  - "no-binary"    the engine CLI is not on PATH         → install it
  *  - "no-auth"      reserved for engines with a reliable standalone auth-status gate
  *  - "probe-failed" installed/authed but the live probe failed (nonzero, missing token, timeout)
- *                     codex uses `doctor` instead of `exec` to avoid a slow model round-trip
+ *                     codex uses `doctor`; copilot uses `gh auth status` instead of a prompt probe
  *  - "unknown"      we could not determine readiness (defensive; should be rare)
  */
 export type ReadinessLevel = "ready" | "no-binary" | "no-auth" | "probe-failed" | "unknown";
@@ -48,9 +48,7 @@ export interface PreflightOpts {
 
 /** Bounded so a hung / never-logged-in engine cannot block the check forever. */
 const PROBE_TIMEOUT_MS = 20_000;
-/** Copilot CLI startup/model latency commonly exceeds 20s even for a one-token probe. */
-const COPILOT_PROBE_TIMEOUT_MS = 60_000;
-/** GitHub auth status is a local fast-fail gate; keep it short before any slow Copilot probe. */
+/** GitHub auth status is a local fast-fail gate, so keep it short. */
 const GH_AUTH_TIMEOUT_MS = 5_000;
 /** Trivial prompt whose reply proves the engine actually runs end-to-end. */
 const PROBE_PROMPT = "Reply with the single word READY and nothing else.";
@@ -64,7 +62,7 @@ interface ProbeInvocation {
 }
 
 function probeTimeoutMs(engine: Engine): number {
-  return engine === "copilot" ? COPILOT_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS;
+  return engine === "copilot" ? GH_AUTH_TIMEOUT_MS : PROBE_TIMEOUT_MS;
 }
 
 /** Default launcher: bounded spawnSync, prompt on stdin, no shell. */
@@ -91,12 +89,20 @@ function probeInvocation(engine: Engine, prompt = PROBE_PROMPT): ProbeInvocation
     case "codex":
       return { cmd: "codex", args: ["doctor"], input: prompt };
     case "copilot":
-      return { cmd: "copilot", args: ["-p", prompt, "--allow-all-tools"], input: "" };
+      throw new Error("copilot uses `gh auth status`; no probe invocation exists");
   }
+}
+
+function engineBinary(engine: Engine): string {
+  return engine === "copilot" ? "copilot" : probeInvocation(engine).cmd;
 }
 
 function ghAuthInvocation(): ProbeInvocation {
   return { cmd: "gh", args: ["auth", "status"], input: "" };
+}
+
+function ghInstallHint(): string {
+  return "GitHub CLI not found — install gh to check GitHub Copilot auth";
 }
 
 /** Install hint surfaced when an engine binary is missing. */
@@ -192,11 +198,11 @@ function containsToken(s: string): boolean {
 function checkCopilotAuth(
   has: (cmd: string) => boolean,
   spawner: ProbeSpawner,
-): { level: ReadinessLevel; detail: string } | undefined {
-  if (!has("gh")) return undefined;
+): { level: ReadinessLevel; detail: string } {
+  if (!has("gh")) return { level: "no-binary", detail: ghInstallHint() };
   const { cmd, args, input } = ghAuthInvocation();
   const result = spawner(cmd, args, input);
-  if (result.status === 0) return undefined;
+  if (result.status === 0) return { level: "ready", detail: "copilot: GitHub auth OK" };
   return failedAuth("copilot", result);
 }
 
@@ -244,14 +250,14 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
     checkedAt: now(),
   });
 
-  const { cmd } = probeInvocation(engine);
+  const cmd = engineBinary(engine);
   if (!has(cmd)) return stamp("no-binary", installHint(engine));
   const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
 
   if (engine === "copilot") {
     try {
       const auth = checkCopilotAuth(has, spawner);
-      if (auth !== undefined) return stamp(auth.level, auth.detail);
+      return stamp(auth.level, auth.detail);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return stamp("probe-failed", `${engine}: probe failed (${msg})`);
@@ -291,16 +297,20 @@ export function checkEngineAsync(
     checkedAt: now(),
   });
 
-  const { cmd } = probeInvocation(engine);
+  const cmd = engineBinary(engine);
   if (!has(cmd)) return Promise.resolve(stamp("no-binary", installHint(engine)));
   const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
 
   const spawner = opts.spawner;
 
+  if (engine === "copilot" && !has("gh")) {
+    return Promise.resolve(stamp("no-binary", ghInstallHint()));
+  }
+
   if (engine === "copilot" && spawner !== undefined) {
     try {
       const auth = checkCopilotAuth(has, spawner);
-      if (auth !== undefined) return Promise.resolve(stamp(auth.level, auth.detail));
+      return Promise.resolve(stamp(auth.level, auth.detail));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return Promise.resolve(stamp("probe-failed", `${engine}: probe failed (${msg})`));
@@ -365,6 +375,8 @@ export function checkEngineAsync(
           resolve(stamp(failed.level, failed.detail));
           return;
         }
+        resolve(stamp("ready", "copilot: GitHub auth OK"));
+        return;
       }
 
       const attempt = probeInvocation(engine);
