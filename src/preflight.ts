@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { ENGINES, type Engine, hasCommand } from "./core.js";
+import { ENGINES, type Engine, hasCommand, needsShellForCommand, resolveCommand } from "./core.js";
 
 /**
  * Engine readiness levels (most-actionable first):
@@ -30,6 +30,7 @@ interface ProbeResult {
   status: number;
   stdout: string;
   stderr?: string;
+  code?: string;
 }
 
 export type ProbeSpawner = (cmd: string, args: string[], input: string) => ProbeResult;
@@ -49,6 +50,8 @@ export interface PreflightOpts {
 const PROBE_TIMEOUT_MS = 20_000;
 /** Copilot CLI startup/model latency commonly exceeds 20s even for a one-token probe. */
 const COPILOT_PROBE_TIMEOUT_MS = 60_000;
+/** GitHub auth status is a local fast-fail gate; keep it short before any slow Copilot probe. */
+const GH_AUTH_TIMEOUT_MS = 5_000;
 /** Trivial prompt whose reply proves the engine actually runs end-to-end. */
 const PROBE_PROMPT = "Reply with the single word READY and nothing else.";
 /** Token the engine must echo back for the probe to count as a success. */
@@ -66,8 +69,18 @@ function probeTimeoutMs(engine: Engine): number {
 
 /** Default launcher: bounded spawnSync, prompt on stdin, no shell. */
 function defaultSpawner(cmd: string, args: string[], input: string, timeout = PROBE_TIMEOUT_MS) {
-  const r = spawnSync(cmd, args, { input, encoding: "utf8", timeout });
-  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  const r = spawnSync(cmd, args, {
+    input,
+    encoding: "utf8",
+    timeout,
+    shell: needsShellForCommand(cmd),
+  });
+  const code =
+    r.error && typeof (r.error as NodeJS.ErrnoException).code === "string"
+      ? (r.error as NodeJS.ErrnoException).code
+      : undefined;
+  const stderr = r.stderr || (r.error instanceof Error ? r.error.message : "");
+  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr, code };
 }
 
 /** Headless probe argv per engine. Probe args may differ from dispatch when a cheaper check exists. */
@@ -78,14 +91,12 @@ function probeInvocation(engine: Engine, prompt = PROBE_PROMPT): ProbeInvocation
     case "codex":
       return { cmd: "codex", args: ["doctor"], input: prompt };
     case "copilot":
-      return { cmd: "copilot", args: ["-p", prompt, "--allow-all-tools", "--silent"], input: "" };
+      return { cmd: "copilot", args: ["-p", prompt, "--allow-all-tools"], input: "" };
   }
 }
 
-function probeAttempts(engine: Engine): ProbeInvocation[] {
-  const primary = probeInvocation(engine);
-  if (engine !== "copilot") return [primary];
-  return [primary, { cmd: "copilot", args: ["-p", PROBE_PROMPT, "--allow-all-tools"], input: "" }];
+function ghAuthInvocation(): ProbeInvocation {
+  return { cmd: "gh", args: ["auth", "status"], input: "" };
 }
 
 /** Install hint surfaced when an engine binary is missing. */
@@ -115,24 +126,13 @@ function probeSucceeded(engine: Engine, status: number, stdout: string): boolean
   return containsToken(stdout);
 }
 
-function unsupportedSilentFlag(output: string): boolean {
-  return /(?:unknown|unrecognized|unsupported).*(?:option|flag).*--silent|--silent.*(?:unknown|unrecognized|unsupported).*(?:option|flag)/i.test(
-    output,
-  );
-}
-
-function shouldRetryProbe(engine: Engine, attemptIndex: number, result: ProbeResult): boolean {
-  return (
-    engine === "copilot" &&
-    attemptIndex === 0 &&
-    unsupportedSilentFlag(`${result.stdout}\n${result.stderr ?? ""}`)
-  );
-}
-
 function failedProbe(
   engine: Engine,
   result: ProbeResult,
 ): { level: ReadinessLevel; detail: string } {
+  if (result.code === "ENOENT" || /\bspawn\b.*\bENOENT\b/i.test(result.stderr ?? "")) {
+    return { level: "no-binary", detail: installHint(engine) };
+  }
   const output = `${result.stderr ?? ""}\n${result.stdout}`.trim();
   const hint = firstUsefulLine(output);
   const reason =
@@ -140,6 +140,18 @@ function failedProbe(
       ? `nonzero exit ${result.status}${hint ? `: ${hint}` : ""}`
       : `missing token ${EXPECTED_TOKEN}`;
   return { level: "probe-failed", detail: `${engine}: probe failed (${reason})` };
+}
+
+function failedAuth(
+  engine: Engine,
+  result: ProbeResult,
+): { level: ReadinessLevel; detail: string } {
+  const output = `${result.stderr ?? ""}\n${result.stdout}`.trim();
+  const hint = firstUsefulLine(output);
+  return {
+    level: "no-auth",
+    detail: `${engine}: not authenticated${hint ? ` (${hint})` : ""}; run \`gh auth login\``,
+  };
 }
 
 function firstUsefulLine(output: string): string | undefined {
@@ -150,7 +162,9 @@ function firstUsefulLine(output: string): string | undefined {
   const nonWarnings = lines.filter((line) => !line.toLowerCase().startsWith("warning:"));
   return (
     nonWarnings.find((line) =>
-      /(?:^✗|error|failed|unreachable|not found|No authentication)/i.test(line),
+      /(?:^✗|error|failed|failure|fatal|unreachable|not found|no authentication|not authenticated|auth(?:entication)? required|permission denied|access denied|invalid|missing|exception)/i.test(
+        line,
+      ),
     ) ??
     nonWarnings[0] ??
     lines[0]
@@ -175,20 +189,28 @@ function containsToken(s: string): boolean {
   return s.toLowerCase().includes(EXPECTED_TOKEN.toLowerCase());
 }
 
+function checkCopilotAuth(
+  has: (cmd: string) => boolean,
+  spawner: ProbeSpawner,
+): { level: ReadinessLevel; detail: string } | undefined {
+  if (!has("gh")) return undefined;
+  const { cmd, args, input } = ghAuthInvocation();
+  const result = spawner(cmd, args, input);
+  if (result.status === 0) return undefined;
+  return failedAuth("copilot", result);
+}
+
 /** Run the live probe attempts; caller wraps thrown errors into probe-failed. */
 function runProbe(
   engine: Engine,
   spawner: ProbeSpawner,
 ): { level: ReadinessLevel; detail: string } {
-  const attempts = probeAttempts(engine);
-  for (const [index, { cmd, args, input }] of attempts.entries()) {
-    const result = spawner(cmd, args, input);
-    if (probeSucceeded(engine, result.status, result.stdout))
-      return { level: "ready", detail: "ready" };
-    if (shouldRetryProbe(engine, index, result)) continue;
-    return failedProbe(engine, result);
+  const { cmd, args, input } = probeInvocation(engine);
+  const result = spawner(cmd, args, input);
+  if (probeSucceeded(engine, result.status, result.stdout)) {
+    return { level: "ready", detail: "ready" };
   }
-  return { level: "probe-failed", detail: `${engine}: probe failed (no probe attempts)` };
+  return failedProbe(engine, result);
 }
 
 /** Run the live probe, fail-closed: any thrown error becomes a graceful probe-failed. */
@@ -213,7 +235,7 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
   const spawner =
     opts.spawner ??
     ((cmd: string, args: string[], input: string) =>
-      defaultSpawner(cmd, args, input, probeTimeoutMs(engine)));
+      defaultSpawner(cmd, args, input, cmd === "gh" ? GH_AUTH_TIMEOUT_MS : probeTimeoutMs(engine)));
   const now = opts.now ?? (() => new Date().toISOString());
   const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({
     engine,
@@ -224,10 +246,23 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
 
   const { cmd } = probeInvocation(engine);
   if (!has(cmd)) return stamp("no-binary", installHint(engine));
+  const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
+
+  if (engine === "copilot") {
+    try {
+      const auth = checkCopilotAuth(has, spawner);
+      if (auth !== undefined) return stamp(auth.level, auth.detail);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return stamp("probe-failed", `${engine}: probe failed (${msg})`);
+    }
+  }
 
   if (opts.probe === false) return stamp("ready", `${engine}: installed (probe skipped)`);
 
-  const probe = runProbeSafe(engine, spawner);
+  const probe = runProbeSafe(engine, (probeCmd, args, input) =>
+    spawner(probeCmd === cmd ? resolvedCmd : probeCmd, args, input),
+  );
   return stamp(probe.level, probe.detail);
 }
 
@@ -258,8 +293,19 @@ export function checkEngineAsync(
 
   const { cmd } = probeInvocation(engine);
   if (!has(cmd)) return Promise.resolve(stamp("no-binary", installHint(engine)));
+  const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
 
   const spawner = opts.spawner;
+
+  if (engine === "copilot" && spawner !== undefined) {
+    try {
+      const auth = checkCopilotAuth(has, spawner);
+      if (auth !== undefined) return Promise.resolve(stamp(auth.level, auth.detail));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Promise.resolve(stamp("probe-failed", `${engine}: probe failed (${msg})`));
+    }
+  }
 
   if (opts.probe === false)
     return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
@@ -272,13 +318,20 @@ export function checkEngineAsync(
   }
 
   // Real async spawn: runs the actual engine process in parallel.
-  const runAttempt = (attempt: ProbeInvocation): Promise<ProbeResult> =>
+  const runAttempt = (
+    attempt: ProbeInvocation,
+    timeoutMs = probeTimeoutMs(engine),
+  ): Promise<ProbeResult> =>
     new Promise((resolve) => {
-      const child = spawn(attempt.cmd, attempt.args, { stdio: ["pipe", "pipe", "pipe"] });
+      const spawnCmd = attempt.cmd === cmd ? resolvedCmd : attempt.cmd;
+      const child = spawn(spawnCmd, attempt.args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: needsShellForCommand(spawnCmd),
+      });
       const timeout = setTimeout(() => {
         child.kill();
-        resolve({ status: 124, stdout: "", stderr: `${engine}: probe timed out` });
-      }, probeTimeoutMs(engine));
+        resolve({ status: 124, stdout: "", stderr: `${attempt.cmd}: probe timed out` });
+      }, timeoutMs);
 
       let stdout = "";
       let stderr = "";
@@ -294,25 +347,35 @@ export function checkEngineAsync(
       });
       child.on("error", (err) => {
         clearTimeout(timeout);
-        resolve({ status: 1, stdout, stderr: err.message });
+        const code =
+          typeof (err as NodeJS.ErrnoException).code === "string"
+            ? (err as NodeJS.ErrnoException).code
+            : undefined;
+        resolve({ status: 1, stdout, stderr: err.message, code });
       });
       child.stdin.end(attempt.input);
     });
 
   return new Promise((resolve) => {
     const runAttempts = async () => {
-      for (const [index, attempt] of probeAttempts(engine).entries()) {
-        const result = await runAttempt(attempt);
-        if (probeSucceeded(engine, result.status, result.stdout)) {
-          resolve(stamp("ready", "ready"));
+      if (engine === "copilot" && has("gh")) {
+        const auth = await runAttempt(ghAuthInvocation(), GH_AUTH_TIMEOUT_MS);
+        if (auth.status !== 0) {
+          const failed = failedAuth(engine, auth);
+          resolve(stamp(failed.level, failed.detail));
           return;
         }
-        if (shouldRetryProbe(engine, index, result)) continue;
-        const failed = failedProbe(engine, result);
-        resolve(stamp(failed.level, failed.detail));
+      }
+
+      const attempt = probeInvocation(engine);
+      const result = await runAttempt(attempt);
+      if (probeSucceeded(engine, result.status, result.stdout)) {
+        resolve(stamp("ready", "ready"));
         return;
       }
-      resolve(stamp("probe-failed", `${engine}: probe failed (no probe attempts)`));
+      const failed = failedProbe(engine, result);
+      resolve(stamp(failed.level, failed.detail));
+      return;
     };
 
     runAttempts().catch((err: unknown) => {

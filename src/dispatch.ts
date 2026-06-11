@@ -2,7 +2,13 @@ import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { ProjectContext, UnitBrief } from "./adapters.js";
 import { dispatchPrompt } from "./adapters.js";
-import { type Engine, hasCommand, writeFileSafe } from "./core.js";
+import {
+  type Engine,
+  hasCommand,
+  needsShellForCommand,
+  resolveCommand,
+  writeFileSafe,
+} from "./core.js";
 
 /** Structured summary an engine is asked to emit at the end of a dispatch. */
 export interface EngineSummary {
@@ -39,7 +45,11 @@ export type AsyncSpawner = (
 ) => Promise<{ status: number; stdout: string; timedOut?: boolean }>;
 
 function defaultSpawner(cmd: string, args: string[], input: string) {
-  const r = spawnSync(cmd, args, { input, encoding: "utf8" });
+  const r = spawnSync(cmd, args, {
+    input,
+    encoding: "utf8",
+    shell: needsShellForCommand(cmd),
+  });
   return { status: r.status ?? 1, stdout: r.stdout ?? "" };
 }
 
@@ -75,7 +85,7 @@ export function makeAsyncSpawner(
       const child = spawn(cmd, args, {
         stdio: ["pipe", "pipe", "inherit"],
         detached: timeoutMs != null,
-        shell,
+        shell: shell || needsShellForCommand(cmd),
       });
       let stdout = "";
       let timedOut = false;
@@ -147,7 +157,11 @@ export function isUnavailable(r: EngineCommandResult): r is EngineUnavailable {
 /** Best-effort read of `copilot --version` (lightweight; used only for the version guard). */
 function copilotVersion(cmd = "copilot"): string | undefined {
   try {
-    const r = spawnSync(cmd, ["--version"], { encoding: "utf8" });
+    const resolved = resolveCommand(cmd) ?? cmd;
+    const r = spawnSync(resolved, ["--version"], {
+      encoding: "utf8",
+      shell: needsShellForCommand(resolved),
+    });
     if (r.status === 0 && r.stdout?.trim()) return r.stdout.trim();
   } catch {
     /* fall through to undefined */
@@ -325,7 +339,7 @@ function resolveCli(
   }
   return {
     ok: true,
-    cmd: invocation.cmd,
+    cmd: hasSpawner ? invocation.cmd : (resolveCommand(invocation.cmd) ?? invocation.cmd),
     args: invocation.args,
     promptMode: invocation.promptMode,
     warning: invocation.warning,

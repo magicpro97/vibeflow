@@ -228,15 +228,35 @@ export function recomputeTotals(s: WorkflowState): WorkflowState {
   return s;
 }
 
-/** Detect whether a command exists on PATH. */
-export function hasCommand(cmd: string): boolean {
+function safeCommandName(cmd: string): boolean {
   // `command -v` is a POSIX shell builtin with no standalone binary (absent on most Linux),
   // so it must run through a shell — otherwise spawnSync hits ENOENT and reports every tool
   // as missing (CI false-negative). Guard the input (tool names only) so the shell string is safe.
-  if (!/^[A-Za-z0-9._-]+$/.test(cmd)) return false;
-  const probe = process.platform === "win32" ? `where ${cmd}` : `command -v ${cmd}`;
-  const r = spawnSync(probe, { stdio: "ignore", shell: true });
-  return r.status === 0;
+  return /^[A-Za-z0-9._-]+$/.test(cmd);
+}
+
+/** Resolve the first executable path for a command, matching how the platform PATH is searched. */
+export function resolveCommand(cmd: string): string | undefined {
+  if (!safeCommandName(cmd)) return undefined;
+  const r =
+    process.platform === "win32"
+      ? spawnSync("where.exe", [cmd], { encoding: "utf8" })
+      : spawnSync(`command -v ${cmd}`, { encoding: "utf8", shell: true });
+  if (r.status !== 0) return undefined;
+  return r.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+}
+
+/** Windows .cmd/.bat shims require shell execution under node:child_process. */
+export function needsShellForCommand(cmd: string): boolean {
+  return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(cmd);
+}
+
+/** Detect whether a command exists on PATH. */
+export function hasCommand(cmd: string): boolean {
+  return resolveCommand(cmd) !== undefined;
 }
 
 export function isGitRepo(): boolean {
