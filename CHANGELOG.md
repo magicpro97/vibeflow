@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.3](https://github.com/magicpro97/vibeflow/compare/v0.5.2...v0.5.3) (2026-06-12)
+
+
+### Bug Fixes
+
+* add Bun API polyfill for Node.js compat ([d0e47b8](https://github.com/magicpro97/vibeflow/commit/d0e47b8f4b09d4259f3a0052b47600a7670f7573))
+
+
+### Continuous Integration
+
+* remove autorelease:pending label check — any merged PR triggers publish (npm version check prevents duplicates) ([6d6cc44](https://github.com/magicpro97/vibeflow/commit/6d6cc44c4ceb5ef8f251cdb7fe5857311b5c601c))
+
 ## [0.5.2](https://github.com/magicpro97/vibeflow/compare/v0.5.1...v0.5.2) (2026-06-12)
 
 
