@@ -3295,6 +3295,7 @@
         updateContent();
       }
 
+      // keep in sync with src/ui/escape.ts (Task 4 hardening)
       function esc(s) {
         return String(s).replace(/[&<>"']/g, function (m) {
           return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m];
