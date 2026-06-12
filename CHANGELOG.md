@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.1](https://github.com/magicpro97/vibeflow/compare/v0.5.0...v0.5.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* **ai-init:** include stderr snippet in engine failure message ([42a1d99](https://github.com/magicpro97/vibeflow/commit/42a1d996200086c028d66e52b9a3a397aed88d52))
+* **ai-init:** Windows cmd-line too long + idle timeout + streaming callbacks ([b994a0a](https://github.com/magicpro97/vibeflow/commit/b994a0aa9a73fd1ba89ddd9bb158dfa101cfc45c))
+* **test:** isolate logbus no-bus tests from parallel test bus state ([bdfbdcc](https://github.com/magicpro97/vibeflow/commit/bdfbdccb673cca9a5b2e1b3d70086de99afbc6e1))
+
+
+### Refactors
+
+* migrate process spawn + command resolution to Bun native APIs ([02cc1a3](https://github.com/magicpro97/vibeflow/commit/02cc1a353d77fb303ff96b0b8d7ac5ad5acd55b7))
+* **server:** migrate from node:http to Bun.serve ([ff0e0d0](https://github.com/magicpro97/vibeflow/commit/ff0e0d0208b24e01aafcb9fadb97aaf59197887a))
+
 ## [0.5.0](https://github.com/magicpro97/vibeflow/compare/v0.4.1...v0.5.0) (2026-06-12)
 
 
