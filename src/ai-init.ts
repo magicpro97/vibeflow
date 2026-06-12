@@ -501,6 +501,18 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // On Windows, `type file | copilot -p ...` runs through cmd.exe /c.
   // Copilot is on PATH — no need for resolved path (which may have spaces).
   if (engine === "copilot" && promptFile) {
+    // Runtime guard: invocation.cmd must be a known engine binary name from
+    // server-controlled engine config. Reject anything else to prevent this
+    // shell:true concatenation from being abused if config is ever polluted.
+    const ALLOWED_ENGINE_CMDS = new Set(["copilot", "claude", "codex"]);
+    if (!ALLOWED_ENGINE_CMDS.has(invocation.cmd)) {
+      return {
+        ok: false,
+        engine,
+        reason: `refusing to spawn unexpected engine cmd "${invocation.cmd}" (shell:true call site)`,
+        raw: "",
+      };
+    }
     const pipeSrc = process.platform === "win32" ? `type "${promptFile}"` : `cat "${promptFile}"`;
     const pipeCmd =
       process.platform === "win32"
@@ -508,7 +520,8 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
         : `${pipeSrc} | "${invocation.cmd}" -p --allow-all-tools`;
     // safety: pipeSrc is a server-controlled temp path under cwd(); invocation.cmd
     // is engine config (e.g. "copilot") set by vibeflow, not user/env input. The
-    // shell is needed to compose `cat/type | copilot` pipelines on Unix + Windows.
+    // runtime ALLOWED_ENGINE_CMDS guard above enforces this at the call site.
+    // The shell is needed to compose `cat/type | copilot` pipelines on Unix + Windows.
     const shellSpawner = makeAsyncSpawner({
       timeoutMs,
       idleTimeoutMs: timeoutMs,
