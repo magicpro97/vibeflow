@@ -22,3 +22,6 @@ screenshots/
 .codex/agents/
 .claude/agents/
 .github/agents/
+
+# Hermes runtime plans (local-only)
+.hermes/
