@@ -84,20 +84,21 @@ const DENY_SUFFIXES: readonly RegExp[] = [
 ];
 
 export function isAllowedKey(key: string): boolean {
-  // First check: known-safe allowlist (system keys + engine auth).
-  // Engine auth keys are allowlisted because claude/codex/copilot
-  // binaries MUST receive them in their env to authenticate.
+  // Deny-by-default: unknown keys are BLOCKED unless explicitly allowlisted.
+  // This is the secure default — the previous allow-by-default was the bug.
+  // To pass through an unknown key, add it to ALLOWLIST explicitly.
+  //
+  // Check order:
+  // 1. Explicit allowlist wins (system keys, engine auth).
+  //    Engine auth keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) MUST
+  //    propagate to the child or claude/codex/copilot auth fails.
+  // 2. Then denylist — any key matching a known-secret pattern is blocked
+  //    even if it sneaks past the allowlist (defence in depth).
   if (ALLOWLIST.has(key)) return true;
-  // Then deny: any key matching a known-secret pattern is blocked.
-  // This catches generic SECRET/TOKEN/PASSWORD/AUTH suffixes from
-  // third-party services (AWS, Azure, custom cloud creds, etc.).
   for (const re of DENY_SUFFIXES) {
     if (re.test(key)) return false;
   }
-  // Unknown keys are passed through; the deny list is the primary
-  // defence for new unknown secrets. If you add a new secret prefix
-  // (e.g. a new cloud provider), add a denylist regex above.
-  return true;
+  return false; // unknown → deny
 }
 
 export function filterChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

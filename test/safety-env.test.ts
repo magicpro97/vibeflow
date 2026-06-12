@@ -82,4 +82,14 @@ describe("env allowlist", () => {
     });
     expect(out).toEqual({ PATH: "/x", HOME: "/h", TMPDIR: "/t", LANG: "en" });
   });
+
+  test("isAllowedKey denies unknown keys by default", () => {
+    // Deny-by-default: keys not in ALLOWLIST and not matching a denylist
+    // pattern are BLOCKED. This is the secure default — previous behaviour
+    // of passing unknown keys through was the bug.
+    expect(isAllowedKey("MY_CUSTOM_RUNTIME_VAR")).toBe(false);
+    expect(isAllowedKey("SOMETHING_NOT_IN_ALLOWLIST")).toBe(false);
+    expect(isAllowedKey("FOOBAR_BAZ_QUX")).toBe(false);
+    expect(isAllowedKey("RANDOM_APP_CONFIG")).toBe(false);
+  });
 });
