@@ -8,6 +8,7 @@ import {
   resolveCommand,
   writeFileSafe,
 } from "./core.js";
+import { filterChildEnv } from "./safety/env.js";
 
 // Confidence fallback for engine runs with no JSON summary block
 const MIN_PRODUCTIVE_TURNS = 3;
@@ -113,7 +114,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env },
+      env: filterChildEnv(process.env),
     });
     proc.stdin?.write(input);
     proc.stdin?.end();

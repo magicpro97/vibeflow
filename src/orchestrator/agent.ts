@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CTX_DIR, type WorkUnit } from "../core.js";
+import { filterChildEnv } from "../safety/env.js";
 import { createMarker, releaseLock, tryLock, updateMarker } from "./marker.js";
 
 export interface AgentConfig {
@@ -149,7 +150,7 @@ async function runAgent(
     const child = spawn(engine, args, {
       cwd: config.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: filterChildEnv(process.env),
       timeout: config.timeoutMs || undefined,
     });
 
