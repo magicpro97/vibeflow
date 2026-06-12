@@ -49,6 +49,7 @@ import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
 import { appendJournal, ensureIndex } from "./journal.js";
+import { runSemgrep } from "./verify/semgrep.js";
 import { spawnAgent } from "./orchestrator/agent.js";
 import {
   type AsyncResearcher,
@@ -2163,6 +2164,19 @@ export function verify(): number {
   // e2e advisory gates — non-fatal warnings only.
   for (const w of e2eUnicodeSelectorWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
   for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
+
+  // Semgrep gate — custom security rules. Missing binary or missing config
+  // is a soft pass (`missing: true`); findings are a hard fail.
+  const sgResult = runSemgrep(base);
+  if (sgResult.missing) {
+    out("vf", c.dim(`semgrep: skipped (${sgResult.raw})`));
+  } else if (sgResult.ok) {
+    out("vf", c.green(`✓ semgrep: 0 findings`));
+  } else {
+    failed++;
+    out("vf", c.red(`✗ semgrep: ${sgResult.findings} finding(s)`));
+    if (sgResult.raw) console.error(sgResult.raw);
+  }
 
   if (failed > 0) {
     out("vf", c.red(`\n${failed} gate(s) failed.`));
