@@ -271,13 +271,16 @@ export function detectRepo(path?: string): RepoDetection {
 function contextFrom(answers: IntakeAnswers): ProjectContext {
   const base = defaultContext();
   const clean = (s?: string) => (s?.trim() ? s.trim() : undefined);
+  // Pass through `undefined` (not `undefined` from clean) for required fields
+  // so the defaults from `base` survive. canonicalFiles() is fail-closed
+  // and throws if these end up undefined.
   return {
     ...base,
     goal: clean(answers.goal) ?? base.goal,
-    docSource: clean(answers.docSource),
-    taskSource: clean(answers.taskSource),
+    docSource: clean(answers.docSource) ?? base.docSource,
+    taskSource: clean(answers.taskSource) ?? base.taskSource,
     fileTypes: answers.fileTypes?.map((s) => s.trim()).filter(Boolean),
-    expectedResult: clean(answers.expectedResult),
+    expectedResult: clean(answers.expectedResult) ?? base.expectedResult,
     sample: clean(answers.sample),
   };
 }
