@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/magicpro97/vibeflow/compare/v0.5.3...v0.5.4) (2026-06-12)
+
+
+### Bug Fixes
+
+* **ai-init:** shell-pipe cmd must not quote copilot on Windows (cmd.exe treats quotes literally) ([11c74d6](https://github.com/magicpro97/vibeflow/commit/11c74d6fa23b49a7af50244a9b3cc6102ed1e9f2))
+
 ## [0.5.3](https://github.com/magicpro97/vibeflow/compare/v0.5.2...v0.5.3) (2026-06-12)
 
 
