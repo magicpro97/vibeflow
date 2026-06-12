@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.6.0](https://github.com/magicpro97/vibeflow/compare/v0.5.4...v0.6.0) (2026-06-12)
+
+
+### Features
+
+* **scanner:** evidence-backed stack findings with confidence levels ([1a8b501](https://github.com/magicpro97/vibeflow/commit/1a8b50172e57b8a04cef45e6652c0fdb96a0c1a9))
+* **skills:** add Anthropic skill format validator + test suite ([7967cbf](https://github.com/magicpro97/vibeflow/commit/7967cbf77506a5434145d2da04fc78a19dbc6bce))
+* **skills:** add canonical skills pointer/full sync (src/skills/sync.ts) ([7c2ae61](https://github.com/magicpro97/vibeflow/commit/7c2ae614657979880f56c75c29ade49aa347a577))
+* **skills:** importer (single + parent) + sync CLI + body length fix ([80ecd9d](https://github.com/magicpro97/vibeflow/commit/80ecd9d73299211b1a242c9c03a23f171ff60ba6))
+* **skills:** vf skills validate CLI command + lint fixes ([e7a0033](https://github.com/magicpro97/vibeflow/commit/e7a003345f61df34e6ce602d3f88e51388670b2c))
+* **skills:** write standard + taxonomy + stack-evidence to .vibeflow/ai-context/; prompt references them ([cf5e87d](https://github.com/magicpro97/vibeflow/commit/cf5e87d4f2e97eea986ca48ee45dbe9ee5a0a63f))
+
+
+### Bug Fixes
+
+* **ai-init:** use bare copilot name in shell pipe (PATH resolves it) — avoid path-space issues on Windows ([901e5ac](https://github.com/magicpro97/vibeflow/commit/901e5aca08ff07ab4eea0d87d709906283a01ecd))
+* **bun-shim:** replace data listener + buffer with async iterator — fixes duplicate stdout/stderr on Windows ([8058407](https://github.com/magicpro97/vibeflow/commit/8058407d4afb8eb9546bce4c8abf201a9734135c))
+* **ci:** pin biome lineEnding=lf + add .gitattributes to keep CRLF out of source ([1cf625f](https://github.com/magicpro97/vibeflow/commit/1cf625f3c87bc7ae0ad8c99f156972f3b2feead6))
+* pin lineEnding in biome.json + add .gitattributes to enforce LF on checkout. ([1cf625f](https://github.com/magicpro97/vibeflow/commit/1cf625f3c87bc7ae0ad8c99f156972f3b2feead6))
+* **tests:** make path-handling cross-platform so Windows CI passes ([6070247](https://github.com/magicpro97/vibeflow/commit/60702479f2bf3cd1b5819fa57324e2db880d6c93))
+* **tests:** more cross-platform test fixes (checkpoint, cli, logbus, wave2) ([7c4885c](https://github.com/magicpro97/vibeflow/commit/7c4885cab76f5827ae968113c3fdf45a94b81d78))
+
+
+### Continuous Integration
+
+* add Windows runner to test matrix — catch cross-platform regressions early ([d1f10c2](https://github.com/magicpro97/vibeflow/commit/d1f10c2d298b8d3f092ee77bae32ab1b0c034e8c))
+* restore bun run build step before smoke test ([059961b](https://github.com/magicpro97/vibeflow/commit/059961b083b327de53df240cadf40670ccf3c88c))
+* skip unit tests on Windows until 4 pre-existing path tests are fixed ([dab1e75](https://github.com/magicpro97/vibeflow/commit/dab1e756230c0551ad6fa7ced148b8dd806510e9))
+
 ## [0.5.4](https://github.com/magicpro97/vibeflow/compare/v0.5.3...v0.5.4) (2026-06-12)
 
 
