@@ -49,19 +49,24 @@ export function assertWithinRoot(target: string, root: string): void {
   // up parent-by-parent until realpathSync succeeds, then use that. This
   // handles the case where an intermediate symlink points outside root.
   const realRoot = existsSync(absRoot) ? realpathSync(absRoot) : absRoot;
-  const real = existsSync(absTarget)
-    ? realpathSync(absTarget)
-    : realpathDeepestExisting(absTarget);
+  const real = existsSync(absTarget) ? realpathSync(absTarget) : realpathDeepestExisting(absTarget);
   const rel = relative(realRoot, real);
   if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(
       `refusing to operate on path outside root: ${target} (resolved ${real}, root ${realRoot})`,
     );
   }
-  // Also reject if a path separator appears at the start (defence in depth
-  // against weird relative outputs on Windows).
+  // rel === "" means target IS root (after symlink resolution). For
+  // destructive operations like rmSync, this is almost always a bug:
+  // the caller almost certainly meant to operate on a sub-path, not
+  // the entire project root. Fail-closed: reject and let the caller
+  // pass the explicit sub-path they intended. If a legitimate use case
+  // arises (e.g. "clean the build dir" where the build dir is the root),
+  // the caller can opt out by passing the path with a trailing separator
+  // — but that needs an explicit decision, not silent acceptance.
   if (rel === "" || rel.startsWith(sep)) {
-    // rel === "" means target IS root — only OK for some operations.
-    // For rm/delete, root itself is suspicious; let the caller decide.
+    throw new Error(
+      `refusing to operate on path equal to root: ${target} (resolved ${real}, root ${realRoot}). Pass an explicit sub-path; rmSync of the project root is never safe.`,
+    );
   }
 }

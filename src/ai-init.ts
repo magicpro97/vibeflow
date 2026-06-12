@@ -518,10 +518,11 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       process.platform === "win32"
         ? `${pipeSrc} | ${invocation.cmd} -p --allow-all-tools`
         : `${pipeSrc} | "${invocation.cmd}" -p --allow-all-tools`;
-    // safety: pipeSrc is a server-controlled temp path under cwd(); invocation.cmd
-    // is engine config (e.g. "copilot") set by vibeflow, not user/env input. The
-    // runtime ALLOWED_ENGINE_CMDS guard above enforces this at the call site.
-    // The shell is needed to compose `cat/type | copilot` pipelines on Unix + Windows.
+    // safety: pipeSrc is a server-controlled temp path under ctxDir (NOT cwd);
+    // invocation.cmd is engine config (e.g. "copilot") set by vibeflow, not
+    // user/env input. The runtime ALLOWED_ENGINE_CMDS guard above enforces
+    // this at the call site. The shell is needed to compose `cat/type | copilot`
+    // pipelines on Unix + Windows.
     const shellSpawner = makeAsyncSpawner({
       timeoutMs,
       idleTimeoutMs: timeoutMs,

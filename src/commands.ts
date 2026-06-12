@@ -49,7 +49,6 @@ import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
 import { appendJournal, ensureIndex } from "./journal.js";
-import { runSemgrep } from "./verify/semgrep.js";
 import { spawnAgent } from "./orchestrator/agent.js";
 import {
   type AsyncResearcher,
@@ -104,6 +103,7 @@ import { validateSkillRoots } from "./skills/validator.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
 import { Spinner, StatusLine, link, panel, progressBar, table } from "./ui.js";
+import { runSemgrep } from "./verify/semgrep.js";
 import {
   type CollisionPolicy,
   type DeletePlan,
@@ -2166,16 +2166,22 @@ export function verify(): number {
   for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
 
   // Semgrep gate — custom security rules. Missing binary or missing config
-  // is a soft pass (`missing: true`); findings are a hard fail.
+  // is a soft pass (`missing: true`); findings are a hard fail. A JSON
+  // parse error (semgrep ran but produced unparseable output) is also a
+  // hard fail, surfaced distinctly from "0 findings".
   const sgResult = runSemgrep(base);
   if (sgResult.missing) {
     out("vf", c.dim(`semgrep: skipped (${sgResult.raw})`));
   } else if (sgResult.ok) {
-    out("vf", c.green(`✓ semgrep: 0 findings`));
+    out("vf", c.green("✓ semgrep: 0 findings"));
+  } else if (sgResult.parseError) {
+    failed++;
+    out("vf", c.red("✗ semgrep: could not parse output"));
+    if (sgResult.raw) console.error(sgResult.raw);
   } else {
     failed++;
-    out("vf", c.red(`✗ semgrep: ${sgResult.findings} finding(s)`));
     if (sgResult.raw) console.error(sgResult.raw);
+    out("vf", c.red(`✗ semgrep: ${sgResult.findings} finding(s)`));
   }
 
   if (failed > 0) {
