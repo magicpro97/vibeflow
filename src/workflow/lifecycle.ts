@@ -9,6 +9,7 @@ import {
   writeState,
 } from "../core.js";
 import { findScopeConflicts } from "../gates.js";
+import { assertWithinRoot } from "../safety/path.js";
 
 /** Injected filesystem seams so tests never touch the real disk destructively. */
 export type RmOp = (path: string) => void;
@@ -147,7 +148,13 @@ export function deleteUnit(base: string, name: string): WorkflowState | null {
   recomputeTotals(state);
   writeState(repo, state);
   const unitDir = join(repo, CTX_DIR, "workunits", target);
-  if (existsSync(unitDir)) rmSync(unitDir, { recursive: true, force: true });
+  if (existsSync(unitDir)) {
+    // unitDir is constructed from `repo` (project root) + CTX_DIR + target.
+    // `target` is a unit id from the workflow state; guard against any
+    // state corruption that could put a traversal segment in `target`.
+    assertWithinRoot(unitDir, repo);
+    rmSync(unitDir, { recursive: true, force: true });
+  }
   return state;
 }
 

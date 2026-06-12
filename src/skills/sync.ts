@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { assertWithinRoot } from "../safety/path.js";
 import { validateSkillDir } from "./validator.js";
 
 const CANONICAL = join(".vibeflow", "skills");
@@ -80,6 +81,7 @@ export function syncSkillMirrors(repo: string, opts: SyncSkillOptions = {}): Ski
       for (const mirror of MIRRORS) {
         const dst = join(repo, mirror, name);
         mkdirSync(join(repo, mirror), { recursive: true });
+        assertWithinRoot(dst, repo);
         rmSync(dst, { recursive: true, force: true });
         mkdirSync(dst, { recursive: true });
         if (mode === "pointer") {

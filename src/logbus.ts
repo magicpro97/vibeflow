@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
+import { assertWithinRoot } from "./safety/path.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,7 +265,10 @@ export class Logbus {
       const dst = join(this.dir, `current.log.${i + 1}`);
       if (existsSync(src)) {
         if (i === this.maxRotations) {
-          // Drop the oldest.
+          // Drop the oldest. `src` is constructed from `this.dir` which is the
+          // logbus temp dir; assertWithinRoot protects against any future
+          // config injection that could re-target the path.
+          assertWithinRoot(src, this.dir);
           rmSync(src, { force: true });
         } else {
           renameSync(src, dst);
@@ -302,6 +306,10 @@ export class Logbus {
       for (const e of entries) {
         if (e.mtimeMs < cutoff) {
           try {
+            // `e.path` came from readdir on the logbus dir; guard with
+            // assertWithinRoot so a symlink-escape in the temp dir cannot
+            // rmSync an arbitrary path.
+            assertWithinRoot(e.path, this.dir);
             rmSync(e.path, { force: true });
           } catch (err) {
             process.stderr.write(`[logbus] prune remove failed: ${(err as Error).message}\n`);
@@ -317,6 +325,7 @@ export class Logbus {
         for (const e of kept) {
           if (totalBytes <= this.retentionMaxBytes) break;
           try {
+            assertWithinRoot(e.path, this.dir);
             rmSync(e.path, { force: true });
             totalBytes -= e.size;
           } catch (err) {

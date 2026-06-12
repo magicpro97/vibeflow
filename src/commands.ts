@@ -83,6 +83,7 @@ import {
   recoveryHint,
   restoreIgnored,
 } from "./safety/checkpoint.js";
+import { assertWithinRoot } from "./safety/path.js";
 import { type QuotaSignal, detectQuota } from "./safety/quota.js";
 import { scanRepo, summarizeProfile } from "./scanner.js";
 import {
@@ -2319,7 +2320,13 @@ function writeCodexMcp(base: string, settings: VibeSettings, languages: string[]
   const entries = gateCodexEntries(merged.entries as TomlMcpEntry[], settings);
   const path = join(base, CODEX_MCP_FILE);
   if (entries.length === 0) {
-    if (existsSync(path)) rmSync(path);
+    if (existsSync(path)) {
+      // path is constructed from `base` (project root) + CODEX_MCP_FILE.
+      // Guard against any future change that could make CODEX_MCP_FILE
+      // user-controlled or contain a traversal segment.
+      assertWithinRoot(path, base);
+      rmSync(path);
+    }
     return false;
   }
   const header =

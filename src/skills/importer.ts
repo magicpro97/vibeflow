@@ -1,5 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { assertWithinRoot } from "../safety/path.js";
 import { validateSkillDir } from "./validator.js";
 
 const CANONICAL = join(".vibeflow", "skills");
@@ -25,12 +26,13 @@ function readSkillFrontmatterName(dir: string): string | null {
   }
 }
 
-function backupIfExists(dst: string): void {
+function backupIfExists(repo: string, dst: string): void {
   if (existsSync(dst)) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const backup = join(CANONICAL, ".backup", ts, basename(dst));
-    mkdirSync(join(CANONICAL, ".backup", ts), { recursive: true });
+    const backup = join(repo, CANONICAL, ".backup", ts, basename(dst));
+    mkdirSync(join(repo, CANONICAL, ".backup", ts), { recursive: true });
     cpSync(dst, backup, { recursive: true });
+    assertWithinRoot(dst, repo);
     rmSync(dst, { recursive: true, force: true });
   }
 }
@@ -59,7 +61,7 @@ export function importSkillFromDir(repo: string, sourceDir: string): ImportResul
   const dst = join(repo, CANONICAL, name);
   mkdirSync(join(repo, CANONICAL), { recursive: true });
   try {
-    backupIfExists(dst);
+    backupIfExists(repo, dst);
     cpSync(sourceDir, dst, { recursive: true });
     imported.push(name);
     return { ok: true, imported, errors, warnings };
