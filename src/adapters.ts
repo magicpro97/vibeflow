@@ -116,13 +116,30 @@ export function defaultContext(): ProjectContext {
 export function aiGenerate(prompt: string, fallback: () => string): string {
   const cmd = process.env.VIBEFLOW_AI;
   if (!cmd) return fallback();
-  // Bounded so a hung VIBEFLOW_AI command cannot block vf init forever.
-  // 30s matches aiEnrichRole (consistency).
-  const r = spawnSync(cmd, {
+  // argv form: cmd is tokenized into [exec, ...args]. No shell is invoked, so
+  // metacharacters in `cmd` or `prompt` cannot break out.
+  // Windows .cmd/.bat shims still work because node:child_process detects them
+  // and applies the right quoting without a shell.
+  //
+  // BREAKING: this used to invoke `sh -c "$VIBEFLOW_AI"`. VIBEFLOW_AI=
+  // "my-llm --model x" now requires the user to wrap in a shell script.
+  // See tokenizeVibeflowAi in dispatch.ts for the rationale.
+  //
+  // 30s timeout matches aiEnrichRole (consistency) so a hung VIBEFLOW_AI
+  // cannot block vf init forever.
+  const argv = cmd
+    .trim()
+    .split(/\s+/)
+    .filter((s) => s.length > 0);
+  if (argv.length === 0) return fallback();
+  const execName = argv[0];
+  if (execName === undefined) return fallback();
+  const args = argv.slice(1);
+  const r = spawnSync(execName, args, {
     input: prompt,
-    shell: true,
     encoding: "utf8",
     timeout: 30_000,
+    env: filterChildEnv(process.env),
   });
   if (r.status === 0 && r.stdout.trim()) return r.stdout;
   return fallback();
