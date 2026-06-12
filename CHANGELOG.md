@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.5.0](https://github.com/magicpro97/vibeflow/compare/v0.4.1...v0.5.0) (2026-06-12)
+
+
+### Features
+
+* **cli:** stream engine output in real-time during vf init --ai ([b7dc81e](https://github.com/magicpro97/vibeflow/commit/b7dc81e610b32bdffa94eba2239becfb54f3f20e))
+* **ui:** add AI generation toggle to web UI intake form ([41d6c63](https://github.com/magicpro97/vibeflow/commit/41d6c6337b13128a27f03af18092124f0e793768))
+
+
+### Bug Fixes
+
+* **ai-init,preflight:** copilot probe false-negative + dispatch args order + engine fallback ([1aaa883](https://github.com/magicpro97/vibeflow/commit/1aaa8833296566b641149283b4826c07b59a6d9d))
+* **xss:** escape quote chars in esc() for attribute safety ([9786b72](https://github.com/magicpro97/vibeflow/commit/9786b72d709a33f927f4e0f36328d08e05ffcb85))
+
+
+### Refactors
+
+* **dispatch:** extract confidence fallback thresholds to named constants ([122734f](https://github.com/magicpro97/vibeflow/commit/122734f6844173d791aebaac6fd90c2af37a984f))
+* **e2e:** extract waitForPage to shared helpers.ts ([6d8fea7](https://github.com/magicpro97/vibeflow/commit/6d8fea7d43469e9b633466abf00ea190862238b3))
+* **ui:** split server.html into src/ui/ — shell + sections ([818e2eb](https://github.com/magicpro97/vibeflow/commit/818e2ebf1db7425a2d20262693561a857c2a69c2))
+
+
+### Tests
+
+* **commands:** add unit tests for orchestrate, doctor, applyIntake, writeState, review gate ([3365941](https://github.com/magicpro97/vibeflow/commit/3365941a92e99583e0483e5a5bed24f2c0634a02))
+* **server:** add HTTP-level tests for /api/init, preflight, CSRF guard ([f145d6c](https://github.com/magicpro97/vibeflow/commit/f145d6c0ab11cba109013f81fbfd527015c9f01d))
+
 ## [0.4.1](https://github.com/magicpro97/vibeflow/compare/v0.4.0...v0.4.1) (2026-06-12)
 
 
