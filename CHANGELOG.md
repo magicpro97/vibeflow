@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.2](https://github.com/magicpro97/vibeflow/compare/v0.5.1...v0.5.2) (2026-06-12)
+
+
+### Bug Fixes
+
+* **dispatch:** handle shell:true in Bun.spawn via /bin/sh -c wrapper ([f09e4b3](https://github.com/magicpro97/vibeflow/commit/f09e4b39983d767ff69e09d536776589a5d15ead))
+
+
+### Continuous Integration
+
+* run CLI with bun instead of node (Bun APIs not available in Node) ([f5bb989](https://github.com/magicpro97/vibeflow/commit/f5bb989d747bc899a69a2f50a0a4fc83bf2c68b0))
+
 ## [0.5.1](https://github.com/magicpro97/vibeflow/compare/v0.5.0...v0.5.1) (2026-06-12)
 
 
