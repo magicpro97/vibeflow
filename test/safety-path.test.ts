@@ -36,6 +36,24 @@ describe("assertWithinRoot", () => {
     }
   });
 
+  test("rejects path whose intermediate symlink points outside root", () => {
+    // Tighter symlink test: create a symlink inside root that resolves
+    // to a directory outside root. Then ask the validator about a
+    // non-existing child of that symlink. The walk-up parent-by-parent
+    // realpath must follow the symlink and reject the resolved real path.
+    const linkPath = join(root, "evil-parent-link");
+    const target = join(linkPath, "nonexistent-child");
+    let created = false;
+    try {
+      require("node:fs").symlinkSync(tmpdir(), linkPath);
+      created = true;
+    } catch {
+      // symlink permission can fail on some FS (e.g. macOS sandbox) — skip
+    }
+    if (!created) return;
+    expect(() => assertWithinRoot(target, root)).toThrow(/outside root/);
+  });
+
   test("toAbsolute returns absolute path", () => {
     expect(toAbsolute("a/b")).toMatch(/^[/\\]/);
   });

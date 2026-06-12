@@ -15,6 +15,27 @@ export function toAbsolute(p: string): string {
 }
 
 /**
+ * Walk up parent-by-parent until `realpathSync` succeeds.
+ * Used when the target itself doesn't exist but we still need a
+ * canonical (symlink-resolved) path for comparison.
+ *
+ * If even the root can't be resolved, falls back to the deepest ancestor
+ * whose realpath worked — which is the best we can do for comparison.
+ */
+function realpathDeepestExisting(p: string): string {
+  let current = p;
+  const stop = resolve(p, "..");
+  while (current !== stop) {
+    try {
+      return realpathSync(current);
+    } catch {
+      current = resolve(current, "..");
+    }
+  }
+  return current; // fell off the root, use as-is
+}
+
+/**
  * Throw if `target` is not within `root` (after symlink resolution).
  * Use this BEFORE any destructive operation (rm, chmod, write).
  *
@@ -24,15 +45,13 @@ export function toAbsolute(p: string): string {
 export function assertWithinRoot(target: string, root: string): void {
   const absRoot = toAbsolute(root);
   const absTarget = toAbsolute(target);
-  // Realpath resolves symlinks. If the root or target doesn't exist yet, fall
-  // back to the parent. We realpath both root and target so that comparisons
-  // work across symlinked prefixes (e.g. /var -> /private/var on macOS).
+  // Realpath resolves symlinks. If the root or target doesn't exist yet, walk
+  // up parent-by-parent until realpathSync succeeds, then use that. This
+  // handles the case where an intermediate symlink points outside root.
   const realRoot = existsSync(absRoot) ? realpathSync(absRoot) : absRoot;
   const real = existsSync(absTarget)
     ? realpathSync(absTarget)
-    : existsSync(resolve(absTarget, ".."))
-      ? resolve(absTarget, "..", "..") // approximate
-      : absTarget;
+    : realpathDeepestExisting(absTarget);
   const rel = relative(realRoot, real);
   if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(
