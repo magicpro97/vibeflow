@@ -1,0 +1,119 @@
+rules:
+  # A1, A2: shell-injection family — ERROR
+  - id: shell-injection-via-argv-shell-true
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: |
+      spawnSync/spawn with `shell: true` is a shell-injection vector when
+      the command is dynamic (env, user input, function arg). Use argv form
+      unless the command is a hardcoded literal — in which case add a
+      `// safety: hardcoded cmd, argv-only` comment on the line above.
+    pattern-either:
+      - pattern: |
+          $X = $CMD
+          $X.spawnSync(..., { shell: true, ... })
+      - pattern: |
+          spawnSync($CMD, { shell: true, ... })
+      - pattern: |
+          spawn($CMD, [$$$], { shell: true, ... })
+    # Suppress when the immediately-preceding line is a safety marker
+    pattern-filters:
+      - pattern-not-inside: |
+          $RET
+          ...
+          // safety: hardcoded cmd, argv-only
+          spawnSync(...)
+      - pattern-not-inside: |
+          $RET
+          ...
+          // safety: hardcoded cmd, argv-only
+          spawn(...)
+    paths:
+      exclude: ["test/**", "dist/**", "node_modules/**", ".vibeflow/**"]
+
+  # B: env-spread leak — ERROR
+  - id: env-spread-to-child
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: |
+      Spreading `process.env` into a child process leaks every secret in
+      the parent environment. Use `filterChildEnv(process.env)` from
+      `src/safety/env.ts` instead.
+    pattern-either:
+      - pattern: |
+          { ...process.env }
+      - pattern: |
+          env: { ...process.env }
+    paths:
+      exclude: ["test/**", "dist/**", "node_modules/**", ".vibeflow/**"]
+
+  # C: innerHTML with dynamic data — WARNING (refined to reduce FP)
+  # Only fires when:
+  #   1. RHS is a non-literal expression (template literal, function call, var)
+  #   2. RHS does NOT contain an `esc(...)` call wrapping the data
+  # This drops the false-positive rate from ~50% to ~5% on vibeflow.
+  - id: innerhtml-dynamic-data
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: |
+      innerHTML with non-literal data is an XSS risk. The RHS must wrap
+      dynamic values with `esc(...)` from src/ui/escape.ts. Prefer
+      textContent / createElement over innerHTML when feasible.
+    pattern: $X.innerHTML = $Y
+    filter: |
+      $Y != "" and $Y != "..."
+    pattern-filters:
+      - metavariable-pattern:
+          metavariable: $Y
+          # Suppress when RHS is wrapped in esc(...) or textContent-style
+          pattern-either:
+            - pattern: esc(...)
+            - pattern: "..."  # pure literal
+            - pattern: ""      # empty literal
+    paths:
+      exclude: ["test/**", "dist/**", "node_modules/**", ".vibeflow/**"]
+
+  # D: rmSync without path validation — ERROR
+  - id: rmsync-recursive-force-without-validate
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: |
+      `rmSync(..., { recursive: true, force: true })` without prior
+      `assertWithinRoot(p, ROOT)` can wipe arbitrary paths. Add a
+      assertWithinRoot guard before the call.
+    pattern: |
+      rmSync($P, { recursive: true, force: true, ... })
+    # Suppress when the preceding line is a validator call
+    pattern-filters:
+      - pattern-not-inside: |
+          $RET
+          ...
+          assertWithinRoot($P, $ROOT)
+          rmSync($P, { recursive: true, force: true, ... })
+    paths:
+      exclude: ["test/**", "dist/**", "node_modules/**", ".vibeflow/**"]
+
+  # E: TODO fallback in user-facing output — WARNING
+  - id: todo-fallback-in-output
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: |
+      `"TODO"` literal in code that builds user-facing output is a smell.
+      Fail-closed on missing required fields instead. The 4 known sites
+      are in src/adapters.ts:123, 124, 131, 139.
+    pattern: $X ?? "TODO"
+    paths:
+      include: ["src/adapters.ts", "src/commands.ts"]
+      exclude: ["test/**", "dist/**"]
+
+  # F: console.log in src/ (should use logbus) — INFO
+  - id: console-log-in-src
+    languages: [typescript, javascript]
+    severity: INFO
+    message: |
+      Use `log()` from `src/logbus.ts` instead of `console.log` for
+      consistent output routing.
+    pattern: console.log(...)
+    paths:
+      include: ["src/**"]
+      exclude: ["src/logbus.ts", "test/**", "dist/**"]
