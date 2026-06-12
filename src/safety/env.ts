@@ -25,14 +25,29 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
   "PAGER",
   "PWD",
   "OLDPWD",
-  // VibeFlow-specific
+  // VibeFlow-specific (these are configuration, not secrets — safe to pass through)
   "VIBEFLOW_AI",
   "VIBEFLOW_AI_BRIDGE",
   "VIBEFLOW_LOG_LEVEL",
-  // External tool integrations the agent may call
-  "CONTEXT7_API_KEY",
+  // Engine auth keys: claude/codex/copilot binaries read these directly
+  // from their own env. They MUST propagate to the child or auth fails.
+  // Risk: a malicious child process can read them. Mitigation: only the
+  // engine binary runs, not arbitrary code; the engine itself is trusted.
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "OPENAI_API_KEY",
+  "OPENAI_ORG_ID",
+  "OPENAI_BASE_URL",
+  "GH_TOKEN",
+  "COPILOT_GITHUB_TOKEN",
+  "GITHUB_TOKEN",
+  "GITLAB_TOKEN",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  // Node runtime
   "NODE_PATH",
   "NODE_OPTIONS",
+  "NODE_EXTRA_CA_CERTS",
   "NO_COLOR",
   "FORCE_COLOR",
   // Windows
@@ -69,11 +84,20 @@ const DENY_SUFFIXES: readonly RegExp[] = [
 ];
 
 export function isAllowedKey(key: string): boolean {
+  // First check: known-safe allowlist (system keys + engine auth).
+  // Engine auth keys are allowlisted because claude/codex/copilot
+  // binaries MUST receive them in their env to authenticate.
   if (ALLOWLIST.has(key)) return true;
+  // Then deny: any key matching a known-secret pattern is blocked.
+  // This catches generic SECRET/TOKEN/PASSWORD/AUTH suffixes from
+  // third-party services (AWS, Azure, custom cloud creds, etc.).
   for (const re of DENY_SUFFIXES) {
     if (re.test(key)) return false;
   }
-  return true; // unknown keys are passed through; explicit denylist only blocks known patterns
+  // Unknown keys are passed through; the deny list is the primary
+  // defence for new unknown secrets. If you add a new secret prefix
+  // (e.g. a new cloud provider), add a denylist regex above.
+  return true;
 }
 
 export function filterChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
