@@ -491,9 +491,10 @@ export async function runDispatchAsync(
   if (mode === "bridge") {
     const cmd = bridgeCommand(opts);
     if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
-    // VIBEFLOW_AI is a shell command string (may include args), consistent with aiGenerate's
-    // shell:true spawn. Use a shell-aware spawner unless a test injected its own.
-    const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: true });
+    // Default to argv form (no shell) to prevent metacharacter interpretation in
+    // bridge commands. Callers needing .cmd/.bat shims on Windows can opt in
+    // explicitly with { shell: true } at the call site.
+    const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: false });
     return buildResult(opts, await bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
