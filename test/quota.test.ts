@@ -50,6 +50,25 @@ describe("detectQuota: HTTP-style structured line (high confidence)", () => {
     expect(sig.retryAfterMs).toBe(30_000);
   });
 
+  test("429 + Retry-After: HTTP-date → ms (Date.parse path)", () => {
+    // Date 5 seconds in the future as HTTP-date (IMF-fixdate).
+    const future = new Date(Date.now() + 5_000);
+    const httpDate = future.toUTCString();
+    const stdout = `HTTP 429 Too Many Requests\nRetry-After: ${httpDate}\n`;
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.retryAfterMs).toBeGreaterThan(0);
+    expect(sig.retryAfterMs).toBeLessThanOrEqual(5_000);
+  });
+
+  test("429 + Retry-After: garbage → returns undefined (no retryAfterMs)", () => {
+    // Non-numeric, non-date string. Date.parse returns NaN, falls through.
+    const stdout = "HTTP 429 Too Many Requests\nRetry-After: soonish\n";
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.retryAfterMs).toBeUndefined();
+  });
+
   test('structured "status":529 token -> overloaded high', () => {
     const sig = detectQuota({ status: 1, stdout: 'gateway said {"status":529}' });
     expect(sig.kind).toBe("overloaded");
