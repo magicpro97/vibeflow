@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syncSkillMirrors, verifySkillSync } from "../src/skills/sync";
@@ -101,5 +101,30 @@ describe("verifySkillSync", () => {
     syncSkillMirrors(repo, { mode: "pointer" });
     const result = verifySkillSync(repo);
     expect(result.ok).toBe(true);
+  });
+
+  test("broken symlink under .vibeflow/skills is silently skipped (statSync catch)", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-symlink-"));
+    dirs.push(repo);
+    const skillsRoot = join(repo, ".vibeflow", "skills");
+    mkdirSync(skillsRoot, { recursive: true });
+    // A valid skill
+    const good = join(skillsRoot, "good-skill");
+    mkdirSync(good);
+    writeFileSync(
+      join(good, "SKILL.md"),
+      "---\nname: good-skill\ndescription: Valid skill.\n---\n\n# Good\n\nLong enough body to pass actionable instructions check.\n",
+    );
+    // A broken symlink: symlink target doesn't exist. statSync will throw
+    // ENOENT, caught by the filter in skillNames.
+    try {
+      symlinkSync("/nonexistent-target-xyzzy", join(skillsRoot, "broken-symlink"));
+    } catch {
+      // Some FS may not support symlinks; skip the test in that case.
+      return;
+    }
+    // Should not throw, should sync the good skill, skip the broken symlink.
+    const r = syncSkillMirrors(repo, { mode: "pointer" });
+    expect(r.ok).toBe(true);
   });
 });
