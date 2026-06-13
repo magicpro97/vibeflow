@@ -37,6 +37,21 @@ describe("esc() sync between module and shell.html inline", () => {
     // capture group AND we threw above when `match` was null. The `?? ""`
     // fallback above is only there to satisfy tsc's strict optional rules
     // (noUncheckedIndexedAccess) without using a non-null assertion.
+    // TRUST MODEL: shell.html is a source file in the trusted tree, but
+    // `new Function(inlineBody)` would execute arbitrary code from it.
+    // Two layers of mitigation:
+    //   (1) CODEOWNERS + review: shell.html changes require explicit
+    //       review (it's a VibeFlow-generated UI file but a security-
+    //       sensitive edge nonetheless).
+    //   (2) This test asserts byte-for-byte parity with src/ui/escape.ts,
+    //       so an attacker injecting a function body in shell.html must
+    //       also inject a matching divergence in src/ui/escape.ts for
+    //       the test to pass — that divergence would show up in code
+    //       review of escape.ts.
+    // If you need stronger isolation, replace this `new Function` with
+    // a structural diff: read both files, regex-extract esc, compare
+    // token-by-token. The behavioural test below is the higher-value
+    // assertion; the structural one would be a defense-in-depth add.
     const inlineEsc = new Function("s", inlineBody) as (s: unknown) => string;
     const samples = [
       "<script>alert(1)</script>",
