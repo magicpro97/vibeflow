@@ -180,7 +180,8 @@ async function main(argv: string[]): Promise<number> {
     case "doctor":
       return await doctor(flags);
     case "init":
-      if (flags.interactive && process.stdin.isTTY) return await initInteractive(flags);
+      if (flags.interactive && !flags.ai && process.stdin.isTTY)
+        return await initInteractive(flags);
       return await init(flags);
     case "run":
       return await run(positionals[0], flags);

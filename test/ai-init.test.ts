@@ -275,6 +275,14 @@ describe("runAiInit", () => {
     ];
   }
 
+  function copilotReadyPreflight(_engines: Engine[], _opts: { probe: boolean }): EngineReadiness[] {
+    return [
+      readiness("claude", "no-binary"),
+      readiness("copilot", "ready"),
+      readiness("codex", "no-binary"),
+    ];
+  }
+
   test("dry run returns prompt without spawning", async () => {
     const result = await runAiInit({
       base: process.cwd(),
@@ -302,6 +310,31 @@ describe("runAiInit", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.engine).toBe("claude");
+  });
+
+  test("passes Copilot the full AI-init prompt as an argv prompt", async () => {
+    let capturedArgs: string[] = [];
+    let capturedInput = "unset";
+    const result = await runAiInit({
+      base: process.cwd(),
+      forceEngine: "copilot",
+      preflight: copilotReadyPreflight,
+      spawner: async (_cmd, args, input) => {
+        capturedArgs = args;
+        capturedInput = input;
+        return { status: 0, stdout: "{}", timedOut: false };
+      },
+    });
+    if (!result.ok) {
+      expect(result.reason).toContain("copilot CLI not found");
+      return;
+    }
+
+    expect(capturedInput).toBe("");
+    expect(capturedArgs[0]).toBe("-p");
+    expect(capturedArgs[1]).toContain("You are an AI agent performing project initialization");
+    expect(capturedArgs[1]).toContain(".vibeflow/ai-context/project-profile.json");
+    expect(capturedArgs[2]).toBe("--allow-all-tools");
   });
 
   test("returns error when spawner times out", async () => {

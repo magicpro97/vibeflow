@@ -139,3 +139,44 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
 - No changes to src/logbus.ts: `subscribe()` already returns `() => void` ✅
 - Total: 488 pass / 0 fail (481 baseline + 7 new)
 - Gates: bunx tsc --noEmit clean, bunx biome check src test clean
+
+## [2026-06-12] analysis | copilot-only UI generates codex-looking config
+- Investigated UI intake engine selection without code changes.
+- Source evidence: `src/server.html` submits `engines: fd.getAll("engine")` to `/api/init`; `src/commands.ts` uses those engines via `chosenEngines()` and `gateEngines()`.
+- Root cause candidates: `src/adapters.ts` intentionally emits `AGENTS.md` for `copilot`, and `src/commands.ts` unconditionally calls `writeToolConfigs()`, whose implementation writes Codex `.codex/config.toml` when optional tools are enabled.
+- Verification attempt: `bun --input-type=module -e ...` could not run because `proper-lockfile` dependency was not installed in the workspace.
+
+## [2026-06-12] fix | copilot-only init scoped to .github
+- Fixed Copilot adapter output so `engineFiles("copilot")` emits `.github/copilot-instructions.md` only, without `AGENTS.md` or `.agents/instructions.md`.
+- Scoped `writeToolConfigs()` by selected engines, so copilot-only init no longer writes `.codex/config.toml` even when optional tools are enabled.
+- Updated docs to state Copilot uses `.github/`, not `.agents/` or `.codex/`.
+- Verification: `bun test test/cli.test.ts` passed 91/91; `bun run lint` passed; `bun run typecheck` passed.
+
+## [2026-06-12] update | AGENTS.md shared by codex and copilot
+- Updated the Copilot contract to emit root `AGENTS.md` plus `.github/copilot-instructions.md`, while still avoiding `.agents/` and `.codex/` for copilot-only init.
+- Source check: GitHub Copilot docs say repository custom instructions use `.github/copilot-instructions.md`, and agent instructions may use `AGENTS.md` stored anywhere in the repository.
+- Verification: `bun test test/cli.test.ts` passed 91/91; `bun run typecheck` passed; `bun run lint` passed.
+
+## [2026-06-12] update | active CLI intake for vf init --ai
+- Added `collectAiInitIntake()` in `src/commands.ts` as a separate active intake step for `vf init --ai --ask` and `vf init --ai --interactive`.
+- Updated `src/cli.ts` so plain `vf init --interactive` keeps the existing static flow, while `--ai --interactive` routes through the new active intake before deterministic init and AI enrichment.
+- Updated init help text with `--ask` and `--ai`; added a non-TTY regression test in `test/cli.test.ts` to prevent hanging.
+- Verification: `bun run typecheck` passed; `bunx biome check src/cli.ts src/commands.ts test/cli.test.ts` passed; `bun test test/cli.test.ts` passed 92/92; `vf verify` ran 510 tests passing but failed existing workflow confidence gate for `sport-host-tests` at 0.85.
+
+## [2026-06-12] refactor | init intake moved to dedicated module
+- Moved active CLI question helpers from `src/commands.ts` to `src/init-intake.ts`, keeping `commands.ts` as the orchestration caller only.
+- Verification: `bun test test/cli.test.ts` passed 92/92 before the move; after the move, `bunx biome check src/init-intake.ts src/commands.ts src/cli.ts test/cli.test.ts` passed and `bun run typecheck` passed.
+
+## [2026-06-12] update | init --ask questionnaire data model
+- Added `createInitAskQuestionnaireData()` in `src/init-intake.ts` to accept and normalize the planned `vf init --ask` questionnaire answers without wiring it into the command flow yet.
+- The data model covers project overview/source analysis choice, workflow phases, per-phase input/output/template details, document location, task platform, and document file types.
+- Verification: `bun run typecheck` passed; `bunx biome check src/init-intake.ts` passed.
+
+## [2026-06-12] update | init --ask feeds applyIntake
+- Wired `vf init --ask` in `src/commands.ts` to collect the new questionnaire data, convert it with `initAskQuestionnaireToIntakeAnswers()`, and pass the resulting `IntakeAnswers` into `applyIntake()`.
+- This change is CLI-only; `/api/init` and `vf ui` remain unchanged for future adjustment.
+- Verification: `bun test test/cli.test.ts` passed 92/92; `bunx biome check src/init-intake.ts src/commands.ts src/cli.ts test/cli.test.ts` passed; `bun run typecheck` passed.
+
+## [2026-06-12] test | ai-init copilot argv prompt expectation
+- Updated `test/ai-init.test.ts` to match current `runAiInit()` behavior: Copilot receives the full AI-init prompt through argv (`-p`) instead of a prompt-file reference.
+- Verification: `bun test test/ai-init.test.ts` passed 15/15; `bunx biome check test/ai-init.test.ts` passed; `bun run typecheck` passed.
