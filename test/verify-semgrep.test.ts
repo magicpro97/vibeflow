@@ -92,6 +92,26 @@ describe("runSemgrep (integration)", () => {
     expect(r.parseError).toBe(false);
     expect(r.findings).toBe(0);
   });
+
+  test("delegates non-ENOENT spawn results to decideSemgrepResult (no soft-pass)", () => {
+    // When the binary IS installed (not ENOENT), runSemgrep should fall
+    // through to the pure decision function instead of soft-passing as
+    // missing. This is the production happy path: status=0 → ok clean.
+    const dir = mkdtempSync(join(tmpdir(), "vfsg-"));
+    writeFileSync(join(dir, ".semgrep.yml"), "rules: []\n");
+    const fakeClean = makeSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({ results: [] }),
+    });
+    const r = runSemgrep(dir, {
+      spawn: (_cmd, _args, _opts) => fakeClean,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.missing).toBe(false); // NOT soft-passed
+    expect(r.parseError).toBe(false);
+    expect(r.findings).toBe(0);
+    expect(r.raw).toBe(JSON.stringify({ results: [] }));
+  });
 });
 
 describe("decideSemgrepResult (pure decision function — contract test)", () => {
