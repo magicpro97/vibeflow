@@ -175,4 +175,31 @@ describe("runAiInit", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("exited with status 1");
   });
+
+  test("returns error when forceEngine is not ready (no fallback)", async () => {
+    // mockPreflight only has claude ready. Force copilot (not ready).
+    const result = await runAiInit({
+      base: process.cwd(),
+      forceEngine: "copilot",
+      preflight: mockPreflight,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("forced engine copilot is not ready");
+    expect(result.reason).toContain("vf doctor --probe");
+  });
+
+  test("returns error when no engine is ready (no forceEngine)", async () => {
+    // mockPreflight: all engines not ready.
+    const allDown: EngineReadiness[] = [
+      readiness("claude", "no-binary"),
+      readiness("copilot", "no-binary"),
+      readiness("codex", "no-binary"),
+    ];
+    const result = await runAiInit({
+      base: process.cwd(),
+      preflight: () => allDown,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("no ready engine found");
+  });
 });
