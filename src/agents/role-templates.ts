@@ -19,7 +19,7 @@ export function roleContextFromProfile(p: ProjectProfile): RoleContext {
     testCommand: p.testCommand,
     lintCommand: p.lintCommand,
     packageManager: p.packageManager,
-    hasWeb: p.frameworks.some((f) => /react|vue|svelte|next|nuxt|solid|express/i.test(f)),
+    hasWeb: p.frameworks.some((f) => /react|vue|svelte|next|nuxt|solid/i.test(f)),
   };
 }
 
