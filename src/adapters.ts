@@ -4,6 +4,7 @@ import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/rende
 import { type RoleName, getRoleSpec, roleContextFromProfile } from "./agents/role-templates.js";
 import type { RoleSpec } from "./agents/role.js";
 import { CTX_DIR, type Engine, VERSION, cwd } from "./core.js";
+import { filterChildEnv } from "./safety/env.js";
 import type { ProjectProfile } from "./scanner.js";
 
 /** Banner shown in every generated instruction file so agents know VibeFlow is present. */
@@ -285,7 +286,23 @@ function aiEnrichRole(spec: RoleSpec, profile: ProjectProfile): RoleSpec {
     "Original body:",
     spec.body,
   ].join("\n");
-  const r = spawnSync(cmd, { input: prompt, shell: true, encoding: "utf8", timeout: 30_000 });
+  // argv form (no shell) + filtered env — same B3+B4 contract as aiGenerate /
+  // runDispatch sync/async. tokenizeVibeflowAi lives in dispatch.ts; we
+  // inline the same logic here to avoid a circular import.
+  const argv = cmd
+    .trim()
+    .split(/\s+/)
+    .filter((s) => s.length > 0);
+  if (argv.length === 0) return spec;
+  const execName = argv[0];
+  if (execName === undefined) return spec;
+  const args = argv.slice(1);
+  const r = spawnSync(execName, args, {
+    input: prompt,
+    encoding: "utf8",
+    timeout: 30_000,
+    env: filterChildEnv(process.env),
+  });
   if (r.status !== 0 || !r.stdout?.trim()) return spec;
   const enrichedBody = r.stdout.trim().slice(0, 4000);
   return { ...spec, body: enrichedBody };
