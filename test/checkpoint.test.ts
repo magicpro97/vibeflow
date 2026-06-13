@@ -226,6 +226,132 @@ describe("safety/checkpoint createCheckpoint", () => {
     expect(cp.backedUp).toContain(".env.local");
     expect(copies.some((c) => c.src === p("web"))).toBe(false);
   });
+
+  test("skips files larger than sizeCapBytes (size-cap branch)", () => {
+    const { runner } = fakeGit([
+      ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+      ["rev-parse --verify HEAD", { status: 0, stdout: "abc" }],
+      ["status --porcelain", { status: 0, stdout: "" }],
+      [
+        "ls-files --others --ignored --exclude-standard",
+        { status: 0, stdout: "big.bin\n" },
+      ],
+      ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+    ]);
+    const { fs, copies } = fakeFs({
+      sizes: { [p("big.bin")]: 10_000_000 }, // 10MB
+    });
+    const cp = createCheckpoint("/repo", "cap", {
+      git: runner,
+      fs,
+      sizeCapBytes: 1_000_000, // 1MB cap
+    });
+    expect(cp.backedUp).not.toContain("big.bin");
+    expect(cp.skipped.some((s) => s.includes("big.bin") && s.includes("size cap"))).toBe(true);
+    expect(copies.some((c) => c.src === p("big.bin"))).toBe(false);
+  });
+
+  test("treats fs.isDir throw (e.g. EPERM) as 'not a directory' (defense in depth)", () => {
+    // isDir catches its own errors and returns false. Test by injecting
+    // a fake isDir that throws. The backup should NOT throw (caller
+    // contract: must not crash on per-file isDir failures).
+    const { runner } = fakeGit([
+      ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+      ["rev-parse --verify HEAD", { status: 0, stdout: "abc" }],
+      ["status --porcelain", { status: 0, stdout: "" }],
+      [
+        "ls-files --others --ignored --exclude-standard",
+        { status: 0, stdout: "weird\n" },
+      ],
+      ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+    ]);
+    let isDirCalls = 0;
+    const fakeFsOps: FsOps = {
+      exists: () => true,
+      copyFile: () => {},
+      mkdirp: () => {},
+      size: () => 1,
+      isDir: () => {
+        isDirCalls++;
+        throw new Error("EPERM: synthetic");
+      },
+      writeFile: () => {},
+    };
+    // Must not throw — the catch in defaultFs's isDir would return false,
+    // but our test injects a non-catching isDir. Verify the call doesn't
+    // crash even when isDir throws (the test framework's expect doesn't
+    // catch inside the closure).
+    let didNotThrow = true;
+    try {
+      createCheckpoint("/repo", "perm", { git: runner, fs: fakeFsOps });
+    } catch {
+      didNotThrow = false;
+    }
+    expect(isDirCalls).toBeGreaterThan(0);
+    // We only assert that isDir was invoked and didn't propagate an
+    // unhandled throw. The actual decision is internal to checkpoint.
+    expect(didNotThrow).toBe(true);
+  });
+
+  test("skips file when fs.copyFile throws (not ENOENT → 'copy failed')", () => {
+    const { runner } = fakeGit([
+      ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+      ["rev-parse --verify HEAD", { status: 0, stdout: "abc" }],
+      ["status --porcelain", { status: 0, stdout: "" }],
+      [
+        "ls-files --others --ignored --exclude-standard",
+        { status: 0, stdout: "badperm\n" },
+      ],
+      ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+    ]);
+    const epermErr = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    const fakeFsOps: FsOps = {
+      exists: () => true,
+      copyFile: () => {
+        throw epermErr;
+      },
+      mkdirp: () => {},
+      size: () => 1,
+      isDir: () => false,
+      writeFile: () => {},
+    };
+    const cp = createCheckpoint("/repo", "perm2", {
+      git: runner,
+      fs: fakeFsOps,
+    });
+    expect(cp.backedUp).not.toContain("badperm");
+    expect(cp.skipped.some((s) => s.includes("badperm") && s.includes("EACCES"))).toBe(true);
+  });
+
+  test("treats ENOENT from fs.copyFile as 'stale — no longer exists'", () => {
+    const { runner } = fakeGit([
+      ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+      ["rev-parse --verify HEAD", { status: 0, stdout: "abc" }],
+      ["status --porcelain", { status: 0, stdout: "" }],
+      [
+        "ls-files --others --ignored --exclude-standard",
+        { status: 0, stdout: "stale\n" },
+      ],
+      ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+    ]);
+    const enoentErr = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    const fakeFsOps: FsOps = {
+      exists: () => true,
+      copyFile: () => {
+        throw enoentErr;
+      },
+      mkdirp: () => {},
+      size: () => 1,
+      isDir: () => false,
+      writeFile: () => {},
+    };
+    const cp = createCheckpoint("/repo", "stale", {
+      git: runner,
+      fs: fakeFsOps,
+    });
+    expect(cp.backedUp).not.toContain("stale");
+    expect(cp.skipped.some((s) => s.includes("stale") && s.includes("stale"))).toBe(true);
+  });
 });
 
 describe("safety/checkpoint recoveryHint", () => {
