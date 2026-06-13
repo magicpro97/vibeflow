@@ -99,8 +99,9 @@ rules:
     severity: WARNING
     message: |
       `"TODO"` literal in code that builds user-facing output is a smell.
-      Fail-closed on missing required fields instead. The 4 known sites
-      are in src/adapters.ts:123, 124, 131, 139.
+      Fail-closed on missing required fields instead. The 3 known sites
+      are in src/adapters.ts:162, 165, 168 (canonicalFiles fail-closed throws).
+      Line numbers are post-rebase — re-audit if the pattern reappears.
     pattern: $X ?? "TODO"
     paths:
       include: ["src/adapters.ts", "src/commands.ts"]

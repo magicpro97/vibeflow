@@ -87,6 +87,11 @@ describe("planDelete", () => {
 describe("applyDelete", () => {
   test("removes exactly plan.targets and never .git", () => {
     const dir = tmp();
+    // Create the target so assertWithinRoot can realpath it. The
+    // defense-in-depth guard requires an existing path (a non-existing
+    // child of root walks up to root itself and is correctly rejected
+    // as "equal to root" by the assert).
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
     const calls: string[] = [];
     const plan = {
       repo: dir,
@@ -101,6 +106,20 @@ describe("applyDelete", () => {
     expect(calls).toEqual([join(dir, ".vibeflow")]);
     expect(removed).toEqual([join(dir, ".vibeflow")]);
     expect(calls).not.toContain(join(dir, ".git"));
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("rejects target that escapes the repo (defense in depth)", () => {
+    const dir = tmp();
+    mkdirSync(dir, { recursive: true });
+    const plan = {
+      repo: dir,
+      ctxDir: join(dir, ".vibeflow"),
+      targets: ["/etc/passwd"],
+      preserved: [],
+      summary: "",
+    };
+    expect(() => applyDelete(plan, () => {})).toThrow(/outside root/);
     rmSync(dir, { recursive: true, force: true });
   });
 });

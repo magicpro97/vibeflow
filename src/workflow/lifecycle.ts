@@ -125,11 +125,13 @@ export function applyDelete(plan: DeletePlan, rm: RmOp = defaultRm): string[] {
   const removed: string[] = [];
   for (const target of plan.targets) {
     if (target.endsWith(GIT_DIR) || target.includes(`${GIT_DIR}/`)) continue; // never .git
-    // Note: a defense-in-depth assertWithinRoot(target, plan.repo) call
-    // was tried here but revealed a pre-existing bug in assertWithinRoot
-    // on macOS — `toAbsolute` doesn't realpath, so /var/folders vs
-    // /private/var/folders mismatch breaks existing tests. Filed as a
-    // follow-up to fix assertWithinRoot's macOS path resolution.
+    // Defense in depth: assert the target is inside the plan's repo root
+    // BEFORE any rm call. assertWithinRoot resolves macOS symlinks
+    // (/var/folders vs /private/var/folders) and rejects escapes; for
+    // non-existing children of root it correctly rejects as 'equal to
+    // root' (fail-closed — a caller can't pass a non-existing
+    // traversal path because the assert refuses to verify it).
+    assertWithinRoot(target, plan.repo);
     rm(target);
     removed.push(target);
   }
