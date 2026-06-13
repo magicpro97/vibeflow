@@ -34,6 +34,98 @@ describe("parseQuotaOutput", () => {
   test("unparseable output → exhausted level", () => {
     expect(parseQuotaOutput("claude", "???garbage???").level).toBe("exhausted");
   });
+
+  test("malformed JSON → exhausted with error", () => {
+    const r = parseQuotaOutput("claude", "{not valid json");
+    expect(r.level).toBe("exhausted");
+    expect(r.error).toBeDefined();
+  });
+
+  test("percentage-only text (no fraction, no JSON)", () => {
+    const r = parseQuotaOutput("claude", "remaining: 50%");
+    expect(r.percentRemaining).toBe(50);
+    expect(r.level).toBe("ready");
+  });
+
+  test("fraction with limit=0 → exhausted", () => {
+    const r = parseQuotaOutput("codex", "0/0");
+    expect(r.level).toBe("exhausted");
+    expect(r.error).toBe("zero limit");
+  });
+
+  test("JSON with limit=0 → percentRemaining undefined", () => {
+    const r = parseQuotaOutput("claude", JSON.stringify({ remaining: 5, limit: 0 }));
+    expect(r.percentRemaining).toBeUndefined();
+    expect(r.level).toBe("ready");
+  });
+
+  test("JSON without remaining → percentRemaining undefined", () => {
+    const r = parseQuotaOutput("claude", JSON.stringify({ limit: 100 }));
+    expect(r.percentRemaining).toBeUndefined();
+    expect(r.level).toBe("ready");
+  });
+
+  test("JSON with used_remaining + total keys (third fallback)", () => {
+    const r = parseQuotaOutput(
+      "gh",
+      JSON.stringify({ used_remaining: 25, total: 100, used_count: 30 }),
+    );
+    expect(r.remaining).toBe(25);
+    expect(r.limit).toBe(100);
+    expect(r.used).toBe(30);
+    expect(r.percentRemaining).toBe(25);
+  });
+
+  test("JSON with quota_remaining + quota_total keys (second fallback)", () => {
+    const r = parseQuotaOutput(
+      "claude",
+      JSON.stringify({ quota_remaining: 10, quota_total: 100 }),
+    );
+    expect(r.remaining).toBe(10);
+    expect(r.limit).toBe(100);
+    expect(r.percentRemaining).toBe(10);
+  });
+
+  test("parsePercent with non-numeric capture falls back to undefined", () => {
+    // Force m[1] to be nullish via String.prototype.match override
+    const orig = String.prototype.match;
+    String.prototype.match = function (re: RegExp) {
+      // fraction regex inside parseQuotaOutput — return null so parsePercent is reached
+      if (re.source.includes("\\/")) {
+        return null;
+      }
+      // percent regex inside parsePercent — return match with null capture group
+      if (re.source.includes("\\s*%")) {
+        return ["xx%", undefined as unknown as string];
+      }
+      return orig.call(this, re);
+    };
+    try {
+      const r1 = parseQuotaOutput("claude", "anything %");
+      // parsePercent returns undefined → falls through to "unparseable output"
+      expect(r1.level).toBe("exhausted");
+    } finally {
+      String.prototype.match = orig;
+    }
+  });
+
+  test("fraction regex with null capture groups triggers zero limit path", () => {
+    const orig = String.prototype.match;
+    String.prototype.match = function (re: RegExp) {
+      if (re.source.includes("\\/")) {
+        // Return match with null capture groups → Number.parseInt(undefined ?? "0", 10) = 0
+        return ["x/y", undefined as unknown as string, undefined as unknown as string];
+      }
+      return orig.call(this, re);
+    };
+    try {
+      const r = parseQuotaOutput("codex", "x/y");
+      expect(r.level).toBe("exhausted");
+      expect(r.error).toBe("zero limit");
+    } finally {
+      String.prototype.match = orig;
+    }
+  });
 });
 
 describe("checkEngineQuota", () => {

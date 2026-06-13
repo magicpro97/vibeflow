@@ -4,6 +4,9 @@ import { type QuotaSignal, backoffPlan, detectQuota } from "../src/safety/quota.
 /** Deterministic rng for backoff jitter assertions. */
 const rng = (v: number) => () => v;
 
+/** Reference raw for default-options backoff test: baseMs=2000 (default), attempt=0 -> 2000*2^0=2000. */
+const DEFAULT_TEST_RAW = 2000;
+
 describe("detectQuota: typed claude stream-json (high confidence)", () => {
   test("api_retry event with rate_limit + retry_delay_ms", () => {
     const stdout = [
@@ -23,6 +26,38 @@ describe("detectQuota: typed claude stream-json (high confidence)", () => {
     expect(sig.limited).toBe(true);
     expect(sig.kind).toBe("overloaded");
     expect(sig.confidence).toBe("high");
+  });
+
+  test("top-level obj.type as known token (no err/subtype)", () => {
+    // Covers the obj.type branch in tokenFromObject: type=quota_exceeded recognized at top level.
+    const stdout = '{"type":"quota_exceeded"}';
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.kind).toBe("quota-exhausted");
+    expect(sig.confidence).toBe("high");
+  });
+
+  test("obj.type as unknown string token (typeof===string but not in KIND_BY_TOKEN)", () => {
+    // type is a string, KIND_BY_TOKEN[type] is undefined → fall through. Must not match a token.
+    const stdout = '{"type":"assistant","subtype":"some_msg"}';
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(false);
+  });
+
+  test("retry_after:null with retry_delay (number) — ?? falls through to retry_delay", () => {
+    // retry_after is nullish (null) so ?? falls through to retry_delay; scaled by 1000.
+    const stdout =
+      '{"type":"system","subtype":"api_retry","error":{"type":"rate_limit_error"},"retry_after":null,"retry_delay":12}';
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.retryAfterMs).toBe(12_000);
+  });
+
+  test("retry_after:null with retry_delay missing — no retryAfterMs", () => {
+    const stdout =
+      '{"type":"system","subtype":"api_retry","error":{"type":"rate_limit_error"},"retry_after":null}';
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.retryAfterMs).toBeUndefined();
   });
 
   test("insufficient_quota maps to quota-exhausted, high, no retry", () => {
@@ -107,6 +142,31 @@ describe("detectQuota: robustness", () => {
     expect(sig.evidence.toLowerCase()).toContain("no quota");
   });
 
+  test("JSONL where first line is valid JSON but not an object (e.g. number) is skipped", () => {
+    // Whole-string tryParse fails (multiline junk follows) so we fall to JSONL line loop.
+    // The first line "42" parses to a number; isObject(42) is false -> not pushed to out.
+    // No object parses, so no quota signal.
+    const stdout = "42\nsome non-json line\n4";
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(false);
+  });
+
+  test("whole-string parse returns non-object (number) -> isObject(whole) false, no push", () => {
+    // tryParse succeeds (whole !== undefined), isObject(number) false, branch on line 83 false.
+    const stdout = "42";
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(false);
+  });
+
+  test('err is a string with non-token value — string check true, KIND_BY_TOKEN lookup false', () => {
+    // tokenFromObject line 106: typeof err === "string" true, KIND_BY_TOKEN[err] false -> fall through.
+    const stdout = '{"error":"some_other_error","type":"assistant"}';
+    const sig = detectQuota({ status: 1, stdout });
+    // No known token; fall through to prose — but status=1 + "error" is not in PROSE_PATTERNS
+    // so it returns no-signal. (Object has no type, no subtype, prose misses.)
+    expect(sig.limited).toBe(false);
+  });
+
   test("evidence never echoes a token-like secret", () => {
     const secret = "sk-ant-api03-SECRETSECRETSECRETSECRET";
     const stdout = `{"error":{"type":"rate_limit_error","message":"key ${secret} throttled"}}`;
@@ -173,5 +233,31 @@ describe("backoffPlan", () => {
       evidence: "x",
     };
     expect(backoffPlan(sig, 0, { ...base, rng: rng(0.5) }).retry).toBe(false);
+  });
+
+  test("no opts — uses all defaults (baseMs/capMs/maxRetries/rng)", () => {
+    // Reach lines 227-230: every ?? falls back to default. Verify behavior is sane.
+    const plan = backoffPlan(rateLimit, 0, {});
+    // default baseMs=2000, attempt=0 -> raw=2000; rng=Math.random gives 0..2000.
+    expect(plan.delayMs).toBeGreaterThanOrEqual(0);
+    expect(plan.delayMs).toBeLessThanOrEqual(DEFAULT_TEST_RAW);
+  });
+
+  test("partial opts — only baseMs set, others fall back to defaults", () => {
+    // With baseMs=1000, attempt=0 -> raw=1000; rng=0.5 -> delayMs=500.
+    const plan = backoffPlan(rateLimit, 0, { baseMs: 1000, rng: rng(0.5) });
+    expect(plan.delayMs).toBe(500);
+  });
+
+  test("partial opts — only capMs set, others fall back to defaults", () => {
+    // baseMs default 2000, attempt=0 -> raw=min(capMs=1000, 2000) = 1000; rng=0.5 -> 500.
+    const plan = backoffPlan(rateLimit, 0, { capMs: 1_000, rng: rng(0.5) });
+    expect(plan.delayMs).toBe(500);
+  });
+
+  test("partial opts — only maxRetries set, others fall back to defaults", () => {
+    // maxRetries=0, attempt=0 -> attempt < maxRetries is false -> no retry.
+    const plan = backoffPlan(rateLimit, 0, { maxRetries: 0, rng: rng(0.5) });
+    expect(plan.retry).toBe(false);
   });
 });
