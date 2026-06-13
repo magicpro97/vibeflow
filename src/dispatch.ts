@@ -66,7 +66,14 @@ export interface AsyncSpawnerOpts {
 }
 
 function defaultSpawner(cmd: string, args: string[], input: string) {
-  const r = Bun.spawnSync([cmd, ...args], { stdin: Buffer.from(input, "utf8"), stdout: "pipe" });
+  // B4: pass env: filterChildEnv so the child doesn't inherit the
+  // unfiltered parent env. Same contract as the async path
+  // (makeAsyncSpawner) and runDispatch sync bridge.
+  const r = Bun.spawnSync([cmd, ...args], {
+    stdin: Buffer.from(input, "utf8"),
+    stdout: "pipe",
+    env: filterChildEnv(process.env),
+  });
   return { status: r.exitCode, stdout: r.stdout.toString() };
 }
 
