@@ -17,4 +17,22 @@ describe("RoleSpec", () => {
     expect(SPEC.body.length).toBeGreaterThan(50);
     expect(SPEC.tools.length).toBeGreaterThan(0);
   });
+
+  // src/agents/role.ts has only type exports (RoleSpec interface, ToolIntent,
+  // RoleModel, RoleSandbox) — no executable code. The "real" role fixture
+  // constants (cliEngineSpec, webUiSpec, etc.) live in src/agents/role-templates.ts
+  // and are tested in test/role-templates.test.ts. There's nothing executable to
+  // hit in role.ts, so 0% branch/line coverage is the correct measurement.
+  test("RoleSpec interface is assignable to a const with the documented shape", () => {
+    const s: RoleSpec = {
+      name: "a-b-c",
+      description: "d",
+      body: "e".repeat(60),
+      tools: ["read", "write"],
+      model: "sonnet",
+      sandbox: "read-only",
+    };
+    expect(s.name).toBe("a-b-c");
+    expect(s.sandbox).toBe("read-only");
+  });
 });

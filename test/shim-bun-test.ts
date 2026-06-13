@@ -31,12 +31,15 @@ const test: typeof vitestTest & {
   if: (cond: boolean) => (name: string, fn: () => void | Promise<void>) => void;
   skipIf: (cond: boolean) => (name: string, fn: () => void | Promise<void>) => void;
   todo: (name: string) => void;
+  skip: (name: string, fn?: () => void | Promise<void>) => void;
 } = Object.assign(
   (name: string, fn: () => void | Promise<void>) => vitestTest(name, fn),
   {
     if: makeTestIf(vitestTest),
     skipIf: makeTestSkipIf(vitestTest),
     todo: (name: string) => vitestTest.skip(name),
+    skip: (name: string, fn?: () => void | Promise<void>) =>
+      vitestTest.skip(name, fn ?? (() => {})),
   },
 ) as never;
 
