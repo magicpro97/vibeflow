@@ -88,4 +88,53 @@ describe("frontmatter", () => {
     expect(Object.prototype.hasOwnProperty.call(data, "prototype")).toBe(false);
     expect(data.name).toBe("evil2");
   });
+
+  test("preserves blank lines inside a child block", () => {
+    const doc = [
+      "---",
+      "parent:",
+      "  child: a",
+      "",
+      "  other: b",
+      "---",
+      "body",
+    ].join("\n");
+    const { data, body } = parseFrontmatter(doc);
+    // Blank line inside the indented child block must be preserved in
+    // iteration (the parser continues past it) so subsequent siblings parse.
+    expect(data.parent).toEqual({ child: "a", other: "b" });
+    expect(body).toBe("body");
+  });
+
+  test("an empty child block resolves to an empty string", () => {
+    const doc = ["---", "parent:", "---", "body"].join("\n");
+    const { data, body } = parseFrontmatter(doc);
+    expect(data.parent).toBe("");
+    expect(body).toBe("body");
+  });
+
+  test("forbidden keys with inline list values are also dropped", () => {
+    const doc = [
+      "---",
+      "name: evil-list",
+      "__proto__: [a, b, c]",
+      "---",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    expect(Object.prototype.hasOwnProperty.call(data, "__proto__")).toBe(false);
+    expect(data.name).toBe("evil-list");
+  });
+
+  test("forbidden keys with scalar values are also dropped", () => {
+    // Use `prototype` (also in FORBIDDEN_KEYS) as a non-block scalar.
+    const doc = [
+      "---",
+      "name: evil-scalar",
+      "prototype: nope",
+      "---",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    expect(Object.prototype.hasOwnProperty.call(data, "prototype")).toBe(false);
+    expect(data.name).toBe("evil-scalar");
+  });
 });
