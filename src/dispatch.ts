@@ -75,6 +75,25 @@ const TIMEOUT_STATUS = 124;
 /** Default grace between SIGTERM and the hard SIGKILL when a process group ignores the term. */
 const DEFAULT_GRACE_MS = 3000;
 
+/**
+ * Tokenize VIBEFLOW_AI into argv form.
+ *
+ * `VIBEFLOW_AI` may historically contain a shell command string like
+ * `"my-llm --model gpt-x"`. To run argv-form safely (no shell metachar
+ * interpretation), we split on whitespace. This is a deliberate trade-off:
+ * users who need shell features (pipes, env expansion, globbing) must
+ * write a wrapper script. The old `sh -c "$VIBEFLOW_AI"` behaviour was a
+ * shell-injection vector (CVE-class bug).
+ *
+ * Returns `[cmd, ...args]`. Empty input → `[]`.
+ */
+export function tokenizeVibeflowAi(cmd: string): string[] {
+  return cmd
+    .trim()
+    .split(/\s+/)
+    .filter((s) => s.length > 0);
+}
+
 interface AsyncResult {
   status: number;
   stdout: string;
@@ -463,9 +482,9 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
     // treated as literal data. A custom spawner (e.g. tests) still wins.
     const bridgeSpawn =
       opts.spawner ??
-      ((c: string, _a: string[], input: string) => {
-        const argv = c.trim().split(/\s+/);
-        if (argv.length === 0 || !argv[0]) {
+      ((_c: string, _a: string[], input: string) => {
+        const argv = tokenizeVibeflowAi(cmd);
+        if (argv.length === 0) {
           return { status: 127, stdout: "" };
         }
         const r = Bun.spawnSync(argv, {
@@ -505,8 +524,27 @@ export async function runDispatchAsync(
     // Default to argv form (no shell) to prevent metacharacter interpretation in
     // bridge commands. Callers needing .cmd/.bat shims on Windows can opt in
     // explicitly with { shell: true } at the call site.
+    //
+    // BREAKING: prior versions passed the raw `VIBEFLOW_AI` string to a shell.
+    // VIBEFLOW_AI="my-llm --model x" used to work; now it requires
+    // VIBEFLOW_AI="my-llm" + a separate `VIBEFLOW_AI_ARGS="--model x"` env
+    // (or a wrapper script). Tokenize what we can; users needing shell
+    // features should pass opts.spawner with shell:true explicitly.
+    const argv = tokenizeVibeflowAi(cmd);
+    if (argv.length === 0) {
+      return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is empty" };
+    }
+    const execName = argv[0];
+    const execArgs = argv.slice(1);
+    if (execName === undefined) {
+      return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is empty" };
+    }
     const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: false });
-    return buildResult(opts, await bridgeSpawn(cmd, [], prompt), "bridge command failed");
+    return buildResult(
+      opts,
+      await bridgeSpawn(execName, execArgs, prompt),
+      "bridge command failed",
+    );
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };

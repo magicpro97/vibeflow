@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { makeAsyncSpawner, runDispatch } from "../src/dispatch.js";
+import { makeAsyncSpawner, runDispatch, tokenizeVibeflowAi } from "../src/dispatch.js";
 
 describe("bridge spawner shell default", () => {
   test("default options do not enable shell", () => {
@@ -80,5 +80,31 @@ describe("sync runDispatch bridge spawner (B3 + stealth B4 fix)", () => {
       if (prevBridge === undefined) process.env.VIBEFLOW_AI = undefined;
       else process.env.VIBEFLOW_AI = prevBridge;
     }
+  });
+});
+
+describe("tokenizeVibeflowAi (VIBEFLOW_AI multi-token support)", () => {
+  // BREAKING: VIBEFLOW_AI used to be a shell string passed to `sh -c`.
+  // Now it's tokenized argv. Users with "my-llm --model x" need to keep
+  // the multi-token form working — split-on-whitespace, not literal-name.
+  test("splits simple command + args", () => {
+    expect(tokenizeVibeflowAi("my-llm --model gpt-x")).toEqual(["my-llm", "--model", "gpt-x"]);
+  });
+
+  test("collapses multiple whitespace", () => {
+    expect(tokenizeVibeflowAi("my-llm    --model    x")).toEqual(["my-llm", "--model", "x"]);
+  });
+
+  test("trims leading/trailing whitespace", () => {
+    expect(tokenizeVibeflowAi("   my-llm --model x   ")).toEqual(["my-llm", "--model", "x"]);
+  });
+
+  test("empty string returns []", () => {
+    expect(tokenizeVibeflowAi("")).toEqual([]);
+    expect(tokenizeVibeflowAi("   ")).toEqual([]);
+  });
+
+  test("single token stays as [token]", () => {
+    expect(tokenizeVibeflowAi("my-llm")).toEqual(["my-llm"]);
   });
 });
