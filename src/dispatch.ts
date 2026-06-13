@@ -456,13 +456,23 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
   if (mode === "bridge") {
     const cmd = bridgeCommand(opts);
     if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
-    // VIBEFLOW_AI is a shell command string (may include args) — spawn via shell unless a
-    // test injected its own spawner.
+    // VIBEFLOW_AI is tokenized as a single executable + args (no shell). The
+    // sync path used to spawn `/bin/sh -c <cmd>`, which let a malicious
+    // VIBEFLOW_AI like "x; rm -rf $HOME" break out and run arbitrary shell.
+    // Now we split on whitespace and spawn argv-form so metacharacters are
+    // treated as literal data. A custom spawner (e.g. tests) still wins.
     const bridgeSpawn =
       opts.spawner ??
-      ((c: string, a: string[], input: string) => {
-        const shell = process.platform === "win32" ? ["cmd.exe", "/c", c] : ["/bin/sh", "-c", c];
-        const r = Bun.spawnSync(shell, { stdin: Buffer.from(input, "utf8"), stdout: "pipe" });
+      ((c: string, _a: string[], input: string) => {
+        const argv = c.trim().split(/\s+/);
+        if (argv.length === 0 || !argv[0]) {
+          return { status: 127, stdout: "" };
+        }
+        const r = Bun.spawnSync(argv, {
+          stdin: Buffer.from(input, "utf8"),
+          stdout: "pipe",
+          env: filterChildEnv(process.env),
+        });
         return { status: r.exitCode, stdout: r.stdout.toString() };
       });
     return buildResult(opts, bridgeSpawn(cmd, [], prompt), "bridge command failed");
