@@ -4,14 +4,21 @@ import { join } from "node:path";
 
 export interface SemgrepResult {
   ok: boolean;
-  /** Number of findings. 0 means clean; -1 means parse error (see parseError). */
+  /**
+   * Number of findings.
+   *  - >= 0  : findings count (only meaningful when ok=false)
+   *  - -1    : semgrep ran but its stdout could not be parsed as JSON.
+   *            Check parseError. Distinct from "0 findings" so downstream
+   *            code can surface a clear error rather than printing
+   *            "✗ semgrep: -1 finding(s)".
+   */
   findings: number;
   raw: string;
   missing: boolean;
   /**
-   * True only when semgrep exited non-zero AND its stdout could not be parsed
-   * as JSON. Distinct from "0 findings" so downstream code can surface a
-   * clear error rather than printing "✗ semgrep: -1 finding(s)".
+   * True only when semgrep ran (or was missing) but its stdout could not
+   * be parsed as JSON. Mutually exclusive with `missing`. Downstream code
+   * should report this as a config/syntax problem, not a finding.
    */
   parseError: boolean;
 }
@@ -48,7 +55,7 @@ export function runSemgrep(projectRoot: string): SemgrepResult {
   } catch (err) {
     return {
       ok: false,
-      findings: 0,
+      findings: -1,
       raw: r.stdout || r.stderr,
       missing: false,
       parseError: true,
