@@ -25,3 +25,6 @@ screenshots/
 
 # Hermes runtime plans (local-only)
 .hermes/
+
+# Coverage output
+coverage/
