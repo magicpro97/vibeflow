@@ -11,7 +11,7 @@ import {
   parseSkill,
   renderSkillIndex,
 } from "../src/skills/registry.js";
-import { resolveSkillNeeds } from "../src/skills/resolver.js";
+import { renderSkillNeeds, resolveSkillNeeds } from "../src/skills/resolver.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "vf-skills-"));
@@ -276,5 +276,53 @@ describe("matchSkillsForFile: deprecated skills skipped", () => {
     ];
     const matches = matchSkillsForFile(skills, "x.txt");
     expect(matches).toEqual([]);
+  });
+});
+
+describe("resolveSkillNeeds: framework detection", () => {
+  test("flags framework docs as missing for each detected framework", () => {
+    const needs = resolveSkillNeeds({
+      repo: "/repo",
+      profile: { frameworks: ["React", "Vue"] } as never,
+    });
+    const react = needs.find((n) => n.need === "React docs");
+    const vue = needs.find((n) => n.need === "Vue docs");
+    expect(react?.status).toBe("missing");
+    expect(react?.acquire).toContain("vf discover docs React");
+    expect(vue?.status).toBe("missing");
+  });
+});
+
+describe("renderSkillNeeds", () => {
+  test("returns 'no needs' message for empty list", () => {
+    expect(renderSkillNeeds([])).toContain("No skill needs");
+  });
+
+  test("renders satisfied needs with ✓ checkmark and 'satisfied by' tail", () => {
+    const out = renderSkillNeeds([
+      {
+        need: "xlsx-reader",
+        reason: "attachment data.xlsx",
+        status: "satisfied",
+        satisfiedBy: "xlsx-reader-skill",
+      },
+    ]);
+    expect(out).toContain("✓");
+    expect(out).toContain("xlsx-reader");
+    expect(out).toContain("satisfied by xlsx-reader-skill");
+  });
+
+  test("renders missing needs with • bullet and 'missing — <acquire>' tail", () => {
+    const out = renderSkillNeeds([
+      {
+        need: "docx-reader",
+        reason: "attachment spec.docx",
+        status: "missing",
+        acquire: "vf discover skills docx",
+      },
+    ]);
+    expect(out).toContain("•");
+    expect(out).toContain("docx-reader");
+    expect(out).toContain("missing — vf discover skills docx");
   });
 });
