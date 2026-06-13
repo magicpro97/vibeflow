@@ -6,11 +6,12 @@ import { scanRepo } from "./scanner.js";
 import { confirmInput, selectMany, selectOne, textInput } from "./terminal-prompts.js";
 import { panel } from "./ui.js";
 
-function commaList(value: string): string[] {
-  return value
+function commaList(value: string, fallback: string[] = []): string[] {
+  const values = value
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  return values.length ? values : fallback;
 }
 
 function suggestedFileTypes(languages: string[]): string[] {
@@ -56,6 +57,16 @@ export const INIT_ASK_PHASE_LABELS: Record<InitAskPhase, string> = {
   verify: "Verify",
 };
 
+export const INIT_ASK_PROMPTS = {
+  projectOverview: "Describe the project overview (business, tech stack)",
+  useAiSourceAnalysis: "Use AI to analyze from source base?",
+  phases: "Workflow phases to execute",
+  phaseDetails: "Input/output/template for each selected phase",
+  documentLocation: "Where are project documents stored?",
+  taskPlatform: "Which platform manages tasks?",
+  documentFileTypes: "Document file types",
+};
+
 export interface InitAskPhaseDetail {
   phase: InitAskPhase;
   input?: string;
@@ -77,13 +88,6 @@ export interface InitAskQuestionnaireInput {
 }
 
 export interface InitAskQuestionnaireData {
-  questions: Array<{
-    id: string;
-    question: string;
-    options?: string[];
-    allowCustom?: boolean;
-    multiple?: boolean;
-  }>;
   answers: {
     projectOverview: {
       description: string;
@@ -122,44 +126,6 @@ export function createInitAskQuestionnaireData(
   }));
 
   return {
-    questions: [
-      {
-        id: "projectOverview",
-        question: "Describe the project overview (business, tech stack)",
-        options: ["Description", "Use AI to analyze from source base"],
-        allowCustom: true,
-      },
-      {
-        id: "phases",
-        question: "Workflow phases to execute",
-        options: INIT_ASK_PHASE_OPTIONS.map((phase) => INIT_ASK_PHASE_LABELS[phase]),
-        multiple: true,
-      },
-      {
-        id: "phaseDetails",
-        question: "Input/output/template cho từng phase đã chọn",
-        multiple: true,
-      },
-      {
-        id: "documentLocation",
-        question: "Tài liệu dự án lưu ở đâu?",
-        options: ["Box", "Sharepoint", "Git"],
-        allowCustom: true,
-      },
-      {
-        id: "taskPlatform",
-        question: "Quản lý task bằng platform nào?",
-        options: ["Jira", "Backlog", "Github"],
-        allowCustom: true,
-      },
-      {
-        id: "documentFileTypes",
-        question: "Các loại file type tài liệu?",
-        options: ["md", "pdf", "excel"],
-        allowCustom: true,
-        multiple: true,
-      },
-    ],
     answers: {
       projectOverview: {
         description: input.projectOverview?.description?.trim() ?? "",
@@ -225,12 +191,13 @@ export async function collectInitAskQuestionnaireData(): Promise<InitAskQuestion
 
   try {
     out("vf", panel("Init ask", c.bold("workflow questionnaire")));
-    const description = await textInput("Describe the project overview (business, tech stack)");
-    const useAiSourceAnalysis = await confirmInput("Use AI to analyze from source base?", false);
+    const description = await textInput(INIT_ASK_PROMPTS.projectOverview);
+    const useAiSourceAnalysis = await confirmInput(INIT_ASK_PROMPTS.useAiSourceAnalysis, false);
     const normalizedPhases = normalizePhases(
       await selectMany(
-        "Workflow phases to execute",
+        INIT_ASK_PROMPTS.phases,
         INIT_ASK_PHASE_OPTIONS.map((phase) => INIT_ASK_PHASE_LABELS[phase]),
+        { defaultValues: [INIT_ASK_PHASE_LABELS["requirements-analysis"]] },
       ),
     );
     const phaseDetails: InitAskQuestionnaireInput["phaseDetails"] = {};
@@ -244,18 +211,23 @@ export async function collectInitAskQuestionnaireData(): Promise<InitAskQuestion
       };
     }
     const documentLocation = await selectOne(
-      "Where are project documents stored?",
+      INIT_ASK_PROMPTS.documentLocation,
       ["Box", "Sharepoint", "Git"],
-      { allowCustom: true },
+      { allowCustom: true, defaultValue: "Git" },
     );
     const taskPlatform = await selectOne(
-      "Which platform manages tasks?",
+      INIT_ASK_PROMPTS.taskPlatform,
       ["Jira", "Backlog", "Github"],
-      { allowCustom: true },
+      { allowCustom: true, defaultValue: "Github" },
     );
-    const documentFileTypes = await selectMany("Document file types", ["md", "pdf", "excel"], {
-      allowCustom: true,
-    });
+    const documentFileTypes = await selectMany(
+      INIT_ASK_PROMPTS.documentFileTypes,
+      ["md", "pdf", "excel"],
+      {
+        allowCustom: true,
+        defaultValues: ["md"],
+      },
+    );
 
     return createInitAskQuestionnaireData({
       projectOverview: { description, useAiSourceAnalysis },
@@ -285,42 +257,45 @@ export async function collectAiInitIntake(
     return null;
   }
 
-  const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
-  const profile = scanRepo(cwd());
-  const previous = readState();
-  const detected = [
-    `project: ${profile.name}`,
-    `languages: ${profile.languages.length ? profile.languages.join(", ") : "unknown"}`,
-    `frameworks: ${profile.frameworks.length ? profile.frameworks.join(", ") : "none detected"}`,
-    `package manager: ${profile.packageManager ?? "unknown"}`,
-    `build/test/lint: ${profile.buildCommand ?? "-"} / ${profile.testCommand ?? "-"} / ${profile.lintCommand ?? "-"}`,
-  ];
+  try {
+    const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
+    const profile = scanRepo(cwd());
+    const previous = readState();
+    const detected = [
+      `project: ${profile.name}`,
+      `languages: ${profile.languages.length ? profile.languages.join(", ") : "unknown"}`,
+      `frameworks: ${profile.frameworks.length ? profile.frameworks.join(", ") : "none detected"}`,
+      `package manager: ${profile.packageManager ?? "unknown"}`,
+      `build/test/lint: ${profile.buildCommand ?? "-"} / ${profile.testCommand ?? "-"} / ${profile.lintCommand ?? "-"}`,
+    ];
 
-  out("vf", panel("AI intake", c.bold("answer the missing workflow context")));
-  for (const line of detected) out("vf", c.dim(`  ${line}`));
+    out("vf", panel("AI intake", c.bold("answer the missing workflow context")));
+    for (const line of detected) out("vf", c.dim(`  ${line}`));
 
-  const defaultGoal = previous?.goal || defaultContext().goal;
-  const defaultDone = previous?.success_criteria?.[0] || "Implemented, tested, and verified";
-  const defaultDocs = profile.manifests.includes("package.json")
-    ? "README.md, package.json"
-    : "README.md";
-  const defaultFileTypes = suggestedFileTypes(profile.languages).join(",");
+    const defaultGoal = previous?.goal ?? defaultContext().goal;
+    const defaultDone = previous?.success_criteria?.[0] ?? "";
+    const defaultDocs = "README.md";
+    const defaultFileTypes = suggestedFileTypes(profile.languages).join(",");
 
-  const goal = await textInput("Goal / task", defaultGoal);
-  const expectedResult = await textInput("Definition of Done", defaultDone);
-  const docSource = await textInput("Project docs source", defaultDocs);
-  const taskSource = await textInput("Task / issue source");
-  const fileTypeAnswer = await textInput("File types in scope (comma)", defaultFileTypes);
-  const sample = await textInput("Reference/sample (optional)");
-  const engineAnswer = await textInput("Engines (comma)", (engines ?? ENGINES).join(","));
+    const goal = await textInput("Goal / task", defaultGoal);
+    const expectedResult = await textInput("Definition of Done", defaultDone);
+    const docSource = await textInput("Project docs source", defaultDocs);
+    const taskSource = await textInput("Task / issue source");
+    const fileTypeAnswer = await textInput("File types in scope (comma)", defaultFileTypes);
+    const sample = await textInput("Reference/sample (optional)");
+    const engineAnswer = await textInput("Engines (comma)", (engines ?? ENGINES).join(","));
 
-  return {
-    goal,
-    expectedResult,
-    docSource,
-    taskSource,
-    fileTypes: commaList(fileTypeAnswer),
-    sample,
-    engines: commaList(engineAnswer),
-  };
+    return {
+      goal,
+      expectedResult,
+      docSource,
+      taskSource,
+      fileTypes: commaList(fileTypeAnswer, suggestedFileTypes(profile.languages)),
+      sample,
+      engines: commaList(engineAnswer, engines ?? ENGINES),
+    };
+  } catch (err) {
+    if ((err as Error)?.message === "cancelled") return null;
+    throw err;
+  }
 }
