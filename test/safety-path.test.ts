@@ -58,6 +58,13 @@ describe("assertWithinRoot", () => {
     expect(toAbsolute("a/b")).toMatch(/^[/\\]/);
   });
 
+  test("assertWithinRoot rejects target === root (fail-closed for rmSync)", () => {
+    // Defense in depth: rmSync of the project root is almost never
+    // intentional. The path validator rejects it explicitly. If a
+    // future refactor accidentally removes the check, this test fails.
+    expect(() => assertWithinRoot(root, root)).toThrow();
+  });
+
   test("rejects escape via '../' repeated past root (realpath walk is bounded)", () => {
     // Defense in depth: a path that uses '../' more times than the directory
     // depth should still be rejected. The realpath walk has a depth cap so
