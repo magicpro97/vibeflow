@@ -813,7 +813,7 @@ async function runAiInitOnce(
   // Spawn the engine via direct Bun.spawn
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
 
-  const result = await asyncSpawn(invocation.cmd, args, input);
+  const result = await asyncSpawn(materialized.cmd, args, input);
 
   if (result.timedOut) {
     return {

@@ -39,6 +39,10 @@ import {
   recomputeTotals,
 } from "../src/core.js";
 import { policyGates } from "../src/gates.js";
+import {
+  createInitAskQuestionnaireData,
+  initAskQuestionnaireToIntakeAnswers,
+} from "../src/init-intake.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import { startServer } from "../src/server.js";
 import {
@@ -286,6 +290,41 @@ describe("commands.init", () => {
     init({}, { preflight: allReady });
     expect(units("status", [])).toBe(0);
     expect(units("resources", [])).toBe(0);
+  });
+
+  test("init --ai --ask refuses non-TTY instead of hanging", async () => {
+    const original = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: false });
+    try {
+      const code = await init({ ai: true, ask: true }, { preflight: allReady });
+      expect(code).toBe(2);
+      expect(existsSync(join(dir, CTX_DIR))).toBe(false);
+    } finally {
+      if (original) Object.defineProperty(process.stdin, "isTTY", original);
+      else Reflect.deleteProperty(process.stdin, "isTTY");
+    }
+  });
+
+  test("init --ask questionnaire stores stable phase ids and maps labels to intake", () => {
+    const data = createInitAskQuestionnaireData({
+      projectOverview: { description: "Project overview", useAiSourceAnalysis: true },
+      phases: ["Basic design", "implement"],
+      phaseDetails: {
+        "basic-design": { input: "requirements", output: "basic design doc" },
+        implement: { input: "design", output: "code" },
+      },
+      documentLocation: "Git",
+      taskPlatform: "Github",
+      documentFileTypes: ["md", "pdf"],
+    });
+
+    expect(data.questions.find((q) => q.id === "phases")?.options).toContain("Basic design");
+    expect(data.answers.phases).toEqual(["basic-design", "implement"]);
+
+    const answers = initAskQuestionnaireToIntakeAnswers(data, ["claude"]);
+    expect(answers.goal).toBe("Project overview");
+    expect(answers.expectedResult).toContain("basic-design, implement");
+    expect(answers.sample).toContain("Basic design: input=requirements; output=basic design doc");
   });
 });
 

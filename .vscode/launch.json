@@ -2,6 +2,41 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "type": "bun",
+      "request": "launch",
+      "name": "Debug vf ui",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": ["ui", "--no-open", "--port", "7799"],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false
+    },
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "Debug vf init --ai",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": ["init", "--ai", "--engine", "copilot"],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug vf init --ask",
+      "cwd": "${workspaceFolder}",
+      "command": "bun --inspect-brk=6499 src/cli.ts init --ask"
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach vf ui (Bun inspector)",
+      "address": "127.0.0.1",
+      "port": 6499,
+      "cwd": "${workspaceFolder}",
+      "restart": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
       "name": "Debug vf CLI: doctor",
       "type": "bun",
       "request": "launch",

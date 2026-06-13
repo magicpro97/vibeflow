@@ -78,6 +78,27 @@ describe("dispatch.ts stderr pipe (M2)", () => {
     expect(stderrText).toBe("out-stderr");
   });
 
+  test("reports failure when the command cannot be spawned", async () => {
+    let stderrText: string | undefined;
+    const spawner = makeAsyncSpawner({
+      onStderrChunk: (text) => {
+        stderrText = text;
+      },
+    });
+    let thrown: Error | undefined;
+    let status: number | undefined;
+    try {
+      const result = await spawner("vf-definitely-missing-command", [], "");
+      status = result.status;
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(Boolean(thrown) || (status != null && status !== 0)).toBe(true);
+    if (!thrown && stderrText != null) {
+      expect(stderrText).toContain("vf-definitely-missing-command");
+    }
+  });
+
   test("routes engine-stderr to the bus as level=warn events", async () => {
     const spawner = makeAsyncSpawner({
       onStderrChunk: (text) => {

@@ -50,6 +50,11 @@ import {
 import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
+import {
+  collectAiInitIntake,
+  collectInitAskQuestionnaireData,
+  initAskQuestionnaireToIntakeAnswers,
+} from "./init-intake.js";
 import { appendJournal, ensureIndex } from "./journal.js";
 import { spawnAgent } from "./orchestrator/agent.js";
 import {
@@ -1267,12 +1272,22 @@ export async function init(
   const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
   const dry = Boolean(flags["dry-run"]);
   const ai = Boolean(flags.ai);
+  const questionnaire = flags.ask ? await collectInitAskQuestionnaireData() : null;
+  const answers = flags.ask
+    ? questionnaire && initAskQuestionnaireToIntakeAnswers(questionnaire, engines)
+    : flags.interactive && ai
+      ? await collectAiInitIntake(flags)
+      : { engines };
+  if (!answers) return flags.ask && process.stdin.isTTY ? 130 : 2;
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
-  const result = applyIntake(
-    { engines },
-    { dry, skipPreflight: dry, preflight: inject.preflight, useAi: false },
-  );
+  const result = applyIntake(answers, {
+    dry,
+    skipPreflight: dry,
+    preflight: inject.preflight,
+    useAi: false,
+  });
+
   if (result.refused) return reportPreflightRefusal(result.readiness);
   const label = dry ? "dry run" : "init";
   out("vf", panel("VibeFlow", c.bold(label)));
@@ -2910,7 +2925,7 @@ ${c.bold("Examples:")}
   vf doctor
   vf doctor --probe`,
 
-  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--interactive] [--dry-run]")}
+  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--interactive] [--ask] [--ai] [--dry-run]")}
 Generate the canonical context + engine instruction files and a workflow ledger.
 By default a hard creation gate refuses when no engine is ready; --dry-run previews
 offline (writes nothing).
@@ -2918,10 +2933,13 @@ offline (writes nothing).
 ${c.bold("Options:")}
   --engine <e>   generate for a single engine instead of all three
   --interactive  ask the intake questions in the terminal (TTY only)
+  --ask          run the active CLI intake step before generation
+  --ai           enrich generated context by dispatching a ready engine headlessly
   --dry-run      read-only preview — print what would be written, change nothing
 
 ${c.bold("Examples:")}
   vf init --engine claude
+  vf init --ai --ask
   vf init --dry-run`,
 
   run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot> [--yes]")}
