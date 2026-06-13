@@ -28,11 +28,16 @@ function readSkillFrontmatterName(dir: string): string | null {
 
 function backupIfExists(repo: string, dst: string): void {
   if (existsSync(dst)) {
+    // Defense in depth: assert the destination is inside the project root
+    // BEFORE any destructive operation (cpSync writes the backup into
+    // a subdirectory of `repo`, but if `dst` itself is a traversal path
+    // the assert guards the subsequent rmSync and the write to a backup
+    // path derived from it).
+    assertWithinRoot(dst, repo);
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const backup = join(repo, CANONICAL, ".backup", ts, basename(dst));
     mkdirSync(join(repo, CANONICAL, ".backup", ts), { recursive: true });
     cpSync(dst, backup, { recursive: true });
-    assertWithinRoot(dst, repo);
     rmSync(dst, { recursive: true, force: true });
   }
 }
