@@ -3,18 +3,32 @@ import { existsSync } from "node:fs";
 import { makeAsyncSpawner, runDispatch, tokenizeVibeflowAi } from "../src/dispatch.js";
 
 describe("bridge spawner shell default", () => {
-  test("default options do not enable shell", () => {
+  test("default options do NOT enable shell (argv form, metachar literal)", async () => {
+    // The async spawner's default is shell:false. We can prove this by
+    // spawning a command whose behaviour differs between shell:true and
+    // shell:false for a payload containing a metacharacter. `echo` is
+    // the simplest: shell:false echoes args literally (including `;`),
+    // shell:true would split the `;` and the second arg never runs.
     const spawner = makeAsyncSpawner();
-    // The function exists and returns a spawner; we cannot introspect its closure
-    // directly, but we CAN assert by behaviour: spawn a benign command and confirm
-    // no shell metacharacter interpretation occurs.
-    expect(typeof spawner).toBe("function");
+    // Use `printf` with a single explicit format arg and let the `;`
+    // come through as a separate arg. argv form: printf sees [echo, ";", "x"],
+    // prints ";x". shell form would attempt to run `; x` as a 2nd command.
+    const r = await spawner("printf", ["%s%s", ";", "x"], "");
+    // argv form: printf formats as one %s per arg → ";x". (If you passed
+    // just 1 %s, it would repeat for each arg, hence two %s here so each
+    // arg produces one char.)
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(";x");
   });
 
-  test("explicit shell:true still works (opt-in preserved)", () => {
-    // If a future caller passes shell:true it should still spawn (e.g. .cmd on Windows).
+  test("explicit shell:true still works (opt-in preserved)", async () => {
+    // If a future caller passes shell:true, the spawner should still
+    // work. With shell:true on POSIX it uses `/bin/sh -c`, so the args
+    // get joined and the `;` becomes a command separator — exit 127
+    // because `a` is not a command, but the call still returned.
     const spawner = makeAsyncSpawner({ shell: true });
-    expect(typeof spawner).toBe("function");
+    const r = await spawner("/bin/sh", ["-c", "exit 0"], "");
+    expect(r.status).toBe(0);
   });
 });
 
