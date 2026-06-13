@@ -92,4 +92,22 @@ describe("env allowlist", () => {
     expect(isAllowedKey("FOOBAR_BAZ_QUX")).toBe(false);
     expect(isAllowedKey("RANDOM_APP_CONFIG")).toBe(false);
   });
+
+  test("filterChildEnv passes SSH_AUTH_SOCK + Windows shell resolution keys", () => {
+    // SSH_AUTH_SOCK is plumbing: the path to the ssh-agent socket. The agent
+    // holds the actual keys; the child can authenticate via the socket without
+    // ever seeing the key material. Stripping it breaks git push / ssh auth.
+    // PATHEXT / COMSPEC / SYSTEMROOT are required for Windows process spawn
+    // to resolve .cmd / .bat shims and the cmd.exe interpreter.
+    const out = filterChildEnv({
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      COMSPEC: "C:\\Windows\\system32\\cmd.exe",
+      SYSTEMROOT: "C:\\Windows",
+    });
+    expect(out.SSH_AUTH_SOCK).toBe("/tmp/agent.sock");
+    expect(out.PATHEXT).toBe(".COM;.EXE;.BAT;.CMD");
+    expect(out.COMSPEC).toBe("C:\\Windows\\system32\\cmd.exe");
+    expect(out.SYSTEMROOT).toBe("C:\\Windows");
+  });
 });

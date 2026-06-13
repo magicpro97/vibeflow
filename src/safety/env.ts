@@ -101,11 +101,39 @@ export function isAllowedKey(key: string): boolean {
   return false; // unknown → deny
 }
 
+/**
+ * Keys that should always pass through to child processes, regardless of the
+ * allowlist, in addition to those already in ALLOWLIST. These are environment
+ * plumbing the existing allowlist missed:
+ *
+ * - PATHEXT / COMSPEC / SYSTEMROOT (Windows shell / exec resolution)
+ * - LC_MESSAGES / LC_NUMERIC / LC_TIME (locale, complement to LC_ALL/LC_CTYPE)
+ * - USERPROFILE (Windows analogue of HOME — already in ALLOWLIST but
+ *   cross-platform safety to list here too)
+ * - SSH_AUTH_SOCK (ssh-agent socket — engine auth without exposing the key)
+ * - COLORTERM (engines may want richer terminal output)
+ *
+ * None of these carry credentials on their own. If you need to add a new
+ * one, ask: "is this a secret on its own, or just plumbing?" Plumbing goes
+ * here; secrets go in ALLOWLIST.
+ */
+const PASSTHROUGH = new Set([
+  "PATHEXT",
+  "COMSPEC",
+  "SYSTEMROOT",
+  "LC_MESSAGES",
+  "LC_NUMERIC",
+  "LC_TIME",
+  "USERPROFILE",
+  "SSH_AUTH_SOCK",
+  "COLORTERM",
+]);
+
 export function filterChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;
-    if (isAllowedKey(k)) out[k] = v;
+    if (isAllowedKey(k) || PASSTHROUGH.has(k)) out[k] = v;
   }
   return out;
 }
