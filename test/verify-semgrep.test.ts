@@ -1,20 +1,40 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runSemgrep } from "../src/verify/semgrep.js";
+import { decideSemgrepResult, runSemgrep } from "../src/verify/semgrep.js";
 
 /** True when `cmd` is on PATH. Lets the suite skip cleanly on hosts where
  * semgrep isn't installed (CI installs it via pip; dev laptops may not). */
 function hasCommand(cmd: string): boolean {
+  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
   const probe = spawnSync(cmd, ["--version"], { encoding: "utf8" });
   return probe.status === 0;
 }
 
 const semgrepOk = hasCommand("semgrep");
 
-describe("runSemgrep", () => {
+/**
+ * Build a minimal `SpawnSyncReturns<string>` for unit testing the
+ * decision function without actually spawning semgrep.
+ */
+function makeSpawnResult(
+  overrides: Partial<SpawnSyncReturns<string>> = {},
+): SpawnSyncReturns<string> {
+  return {
+    pid: 0,
+    output: [""],
+    stdout: "",
+    stderr: "",
+    status: 0,
+    signal: null,
+    error: undefined,
+    ...overrides,
+  } as SpawnSyncReturns<string>;
+}
+
+describe("runSemgrep (integration)", () => {
   test("returns ok with no findings when no .semgrep.yml present", () => {
     const dir = mkdtempSync(join(tmpdir(), "vfsg-"));
     const r = runSemgrep(dir);
@@ -54,22 +74,109 @@ describe("runSemgrep", () => {
     expect(r.findings).toBeGreaterThan(0);
   });
 
-  test("returns ok:false findings:-1 parseError:true when JSON parse fails", () => {
-    // We can't easily mock the spawned binary in this environment (Bun
-    // resolves PATH at startup, not per-spawn), so we test the contract
-    // shape: when runSemgrep encounters a parse error it must use the -1
-    // sentinel documented in the interface, NOT 0.
-    //
-    // The shape is tested by calling runSemgrep with no .semgrep.yml —
-    // that path returns missing:true (not the parse-error branch), but
-    // it confirms the type contract compiles and the result is well-formed.
+  test("soft-passes with missing:true when semgrep binary is not installed (ENOENT)", () => {
+    // Mock a spawn that always returns ENOENT — the same path that real
+    // spawnSync takes when the binary is absent. The integration behaviour
+    // here is what `runSemgrep` did before this fix; this test pins it.
     const dir = mkdtempSync(join(tmpdir(), "vfsg-"));
-    const r = runSemgrep(dir);
-    expect(r.findings).toBe(0);
+    writeFileSync(join(dir, ".semgrep.yml"), "rules: []\n");
+    const fakeEnoent = makeSpawnResult({
+      status: null,
+      error: Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }),
+    });
+    const r = runSemgrep(dir, {
+      spawn: (_cmd, _args, _opts) => fakeEnoent,
+    });
+    expect(r.ok).toBe(true);
     expect(r.missing).toBe(true);
     expect(r.parseError).toBe(false);
-    // The -1 sentinel is only reachable when the binary runs AND its
-    // output is unparseable. This is verified manually via the `if
-    // (r.status === 0)` and `try/JSON.parse` branches in the source.
+    expect(r.findings).toBe(0);
+  });
+});
+
+describe("decideSemgrepResult (pure decision function — contract test)", () => {
+  // The decision function is the only place that translates spawnSync output
+  // into a SemgrepResult. Testing it directly (no real binary, no PATH
+  // mocking) gives us real coverage of every branch in the contract.
+
+  test("status:0 with valid JSON 0 findings → ok:true, findings:0, parseError:false", () => {
+    const r = makeSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({ results: [] }),
+    });
+    const d = decideSemgrepResult(r);
+    expect(d.ok).toBe(true);
+    expect(d.findings).toBe(0);
+    expect(d.parseError).toBe(false);
+    expect(d.raw).toBe(JSON.stringify({ results: [] }));
+  });
+
+  test("status:0 always means ok:true, findings:0 (clean exit, even with JSON present)", () => {
+    // Semgrep's --error flag means non-zero only on findings. status:0 is
+    // always clean. If JSON is present, the count is irrelevant — the
+    // exit status is the source of truth.
+    const r = makeSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({
+        results: [{ check_id: "x" }, { check_id: "y" }, { check_id: "z" }],
+      }),
+    });
+    const d = decideSemgrepResult(r);
+    expect(d.ok).toBe(true);
+    expect(d.findings).toBe(0);
+    expect(d.parseError).toBe(false);
+  });
+
+  test("non-zero status with valid JSON findings → ok:false, findings:N, parseError:false", () => {
+    // --error exits non-zero on findings; the JSON is still valid
+    const r = makeSpawnResult({
+      status: 1,
+      stdout: JSON.stringify({ results: [{ check_id: "x" }] }),
+    });
+    const d = decideSemgrepResult(r);
+    expect(d.ok).toBe(false);
+    expect(d.findings).toBe(1);
+    expect(d.parseError).toBe(false);
+  });
+
+  test("non-zero status with unparseable stdout → ok:false, findings:-1, parseError:true (THE -1 SENTINEL)", () => {
+    // This is the contract that was previously unverified: when semgrep
+    // exits non-zero AND its stdout is unparseable, we must use the -1
+    // sentinel so downstream code can branch on parseError rather than
+    // mis-reporting "0 findings" + parseError:true.
+    const r = makeSpawnResult({
+      status: 1,
+      stdout: "this is not json\n",
+      stderr: "rules invalid",
+    });
+    const d = decideSemgrepResult(r);
+    expect(d.ok).toBe(false);
+    expect(d.findings).toBe(-1);
+    expect(d.parseError).toBe(true);
+    expect(d.raw).toBe("this is not json\n");
+  });
+
+  test("null status with no error → ok:false, findings:-1, parseError:true (BEFORE FIX: fell through to JSON.parse and silently hard-failed)", () => {
+    // The path that the previous code missed: r.status === null with no
+    // r.error. We added an explicit branch so this doesn't try to JSON.parse
+    // empty stdout and produce the misleading "0 findings + parseError:true".
+    const r = makeSpawnResult({ status: null });
+    const d = decideSemgrepResult(r);
+    expect(d.ok).toBe(false);
+    expect(d.findings).toBe(-1);
+    expect(d.parseError).toBe(true);
+  });
+
+  test("empty stdout with non-zero status → ok:false, findings:0, parseError:false ('{}' parses cleanly)", () => {
+    // Empty stdout with non-zero status falls back to '{}' which parses
+    // cleanly as 0 findings. The non-zero status makes ok:false. This is
+    // the same behaviour as the original code — not ideal (semgrep may
+    // have failed for an unknown reason), but the parse-error sentinel
+    // is reserved for actual JSON parse failures, not empty stdout.
+    const r = makeSpawnResult({ status: 1, stdout: "" });
+    const d = decideSemgrepResult(r);
+    expect(d.ok).toBe(false);
+    expect(d.findings).toBe(0);
+    expect(d.parseError).toBe(false);
   });
 });
