@@ -80,6 +80,77 @@ describe("syncSkillMirrors full mode", () => {
   });
 });
 
+describe("syncSkillMirrors default mode", () => {
+  test("defaults to pointer mode when opts is omitted (line 67 ?? branch)", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-default-"));
+    dirs.push(repo);
+    const src = join(repo, ".vibeflow", "skills", "default-mode-skill");
+    mkdirSync(src, { recursive: true });
+    writeFileSync(
+      join(src, "SKILL.md"),
+      "---\nname: default-mode-skill\ndescription: Default mode test skill.\n---\n\n# Default Mode\n\nLong enough body to pass actionable instructions check comfortably.\n",
+    );
+    // Call with no opts at all to exercise the `opts.mode ?? "pointer"` branch.
+    const result = syncSkillMirrors(repo);
+    expect(result.mode).toBe("pointer");
+    expect(result.ok).toBe(true);
+    // In pointer mode the mirror SKILL.md is the short generated body,
+    // not a copy of the original (which contains the long description).
+    const pointer = readFileSync(
+      join(repo, ".claude", "skills", "default-mode-skill", "SKILL.md"),
+      "utf8",
+    );
+    expect(pointer).toContain("Sync mode: pointer");
+    expect(pointer).not.toContain("Default mode test skill.");
+  });
+});
+
+describe("syncSkillMirrors with warnings", () => {
+  test("propagates validator warnings (line 79 .map callback)", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-warn-"));
+    dirs.push(repo);
+    // folder name "warn-skill" intentionally differs from frontmatter name
+    // "different-name" so the validator emits a warning, which exercises
+    // the .map callback at line 79 of sync.ts.
+    const src = join(repo, ".vibeflow", "skills", "warn-skill");
+    mkdirSync(src, { recursive: true });
+    writeFileSync(
+      join(src, "SKILL.md"),
+      "---\nname: different-name\ndescription: Warning propagation test skill.\n---\n\n# Warning\n\nLong enough body to pass actionable instructions check comfortably.\n",
+    );
+    const result = syncSkillMirrors(repo, { mode: "pointer" });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("warn-skill"))).toBe(true);
+    // The warning message should mention the folder/frontmatter mismatch.
+    expect(result.warnings.join("\n")).toMatch(
+      /folder name \(warn-skill\) differs from frontmatter\.name \(different-name\)/,
+    );
+  });
+});
+
+describe("syncSkillMirrors with missing canonical dir", () => {
+  test("returns empty result when .vibeflow/skills does not exist (line 33 existsSync branch)", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-empty-"));
+    dirs.push(repo);
+    // Do NOT create .vibeflow/skills. skillNames() should early-return [].
+    const result = syncSkillMirrors(repo, { mode: "pointer" });
+    expect(result.ok).toBe(true);
+    expect(result.synced).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  test("verifySkillSync with missing canonical dir returns ok and no mirrors", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-empty-verify-"));
+    dirs.push(repo);
+    // No .vibeflow/skills at all.
+    const result = verifySkillSync(repo);
+    expect(result.ok).toBe(true);
+    expect(result.synced).toEqual([]);
+    expect(result.errors).toEqual([]);
+  });
+});
+
 describe("verifySkillSync", () => {
   test("reports missing mirrors per engine", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-missing-"));
