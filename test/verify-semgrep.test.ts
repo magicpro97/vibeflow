@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decideSemgrepResult, runSemgrep } from "../src/verify/semgrep.js";
+import { hasCommand, needsShellForCommand } from "../src/core.js";
 
 /** True when `cmd` is on PATH. Lets the suite skip cleanly on hosts where
  * semgrep isn't installed (CI installs it via pip; dev laptops may not). */
@@ -198,5 +199,27 @@ describe("decideSemgrepResult (pure decision function — contract test)", () =>
     expect(d.ok).toBe(false);
     expect(d.findings).toBe(0);
     expect(d.parseError).toBe(false);
+  });
+});
+
+describe("core utilities", () => {
+  test("hasCommand: true for commands that exist on PATH (e.g. git)", () => {
+    expect(hasCommand("git")).toBe(true);
+  });
+
+  test("hasCommand: false for commands that don't exist", () => {
+    expect(hasCommand("definitely-not-a-real-cmd-xyzzy")).toBe(false);
+  });
+
+  test("needsShellForCommand: only true on win32 with .cmd/.bat", () => {
+    if (process.platform === "win32") {
+      expect(needsShellForCommand("foo.cmd")).toBe(true);
+      expect(needsShellForCommand("foo.bat")).toBe(true);
+      expect(needsShellForCommand("foo.exe")).toBe(false);
+    } else {
+      // On non-Windows, the function is always false regardless of ext.
+      expect(needsShellForCommand("foo.cmd")).toBe(false);
+      expect(needsShellForCommand("foo.bat")).toBe(false);
+    }
   });
 });
