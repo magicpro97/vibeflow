@@ -21,18 +21,29 @@ export function toAbsolute(p: string): string {
  *
  * If even the root can't be resolved, falls back to the deepest ancestor
  * whose realpath worked — which is the best we can do for comparison.
+ *
+ * Bounded to MAX_REALPATH_DEPTH iterations to avoid pathological walks
+ * (e.g. a malicious `/proc/self/root/...` chain on Linux, or a deeply
+ * nested non-existing path on a slow filesystem). At each step the
+ * parent is one level closer to filesystem root, so MAX_REALPATH_DEPTH
+ * caps absolute path length at MAX_REALPATH_DEPTH * max-component, which
+ * is comfortably larger than any realistic path on any OS we support.
  */
+const MAX_REALPATH_DEPTH = 4096;
+
 function realpathDeepestExisting(p: string): string {
   let current = p;
   const stop = resolve(p, "..");
-  while (current !== stop) {
+  let depth = 0;
+  while (current !== stop && depth < MAX_REALPATH_DEPTH) {
     try {
       return realpathSync(current);
     } catch {
       current = resolve(current, "..");
+      depth++;
     }
   }
-  return current; // fell off the root, use as-is
+  return current; // fell off the root OR hit depth cap, use as-is
 }
 
 /**

@@ -57,4 +57,14 @@ describe("assertWithinRoot", () => {
   test("toAbsolute returns absolute path", () => {
     expect(toAbsolute("a/b")).toMatch(/^[/\\]/);
   });
+
+  test("rejects escape via '../' repeated past root (realpath walk is bounded)", () => {
+    // Defense in depth: a path that uses '../' more times than the directory
+    // depth should still be rejected. The realpath walk has a depth cap so
+    // an attacker cannot trigger a runaway walk with a 100k-component path
+    // — but the relative-path escape check runs first, so the result is
+    // REJECT regardless of how many '../' are present.
+    const escapePath = `${inside}/../../../..${"/..".repeat(200)}etc/passwd`;
+    expect(() => assertWithinRoot(escapePath, root)).toThrow(/outside root/);
+  });
 });
