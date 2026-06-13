@@ -140,24 +140,19 @@ export function renderCodexAgent(spec: RoleSpec): string {
   // escaped the backslashes. The first commit's 4-quote embed was also
   // wrong — smol-toml parser rejects `""""` (it needs `""\"`, not
   // `""""`). Verified empirically with a parse-roundtrip test.
-  // Multi-line basic strings DO process escape sequences, so we must also
-  // double up literal backslashes (otherwise `\c` or `\d` etc. are rejected
-  // as "unrecognized escape sequence"). Order: embed `"""` first, then
-  // escape backslashes (escaping backslashes first would double-escape
-  // the backslash we just inserted in step 1).
   // Order matters:
   //   1. Escape literal backslashes (\ -> \\). This is needed because
   //      multi-line basic strings process escape sequences, and unknown
   //      ones (\c, \x, etc.) are rejected. Any backslash in the body
   //      must be doubled so it survives the TOML parser as 1 data char.
-  //   2. Embed the closing delimiter (""" -> ""\"). This pattern is per
+  //   2. Embed the closing delimiter (""" -> ""\). This pattern is per
   //      TOML spec. The inserted \ is a literal backslash (it is itself
   //      NOT escaped further because backslash-escape was step 1).
   //
   // Doing step 2 first would over-escape: the inserted \ would become
   // \\ (4 chars in raw output = 2 data backslashes) instead of 1.
   // Per TOML spec (https://toml.io/en/v1.0.0#string), inside a multi-line
-  // basic string, the only way to embed the closing delimiter is `""\"`.
+  // basic string, the only way to embed the closing delimiter is `""\`.
   // Escape backslashes FIRST (so unknown TOML escape sequences in the body
   // are not rejected), then embed `"""`. To preserve the body byte-for-
   // byte we let the auto-trim rule do its thing on the first newline
