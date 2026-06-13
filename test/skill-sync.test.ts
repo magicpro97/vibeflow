@@ -135,4 +135,43 @@ describe("verifySkillSync", () => {
     const r = syncSkillMirrors(repo, { mode: "pointer" });
     expect(r.ok).toBe(true);
   });
+
+  test("writePointerSync catch: read-only mirror dir produces error (not crash)", () => {
+    // The .claude mirror dir exists but is unwritable. syncSkillMirrors
+    // will try to mkdirSync(join(repo, ".claude")) (succeeds, already exists),
+    // then mkdirSync(dst) which succeeds, then writeFileSync SKILL.md which
+    // fails with EACCES — caught by the outer try/catch at line 94.
+    const repo = mkdtempSync(join(tmpdir(), "vf-readonly-"));
+    dirs.push(repo);
+    const skillsRoot = join(repo, ".vibeflow", "skills");
+    mkdirSync(skillsRoot, { recursive: true });
+    const good = join(skillsRoot, "good-skill");
+    mkdirSync(good);
+    writeFileSync(
+      join(good, "SKILL.md"),
+      "---\nname: good-skill\ndescription: Valid skill.\n---\n\n# Good\n\nLong enough body to pass actionable instructions check.\n",
+    );
+    // Pre-create the .claude dir as read-only.
+    const claudeDir = join(repo, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    try {
+      const { chmodSync } = require("node:fs") as typeof import("node:fs");
+      chmodSync(claudeDir, 0o500);
+    } catch {
+      // Some FS may not support chmod (or running as root bypasses it).
+      return;
+    }
+    try {
+      const r = syncSkillMirrors(repo, { mode: "pointer" });
+      // If running as root, chmod 0o500 has no effect and the sync may succeed.
+      // If running as non-root, the catch fires and we get ok:false with errors.
+      if (!r.ok) {
+        expect(r.errors.some((e) => e.includes("EACCES") || e.includes("permission"))).toBe(true);
+      }
+    } finally {
+      // Restore permissions so afterEach cleanup can rmSync the dir.
+      const { chmodSync } = require("node:fs") as typeof import("node:fs");
+      chmodSync(claudeDir, 0o700);
+    }
+  });
 });

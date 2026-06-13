@@ -436,3 +436,139 @@ describe("adapters: branch-sync hooks re-index code navigation (PR-B)", () => {
     expect(Object.keys(files)).toContain(".githooks/post-merge");
   });
 });
+
+describe("runner: presentDecision all event types", () => {
+  test("post-tool-use: no risks returns empty {} (no suppressOutput)", () => {
+    const input: HookInput = { event: "post-tool-use" };
+    const r: HookResult = { decision: "allow", risk: "low", reasons: ["no risk signals detected"] };
+    const p = presentDecision(r, input);
+    expect(p.exitCode).toBe(0);
+    expect(p.json).toBe("{}");
+  });
+
+  test("post-tool-use: risks emit hookSpecificOutput.additionalContext", () => {
+    const input: HookInput = { event: "post-tool-use" };
+    const r: HookResult = { decision: "warn", risk: "medium", reasons: ["suspicious pattern"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toContain("additionalContext");
+    expect(p.json).toContain("suspicious pattern");
+  });
+
+  test("stop: block emits top-level decision:block", () => {
+    const input: HookInput = { event: "stop" };
+    const r: HookResult = { decision: "block", risk: "high", reasons: ["dangerous action"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toContain('"decision":"block"');
+    expect(p.json).toContain("dangerous action");
+  });
+
+  test("stop: risks without block emit additionalContext", () => {
+    const input: HookInput = { event: "stop" };
+    const r: HookResult = { decision: "warn", risk: "medium", reasons: ["minor issue"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toContain("additionalContext");
+    expect(p.json).toContain("minor issue");
+  });
+
+  test("stop: no risks returns empty {} (suppressOutput invalid for Stop)", () => {
+    const input: HookInput = { event: "stop" };
+    const r: HookResult = { decision: "allow", risk: "low", reasons: ["no risk signals detected"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toBe("{}");
+  });
+
+  test("pre-tool-use: block maps to permissionDecision:deny", () => {
+    const input: HookInput = { event: "pre-tool-use" };
+    const r: HookResult = { decision: "block", risk: "high", reasons: ["x"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toContain('"permissionDecision":"deny"');
+  });
+
+  test("pre-tool-use: require_approval maps to permissionDecision:ask", () => {
+    const input: HookInput = { event: "pre-tool-use" };
+    const r: HookResult = { decision: "require_approval", risk: "medium", reasons: ["y"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toContain('"permissionDecision":"ask"');
+  });
+
+  test("pre-tool-use: allow maps to permissionDecision:allow", () => {
+    const input: HookInput = { event: "pre-tool-use" };
+    const r: HookResult = { decision: "allow", risk: "low", reasons: ["z"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toContain('"permissionDecision":"allow"');
+  });
+
+  test("pre-write (other events): emits top-level decision:warn with reason", () => {
+    const input: HookInput = { event: "pre-write", files: [".env"] };
+    const r: HookResult = { decision: "warn", risk: "medium", reasons: ["sensitive file"] };
+    const p = presentDecision(r, input);
+    expect(p.json).toContain('"decision":"warn"');
+    expect(p.json).toContain("sensitive file");
+  });
+});
+
+describe("runner: parseHookInput Claude native payload", () => {
+  test("PreToolUse native payload maps to pre-tool-use with tool+command", () => {
+    const raw = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "ls -la" },
+      workspace: "/repo",
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("pre-tool-use");
+    expect(parsed?.tool).toBe("Bash");
+    expect(parsed?.command).toBe("ls -la");
+    expect(parsed?.workspace).toBe("/repo");
+  });
+
+  test("PostToolUse native payload maps to post-tool-use", () => {
+    const raw = JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Read",
+      tool_input: { file_path: "/repo/a.ts" },
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("post-tool-use");
+    expect(parsed?.tool).toBe("Read");
+    expect(parsed?.files).toEqual(["/repo/a.ts"]);
+  });
+
+  test("Stop native payload maps to stop (with SubagentStop too)", () => {
+    const stopRaw = JSON.stringify({ hook_event_name: "Stop" });
+    expect(parseHookInput(stopRaw)?.event).toBe("stop");
+    const subagentRaw = JSON.stringify({ hook_event_name: "SubagentStop" });
+    expect(parseHookInput(subagentRaw)?.event).toBe("stop");
+  });
+
+  test("Unknown Claude event falls through to pre-tool-use", () => {
+    const raw = JSON.stringify({ hook_event_name: "SessionStart" });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("pre-tool-use");
+  });
+
+  test("Native payload with tool_input.files (array) maps to files list", () => {
+    const raw = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Write",
+      tool_input: { files: ["/repo/a.ts", "/repo/b.ts"] },
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.files).toEqual(["/repo/a.ts", "/repo/b.ts"]);
+  });
+
+  test("Native payload with cwd (instead of workspace) maps to workspace", () => {
+    const raw = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "ls" },
+      cwd: "/alt-path",
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.workspace).toBe("/alt-path");
+  });
+
+  test("Unparseable JSON returns null", () => {
+    expect(parseHookInput("not json")).toBeNull();
+  });
+});
