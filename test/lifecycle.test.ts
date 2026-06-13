@@ -73,6 +73,19 @@ describe("planDelete", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("summary falls back to 'no workflow' when ctxDir exists but state is unreadable", () => {
+    // exists(ctxDir) is true (we create the dir) but readState returns null
+    // (state file is unparseable garbage). The describeWorkflow helper's
+    // `if (!state)` branch — line 52 — produces a 'no workflow in <repo>' summary.
+    const dir = tmp();
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), "{ this is not json");
+    const plan = planDelete(dir);
+    expect(plan.summary).toContain("no workflow");
+    expect(plan.summary).toContain(dir);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("no .vibeflow yields empty targets and a clear summary", () => {
     const dir = tmp();
     const plan = planDelete(dir);
@@ -225,6 +238,50 @@ describe("importWorkflow", () => {
     expect(res?.merged.work_units.map((u) => u.name).sort()).toEqual(["a", "b"]);
     rmSync(dest, { recursive: true, force: true });
     rmSync(srcRepo, { recursive: true, force: true });
+  });
+});
+
+describe("deleteUnit no-state branch", () => {
+  test("returns null when there is no workflow state (readState null)", () => {
+    // deleteUnit calls readState and returns null when the state file is missing.
+    const dir = tmp();
+    // Create .vibeflow dir but do NOT write any state file inside it.
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    expect(deleteUnit(dir, "anything")).toBeNull();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("planDelete --all edge cases", () => {
+  test("classifyManagedFiles catches EISDIR (read a directory) and preserves conservatively", () => {
+    const dir = tmp();
+    writeState(dir, state());
+    // Create a DIRECTORY at the path of a managed engine file so readFileSync throws EISDIR.
+    // The injected exists() returns true, the try-block fails, catch handles non-ENOENT
+    // by pushing to preserved (conservative fallback) — line 80 branch.
+    mkdirSync(join(dir, "CLAUDE.md"), { recursive: true });
+    const plan = planDelete(dir, { all: true });
+    expect(plan.targets).toContain(join(dir, ".vibeflow"));
+    expect(plan.preserved).toContain(join(dir, "CLAUDE.md"));
+    expect(plan.targets).not.toContain(join(dir, "CLAUDE.md"));
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("classifyManagedFiles catches ENOENT (race) and skips without preserving", () => {
+    const dir = tmp();
+    writeState(dir, state());
+    // Inject an exists() that lies — returns true for .github/copilot-instructions.md
+    // even though the file does not exist. readFileSync then throws ENOENT, which the
+    // catch block recognises and `continue`s over (line 79 true branch). The path must
+    // NOT show up in either targets or preserved. Also return true for the ctx dir so
+    // planDelete reaches classifyManagedFiles (its early return otherwise skips it).
+    const liesAbout = join(dir, ".github", "copilot-instructions.md");
+    const ctxDir = join(dir, ".vibeflow");
+    const plan = planDelete(dir, { all: true }, (p) => p === liesAbout || p === ctxDir);
+    expect(plan.targets).toContain(ctxDir);
+    expect(plan.targets).not.toContain(liesAbout);
+    expect(plan.preserved).not.toContain(liesAbout);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 
