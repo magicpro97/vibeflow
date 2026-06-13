@@ -9,6 +9,7 @@ import {
   matchSkillsForFile,
   matchSkillsForTask,
   parseSkill,
+  renderSkillIndex,
 } from "../src/skills/registry.js";
 import { resolveSkillNeeds } from "../src/skills/resolver.js";
 
@@ -220,5 +221,60 @@ describe("maintainer lifecycle", () => {
     expect(canPromote({ status: "experimental", validated: false, approved: true }).ok).toBe(false);
     expect(canPromote({ status: "experimental", validated: true, approved: false }).ok).toBe(false);
     expect(canPromote({ status: "experimental", validated: true, approved: true }).ok).toBe(true);
+  });
+});
+
+describe("renderSkillIndex", () => {
+  test("renders header only when skills array is empty", () => {
+    const out = renderSkillIndex([]);
+    expect(out).toContain("# Skill Index");
+    expect(out.split("\n").length).toBeGreaterThanOrEqual(3);
+    expect(out).toContain("| skill | status | capabilities |");
+  });
+
+  test("renders a markdown table row per skill", () => {
+    const skills: Skill[] = [
+      { name: "rust-debug", status: "verified", capabilities: ["debug", "trace"] },
+      { name: "ts-test", status: "experimental", capabilities: ["test"] },
+    ];
+    const out = renderSkillIndex(skills);
+    expect(out).toContain("| rust-debug | verified | debug, trace |");
+    expect(out).toContain("| ts-test | experimental | test |");
+  });
+});
+
+describe("discoverSkills: error paths", () => {
+  test("continues past non-directory entries without crashing", () => {
+    const repo = tmpRepo();
+    const root = join(repo, ".vibeflow", "skills");
+    mkdirSync(root, { recursive: true });
+    // Place a regular file alongside an actual skill dir.
+    writeFileSync(join(root, "not-a-dir"), "x");
+    const dir = join(root, "good-skill");
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      "---\nname: good-skill\ndescription: A valid skill.\n---\n\n# Good Skill\n\nLong enough body to pass the actionable instructions check.\n",
+    );
+    try {
+      const skills = discoverSkills(repo);
+      expect(skills.find((s) => s.name === "good-skill")).toBeDefined();
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("matchSkillsForFile: deprecated skills skipped", () => {
+  test("deprecated skill is not returned as a match", () => {
+    const skills: Skill[] = [
+      {
+        name: "old-skill",
+        status: "deprecated",
+        triggers: ["x.txt"],
+      },
+    ];
+    const matches = matchSkillsForFile(skills, "x.txt");
+    expect(matches).toEqual([]);
   });
 });
