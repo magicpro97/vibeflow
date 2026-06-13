@@ -125,6 +125,11 @@ export function applyDelete(plan: DeletePlan, rm: RmOp = defaultRm): string[] {
   const removed: string[] = [];
   for (const target of plan.targets) {
     if (target.endsWith(GIT_DIR) || target.includes(`${GIT_DIR}/`)) continue; // never .git
+    // Note: a defense-in-depth assertWithinRoot(target, plan.repo) call
+    // was tried here but revealed a pre-existing bug in assertWithinRoot
+    // on macOS — `toAbsolute` doesn't realpath, so /var/folders vs
+    // /private/var/folders mismatch breaks existing tests. Filed as a
+    // follow-up to fix assertWithinRoot's macOS path resolution.
     rm(target);
     removed.push(target);
   }
