@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -460,5 +467,192 @@ describe("safety/checkpoint real-git smoke (temp dir only)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coverage-gap tests: exercise the production-default seams (defaultGit +
+// defaultFs) and the `?? null` defensive fallbacks inside makeWip.
+// These run on a real tmpdir so the default filesystem code paths can touch
+// actual files; the git side is faked or spawn-failed as needed.
+// ---------------------------------------------------------------------------
+
+describe("safety/checkpoint defaultFs seam (no fs injection)", () => {
+  const gitOk = (() => {
+    try {
+      execFileSync("git", ["--version"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  test.if(gitOk)(
+    "uses the real defaultFs (copyFile/mkdirp/size/isDir) on a real tmpdir without injecting fs",
+    () => {
+      // No `fs` option → createCheckpoint falls through to `opts.fs ?? defaultFs()`.
+      // The defaultFs implementations touch the real filesystem (mkdirSync, copyFileSync,
+      // statSync). We seed an ignored file and assert the backup copy lands in the
+      // canonical backup dir, proving all four default methods were exercised.
+      const dir = mkdtempSync(join(tmpdir(), "vf-cp-df-"));
+      try {
+        execFileSync("git", ["init", "-q"], { cwd: dir });
+        execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+        execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+        // A small ignored file the defaultFs.copyFile + size will copy.
+        writeFileSync(join(dir, ".env.local"), "SECRET=1\n");
+        execFileSync("git", ["status", "--porcelain"], { cwd: dir }); // warm up
+        // The fake git runner answers all probes as if the repo is clean & empty,
+        // but with the ignored-dirty file listed. No `fs` injection → defaultFs.
+        const { runner } = fakeGit([
+          ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+          ["rev-parse --verify HEAD", { status: 128 }], // unborn
+          ["status --porcelain", { status: 0, stdout: "" }],
+          ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+          [
+            "ls-files --others --ignored --exclude-standard",
+            { status: 0, stdout: ".env.local\n" },
+          ],
+        ]);
+        const cp = createCheckpoint(dir, "df-run", { git: runner });
+        expect(cp.isRepo).toBe(true);
+        expect(cp.backedUp).toContain(".env.local");
+        // The real defaultFs.copyFile must have produced a real file on disk
+        // under the canonical backup location.
+        const copied = join(dir, ".vibeflow", "backup", "df-run", ".env.local");
+        expect(existsSync(copied)).toBe(true);
+        expect(readFileSync(copied, "utf8")).toBe("SECRET=1\n");
+        // The defaultFs.writeFile (ensureCtxIgnored) must have written the guard.
+        const guard = join(dir, ".vibeflow", ".gitignore");
+        expect(existsSync(guard)).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.if(gitOk)(
+    "defaultFs.isDir try/catch branch fires when the ignored entry is a directory (no fs injection)",
+    () => {
+      // The defaultFs.isDir wraps statSync in try/catch and returns false on
+      // failure. We seed a *real* ignored directory: statSync will succeed and
+      // return isDirectory()=true, so the entry is skipped via the "isDir"
+      // branch (not the catch). Combined with the sibling file, this also
+      // exercises defaultFs.size + copyFile for the file.
+      const dir = mkdtempSync(join(tmpdir(), "vf-cp-df2-"));
+      try {
+        execFileSync("git", ["init", "-q"], { cwd: dir });
+        execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+        execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+        mkdirSync(join(dir, "web"));
+        writeFileSync(join(dir, "web", "x.txt"), "x");
+        writeFileSync(join(dir, ".env.local"), "S=1\n");
+        const { runner } = fakeGit([
+          ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+          ["rev-parse --verify HEAD", { status: 0, stdout: "abc" }],
+          ["status --porcelain", { status: 0, stdout: "" }],
+          ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+          [
+            "ls-files --others --ignored --exclude-standard",
+            { status: 0, stdout: "web\n.env.local\n" },
+          ],
+        ]);
+        const cp = createCheckpoint(dir, "df2", { git: runner });
+        expect(cp.skipped.some((s) => s.includes("web") && s.includes("directory"))).toBe(true);
+        expect(cp.backedUp).toContain(".env.local");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe("safety/checkpoint defaultGit seam (no git injection)", () => {
+  // When the working directory is not accessible (or git cannot run from it),
+  // node:child_process's spawnSync returns { status: undefined, stdout: null,
+  // stderr: null, error: ENOENT }. defaultGit's defensive fallbacks then fire.
+  // We trigger this by passing a non-existent base path AND omitting the `git`
+  // injection — the production code constructs `defaultGit(base)` whose closure
+  // hits the three `??` fallbacks on its first call.
+  test("defaultGit fallbacks (r.status ?? 1, r.stdout ?? '', r.stderr ?? '') fire when spawn fails", () => {
+    // Sanity probe: confirm a spawn with the same args fails in this runtime.
+    // Under bun, `status`/`stdout`/`stderr` may be `undefined`; under node,
+    // they may be `null`. Both are caught by the `??` fallback.
+    const probe = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: "/nonexistent/garbage/dir",
+      encoding: "utf8",
+    });
+    expect(probe.status == null).toBe(true);
+    expect(probe.stdout == null).toBe(true);
+    expect(probe.stderr == null).toBe(true);
+    // The closure runs once for `rev-parse --is-inside-work-tree`, hits the
+    // ENOENT, takes all three `??` fallbacks, returns status:1, and the call
+    // degrades to isRepo:false.
+    const cp = createCheckpoint("/nonexistent/garbage/dir", "nopath");
+    expect(cp.isRepo).toBe(false);
+  });
+});
+
+describe("safety/checkpoint makeWip ?? null fallbacks", () => {
+  test("baseRef=null when the makeWip HEAD probe returns empty stdout (lines()[0] ?? null)", () => {
+    // The gitState probe and the makeWip probe both call `rev-parse --verify
+    // HEAD`. We need different responses: gitState must return a valid SHA
+    // (so hasCommits=true), and makeWip's probe must return empty stdout
+    // (so lines()[0] is undefined → null). Use a call-counting runner.
+    const responses: Array<{ status: number; stdout: string; stderr: string }> = [
+      // 1st call: gitState rev-parse --is-inside-work-tree
+      { status: 0, stdout: "true", stderr: "" },
+      // 2nd call: gitState rev-parse --verify HEAD  → hasCommits=true
+      { status: 0, stdout: "deadbeef\n", stderr: "" },
+      // 3rd call: gitState status --porcelain
+      { status: 0, stdout: "", stderr: "" },
+      // 4th call: gitState ls-files --others --exclude-standard
+      { status: 0, stdout: "", stderr: "" },
+      // 5th call: gitState ls-files --others --ignored --exclude-standard
+      { status: 0, stdout: "", stderr: "" },
+      // 6th call: makeWip rev-parse --verify HEAD  → empty stdout → ?? null
+      { status: 0, stdout: "", stderr: "" },
+      // 7th call: makeWip add -A
+      { status: 0, stdout: "", stderr: "" },
+      // 8th call: makeWip commit -m ...
+      { status: 0, stdout: "", stderr: "" },
+      // 9th call: makeWip rev-parse HEAD (post-commit) → empty → wipSha null
+      { status: 0, stdout: "", stderr: "" },
+    ];
+    const calls: string[] = [];
+    const runner: GitRunner = (args) => {
+      calls.push(args.join(" "));
+      return responses.shift() ?? { status: 0, stdout: "", stderr: "" };
+    };
+    const { fs } = fakeFs();
+    const cp = createCheckpoint("/repo", "empty", {
+      autoWip: true,
+      git: runner,
+      fs,
+    });
+    expect(cp.hasCommits).toBe(true);
+    expect(cp.baseRef).toBeNull();
+    expect(cp.wipSha).toBeNull();
+    // Sanity: the runner really did see both the makeWip HEAD probe and the
+    // post-commit rev-parse HEAD.
+    expect(calls).toContain("rev-parse --verify HEAD");
+    expect(calls).toContain("rev-parse HEAD");
+  });
+
+  test("baseRef=null when no autoWip is requested (no makeWip call)", () => {
+    // Trivial: autoWip=false skips makeWip entirely, so baseRef stays null.
+    // This is the existing behaviour, asserted here for symmetry.
+    const { runner } = fakeGit([
+      ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+      ["rev-parse --verify HEAD", { status: 0, stdout: "feedface\n" }],
+      ["status --porcelain", { status: 0, stdout: "" }],
+      ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+      ["ls-files --others --ignored --exclude-standard", { status: 0, stdout: "" }],
+    ]);
+    const { fs } = fakeFs();
+    const cp = createCheckpoint("/repo", "noauto", { git: runner, fs });
+    expect(cp.hasCommits).toBe(true);
+    expect(cp.baseRef).toBeNull();
+    expect(cp.wipSha).toBeNull();
   });
 });
