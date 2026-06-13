@@ -280,3 +280,46 @@ describe("runDispatchAsync — timedOut plumbing maps to reason 'timeout'", () =
     expect(r.reason).toBe("claude failed");
   });
 });
+
+describe("runDispatchAsync — bridge mode (async spawner)", () => {
+  test("bridge mode: VIBEFLOW_AI unset returns 'not set' reason", async () => {
+    const prev = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "";
+    try {
+      const r = await runDispatchAsync({
+        engine: "claude",
+        prompt: "p",
+        mode: "bridge",
+      });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toContain("VIBEFLOW_AI");
+    } finally {
+      if (prev === undefined) process.env.VIBEFLOW_AI = undefined;
+      else process.env.VIBEFLOW_AI = prev;
+    }
+  });
+
+  test("bridge mode: tokenized cmd invokes spawner with [exec, ...args] (no shell)", async () => {
+    const prev = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "fake-llm --model x --quiet";
+    let captured: { cmd: string; args: string[] } | null = null;
+    const spawner: AsyncSpawner = async (cmd, args, _input) => {
+      captured = { cmd, args };
+      return { status: 0, stdout: "ok" };
+    };
+    try {
+      const r = await runDispatchAsync({
+        engine: "claude",
+        prompt: "hello",
+        mode: "bridge",
+        spawner,
+      });
+      expect(r.ok).toBe(true);
+      expect(captured?.cmd).toBe("fake-llm");
+      expect(captured?.args).toEqual(["--model", "x", "--quiet"]);
+    } finally {
+      if (prev === undefined) process.env.VIBEFLOW_AI = undefined;
+      else process.env.VIBEFLOW_AI = prev;
+    }
+  });
+});
