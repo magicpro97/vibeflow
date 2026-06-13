@@ -28,6 +28,14 @@ export function toAbsolute(p: string): string {
  * parent is one level closer to filesystem root, so MAX_REALPATH_DEPTH
  * caps absolute path length at MAX_REALPATH_DEPTH * max-component, which
  * is comfortably larger than any realistic path on any OS we support.
+ *
+ * SECURITY NOTE: the depth cap is a performance / DoS guard, NOT a
+ * security boundary. If the cap is exhausted, the fallback `current`
+ * is the most-recently-failed ancestor (an un-resolved path). The
+ * downstream `relative(realRoot, real)` check in {@link assertWithinRoot}
+ * is what enforces the security invariant — if the relative path
+ * escapes, the assert throws regardless of whether realpath was
+ * resolved or capped.
  */
 const MAX_REALPATH_DEPTH = 4096;
 
@@ -59,6 +67,14 @@ export function assertWithinRoot(target: string, root: string): void {
   // Realpath resolves symlinks. If the root or target doesn't exist yet, walk
   // up parent-by-parent until realpathSync succeeds, then use that. This
   // handles the case where an intermediate symlink points outside root.
+  //
+  // PLATFORM NOTE (Windows): realpathSync on Windows does NOT normalize
+  // across drive boundaries — `C:\a\..\D:\b` is not detected as a
+  // cross-drive traversal. The call-site caller is responsible for
+  // passing a root + target on the same drive. This is acceptable for
+  // VibeFlow's use case (one project = one worktree = one drive on
+  // Windows), but a defense-in-depth improvement would split-and-resolve
+  // each drive root separately before the relative() check.
   const realRoot = existsSync(absRoot) ? realpathSync(absRoot) : absRoot;
   const real = existsSync(absTarget) ? realpathSync(absTarget) : realpathDeepestExisting(absTarget);
   const rel = relative(realRoot, real);
