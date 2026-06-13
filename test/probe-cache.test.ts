@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
 import {
   ProbeCache,
   getCachedProbe,
+  getSharedCache,
+  invalidateAllProbes,
   invalidateProbe,
   setCachedProbe,
   setSharedCache,
@@ -127,6 +128,27 @@ describe("shared cache helpers", () => {
     expect(getCachedProbe("claude", "/repo", ["x"])?.detail).toBe("via shared");
     invalidateProbe("claude");
     expect(getCachedProbe("claude", "/repo", ["x"])).toBeUndefined();
+    setSharedCache(undefined);
+  });
+
+  test("invalidateAllProbes clears all entries", () => {
+    const fresh = new ProbeCache();
+    setSharedCache(fresh);
+    setCachedProbe("claude", "/repo", ["x"], {
+      level: "ready",
+      detail: "a",
+      engine: "claude",
+      checkedAt: "2026-06-12",
+    });
+    setCachedProbe("codex", "/repo", ["y"], {
+      level: "ready",
+      detail: "b",
+      engine: "codex",
+      checkedAt: "2026-06-12",
+    });
+    invalidateAllProbes();
+    expect(getCachedProbe("claude", "/repo", ["x"])).toBeUndefined();
+    expect(getCachedProbe("codex", "/repo", ["y"])).toBeUndefined();
     setSharedCache(undefined);
   });
 });
