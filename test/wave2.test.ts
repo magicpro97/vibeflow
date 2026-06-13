@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultContext } from "../src/adapters.js";
@@ -10,7 +10,11 @@ import {
   parseEngineSummary,
   runDispatch,
 } from "../src/dispatch.js";
-import { e2eEvaluateDynamicImportWarning, e2eUnicodeSelectorWarning, policyGates } from "../src/gates.js";
+import {
+  e2eEvaluateDynamicImportWarning,
+  e2eUnicodeSelectorWarning,
+  policyGates,
+} from "../src/gates.js";
 import { claudeHookConfig, engineHookFiles } from "../src/hooks/adapters.js";
 import { DEFAULT_SETTINGS } from "../src/settings.js";
 import { resolveSkillNeeds, skillForFile } from "../src/skills/resolver.js";
@@ -360,7 +364,7 @@ describe("e2eUnicodeSelectorWarning", () => {
       `import { test } from "bun:test";\n` +
         `test("foo", async () => {\n` +
         `  await page.getByText("text=漢字 button").click();\n` +
-        `});\n`,
+        "});\n",
     );
     try {
       const warnings = e2eUnicodeSelectorWarning(dir);
@@ -382,11 +386,13 @@ describe("e2eEvaluateDynamicImportWarning", () => {
       `import { test } from "bun:test";\n` +
         `test("foo", async () => {\n` +
         `  await page.evaluate(async () => await import("./dynamic"));\n` +
-        `});\n`,
+        "});\n",
     );
     try {
       const warnings = e2eEvaluateDynamicImportWarning(dir);
-      expect(warnings.some((w) => w.includes("dynamic import") && w.includes("bundled"))).toBe(true);
+      expect(warnings.some((w) => w.includes("dynamic import") && w.includes("bundled"))).toBe(
+        true,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -315,8 +315,9 @@ describe("runDispatchAsync — bridge mode (async spawner)", () => {
         spawner,
       });
       expect(r.ok).toBe(true);
-      expect(captured?.cmd).toBe("fake-llm");
-      expect(captured?.args).toEqual(["--model", "x", "--quiet"]);
+      const c = captured as unknown as { cmd: string; args: string[] };
+      expect(c.cmd).toBe("fake-llm");
+      expect(c.args).toEqual(["--model", "x", "--quiet"]);
     } finally {
       if (prev === undefined) process.env.VIBEFLOW_AI = undefined;
       else process.env.VIBEFLOW_AI = prev;

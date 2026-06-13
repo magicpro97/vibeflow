@@ -234,8 +234,22 @@ describe("renderSkillIndex", () => {
 
   test("renders a markdown table row per skill", () => {
     const skills: Skill[] = [
-      { name: "rust-debug", status: "verified", capabilities: ["debug", "trace"] },
-      { name: "ts-test", status: "experimental", capabilities: ["test"] },
+      {
+        name: "rust-debug",
+        status: "verified",
+        capabilities: ["debug", "trace"],
+        description: "d",
+        dir: "/x",
+        path: "/x",
+      },
+      {
+        name: "ts-test",
+        status: "experimental",
+        capabilities: ["test"],
+        description: "d",
+        dir: "/x",
+        path: "/x",
+      },
     ];
     const out = renderSkillIndex(skills);
     expect(out).toContain("| rust-debug | verified | debug, trace |");
@@ -272,6 +286,9 @@ describe("matchSkillsForFile: deprecated skills skipped", () => {
         name: "old-skill",
         status: "deprecated",
         triggers: ["x.txt"],
+        description: "d",
+        dir: "/x",
+        path: "/x",
       },
     ];
     const matches = matchSkillsForFile(skills, "x.txt");

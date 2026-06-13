@@ -3,15 +3,13 @@ import type { SpawnSyncReturns } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hasCommand as hasCommandCore, needsShellForCommand } from "../src/core.js";
 import { decideSemgrepResult, runSemgrep } from "../src/verify/semgrep.js";
-import { hasCommand, needsShellForCommand } from "../src/core.js";
 
 /** True when `cmd` is on PATH. Lets the suite skip cleanly on hosts where
  * semgrep isn't installed (CI installs it via pip; dev laptops may not). */
 function hasCommand(cmd: string): boolean {
-  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
-  const probe = spawnSync(cmd, ["--version"], { encoding: "utf8" });
-  return probe.status === 0;
+  return hasCommandCore(cmd);
 }
 
 const semgrepOk = hasCommand("semgrep");
