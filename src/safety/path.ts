@@ -8,10 +8,16 @@ import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 /**
- * Resolve a path to absolute form, relative to cwd if relative.
+ * Resolve a path to absolute form, relative to cwd if relative. If the
+ * path already exists, also realpath it so that symlinks (notably
+ * macOS /var/folders -> /private/var/folders) are resolved uniformly.
+ * This keeps callers' `root` and `target` on the same canonical
+ * filesystem view before they reach assertWithinRoot's
+ * relative(realRoot, real) check.
  */
 export function toAbsolute(p: string): string {
-  return isAbsolute(p) ? p : resolve(p);
+  const abs = isAbsolute(p) ? p : resolve(p);
+  return existsSync(abs) ? realpathSync(abs) : abs;
 }
 
 /**
@@ -41,17 +47,33 @@ const MAX_REALPATH_DEPTH = 4096;
 
 function realpathDeepestExisting(p: string): string {
   let current = p;
-  const stop = resolve(p, "..");
+  // Walk up from `p` toward the filesystem root. The previous version
+  // set `stop = resolve(p, "..")` and exited when `current === stop`,
+  // which on a non-existing path would walk exactly ONE step up and
+  // return an un-realpathed value. That broke assertWithinRoot on
+  // macOS (where /var/folders -> /private/var/folders) for any
+  // non-existing child of an existing test root. New approach: keep
+  // walking up while the current value cannot be realpath'd, and
+  // return the highest ancestor that resolves.
+  const root = resolve(p, "/..");
   let depth = 0;
-  while (current !== stop && depth < MAX_REALPATH_DEPTH) {
+  while (depth < MAX_REALPATH_DEPTH) {
+    if (current === root) break; // can't go higher than /
     try {
       return realpathSync(current);
     } catch {
-      current = resolve(current, "..");
+      const parent = resolve(current, "..");
+      if (parent === current) break; // parent is self — at /
+      current = parent;
       depth++;
     }
   }
-  return current; // fell off the root OR hit depth cap, use as-is
+  // Last resort: try realpath of the current dir.
+  try {
+    return realpathSync(current);
+  } catch {
+    return current;
+  }
 }
 
 /**
