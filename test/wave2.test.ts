@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultContext } from "../src/adapters.js";
@@ -10,7 +10,7 @@ import {
   parseEngineSummary,
   runDispatch,
 } from "../src/dispatch.js";
-import { policyGates } from "../src/gates.js";
+import { e2eEvaluateDynamicImportWarning, e2eUnicodeSelectorWarning, policyGates } from "../src/gates.js";
 import { claudeHookConfig, engineHookFiles } from "../src/hooks/adapters.js";
 import { DEFAULT_SETTINGS } from "../src/settings.js";
 import { resolveSkillNeeds, skillForFile } from "../src/skills/resolver.js";
@@ -336,5 +336,85 @@ describe("skill resolver (demand-driven)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("e2eUnicodeSelectorWarning", () => {
+  test("returns empty when no e2e dir", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-e2e-"));
+    try {
+      expect(e2eUnicodeSelectorWarning(dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("flags e2e specs with Unicode text selectors (text= prefix)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-e2e-"));
+    mkdirSync(join(dir, "e2e"), { recursive: true });
+    // E2E_GLOB matches `*.spec.ts` and `*.e2e.ts`. Use `.spec.ts`.
+    // TEXT_SELECTOR_RE requires the `text=` prefix (Playwright syntax) or
+    // `hasText:` option. Plain Unicode in getByText is NOT detected.
+    writeFileSync(
+      join(dir, "e2e", "spec.spec.ts"),
+      `import { test } from "bun:test";\n` +
+        `test("foo", async () => {\n` +
+        `  await page.getByText("text=漢字 button").click();\n` +
+        `});\n`,
+    );
+    try {
+      const warnings = e2eUnicodeSelectorWarning(dir);
+      expect(warnings.some((w) => w.includes("漢字") && w.includes("Unicode"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("e2eEvaluateDynamicImportWarning", () => {
+  test("flags import() inside page.evaluate() (fails in bundled builds)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-e2e-"));
+    mkdirSync(join(dir, "e2e"), { recursive: true });
+    // import() must be on the SAME line as .evaluate( (the heuristic
+    // only checks the rest of that line, not subsequent lines).
+    writeFileSync(
+      join(dir, "e2e", "dyn.spec.ts"),
+      `import { test } from "bun:test";\n` +
+        `test("foo", async () => {\n` +
+        `  await page.evaluate(async () => await import("./dynamic"));\n` +
+        `});\n`,
+    );
+    try {
+      const warnings = e2eEvaluateDynamicImportWarning(dir);
+      expect(warnings.some((w) => w.includes("dynamic import") && w.includes("bundled"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores import() outside page.evaluate()", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-e2e-"));
+    mkdirSync(join(dir, "e2e"), { recursive: true });
+    writeFileSync(
+      join(dir, "e2e", "ok.spec.ts"),
+      `import { test } from "bun:test";\n` +
+        `import { foo } from "./helper";\n` +
+        `test("foo", () => foo());\n`,
+    );
+    try {
+      const warnings = e2eEvaluateDynamicImportWarning(dir);
+      expect(warnings).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("policyGates(null)", () => {
+  test("returns ok with 'no workflow' note when state is null", () => {
+    const r = policyGates(null);
+    expect(r.ok).toBe(true);
+    expect(r.failures).toEqual([]);
+    expect(r.passed).toContain("no workflow state — nothing to gate");
   });
 });
