@@ -1278,7 +1278,7 @@ export async function init(
     : flags.interactive && ai
       ? await collectAiInitIntake(flags)
       : { engines };
-  if (!answers) return flags.ask && process.stdin.isTTY ? 130 : 2;
+  if (!answers) return (flags.ask || flags.interactive) && process.stdin.isTTY ? 130 : 2;
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
   const result = applyIntake(answers, {

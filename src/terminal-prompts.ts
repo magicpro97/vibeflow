@@ -19,10 +19,13 @@ function clearLines(count: number): void {
   }
 }
 
-function restoreRawMode(wasRaw: boolean): void {
-  process.stdin.setRawMode?.(wasRaw);
-  process.stdin.pause();
-  write(SHOW_CURSOR);
+function restoreRawMode(wasRaw: boolean, cursorHidden = false): void {
+  try {
+    process.stdin.setRawMode?.(wasRaw);
+  } finally {
+    process.stdin.pause();
+    if (cursorHidden) write(SHOW_CURSOR);
+  }
 }
 
 function normalizeIndex(index: number, length: number): number {
@@ -33,7 +36,7 @@ function normalizeIndex(index: number, length: number): number {
 async function readLine(question: string, defaultValue = ""): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const suffix = defaultValue ? ` ${c.dim(`[${defaultValue}]`)}` : "";
-  return await new Promise<string>((resolve) => {
+  return await new Promise<string>((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => settle(defaultValue), READLINE_TIMEOUT_MS);
     timer.unref?.();
@@ -44,9 +47,17 @@ async function readLine(question: string, defaultValue = ""): Promise<string> {
       rl.close();
       resolve(value);
     };
+    const rejectSettle = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rl.close();
+      reject(err);
+    };
     rl.question(`${question}${suffix}: `, (answer) => {
       settle(answer.trim() || defaultValue);
     });
+    rl.on("SIGINT", () => rejectSettle(new Error("cancelled")));
     rl.once("close", () => settle(defaultValue));
   });
 }
@@ -56,16 +67,49 @@ export async function textInput(question: string, defaultValue = ""): Promise<st
 }
 
 export async function confirmInput(question: string, defaultValue = false): Promise<boolean> {
-  const answer = (await readLine(`${question} ${defaultValue ? "(Y/n)" : "(y/N)"}`)).trim();
-  if (!answer) return defaultValue;
-  if (/^(y|yes|true|1)$/i.test(answer)) return true;
-  if (/^(n|no|false|0)$/i.test(answer)) return false;
-  return await confirmInput(`${question} ${c.yellow("(answer yes or no)")}`, defaultValue);
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return await new Promise<boolean>((resolve, reject) => {
+    let settled = false;
+    let suffix = "";
+    const timer = setTimeout(() => settle(defaultValue), READLINE_TIMEOUT_MS);
+    timer.unref?.();
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rl.close();
+      resolve(value);
+    };
+    const rejectSettle = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rl.close();
+      reject(err);
+    };
+    const ask = () => {
+      rl.question(`${question}${suffix} ${defaultValue ? "(Y/n)" : "(y/N)"}: `, (raw) => {
+        const answer = raw.trim();
+        if (!answer) settle(defaultValue);
+        else if (/^(y|yes|true|1)$/i.test(answer)) settle(true);
+        else if (/^(n|no|false|0)$/i.test(answer)) settle(false);
+        else {
+          suffix = ` ${c.yellow("(answer yes or no)")}`;
+          ask();
+        }
+      });
+    };
+    rl.on("SIGINT", () => rejectSettle(new Error("cancelled")));
+    rl.once("close", () => settle(defaultValue));
+    ask();
+  });
 }
 
 export interface SelectOptions {
   allowCustom?: boolean;
   customLabel?: string;
+  defaultValue?: string;
+  defaultValues?: string[];
   timeoutMs?: number;
 }
 
@@ -85,9 +129,13 @@ export async function selectOne(
   options: string[],
   opts: SelectOptions = {},
 ): Promise<string> {
+  if (options.length === 0 && !opts.allowCustom) {
+    throw new Error("selectOne: no options and allowCustom is false");
+  }
   const items = selectItems(options, opts);
+  const fallback = opts.defaultValue ?? options[0] ?? "";
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
-    return await readLine(`${question} (${items.map((i) => i.label).join("/")})`);
+    return await readLine(`${question} (${items.map((i) => i.label).join("/")})`, fallback);
   }
 
   emitKeypressEvents(process.stdin);
@@ -116,7 +164,7 @@ export async function selectOne(
       settled = true;
       clearTimeout(timer);
       process.stdin.off("keypress", onKeypress);
-      restoreRawMode(wasRaw);
+      restoreRawMode(wasRaw, true);
     };
     const timer = setTimeout(() => {
       cleanup();
@@ -126,7 +174,8 @@ export async function selectOne(
     const finish = async (value: string, custom: boolean) => {
       cleanup();
       try {
-        resolve(custom ? await readLine(`${question} custom`) : value);
+        const answer = custom ? await readLine(`${question} custom`, fallback) : value;
+        resolve(answer || fallback);
       } catch (err) {
         reject(err);
       }
@@ -162,12 +211,17 @@ export async function selectMany(
   opts: SelectOptions = {},
 ): Promise<string[]> {
   const items = selectItems(options, opts);
+  const fallback = opts.defaultValues ?? (options[0] ? [options[0]] : []);
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
-    const raw = await readLine(`${question} (${items.map((i) => i.label).join(",")})`);
-    return raw
-      .split(",")
+    const raw = await readLine(
+      `${question} (${items.map((i) => i.label).join(",")})`,
+      fallback.join(","),
+    );
+    const values = raw
+      .split(/[,\n]/)
       .map((s) => s.trim())
       .filter(Boolean);
+    return values.length ? values : fallback;
   }
 
   emitKeypressEvents(process.stdin);
@@ -200,7 +254,7 @@ export async function selectMany(
       settled = true;
       clearTimeout(timer);
       process.stdin.off("keypress", onKeypress);
-      restoreRawMode(wasRaw);
+      restoreRawMode(wasRaw, true);
     };
     const timer = setTimeout(() => {
       cleanup();
@@ -214,15 +268,16 @@ export async function selectMany(
       cleanup();
       try {
         const custom = picked.some((item) => item.custom)
-          ? await readLine(`${question} custom`)
+          ? await readLine(`${question} custom`, fallback.join(","))
           : "";
-        resolve([
+        const values = [
           ...picked.filter((item) => !item.custom).map((item) => item.label),
           ...custom
-            .split(",")
+            .split(/[,\n]/)
             .map((s) => s.trim())
             .filter(Boolean),
-        ]);
+        ];
+        resolve(values.length ? values : fallback);
       } catch (err) {
         reject(err);
       }

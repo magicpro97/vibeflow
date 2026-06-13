@@ -40,6 +40,8 @@ import {
 } from "../src/core.js";
 import { policyGates } from "../src/gates.js";
 import {
+  INIT_ASK_PHASE_LABELS,
+  INIT_ASK_PROMPTS,
   createInitAskQuestionnaireData,
   initAskQuestionnaireToIntakeAnswers,
 } from "../src/init-intake.js";
@@ -293,16 +295,16 @@ describe("commands.init", () => {
   });
 
   test("init --ai --ask refuses non-TTY instead of hanging", async () => {
-    const original = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: false });
-    try {
-      const code = await init({ ai: true, ask: true }, { preflight: allReady });
-      expect(code).toBe(2);
-      expect(existsSync(join(dir, CTX_DIR))).toBe(false);
-    } finally {
-      if (original) Object.defineProperty(process.stdin, "isTTY", original);
-      else Reflect.deleteProperty(process.stdin, "isTTY");
-    }
+    const result = Bun.spawnSync(
+      ["bun", "run", join(origCwd, "src/cli.ts"), "init", "--ai", "--ask"],
+      {
+        cwd: dir,
+        env: { ...process.env, NO_COLOR: "1" },
+      },
+    );
+    expect(result.exitCode).toBe(2);
+    expect(new TextDecoder().decode(result.stderr)).toContain("requires an interactive terminal");
+    expect(existsSync(join(dir, CTX_DIR))).toBe(false);
   });
 
   test("init --ask questionnaire stores stable phase ids and maps labels to intake", () => {
@@ -318,7 +320,10 @@ describe("commands.init", () => {
       documentFileTypes: ["md", "pdf"],
     });
 
-    expect(data.questions.find((q) => q.id === "phases")?.options).toContain("Basic design");
+    expect(Object.values(INIT_ASK_PHASE_LABELS)).toContain("Basic design");
+    expect(Object.values(INIT_ASK_PROMPTS).join("\n")).not.toMatch(
+      /Tài liệu|Quản lý|Các loại|từng phase/,
+    );
     expect(data.answers.phases).toEqual(["basic-design", "implement"]);
 
     const answers = initAskQuestionnaireToIntakeAnswers(data, ["claude"]);

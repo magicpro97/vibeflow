@@ -24,14 +24,14 @@
       "request": "launch",
       "name": "Debug vf init --ask",
       "cwd": "${workspaceFolder}",
-      "command": "bun --inspect-brk=6499 src/cli.ts init --ask"
+      "command": "bun --inspect-brk=7499 src/cli.ts init --ask"
     },
     {
       "type": "node",
       "request": "attach",
       "name": "Attach vf ui (Bun inspector)",
       "address": "127.0.0.1",
-      "port": 6499,
+      "port": 7499,
       "cwd": "${workspaceFolder}",
       "restart": true,
       "skipFiles": ["<node_internals>/**"]
