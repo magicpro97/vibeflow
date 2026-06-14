@@ -198,11 +198,11 @@ export function e2eEvaluateDynamicImportWarning(base: string): string[] {
   const warnings: string[] = [];
   for (const rel of findE2eFiles(base)) {
     const abs = join(base, rel);
-    let src: string;
+    let src = "";
     try {
       src = readFileSync(abs, "utf8");
     } catch {
-      continue;
+      /* file unreadable — treat as empty */
     }
     const lines = src.split("\n");
     let inEvaluate = false;

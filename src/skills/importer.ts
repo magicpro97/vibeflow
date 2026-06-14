@@ -102,7 +102,7 @@ export function importSkillsFromParent(
     try {
       if (!_statSync(dir).isDirectory()) continue;
     } catch {
-      continue;
+      /* not a directory — skip (stat throws for broken symlinks) */
     }
     const result = importSkillFromDir(repo, dir);
     errors.push(...result.errors);

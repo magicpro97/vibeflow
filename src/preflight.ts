@@ -146,9 +146,8 @@ function failedProbe(
   engine: Engine,
   result: ProbeResult,
 ): { level: ReadinessLevel; detail: string } {
-  if (result.code === "ENOENT" || /\bspawn\b.*\bENOENT\b/i.test(result.stderr ?? "")) {
+  if (result.code === "ENOENT" || /\bspawn\b.*\bENOENT\b/i.test(result.stderr ?? ""))
     return { level: "no-binary", detail: installHint(engine) };
-  }
   const output = `${result.stderr ?? ""}\n${result.stdout}`.trim();
   const hint = firstUsefulLine(output);
   const reason =

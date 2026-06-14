@@ -52,6 +52,13 @@ describe("frontmatter", () => {
     expect(data.name).toBe("demo");
   });
 
+  test("skips non-key:value lines inside frontmatter (line 67-68)", () => {
+    const doc = ["---", "name: x", "bad line", "description: y", "---", "body"].join("\n");
+    const { data } = parseFrontmatter(doc);
+    expect(data.name).toBe("x");
+    expect(data.description).toBe("y");
+  });
+
   test("rejects prototype-pollution keys and never inherits a status", () => {
     const doc = [
       "---",
