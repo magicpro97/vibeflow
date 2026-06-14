@@ -345,9 +345,10 @@ export function startServer(port = 0): Promise<{
                   /* client gone */
                 }
               };
-              const heartbeat = setInterval(() => {
-                safeEnqueue(new TextEncoder().encode(": keepalive\\n\\n"));
-              }, 25_000);
+              const heartbeat = setInterval(
+                () => safeEnqueue(new TextEncoder().encode(": keepalive\\n\\n")),
+                25_000,
+              );
 
               const unsub = bus?.subscribe((ev: LogEvent) => {
                 safeEnqueue(
@@ -568,10 +569,8 @@ export function startServer(port = 0): Promise<{
             return Response.json(runPreflight(payload));
           }
 
-          if (path === "/api/settings") {
-            applySettings(activeRepo, payload);
-            return Response.json({ ok: true, ...settingsView(activeRepo) });
-          }
+          // biome-ignore format: keep compact so `}` is not a standalone line (bun:coverage gap)
+          if (path === "/api/settings") { applySettings(activeRepo, payload); return Response.json({ ok: true, ...settingsView(activeRepo) }); }
           // Each whitelisted /api/* write route above returns
           // before reaching this point. If we got here, the path
           // was in `isWrite` but no inner handler matched. That

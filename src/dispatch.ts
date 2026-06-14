@@ -323,9 +323,7 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
       let confidence = 0;
       if (typeof obj.result === "string" && obj.result.trim()) {
         const inner = parseEngineSummary(obj.result);
-        if (inner && typeof inner.confidence === "number") {
-          confidence = inner.confidence;
-        }
+        if (inner && typeof inner.confidence === "number") confidence = inner.confidence;
       }
       // Fallback: engine ran successfully with tool calls but produced no JSON summary.
       // 0.85 was the old hardcoded value — it was correct for productive sessions (15+ turns,

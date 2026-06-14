@@ -2121,16 +2121,19 @@ function guardrailOffNote(): string {
   );
 }
 
+function installHooks(): number {
+  const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], { stdio: "inherit" });
+  if (r.status === 0) out("vf", c.green("Installed: core.hooksPath → .githooks"));
+  return r.status ?? 0;
+}
+
 export function hooks(
   sub: string | undefined,
   flags: Record<string, string | boolean> = {},
 ): number {
   switch (sub) {
-    case "install": {
-      const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], { stdio: "inherit" });
-      if (r.status === 0) out("vf", c.green("Installed: core.hooksPath → .githooks"));
-      return r.status ?? 0;
-    }
+    case "install":
+      return installHooks();
     case undefined:
     case "status": {
       const r = spawnSync("git", ["config", "--get", "core.hooksPath"], { encoding: "utf8" });
