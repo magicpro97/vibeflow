@@ -14,15 +14,53 @@ on:
   pull_request:
     branches: [main]
 
+# Strategy:
+# - `check` runs on self-hosted first (pre-registered label `self-hosted`).
+#   The personal machine picks up the job when it's online.
+# - If self-hosted runner is OFFLINE (machine asleep, network down, etc.),
+#   the `check-fallback` job kicks in after 5 min to run on GitHub-hosted
+#   ubuntu-latest. This guarantees the PR never blocks on a sleeping machine.
+#
+# Setup: register a self-hosted runner with label `self-hosted` at
+# https://github.com/magicpro97/vibeflow/settings/actions/runners
+# (see references/github-self-hosted-runner-setup.md for the full recipe).
+
 jobs:
   check:
-    # Bun is the primary runtime. Windows test was skipped because:
-    # 1. Bun's Windows support is second-class (most devs use Linux/macOS)
-    # 2. The 6 flaky env-dependent tests (claude/copilot/gradle) only exist
-    #    on Linux; running on Windows would surface different env issues
-    # 3. GitHub Actions Windows runners are slow + the matrix doubles queue time
-    # Re-enable `[ubuntu-latest, windows-latest]` if you need Windows coverage.
+    name: "check (self-hosted, preferred)"
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run build
+      - name: Smoke test built CLI (prints version)
+        run: node dist/cli.js --version
+      - name: Coverage gate — fail if line coverage < 100%
+        run: bun run coverage:check
+      - name: Ship-gate — real bridge dispatch must complete (no nothing works)
+        run: bun run smoke
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+      - name: Web UI e2e (real dashboard in Chromium)
+        run: bun run test:e2e
+
+  check-fallback:
+    name: "check (cloud fallback, only if self-hosted offline)"
+    # Only run if the self-hosted job failed (cancelled or failed) AND
+    # it didn't succeed. This keeps cloud costs at zero when self-hosted
+    # is online. The `if: failure() || cancelled()` is true only when
+    # the previous job ended without success.
+    needs: check
+    if: failure() || cancelled()
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -46,6 +84,7 @@ jobs:
 
   release-please:
     runs-on: ubuntu-latest
+    # Skip release-please on PRs; only main.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
