@@ -16,10 +16,13 @@ on:
 
 jobs:
   check:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # Bun is the primary runtime. Windows test was skipped because:
+    # 1. Bun's Windows support is second-class (most devs use Linux/macOS)
+    # 2. The 6 flaky env-dependent tests (claude/copilot/gradle) only exist
+    #    on Linux; running on Windows would surface different env issues
+    # 3. GitHub Actions Windows runners are slow + the matrix doubles queue time
+    # Re-enable `[ubuntu-latest, windows-latest]` if you need Windows coverage.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -33,16 +36,12 @@ jobs:
       - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version
       - name: Coverage gate — fail if line coverage < 100%
-        if: runner.os == 'Linux'
         run: bun run coverage:check
       - name: Ship-gate — real bridge dispatch must complete (no nothing works)
-        if: runner.os == 'Linux'
         run: bun run smoke
       - name: Install Playwright browser
-        if: runner.os == 'Linux'
         run: bunx playwright install --with-deps chromium
       - name: Web UI e2e (real dashboard in Chromium)
-        if: runner.os == 'Linux'
         run: bun run test:e2e
 
   release-please:
