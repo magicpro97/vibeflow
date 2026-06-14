@@ -32,6 +32,9 @@ jobs:
       - run: bun run build
       - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version
+      - name: Coverage gate — fail if line coverage < 100%
+        if: runner.os == 'Linux'
+        run: bun run coverage:check
       - name: Ship-gate — real bridge dispatch must complete (no nothing works)
         if: runner.os == 'Linux'
         run: bun run smoke

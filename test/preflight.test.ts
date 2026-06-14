@@ -811,41 +811,11 @@ describe("probeInvocation (test seam)", () => {
     }
   });
 
-  test("async: copilot with gh + successful gh auth returns 'copilot: GitHub auth OK' (line 438-441)", async () => {
-    // The success path of the copilot/gh branch. gh auth exits 0
-    // → resolve(stamp("ready", "copilot: GitHub auth OK")).
-    // The async checkEngineAsync uses real Bun.spawn. Override it.
-    const { checkEngineAsync } = require("../src/preflight.js");
-    const enc = new TextEncoder();
-    const origSpawn = Bun.spawn;
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
-      const child = {
-        stdin: { write: () => {}, end: () => {} },
-        stdout: {
-          getReader: () => ({
-            read: async () => ({ done: true, value: undefined }),
-          }),
-        },
-        stderr: {
-          getReader: () => ({
-            read: async () => ({ done: true, value: undefined }),
-          }),
-        },
-        exited: Promise.resolve(0),
-        kill: () => {},
-      };
-      return child as never;
-    }) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("copilot", {
-        has: (c: string) => c === "copilot" || c === "gh",
-      });
-      expect(r.level).toBe("ready");
-      expect(r.detail).toContain("GitHub auth OK");
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
-    }
-  });
+  // Removed the old test that overrode Bun.spawn directly — the new
+  // `runAttempts` tests below cover the copilot/gh + auth success
+  // path (line 438-441) without depending on Bun.spawn override,
+  // which was unreliable on CI. The 4 runAttempts tests cover both
+  // non-copilot success/fail and copilot gh success/fail paths.
 });
 
 describe("runAttempts (extracted helper)", () => {

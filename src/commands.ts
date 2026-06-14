@@ -1376,6 +1376,9 @@ export async function initInteractive(
   _flags: Record<string, string | boolean>,
   inject: {
     askFn?: (q: string, def?: string) => Promise<string>;
+    /** Test seam: forward to applyIntake's preflight inject so unit
+     *  tests can mark engines as ready without depending on PATH. */
+    preflight?: PreflightFn;
   } = {},
 ): Promise<number> {
   const ask = inject.askFn ?? defaultAskFn();
@@ -1388,14 +1391,17 @@ export async function initInteractive(
   const expectedResult = await ask("Expected result (Definition of Done)");
   // If using the injected askFn, no real rl was created.
   // If using the default, rl was created+closed per question, so nothing to do.
-  const result = applyIntake({
-    goal,
-    engines,
-    docSource,
-    taskSource,
-    fileTypes,
-    expectedResult,
-  });
+  const result = applyIntake(
+    {
+      goal,
+      engines,
+      docSource,
+      taskSource,
+      fileTypes,
+      expectedResult,
+    },
+    inject.preflight ? { preflight: inject.preflight } : {},
+  );
   if (result.refused) return reportPreflightRefusal(result.readiness);
   for (const rel of result.files) out("vf", `${c.green("+")} ${rel}`);
   out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
