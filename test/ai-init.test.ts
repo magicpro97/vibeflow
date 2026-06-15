@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildAiInitPrompt,
+  defaultAiInitDispatcher,
   listContextFiles,
   renderSlimPrompt,
   runAiInit,
   selectBestEngine,
 } from "../src/ai-init.js";
 import type { Engine } from "../src/core.js";
+import type { WorkUnit } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { ProjectProfile } from "../src/scanner.js";
@@ -919,5 +921,97 @@ describe("runAiInit: autopilot auto-fallback (--autopilot flag)", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("stubbed — fallback test");
+  });
+});
+
+describe("defaultAiInitDispatcher", () => {
+  // B3/T2: the default dispatcher must actually call the engine (so the
+  // workflow path can be production-wired). It used to return a stub
+  // `pending:<engine>:<unitName>` evidence that the reviewer would always
+  // reject, leaving the production path broken.
+
+  function fakeInvocation() {
+    return {
+      cmd: "/usr/bin/false",
+      args: [],
+      promptMode: "arg" as const,
+    };
+  }
+
+  function makeUnit(overrides: Partial<WorkUnit> = {}): WorkUnit {
+    return {
+      name: "ai-init-instruction-writer",
+      status: "pending",
+      confidence: 0,
+      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      scope: ["CLAUDE.md", "AGENTS.md"],
+      spec: "## spec: write the instruction files",
+      ...overrides,
+    };
+  }
+
+  test("calls the engine with the unit spec as prompt and returns verifying", async () => {
+    const calls: { cmd: string; args: string[]; input: string }[] = [];
+    const dispatcher = defaultAiInitDispatcher("claude", {
+      engineCommandFn: () => fakeInvocation(),
+      spawner: async (cmd, args, input) => {
+        calls.push({ cmd, args: [...args], input });
+        return { status: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    const outcome = await dispatcher(makeUnit());
+    expect(calls).toHaveLength(1);
+    // The unit's spec becomes the prompt (materialized as -p argv).
+    const call = calls[0];
+    if (!call) throw new Error("spawner not called");
+    expect(call.input).toBe("");
+    expect(call.args).toContain("## spec: write the instruction files");
+    expect(outcome.status).toBe("verifying");
+    expect(outcome.confidence).toBe(1);
+    // Evidence cites the unit's scope paths so the reviewer can run
+    // file-exists on them.
+    expect(outcome.evidence).toEqual(["CLAUDE.md", "AGENTS.md"]);
+  });
+
+  test("returns status=blocked when the engine exits non-zero", async () => {
+    const dispatcher = defaultAiInitDispatcher("claude", {
+      engineCommandFn: () => fakeInvocation(),
+      spawner: async () => ({ status: 1, stdout: "", stderr: "boom", timedOut: false }),
+    });
+    const outcome = await dispatcher(
+      makeUnit({ scope: [".vibeflow/ai-context/stack-evidence.md"] }),
+    );
+    expect(outcome.status).toBe("blocked");
+    expect(outcome.confidence).toBe(0);
+    expect(outcome.evidence).toEqual([]);
+  });
+
+  test("returns status=blocked when the engine times out", async () => {
+    const dispatcher = defaultAiInitDispatcher("claude", {
+      engineCommandFn: () => fakeInvocation(),
+      spawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: true }),
+    });
+    const outcome = await dispatcher(
+      makeUnit({ scope: [".vibeflow/ai-context/stack-evidence.md"] }),
+    );
+    expect(outcome.status).toBe("blocked");
+    // The dispatcher surfaces a non-zero/timeout failure as `status="blocked"`;
+    // the orchestrator carries the underlying error elsewhere (it can read
+    // it from the spawner test seam in production wiring).
+    expect(outcome.evidence).toEqual([]);
+  });
+
+  test("returns status=blocked when the engine is unavailable (binary missing)", async () => {
+    const dispatcher = defaultAiInitDispatcher("claude", {
+      engineCommandFn: () => ({ unavailable: "binary not found" }),
+      spawner: async () => {
+        throw new Error("spawner should not be called when engine is unavailable");
+      },
+    });
+    const outcome = await dispatcher(makeUnit());
+    expect(outcome.status).toBe("blocked");
+    expect(outcome.confidence).toBe(0);
+    expect(outcome.evidence).toEqual([]);
   });
 });

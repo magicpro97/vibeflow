@@ -893,33 +893,79 @@ export interface AiInitWorkflowOpts {
    *  engine probes). */
   preflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
   /** Injected dispatcher so unit tests can drive the orchestrator
-   *  without spawning real engines. Production callers pass
-   *  `defaultAiInitDispatcher(engine)` (defined below). */
+   *  without spawning real engines. Production callers omit this and
+   *  `runAiInitWorkflow` constructs `defaultAiInitDispatcher(engine)`
+   *  internally (passing through the `engineCommandFn` + `spawner`
+   *  seams below). */
   dispatcher?: UnitDispatcher;
   /** Bounded-parallel concurrency. Defaults to DEFAULT_CONCURRENCY (3). */
   concurrency?: number;
+  /** Test seam: forwards to `defaultAiInitDispatcher` when the default
+   *  dispatcher is constructed. Mirrors `runAiInit`'s option. */
+  engineCommandFn?: (engine: Engine) => EngineCommandResult;
+  /** Test seam: forwards to `defaultAiInitDispatcher`. Mirrors
+   *  `runAiInit`'s `spawner` option. */
+  spawner?: AsyncSpawner;
+  /** Test seam: per-unit engine-call timeout. Defaults to
+   *  `AI_INIT_TIMEOUT_MS`. */
+  timeoutMs?: number;
 }
 
 /** Build the default dispatcher: per unit, run a single engine call with
  *  the unit's `spec` as the prompt. Returns a `UnitOutcome` whose
- *  evidence cites the engine call's output path (so the reviewer can
- *  gate on real on-disk artifacts). This is the production dispatcher;
- *  tests inject a fake. */
-export function defaultAiInitDispatcher(engine: Engine): UnitDispatcher {
+ *  evidence cites the unit's `scope` paths (so the reviewer can gate
+ *  on real on-disk artifacts via the file-exists check).
+ *
+ *  This is the production dispatcher; tests inject a fake dispatcher
+ *  (or a fake `engineCommandFn` + `spawner`) to stay deterministic.
+ *
+ *  Contract: status="verifying" on success (production never says "done"
+ *  — the reviewer must), confidence=1, evidence=unit.scope. status="blocked"
+ *  on any engine error (timeout, non-zero exit, unavailable binary), with
+ *  evidence=[] so the reviewer rejects the unit deterministically. */
+export function defaultAiInitDispatcher(
+  engine: Engine,
+  opts: {
+    engineCommandFn?: (engine: Engine) => EngineCommandResult;
+    spawner?: AsyncSpawner;
+    timeoutMs?: number;
+  } = {},
+): UnitDispatcher {
+  const { engineCommandFn, spawner, timeoutMs = AI_INIT_TIMEOUT_MS } = opts;
+  const resolveInvocation = engineCommandFn ?? engineCommand;
+  const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
   return async (unit): Promise<UnitOutcome> => {
-    // The orchestrator's runUnit is intentionally absent here — we
-    // delegate to a one-shot engine call similar to runAiInit's path.
-    // The real implementation lives in commands.ts; for now we return
-    // a placeholder outcome that the reviewer will reject (so callers
-    // know to wire the real dispatcher before going to production).
-    // The shape contract is: status="verifying" (production never says
-    // "done" — the reviewer must), confidence=0 (raised by the engine
-    // in production), and evidence cites the on-disk file the engine
-    // claimed to write.
+    const invocation = resolveInvocation(engine);
+    if (isUnavailable(invocation)) {
+      return {
+        status: "blocked",
+        confidence: 0,
+        evidence: [],
+      };
+    }
+    const materialized = materializePrompt(
+      { cmd: invocation.cmd, args: invocation.args, promptMode: invocation.promptMode },
+      unit.spec ?? "",
+    );
+    const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input);
+    if (result.timedOut) {
+      return {
+        status: "blocked",
+        confidence: 0,
+        evidence: [],
+      };
+    }
+    if (result.status !== 0) {
+      return {
+        status: "blocked",
+        confidence: 0,
+        evidence: [],
+      };
+    }
     return {
       status: "verifying",
-      confidence: 0,
-      evidence: [`pending:${engine}:${unit.name}`],
+      confidence: 1,
+      evidence: [...(unit.scope ?? [])],
     };
   };
 }
@@ -969,9 +1015,17 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
 
   // Dispatch through the orchestrator. The injected dispatcher defaults
   // to a placeholder (so unit tests stay deterministic); production
-  // callers must pass `defaultAiInitDispatcher(engine)` (or a richer
-  // implementation that maps each unit to a real engine call).
-  const dispatcher = opts.dispatcher ?? defaultAiInitDispatcher(engine);
+  // Construct the default dispatcher (B3/T2): per-unit engine call, with
+  // the test seams (engineCommandFn, spawner, timeoutMs) forwarded so
+  // production calls go live and tests stay deterministic. Callers may
+  // still inject a custom dispatcher via `opts.dispatcher`.
+  const dispatcher =
+    opts.dispatcher ??
+    defaultAiInitDispatcher(engine, {
+      engineCommandFn: opts.engineCommandFn,
+      spawner: opts.spawner,
+      timeoutMs: opts.timeoutMs,
+    });
 
   const result = await orchestrateUnits({
     units,
