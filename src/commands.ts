@@ -2265,9 +2265,33 @@ function guardrailOffNote(): string {
 }
 
 function installHooks(): number {
-  const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], { stdio: "inherit" });
-  if (r.status === 0) out("vf", c.green("Installed: core.hooksPath → .githooks"));
-  return r.status ?? 0;
+  // PR28 audit Task 7 (M3): the old code only printed a green success line when
+  // git exited 0. On non-zero exit (not a git repo, read-only filesystem, missing
+  // .githooks dir, etc.) it silently returned the bad status — the user saw
+  // nothing. Now we surface the git stderr AND a hint about the most likely cause.
+  // The stdio is still "inherit" for stdout so the git output stays visible in
+  // CI / scripted invocations; we just need to know when it FAILED.
+  const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], {
+    stdio: ["ignore", "inherit", "pipe"],
+  });
+  const status = r.status ?? 0;
+  if (status === 0) {
+    out("vf", c.green("Installed: core.hooksPath → .githooks"));
+    return 0;
+  }
+  // Failure: surface stderr + likely cause. The hint text is intentionally generic —
+  // the most common failure in this codebase is "not a git repo" (this command is
+  // sometimes run from a fresh clone before `git init`), followed by "filesystem is
+  // read-only" (CI on a release branch) and "permission denied on .git/config".
+  const stderr = r.stderr?.toString()?.trim() ?? "";
+  out(
+    "vf",
+    c.red(
+      `git config core.hooksPath failed (status ${status}). ${stderr ? `git said: ${stderr}. ` : ""}Are you inside a git repo with write access to .git/config?`,
+    ),
+    { level: "error" },
+  );
+  return status;
 }
 
 export function hooks(

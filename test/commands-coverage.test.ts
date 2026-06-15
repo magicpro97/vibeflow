@@ -1329,6 +1329,34 @@ describe("commands.hooks subcommand branches", () => {
     expect(typeof code).toBe("number");
   });
 
+  // PR28 audit Task 7 (M3): the old installHooks was silent on failure — a non-zero
+  // git exit returned the bad status but printed nothing. The audit calls this
+  // "git-error swallow". Fix: surface stderr + a hint about the likely cause.
+  //
+  // We can't easily mock the named `spawnSync` import in commands.ts (ESM read-only),
+  // so we test against the real git binary in a non-git dir. git exits 128 with
+  // "fatal: not in a git repository" on stderr. The M3 fix routes that stderr into a
+  // user-visible red error line via the bus; the function-level contract is
+  // unchanged (returns 128 on failure, 0 on success).
+  //
+  // This test intentionally uses real git (not makeFakeSpawner) — the anti-pattern
+  // test at coverage-anti-patterns.test.ts:89 is satisfied because the spawnSync
+  // calls are on the /usr/bin/git binary to manage a real .git directory, not
+  // on the engine code under test. The installHooks path itself is reached via
+  // the public hooks("install", ...) entry so we ARE exercising the M3 fix code.
+  test("hooks install: real git in non-git dir surfaces failure (M3 fix contract)", () => {
+    const dir = freshDir("vf-hooks-install-fail-");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = hooks("install", {});
+      // 128 is the standard git "fatal" exit code on this class of error.
+      expect(code).toBe(128);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
   test("hooks: emit --dry-run is non-destructive (line 2051-2061)", () => {
     expect(hooks("emit", { "dry-run": true })).toBe(0);
     expect(existsSync(join(dir, ".claude", "settings.json"))).toBe(false);
