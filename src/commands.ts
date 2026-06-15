@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
@@ -11,7 +11,7 @@ import {
   engineFiles,
 } from "./adapters.js";
 import { detectRolesForRepo } from "./agents/detect-roles.js";
-import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
+import { type AgentEngine } from "./agents/render.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -56,7 +56,6 @@ import {
   initAskQuestionnaireToIntakeAnswers,
 } from "./init-intake.js";
 import { appendJournal, ensureIndex } from "./journal.js";
-import { spawnAgent } from "./orchestrator/agent.js";
 import {
   type AsyncResearcher,
   DEFAULT_MAX_ROUNDS,
@@ -65,7 +64,6 @@ import {
   investigateUnit,
   thresholdFor,
 } from "./orchestrator/investigate.js";
-import { createMarker, updateMarker } from "./orchestrator/marker.js";
 import {
   DEFAULT_CONCURRENCY,
   type Reviewer,
@@ -108,7 +106,7 @@ import { syncSkillMirrors, verifySkillSync } from "./skills/sync.js";
 import { validateSkillRoots } from "./skills/validator.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
-import { Spinner, StatusLine, link, panel, progressBar, table } from "./ui.js";
+import { Spinner, panel, table } from "./ui.js";
 import {
   type CollisionPolicy,
   type DeletePlan,
@@ -1281,12 +1279,22 @@ export async function init(
   if (!answers) return (flags.ask || flags.interactive) && process.stdin.isTTY ? 130 : 2;
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
-  const result = applyIntake(answers, {
-    dry,
-    skipPreflight: dry,
-    preflight: inject.preflight,
-    useAi: false,
-  });
+  const initSpinner = new Spinner();
+  initSpinner.start(dry ? "➥ Preparing init dry run" : "➥ Generating VibeFlow context");
+  let result: ReturnType<typeof applyIntake>;
+  try {
+    result = applyIntake(answers, {
+      dry,
+      skipPreflight: dry,
+      preflight: inject.preflight,
+      useAi: false,
+    });
+  } catch (err) {
+    initSpinner.fail("VibeFlow context generation failed");
+    throw err;
+  }
+  if (result.refused) initSpinner.fail("Engine preflight refused init");
+  else initSpinner.succeed(dry ? "Init dry run prepared" : "VibeFlow context generated");
 
   if (result.refused) return reportPreflightRefusal(result.readiness);
   const label = dry ? "dry run" : "init";
@@ -1314,43 +1322,65 @@ export async function init(
     const { runAiInit } = await import("./ai-init.js");
     const aiEngine = typeof flags.engine === "string" ? (flags.engine as Engine) : undefined;
     const prefix = aiEngine ? `[${aiEngine}]` : "[ai]";
-    const aiResult = await runAiInit({
-      base: cwd(),
-      dryRun: dry,
-      // Test seam: use the injected aiSpawner if provided, so unit
-      // tests can stub the engine call. Production callers fall
-      // through to the default makeAsyncSpawner factory.
-      spawner:
-        inject.aiSpawner ??
-        makeAsyncSpawner({
-          timeoutMs: 30_000,
-          idleTimeoutMs: 300_000,
-          onChunk(text) {
-            for (const line of text.split("\n")) {
-              if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
-            }
-          },
-          onStderrChunk(text) {
-            for (const line of text.split("\n")) {
-              if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
-            }
-          },
-        }),
-      forceEngine: aiEngine,
-      // --autopilot: opt-in auto-fallback when the chosen engine is
-      // unavailable or returns a permission error. Default false to
-      // preserve single-shot behavior (any failure is the user's
-      // problem to debug). With --autopilot, runAiInit transparently
-      // retries with the next-best ready engine.
-      autopilot: Boolean(flags.autopilot),
-      // Test seam: forward inject.aiPreflight so unit tests can stub
-      // engine readiness checks in the AI enrichment phase. The
-      // applyIntake call above uses inject.preflight (a different
-      // PreflightFn signature) for the Phase 1 deterministic step.
-      preflight: inject.aiPreflight,
-    });
+    let lineBuf = "";
+    let errLineBuf = "";
+    const aiSpinner = new Spinner();
+    aiSpinner.start(`➥ Running AI enrichment ${prefix}`);
+    let aiResult: Awaited<ReturnType<typeof runAiInit>>;
+    try {
+      aiResult = await runAiInit({
+        base: cwd(),
+        dryRun: dry,
+        // Test seam: use the injected aiSpawner if provided, so unit
+        // tests can stub the engine call. Production callers fall
+        // through to the default makeAsyncSpawner factory.
+        spawner:
+          inject.aiSpawner ??
+          makeAsyncSpawner({
+            timeoutMs: 30_000_000,
+            idleTimeoutMs: 300_000,
+            onChunk(text) {
+              lineBuf += text;
+              const lines = lineBuf.split("\n");
+              lineBuf = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) out("engine-stdout", `${prefix} ${trimmed}`);
+              }
+            },
+            onStderrChunk(text) {
+              errLineBuf += text;
+              const lines = errLineBuf.split("\n");
+              errLineBuf = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) out("engine-stderr", `${prefix} ${trimmed}`);
+              }
+            },
+          }),
+        forceEngine: aiEngine,
+        // --autopilot: opt-in auto-fallback when the chosen engine is
+        // unavailable or returns a permission error. Default false to
+        // preserve single-shot behavior (any failure is the user's
+        // problem to debug). With --autopilot, runAiInit transparently
+        // retries with the next-best ready engine.
+        autopilot: Boolean(flags.autopilot),
+        // Test seam: forward inject.aiPreflight so unit tests can stub
+        // engine readiness checks in the AI enrichment phase. The
+        // applyIntake call above uses inject.preflight (a different
+        // PreflightFn signature) for the Phase 1 deterministic step.
+        preflight: inject.aiPreflight,
+      });
+    } catch (err) {
+      aiSpinner.fail("❌ AI enrichment failed");
+      throw err;
+    }
+    // Flush any partial lines remaining in the stream buffer
+    if (lineBuf.trim()) out("engine-stdout", `${prefix} ${lineBuf.trim()}`);
+    if (errLineBuf.trim()) out("engine-stderr", `${prefix} ${errLineBuf.trim()}`);
     if (aiResult.ok) {
       const used = aiResult.engine ?? "?";
+      aiSpinner.succeed(`✅ AI enrichment complete (${used})`);
       if (aiResult.fallback) {
         out(
           "vf",
@@ -1362,6 +1392,7 @@ export async function init(
         out("vf", c.green(`✔ AI analysis complete (${used})`));
       }
     } else {
+      aiSpinner.fail("❌ AI enrichment skipped");
       out("vf", c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
       out(
         "vf",

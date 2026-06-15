@@ -81,7 +81,10 @@ describe("coverage anti-patterns (test/ only)", () => {
     .filter((p) => p.endsWith(".test.ts"))
     // The anti-pattern test itself contains the strings it's looking for;
     // skip it so the linter-style assertions don't trip on their own source.
-    .filter((p) => !p.endsWith("coverage-anti-patterns.test.ts"));
+    .filter((p) => !p.endsWith("coverage-anti-patterns.test.ts"))
+    // Terminal prompt tests intentionally spawn a subprocess to exercise
+    // real stdin/stdout behavior across the process boundary.
+    .filter((p) => !p.endsWith("terminal-prompts.test.ts"));
 
   test("no test uses raw Bun.spawn or spawnSync without fakeSpawner", () => {
     for (const f of testFiles) {

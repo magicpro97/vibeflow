@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type AsyncSpawner,
   type EngineProbe,
@@ -532,6 +535,91 @@ describe("makeAsyncSpawner — Windows .cmd/.bat shim auto-shell (Task 7b)", () 
       (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
       (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
       Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("auto-enables shell on Windows for copilot even when Bun.which returns a no-extension shim", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    const fakeWhich = (cmd: string) =>
+      cmd === "copilot" ? "C:\\Program Files\\nodejs\\copilot" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    const calls: { cmd: string; args: string[] }[] = [];
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (..._args: unknown[]) => {
+      const arr = _args[0] as string | readonly string[];
+      const list = Array.isArray(arr) ? arr : [arr];
+      calls.push({ cmd: (list[0] ?? "") as string, args: list.slice(1) as string[] });
+      return fakeChild;
+    };
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn =
+      fakeSpawn as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner();
+      await spawner("copilot", ["-p", "hello", "--allow-all"], "");
+      expect(calls).toHaveLength(1);
+      const c = calls[0];
+      expect(c).toBeDefined();
+      if (!c) return;
+      expect(c.cmd).toBe("cmd.exe");
+      expect(c.args[0]).toBe("/c");
+      expect(c.args[1]).toBe("copilot");
+      expect(c.args.slice(2)).toEqual(["-p", "hello", "--allow-all"]);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("auto-enables shell on Windows when a no-extension resolved command has a .cmd sibling", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-dispatch-shim-"));
+    const shim = join(dir, "tool");
+    writeFileSync(`${shim}.cmd`, "@echo off\r\n");
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    const fakeWhich = (cmd: string) => (cmd === "tool" ? shim : origWhich(cmd));
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    const calls: { cmd: string; args: string[] }[] = [];
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (..._args: unknown[]) => {
+      const arr = _args[0] as string | readonly string[];
+      const list = Array.isArray(arr) ? arr : [arr];
+      calls.push({ cmd: (list[0] ?? "") as string, args: list.slice(1) as string[] });
+      return fakeChild;
+    };
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn =
+      fakeSpawn as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner();
+      await spawner("tool", ["--version"], "");
+      expect(calls).toHaveLength(1);
+      const c = calls[0];
+      expect(c).toBeDefined();
+      if (!c) return;
+      expect(c.cmd).toBe("cmd.exe");
+      expect(c.args).toEqual(["/c", "tool", "--version"]);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
