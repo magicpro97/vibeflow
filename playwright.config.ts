@@ -11,7 +11,24 @@ const WORKSPACE = resolve(".e2e-workspace");
  * before globalSetup, and it needs the cwd to exist). Anything the UI generates lands
  * here, never in the project tree.
  */
-rmSync(WORKSPACE, { recursive: true, force: true });
+// Retry rmSync a few times — `vf init` may leave temp files open on macOS
+// (e.g. `.DS_Store`, hardlink races during .vibeflow regen). ENOTEMPTY is
+// transient and resolves within a few ms.
+function rmSyncRetry(p: string): void {
+  for (let i = 0; i < 5; i++) {
+    try {
+      rmSync(p, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOTEMPTY" && code !== "EBUSY" && code !== "EPERM") throw err;
+      if (i === 4) throw err;
+      // biome-ignore lint/suspicious/noConsole: diagnostic on retry
+      console.warn(`[e2e-setup] retry ${i + 1}/5: ${code} removing ${p}`);
+    }
+  }
+}
+rmSyncRetry(WORKSPACE);
 mkdirSync(WORKSPACE, { recursive: true });
 writeFileSync(
   resolve(WORKSPACE, "package.json"),
