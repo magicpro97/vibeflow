@@ -14,20 +14,27 @@ on:
   pull_request:
     branches: [main]
 
-# Single job on GitHub-hosted ubuntu-latest. Self-hosted runner was tried
-# (commit 9fd7913) but the registered self-hosted runner is for a
-# different repo (tui-translator), so it never picked up vibeflow jobs —
-# they sat in "pending" forever. Reverted to cloud-only after 1h+ of
-# pending with no runner pickup.
+# Single job on a self-hosted runner. The MacBook has a registered
+# self-hosted runner at ~/actions-runner-vibeflow/ for this repo.
+# When the MacBook is online, jobs run instantly (no GitHub queue).
+# When offline, this job stays pending — there's no cloud fallback
+# because the cost of repeatedly re-running CI on cloud (and
+# double-spending Actions minutes) outweighs the value of a fallback.
 #
-# To re-enable self-hosted, first register a runner for this repo at
-# https://github.com/magicpro97/vibeflow/settings/actions/runners
-# then change `runs-on: ubuntu-latest` below to
-# `runs-on: [self-hosted, linux, x64]`.
+# Self-hosted runner setup (one-time):
+#   1. cd ~/actions-runner-vibeflow
+#   2. ./config.sh --unattended --url https://github.com/magicpro97/vibeflow \
+#       --token <registration-token-from-repo-settings> \
+#       --labels "self-hosted,linux,x64" \
+#       --name "MacBook-Pro-cua-mac-vibeflow"
+#   3. ./run.sh   # or: ./svc.sh install && ./svc.sh start
+#
+# To run CI on cloud (when self-hosted is offline for hours),
+# temporarily change `runs-on:` below to `ubuntu-latest`.
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
