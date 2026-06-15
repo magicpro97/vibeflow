@@ -59,9 +59,11 @@ export function policyGates(state: WorkflowState | null): GateReport {
   const warnings: string[] = [];
   if (!state) {
     return {
-      ok: true,
-      failures: [],
-      passed: ["no workflow state — nothing to gate"],
+      ok: false,
+      failures: [
+        "no-workflow-state: .vibeflow/WORKFLOW_STATE.json missing or unreadable — run `vf init` before `vf verify`",
+      ],
+      passed: [],
       warnings: [],
     };
   }

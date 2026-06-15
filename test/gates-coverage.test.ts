@@ -160,10 +160,16 @@ test("runs", async () => { await page.goto("/"); });`,
 });
 
 describe("policyGates branches", () => {
-  test("policyGates: null state returns ok with 'no workflow' (line 61-66)", () => {
+  test("policyGates: null state returns FAIL (no-workflow-state) (line 61-66)", () => {
+    // Regression: previously this returned ok:true with a "nothing to gate" pass — which let
+    // `vf verify` exit 0 on a fresh repo. The audit (PR28 finding C2) flagged this as Critical:
+    // a CI that runs `vf verify` as a gate would have been silently green on a repo with no
+    // workflow at all, defeating the entire point of the gate.
     const r = policyGates(null);
-    expect(r.ok).toBe(true);
-    expect(r.passed).toContain("no workflow state — nothing to gate");
+    expect(r.ok).toBe(false);
+    expect(r.failures.length).toBeGreaterThan(0);
+    expect(r.failures[0]).toMatch(/no-workflow-state/);
+    expect(r.failures[0]).toContain("vf init");
   });
 
   test("policyGates: all units at confidence 1.0 (line 70-76)", () => {
