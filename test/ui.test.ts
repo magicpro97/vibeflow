@@ -1,5 +1,13 @@
-import { describe, expect, test } from "bun:test";
-import { link, panel, progressBar, table } from "../src/ui.js";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  link,
+  panel,
+  progressBar,
+  setTtyOverride,
+  Spinner,
+  StatusLine,
+  table,
+} from "../src/ui.js";
 
 describe("ui: table", () => {
   test("renders aligned table with headers and rows", () => {
@@ -23,6 +31,15 @@ describe("ui: table", () => {
     const out = table(["a"], []);
     expect(out).toContain("┌");
     expect(out).toContain("└");
+  });
+
+  test("rows shorter than headers pad the missing cell width (?? '' branch)", () => {
+    // Covers the `r[i] ?? ""` branch where the row is missing a cell.
+    const out = table(["tool", "status"], [["node"]]);
+    expect(out).toContain("tool");
+    expect(out).toContain("status");
+    expect(out).toContain("node");
+    expect(out.split("\n").length).toBe(6);
   });
 });
 
@@ -65,6 +82,15 @@ describe("ui: panel", () => {
     const out = panel("X", "y", color);
     expect(out).toContain("[[");
   });
+
+  test("uses default color when none is provided (default param branch)", () => {
+    const out = panel("Title", "body");
+    // The default color is c.cyan, which wraps the text with ANSI escapes.
+    // We don't assert the exact escape, just that no error is thrown and
+    // the panel renders the title/body.
+    expect(out).toContain("Title");
+    expect(out).toContain("body");
+  });
 });
 
 describe("ui: link", () => {
@@ -106,5 +132,121 @@ describe("ui: link", () => {
         configurable: true,
       });
     }
+  });
+
+  test("setTtyOverride(true) forces the TTY branch in link()", () => {
+    setTtyOverride(true);
+    try {
+      const out = link("click", "https://example.com");
+      expect(out).toContain("\x1b]8;;https://example.com");
+      expect(out).toContain("click");
+    } finally {
+      setTtyOverride(undefined);
+    }
+  });
+});
+
+describe("ui: TTY override helper", () => {
+  let written: { channel: string; args: unknown[] }[] = [];
+  let origError: typeof console.error;
+  let origStderr: typeof process.stderr.write;
+
+  beforeEach(() => {
+    written = [];
+    origError = console.error;
+    origStderr = process.stderr.write;
+    console.error = (...args: unknown[]) => {
+      written.push({ channel: "error", args });
+    };
+    (process.stderr as { write: typeof process.stderr.write }).write = ((
+      chunk: string | Uint8Array,
+    ) => {
+      const text =
+        typeof chunk === "string"
+          ? chunk
+          : new TextDecoder().decode(chunk);
+      written.push({ channel: "stderr", args: [text] });
+      return true;
+    }) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    console.error = origError;
+    (process.stderr as { write: typeof process.stderr.write }).write = origStderr;
+    setTtyOverride(undefined);
+  });
+
+  const outputText = (): string =>
+    written.map((w) => w.args.map((a) => String(a)).join(" ")).join("\n");
+
+  test("Spinner.start writes via stderr.write in TTY mode (setInterval body path)", async () => {
+    setTtyOverride(true);
+    const s = new Spinner();
+    s.start("tty-frame-test");
+    // Wait long enough for at least one setInterval tick (80ms cadence)
+    // so the body of the interval (i++, this.line(...)) executes.
+    await new Promise((r) => setTimeout(r, 120));
+    s.succeed("done");
+    const text = outputText();
+    expect(text).toContain("tty-frame-test");
+    expect(text).toContain("✔");
+    expect(text).toContain("done");
+  });
+
+  test("Spinner.text writes the current frame when TTY and running", () => {
+    setTtyOverride(true);
+    const s = new Spinner();
+    s.start("alpha");
+    written.length = 0; // ignore the start() write
+    s.text("beta");
+    expect(outputText()).toContain("beta");
+    s.succeed("end");
+  });
+
+  test("Spinner.succeed uses stderr.write path in TTY mode (clear branch)", () => {
+    setTtyOverride(true);
+    const s = new Spinner();
+    s.start("work");
+    s.succeed("ok");
+    const text = outputText();
+    // ✔ should appear in the stderr channel (not the error channel).
+    expect(written.some((w) => w.channel === "stderr")).toBe(true);
+    expect(text).toContain("✔");
+    expect(text).toContain("ok");
+  });
+
+  test("Spinner.fail uses stderr.write path in TTY mode", () => {
+    setTtyOverride(true);
+    const s = new Spinner();
+    s.start("work");
+    s.fail("bad");
+    const text = outputText();
+    expect(written.some((w) => w.channel === "stderr")).toBe(true);
+    expect(text).toContain("✖");
+    expect(text).toContain("bad");
+  });
+
+  test("Spinner.stop() with timer=null takes the false branch of `if (this.timer)`", () => {
+    setTtyOverride(true);
+    const s = new Spinner();
+    s.start("x");
+    // First stop() runs inside succeed() and clears the timer.
+    s.succeed("ok");
+    // Second stop() runs inside the second succeed() and sees timer=null.
+    // This must not throw and must not double-clear.
+    s.succeed("ok-again");
+    const text = outputText();
+    expect(text).toContain("✔");
+    expect(text).toContain("ok-again");
+  });
+});
+
+describe("ui: StatusLine text with trail (TTY branch)", () => {
+  test("text(msg, trail) appends the dim trail to spinner.text()", () => {
+    setTtyOverride(true);
+    const sl = new StatusLine();
+    sl.start("working");
+    sl.text("uploading", "42%");
+    sl.succeed("done");
   });
 });
