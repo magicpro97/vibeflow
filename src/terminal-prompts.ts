@@ -28,6 +28,18 @@ function restoreRawMode(wasRaw: boolean, cursorHidden = false): void {
   }
 }
 
+/** B4: throw a clear error when a TTY-only prompt is invoked on a non-TTY stdin.
+ *  Today textInput/confirmInput silently fall into readLine and hang for 60s
+ *  on a non-interactive stdin (CI, piped scripts). Fail fast instead so the
+ *  caller can decide what to do (default, auto-yes, etc.). */
+function ensureTtyOrThrow(label: string): void {
+  if (!process.stdin.isTTY || !process.stdin.setRawMode) {
+    throw new Error(
+      `${label}: stdin is not a TTY (setRawMode=${String(process.stdin.setRawMode)}, isTTY=${String(process.stdin.isTTY)}). Provide a default or run interactively.`,
+    );
+  }
+}
+
 function normalizeIndex(index: number, length: number): number {
   if (length === 0) return 0;
   return (index + length) % length;
@@ -63,10 +75,12 @@ async function readLine(question: string, defaultValue = ""): Promise<string> {
 }
 
 export async function textInput(question: string, defaultValue = ""): Promise<string> {
+  ensureTtyOrThrow("textInput");
   return await readLine(question, defaultValue);
 }
 
 export async function confirmInput(question: string, defaultValue = false): Promise<boolean> {
+  ensureTtyOrThrow("confirmInput");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return await new Promise<boolean>((resolve, reject) => {
     let settled = false;
@@ -140,9 +154,6 @@ export async function selectOne(
 
   emitKeypressEvents(process.stdin);
   const wasRaw = process.stdin.isRaw ?? false;
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  write(HIDE_CURSOR);
 
   let cursor = 0;
   let renderedLines = 0;
@@ -159,14 +170,46 @@ export async function selectOne(
 
   return await new Promise<string>((resolve, reject) => {
     let settled = false;
+    // B18: setRawMode + HIDE_CURSOR must be inside the Promise executor with
+    // try/catch so a failure (e.g. stdin is not actually a TTY under a faked
+    // isTTY) rolls back gracefully instead of leaving the terminal stuck in
+    // raw mode with the cursor hidden.
+    try {
+      process.stdin.setRawMode(true);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    process.stdin.resume();
+    write(HIDE_CURSOR);
+
+    // B17: SIGINT/synchronous-exit backstop. If the process dies before
+    // cleanup() runs (parent SIGINT, uncaught throw, OOM), the raw-mode +
+    // hidden-cursor state would leak. Register a process-exit handler that
+    // restores raw mode + shows the cursor, and unregister it in cleanup.
+    const exitHandler = () => {
+      try {
+        restoreRawMode(wasRaw, true);
+      } catch {
+        // best-effort: never throw from a process-exit handler
+      }
+    };
+    process.on("exit", exitHandler);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       process.stdin.off("keypress", onKeypress);
+      // B5: defensive — removeAllListeners so any keypress subscriber
+      // installed by other code (e.g. our own emitKeypressEvents + future
+      // ad-hoc listeners) can't leak either.
+      process.stdin.removeAllListeners("keypress");
+      process.off("exit", exitHandler);
       restoreRawMode(wasRaw, true);
     };
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       cleanup();
       reject(new Error("selection timed out"));
     }, opts.timeoutMs ?? SELECT_TIMEOUT_MS);
@@ -226,9 +269,6 @@ export async function selectMany(
 
   emitKeypressEvents(process.stdin);
   const wasRaw = process.stdin.isRaw ?? false;
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  write(HIDE_CURSOR);
 
   let cursor = 0;
   let renderedLines = 0;
@@ -249,14 +289,39 @@ export async function selectMany(
 
   return await new Promise<string[]>((resolve, reject) => {
     let settled = false;
+    // B18: see selectOne — setRawMode + HIDE_CURSOR must be inside the
+    // Promise executor so a failure rolls back gracefully.
+    try {
+      process.stdin.setRawMode(true);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    process.stdin.resume();
+    write(HIDE_CURSOR);
+
+    // B17: SIGINT/synchronous-exit backstop — see selectOne.
+    const exitHandler = () => {
+      try {
+        restoreRawMode(wasRaw, true);
+      } catch {
+        // best-effort
+      }
+    };
+    process.on("exit", exitHandler);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       process.stdin.off("keypress", onKeypress);
+      // B5: defensive keypress listener cleanup.
+      process.stdin.removeAllListeners("keypress");
+      process.off("exit", exitHandler);
       restoreRawMode(wasRaw, true);
     };
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       cleanup();
       reject(new Error("selection timed out"));
     }, opts.timeoutMs ?? SELECT_TIMEOUT_MS);
