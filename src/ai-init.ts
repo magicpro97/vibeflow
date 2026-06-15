@@ -504,52 +504,45 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   }
 
   // Handle the copilot promptMode: prompt goes as -p value
-  const materialized = materializePrompt(
+  let materialized = materializePrompt(
     { cmd: invocation.cmd, args: invocation.args, promptMode: invocation.promptMode },
     prompt,
   );
+
+  // Copilot workaround for huge prompts: read the promptFile and
+  // treat its content as the prompt. We CANNOT pipe via stdin
+  // (copilot's -p mode requires the prompt as argv value) and we
+  // CANNOT use a shell pipe (Windows `type file | copilot -p`
+  // results in copilot receiving `-p --allow-all-tools` with no
+  // prompt value, falling back to interactive mode — see "You're
+  // in <cwd>... What should I do next?"). The only working
+  // approach is to read the file in JS and pass the content as
+  // the `-p` argv element via direct Bun.spawn (no shell, so
+  // args[1] isn't reinterpreted by cmd.exe).
+  if (engine === "copilot" && promptFile) {
+    try {
+      const fileContent = readFileSync(promptFile, "utf8");
+      materialized = materializePrompt(
+        {
+          cmd: invocation.cmd,
+          args: invocation.args,
+          promptMode: invocation.promptMode,
+        },
+        fileContent,
+      );
+    } catch {
+      // If the file can't be read, fall through with the original
+      // materialized (which has the truncated prompt). This is
+      // best-effort — the dispatch may still fail, but we'll see
+      // a clear error from copilot instead of a silent interactive
+      // mode fallback.
+    }
+  }
   const args = materialized.args;
   const input = materialized.input;
 
-  // Windows cmd-line length limit: shell-pipe prompt file to copilot stdin
-  // On Windows, `type file | copilot -p ...` runs through cmd.exe /c.
-  // Copilot is on PATH — no need for resolved path (which may have spaces).
-  if (engine === "copilot" && promptFile) {
-    const pipeSrc = process.platform === "win32" ? `type "${promptFile}"` : `cat "${promptFile}"`;
-    const pipeCmd =
-      process.platform === "win32"
-        ? `${pipeSrc} | ${invocation.cmd} -p --allow-all-tools`
-        : `${pipeSrc} | "${invocation.cmd}" -p --allow-all-tools`;
-    const shellSpawner = (opts.makeAsyncSpawner ?? makeAsyncSpawner)({
-      timeoutMs,
-      idleTimeoutMs: timeoutMs,
-      shell: true,
-      onChunk: opts.onChunk,
-      onStderrChunk: opts.onStderrChunk,
-    });
-    const result = await shellSpawner(pipeCmd, [], "");
-    if (result.timedOut) {
-      return {
-        ok: false,
-        engine,
-        reason: `${engine} AI analysis timed out after ${timeoutMs / 1000}s`,
-        raw: result.stdout,
-      };
-    }
-    if (result.status !== 0) {
-      const r = result as { status: number; stdout: string; stderr?: string; timedOut?: boolean };
-      const stderrHint = r.stderr ? ` — ${r.stderr.slice(0, 500)}` : "";
-      return {
-        ok: false,
-        engine,
-        reason: `${engine} exited with status ${result.status}${stderrHint}`,
-        raw: result.stdout,
-      };
-    }
-    return { ok: true, engine, raw: result.stdout };
-  }
-
-  // Spawn the engine
+  // Spawn the engine via direct Bun.spawn (no shell, so the
+  // args[1] prompt value isn't reinterpreted by cmd.exe).
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
 
   const result = await asyncSpawn(invocation.cmd, args, input);
