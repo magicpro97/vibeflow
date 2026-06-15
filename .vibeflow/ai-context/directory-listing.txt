@@ -108,7 +108,6 @@
   bun.lock
   coverage/
     .tmp/
-      coverage-0.json
   docs/
     AGENT_ORCHESTRATION_POLICY.md
     ARCHITECTURE.md
