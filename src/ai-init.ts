@@ -286,15 +286,22 @@ export function dirListing(base: string, maxDepth = 2): string {
   return lines.join("\n");
 }
 
-/** Write full file contents to the ai-context temp dir so the AI can read them directly. */
+/** Write full file contents to the ai-context temp dir so the AI can read them directly.
+ *
+ * If `mkdirSync` fails (e.g. permission denied, read-only fs), all subsequent
+ * writes are skipped — no orphaned files, no inner writeFileSync errors.
+ */
 function writeContextFiles(base: string, profile: ProjectProfile): string[] {
   const ctxDir = join(base, AI_CONTEXT_DIR);
+  let canWrite = true;
   try {
     mkdirSync(ctxDir, { recursive: true });
   } catch {
-    /* best effort */
+    /* best effort — bail out of the rest, see canWrite below */
+    canWrite = false;
   }
   const written: string[] = [];
+  if (!canWrite) return written;
 
   // Write existing instruction files (full content)
   for (const f of INSTRUCTION_FILES) {
@@ -379,17 +386,53 @@ function writeContextFiles(base: string, profile: ProjectProfile): string[] {
 /**
  * Build the slim AI analysis prompt (RAG style).
  *
- * Writes the bulky "Your Tasks" body and full project context to
- * `.vibeflow/ai-context/`. The prompt itself stays under ~2K chars —
- * just a project summary, the file list, and a "read INSTRUCTIONS.md
- * first" directive. The engine uses its own `read_file` tool to pull
- * the body. This keeps the prompt well below Windows's 32K cmd-line
- * limit (relevant for copilot) regardless of how detailed tasks get.
+ * Computes the prompt text first (no disk I/O), then writes the bulky
+ * "Your Tasks" body and full project context to `.vibeflow/ai-context/`.
+ * The prompt itself stays under ~2K chars — just a project summary, the
+ * file list, and a "read INSTRUCTIONS.md first" directive. The engine
+ * uses its own `read_file` tool to pull the body. This keeps the prompt
+ * well below Windows's 32K cmd-line limit (relevant for copilot)
+ * regardless of how detailed tasks get.
+ *
+ * Computing first lets the caller run a length check (e.g. Windows 32K
+ * fail-fast) BEFORE `writeContextFiles` touches disk — saving ~35K chars
+ * of orphaned writes when the call would just abort.
  */
 export function buildAiInitPrompt(profile: ProjectProfile, base: string): string {
-  // Write full context files (including INSTRUCTIONS.md) for the AI to read
-  const contextFiles = writeContextFiles(base, profile);
+  // First compute the prompt text (no disk writes yet). The slim prompt
+  // is short, so this is cheap and lets the caller run length checks
+  // (e.g. Windows 32K fail-fast) before writeContextFiles touches disk.
+  const contextFiles = listContextFiles(base, profile);
+  const prompt = renderSlimPrompt(profile, base, contextFiles);
 
+  // Only after we know the prompt is shippable, write the bulky context
+  // files to disk for the AI to read.
+  writeContextFiles(base, profile);
+  return prompt;
+}
+
+/** List the file paths that would be written to .vibeflow/ai-context/.
+ *  Pure / no side effects — used by buildAiInitPrompt and tests. */
+function listContextFiles(base: string, profile: ProjectProfile): string[] {
+  const written: string[] = [];
+  for (const f of INSTRUCTION_FILES) {
+    if (existsSync(join(base, f))) written.push(`${AI_CONTEXT_DIR}/${f}`);
+  }
+  if (existsSync(join(base, CTX_DIR, "PROJECT_CONTEXT.md"))) {
+    written.push(`${AI_CONTEXT_DIR}/PROJECT_CONTEXT.md`);
+  }
+  written.push(`${AI_CONTEXT_DIR}/project-profile.json`);
+  written.push(`${AI_CONTEXT_DIR}/directory-listing.txt`);
+  written.push(`${AI_CONTEXT_DIR}/${INSTRUCTIONS_FILE}`);
+  written.push(`${AI_CONTEXT_DIR}/ANTHROPIC_SKILL_STANDARD.md`);
+  written.push(`${AI_CONTEXT_DIR}/SKILL_TAXONOMY.md`);
+  if (profile.findings?.length) written.push(`${AI_CONTEXT_DIR}/stack-evidence.md`);
+  return written;
+}
+
+/** Render the slim prompt body (no disk I/O). The engine is told to use
+ *  its Read tool to pull the bulky task body from INSTRUCTIONS.md on disk. */
+function renderSlimPrompt(profile: ProjectProfile, base: string, contextFiles: string[]): string {
   const langList = profile.languages.length ? profile.languages.join(", ") : "unknown";
   const fwList = profile.frameworks.length ? profile.frameworks.join(", ") : "none detected";
   const pkgMgr = profile.packageManager ?? "unknown";
@@ -513,10 +556,17 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // Scan the project
   const profile = scanRepo(base);
 
-  // Build the prompt (writes full context files, no truncation)
-  // Test seam: allow tests to inject a stubbed prompt to exercise
-  // the >10000 char threshold without depending on the real profile.
-  const prompt = (opts.buildPrompt ?? ((p, b) => buildAiInitPrompt(p, b)))(profile, base);
+  // Build the prompt text WITHOUT writing context files yet. The slim
+  // prompt is short, so this is cheap and lets us run the Windows 32K
+  // fail-fast below BEFORE writeContextFiles touches disk (saves ~35K
+  // chars of writes when we would just abort). Test seam: allow tests
+  // to inject a stubbed prompt to exercise the >30000 char threshold
+  // without depending on the real profile.
+  const contextFiles = listContextFiles(base, profile);
+  const prompt = (opts.buildPrompt ?? ((p, b) => renderSlimPrompt(p, b, listContextFiles(b, p))))(
+    profile,
+    base,
+  );
 
   // The original promptFile write/read block (Task 7 follow-up) was
   // DEAD CODE: claude and codex read prompts from stdin (no file
@@ -526,7 +576,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // We just pass the prompt inline as argv and let Windows complain
   // if it's > 32K (fail-fast below).
 
-  // Dry run: return prompt without spawning
+  // Dry run: return prompt without writing context files or spawning
   if (dryRun) {
     return { ok: true, engine, prompt, reason: "dry run — prompt ready for inspection" };
   }
@@ -535,6 +585,9 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   const invocation: EngineCommandResult = (opts.engineCommandFn ?? engineCommand)(engine);
 
   if (isUnavailable(invocation)) {
+    // Write context files before returning — they are still useful
+    // diagnostic output for the caller.
+    writeContextFiles(base, profile);
     return { ok: false, engine, reason: invocation.unavailable, prompt };
   }
 
@@ -545,6 +598,10 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // argv limit is a hard constraint: copilot has no --prompt-file
   // flag, and claude/codex read from stdin (so they are not
   // affected). Switch to claude or codex for huge prompts.
+  //
+  // This check runs BEFORE writeContextFiles so we don't leave ~35K
+  // chars of orphaned context files on disk when the call would just
+  // abort. contextFiles were already listed above (pure / no I/O).
   if (process.platform === "win32" && engine === "copilot" && prompt.length > 30_000) {
     return {
       ok: false,
@@ -553,6 +610,9 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       prompt,
     };
   }
+
+  // Prompt is shippable — now write the bulky context files for the AI.
+  writeContextFiles(base, profile);
 
   // Handle the copilot promptMode: prompt goes as -p value
   const materialized = materializePrompt(

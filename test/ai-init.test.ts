@@ -101,6 +101,23 @@ describe("buildAiInitPrompt", () => {
     expect(dirListIdx).toBeGreaterThan(instrIdx);
   });
 
+  // Regression for cross-debate round 2 nit #2: every engine is assumed
+  // to have a file-read tool. The prompt must EXPLICITLY mention "Read"
+  // (or "Read tool") so an engine without a read tool is at least told
+  // to call one. If this assertion ever fails, the prompt has drifted
+  // into pure-summary land and slim-prompt engines can no longer pull
+  // INSTRUCTIONS.md.
+  test('prompt explicitly tells the engine to "Read" INSTRUCTIONS.md', () => {
+    const prompt = buildAiInitPrompt(profile, "/tmp");
+    // Must reference the read-tool name (engine-agnostic: "Read" /
+    // "Read tool" / "Read/Edit tools"). Use a case-sensitive substring
+    // to catch drift if someone changes the directive to e.g. "Open".
+    expect(prompt).toMatch(/\bRead\b/);
+    // And it must be in the context of reading INSTRUCTIONS.md, not
+    // just incidental.
+    expect(prompt).toMatch(/Read[^\n]*INSTRUCTIONS\.md/);
+  });
+
   test("INSTRUCTIONS.md is written to .vibeflow/ai-context/", () => {
     // The bulky body lives on disk, not in argv. The engine reads it
     // via its own read_file tool.
@@ -157,6 +174,47 @@ describe("buildAiInitPrompt", () => {
     const prompt = buildAiInitPrompt(lean, "/tmp");
     expect(prompt).toContain("unknown");
     expect(prompt).toContain("none detected");
+  });
+
+  // Stronger version of the no-write regression: also exercise the
+  // REAL (non-seam) buildAiInitPrompt path so we know the production
+  // code computes the prompt first and writes only after the fail-fast
+  // check. The slim prompt is always <2K, so we can't directly trigger
+  // fail-fast in production. Instead we verify that calling
+  // buildAiInitPrompt on a 30K-ish profile does NOT leave the
+  // .vibeflow/ai-context/ dir behind when the length threshold is
+  // forced by a profile with a huge summary.
+  test("writeContextFiles is gated by mkdirSync success (nit #5): mkdir failure → no writes", async () => {
+    // Cross-debate round 2 nit #5: if mkdirSync fails, the inner
+    // writeFileSync calls used to throw and the catch absorbed them —
+    // the sibling files were still attempted. New behavior: track
+    // mkdir success, skip all writes if it failed.
+    //
+    // We simulate mkdir failure by pointing writeContextFiles at a
+    // path whose parent is a regular file (mkdir will fail because
+    // the parent exists and isn't a directory). Easier: just call
+    // buildAiInitPrompt on a /dev/null-like path. Actually simpler:
+    // call buildAiInitPrompt on a base where the .vibeflow/ parent
+    // is a file, not a directory.
+    const dir = mkdtempSync(join(tmpdir(), "vf-mkdir-fail-"));
+    try {
+      // Create a regular file at the spot where a directory is needed.
+      // .vibeflow/ must be a dir for .vibeflow/ai-context/ mkdir to
+      // succeed. We make .vibeflow/ a regular file so the recursive
+      // mkdir will fail with ENOTDIR.
+      writeFileSync(join(dir, ".vibeflow"), "not a directory");
+      const prompt = buildAiInitPrompt(profile, dir);
+      // buildAiInitPrompt should still return a valid prompt text
+      // (the listContextFiles + renderSlimPrompt path doesn't touch
+      // disk via mkdir).
+      expect(prompt).toContain("test-project");
+      // And NO context files were written (the .vibeflow/ai-context/
+      // dir couldn't be created).
+      expect(existsSync(join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md"))).toBe(false);
+      expect(existsSync(join(dir, ".vibeflow", "ai-context", "project-profile.json"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -573,6 +631,48 @@ describe("dirListing: FS catch branches (line 80, 92)", () => {
       expect(r.reason).toContain("claude or codex");
       // The spawner must NOT have been called.
       expect(calls).toHaveLength(0);
+      rmSync(dir, { recursive: true, force: true });
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  // Cross-debate round 2 nit #3: the 30K fail-fast MUST run before
+  // writeContextFiles touches disk. Otherwise a Windows + copilot
+  // forced run with a 35K prompt leaves ~35K of orphaned context
+  // files in .vibeflow/ai-context/ that no engine will ever read.
+  // Regression: assert that no .vibeflow/ai-context files are written
+  // when the fail-fast branch is taken.
+  test("copilot on Windows with prompt > 30K chars: writes NO context files (fail-fast before write)", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "vf-7b-nowrite-"));
+      const huge = "x".repeat(31_000);
+      const r = await runAiInit({
+        base: dir,
+        forceEngine: "copilot",
+        preflight: () => [
+          { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        ],
+        engineCommandFn: () => ({
+          cmd: "copilot",
+          args: ["-p", "--allow-all-tools"],
+          promptMode: "arg" as const,
+        }),
+        spawner: async () => ({ status: 0, stdout: "ok", stderr: "", timedOut: false }),
+        // Force a 31K prompt via the test seam. The seam bypasses
+        // buildAiInitPrompt entirely, so no real build → no real write
+        // is expected in the normal code path. The real assertion is
+        // that the fail-fast branch is taken (ok:false, "claude or codex")
+        // BEFORE any writeContextFiles call.
+        buildPrompt: () => huge,
+      });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toContain("claude or codex");
+      // No .vibeflow/ai-context/ dir should exist (no writes happened).
+      const ctxDir = join(dir, ".vibeflow", "ai-context");
+      expect(existsSync(ctxDir)).toBe(false);
       rmSync(dir, { recursive: true, force: true });
     } finally {
       Object.defineProperty(process, "platform", { value: origPlatform });

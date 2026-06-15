@@ -3,6 +3,17 @@
 // below 100% line OR branch coverage, OR if the aggregate drops
 // below 100%. This is the source of truth for the "100% coverage"
 // invariant in this repo. Used by `bun run check` and by CI.
+//
+// GitHub Actions annotation format: `::error file=<path>,line=<n>,col=<n>::<msg>`
+// is required for the workflow UI to render file-scoped annotations.
+// Older form `::error::<msg>` shows as a top-level error with no link.
+//
+// Known limitation: bun:coverage does NOT emit BRDA (branch) records, so
+// the lcov branch-coverage numbers are always 0/0 and the aggregate
+// branch check passes trivially. We surface this with a `::notice::` line
+// so reviewers know the lcov LINE coverage is the meaningful signal —
+// branch coverage is a structural blind spot in the bun:coverage tool,
+// not a coverage regression.
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -12,7 +23,9 @@ const lcovPath = path.join(
   "lcov.info",
 );
 if (!fs.existsSync(lcovPath)) {
-  console.error(`::error::lcov.info not found at ${lcovPath}`);
+  console.error(
+    `::error file=${lcovPath},line=1,col=1::lcov.info not found at ${lcovPath}`,
+  );
   console.error("Run `bun test --coverage --coverage-reporter=lcov` first.");
   process.exit(1);
 }
@@ -66,12 +79,20 @@ console.log(
   `lcov branch coverage: ${overallBranch.toFixed(2)}% (${hitBranches}/${totalBranches})`,
 );
 
+// 0/0 branch notice: see top-of-file limitation comment. This is NOT
+// a coverage regression — bun:coverage emits no BRDA records.
+if (totalBranches === 0) {
+  console.log(
+    "::notice::Branch coverage is 0/0 because bun:coverage emits no BRDA records; lcov line coverage is the meaningful signal.",
+  );
+}
+
 let failed = false;
 
 // Aggregate gate
 if (overallLine < 100 || overallBranch < 100) {
   console.error(
-    `::error::aggregate lcov is line ${overallLine.toFixed(2)}% / branch ${overallBranch.toFixed(2)}%, must be 100%`,
+    `::error file=${lcovPath},line=1,col=1::aggregate lcov is line ${overallLine.toFixed(2)}% / branch ${overallBranch.toFixed(2)}%, must be 100%`,
   );
   failed = true;
 }
@@ -80,7 +101,7 @@ if (overallLine < 100 || overallBranch < 100) {
 for (const f of perFile) {
   if (f.lpct < 100 || f.bpct < 100) {
     console.error(
-      `::error::${f.sf}: line ${f.lpct.toFixed(2)}% (${f.lh}/${f.lf}) / branch ${f.bpct.toFixed(2)}% (${f.brh}/${f.brf}) — must be 100%`,
+      `::error file=${f.sf},line=1,col=1::${f.sf}: line ${f.lpct.toFixed(2)}% (${f.lh}/${f.lf}) / branch ${f.bpct.toFixed(2)}% (${f.brh}/${f.brf}) — must be 100%`,
     );
     failed = true;
   }
