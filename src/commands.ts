@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
@@ -11,7 +11,7 @@ import {
   engineFiles,
 } from "./adapters.js";
 import { detectRolesForRepo } from "./agents/detect-roles.js";
-import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
+import { type AgentEngine } from "./agents/render.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -56,7 +56,6 @@ import {
   initAskQuestionnaireToIntakeAnswers,
 } from "./init-intake.js";
 import { appendJournal, ensureIndex } from "./journal.js";
-import { spawnAgent } from "./orchestrator/agent.js";
 import {
   type AsyncResearcher,
   DEFAULT_MAX_ROUNDS,
@@ -65,7 +64,6 @@ import {
   investigateUnit,
   thresholdFor,
 } from "./orchestrator/investigate.js";
-import { createMarker, updateMarker } from "./orchestrator/marker.js";
 import {
   DEFAULT_CONCURRENCY,
   type Reviewer,
@@ -108,7 +106,7 @@ import { syncSkillMirrors, verifySkillSync } from "./skills/sync.js";
 import { validateSkillRoots } from "./skills/validator.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
-import { Spinner, StatusLine, link, panel, progressBar, table } from "./ui.js";
+import { Spinner, panel, table } from "./ui.js";
 import {
   type CollisionPolicy,
   type DeletePlan,
@@ -1291,12 +1289,22 @@ export async function init(
   if (!answers) return (flags.ask || flags.interactive) && process.stdin.isTTY ? 130 : 2;
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
-  const result = applyIntake(answers, {
-    dry,
-    skipPreflight: dry,
-    preflight: inject.preflight,
-    useAi: false,
-  });
+  const initSpinner = new Spinner();
+  initSpinner.start(dry ? "➥ Preparing init dry run" : "➥ Generating VibeFlow context");
+  let result: ReturnType<typeof applyIntake>;
+  try {
+    result = applyIntake(answers, {
+      dry,
+      skipPreflight: dry,
+      preflight: inject.preflight,
+      useAi: false,
+    });
+  } catch (err) {
+    initSpinner.fail("VibeFlow context generation failed");
+    throw err;
+  }
+  if (result.refused) initSpinner.fail("Engine preflight refused init");
+  else initSpinner.succeed(dry ? "Init dry run prepared" : "VibeFlow context generated");
 
   if (result.refused) return reportPreflightRefusal(result.readiness);
   const label = dry ? "dry run" : "init";

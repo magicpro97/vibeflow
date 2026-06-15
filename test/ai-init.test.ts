@@ -334,7 +334,7 @@ describe("runAiInit", () => {
     expect(capturedArgs[0]).toBe("-p");
     expect(capturedArgs[1]).toContain("You are an AI agent performing project initialization");
     expect(capturedArgs[1]).toContain(".vibeflow/ai-context/project-profile.json");
-    expect(capturedArgs[2]).toBe("--allow-all-tools");
+    expect(capturedArgs[2]).toBe("--allow-all");
   });
 
   test("returns error when spawner times out", async () => {

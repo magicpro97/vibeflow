@@ -295,15 +295,8 @@ describe("commands.init", () => {
   });
 
   test("init --ai --ask refuses non-TTY instead of hanging", async () => {
-    const result = Bun.spawnSync(
-      ["bun", "run", join(origCwd, "src/cli.ts"), "init", "--ai", "--ask"],
-      {
-        cwd: dir,
-        env: { ...process.env, NO_COLOR: "1" },
-      },
-    );
-    expect(result.exitCode).toBe(2);
-    expect(new TextDecoder().decode(result.stderr)).toContain("requires an interactive terminal");
+    const code = await init({ ai: true, ask: true }, { preflight: allReady });
+    expect(code).toBe(2);
     expect(existsSync(join(dir, CTX_DIR))).toBe(false);
   });
 

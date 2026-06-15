@@ -1,13 +1,8 @@
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { extname, join } from "node:path";
 import type { ProjectContext, UnitBrief } from "./adapters.js";
 import { dispatchPrompt } from "./adapters.js";
-import {
-  type Engine,
-  hasCommand,
-  needsShellForCommand,
-  resolveCommand,
-  writeFileSafe,
-} from "./core.js";
+import { type Engine, hasCommand, resolveCommand, writeFileSafe } from "./core.js";
 
 // Confidence fallback for engine runs with no JSON summary block
 const MIN_PRODUCTIVE_TURNS = 3;
@@ -76,6 +71,18 @@ const TIMEOUT_STATUS = 124;
 /** Default grace between SIGTERM and the hard SIGKILL when a process group ignores the term. */
 const DEFAULT_GRACE_MS = 3000;
 
+function hasWindowsShimSibling(path: string): boolean {
+  if (extname(path)) return false;
+  return existsSync(`${path}.cmd`) || existsSync(`${path}.bat`);
+}
+
+function shouldUseWindowsShell(cmd: string, resolvedCmd: string): boolean {
+  if (process.platform !== "win32") return false;
+  if (/\.(?:cmd|bat)$/i.test(resolvedCmd)) return true;
+  if (cmd.toLowerCase() === "copilot") return true;
+  return hasWindowsShimSibling(resolvedCmd);
+}
+
 interface AsyncResult {
   status: number;
   stdout: string;
@@ -113,8 +120,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     // path first; if the resolved path is a .cmd/.bat shim, use
     // shell. The explicit `shell` opt still wins if caller sets it.
     const resolvedCmd = resolveCommand(cmd) ?? cmd;
-    const needsShell =
-      shell ?? (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(resolvedCmd));
+    const needsShell = shell ?? shouldUseWindowsShell(cmd, resolvedCmd);
     const spawnArgs = needsShell
       ? process.platform === "win32"
         ? ["cmd.exe", "/c", cmd, ...args]
@@ -137,11 +143,17 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     let timedOut = false;
 
     let term: Timer | undefined;
+    let graceTerm: Timer | undefined;
     const killProc = () => {
+      if (timedOut) return;
       timedOut = true;
-      proc.kill();
+      try {
+        proc.kill();
+      } catch {
+        // Process may already have exited before the timeout handler runs.
+      }
       if (graceMs > 0)
-        setTimeout(() => {
+        graceTerm = setTimeout(() => {
           try {
             proc.kill("SIGKILL");
           } catch {
@@ -149,7 +161,9 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
           }
         }, graceMs);
     };
-    if (timeoutMs != null) term = setTimeout(killProc, timeoutMs);
+    if (timeoutMs != null) {
+      term = setTimeout(killProc, timeoutMs);
+    }
 
     let idle: Timer | undefined;
     const resetIdle = () => {
@@ -181,10 +195,18 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       })(),
     ]);
 
-    if (term) clearTimeout(term);
-    if (idle) clearTimeout(idle);
+    if (term) {
+      clearTimeout(term);
+    }
+    if (idle) {
+      clearTimeout(idle);
+    }
     const exitCode = await proc.exited;
-    return { status: timedOut ? TIMEOUT_STATUS : (exitCode ?? 1), stdout, stderr, timedOut };
+    if (graceTerm) {
+      clearTimeout(graceTerm);
+    }
+    const status = timedOut ? TIMEOUT_STATUS : (exitCode ?? 1);
+    return { status, stdout, stderr, timedOut };
   };
 }
 

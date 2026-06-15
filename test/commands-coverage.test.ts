@@ -2358,6 +2358,59 @@ describe("commands.hook (test seam)", () => {
 });
 
 describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
+  test("init --ai renders loading states for context generation and AI enrichment", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-loading-"));
+    const origCwd = process.cwd();
+    const origErr = console.error;
+    const origIsTTY = process.stderr.isTTY;
+    const stderrLines: string[] = [];
+    console.error = (...args: unknown[]) => {
+      stderrLines.push(args.map((a) => String(a)).join(" "));
+    };
+    Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-15",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-15",
+            },
+          ],
+          aiSpawner: async () => ({
+            status: 0,
+            stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+            stderr: "",
+            timedOut: false,
+          }),
+        },
+      );
+      expect(code).toBe(0);
+      const stderr = stderrLines.join("\n");
+      expect(stderr).toContain("Generating VibeFlow context");
+      expect(stderr).toContain("VibeFlow context generated");
+      expect(stderr).toContain("Running AI enrichment [claude]");
+      expect(stderr).toContain("AI enrichment complete (claude)");
+    } finally {
+      process.chdir(origCwd);
+      console.error = origErr;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("init --ai with injected aiSpawner and aiPreflight runs the enrichment (line 1277-1319)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-ai-test-"));
     const origCwd = process.cwd();
