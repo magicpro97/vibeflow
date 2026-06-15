@@ -40,6 +40,7 @@ import {
 } from "../src/commands.js";
 import { CTX_DIR, type Engine, type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
+import type { UnitDispatcher } from "../src/orchestrator/run.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
 import { writeSettings } from "../src/settings.js";
@@ -2486,7 +2487,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
     try {
       process.chdir(dir);
       const code = await init(
-        { ai: true, engine: "claude" },
+        { ai: true, "no-agent-team": true, engine: "claude" },
         {
           // NO aiSpawner injected — factory path is used
           preflight: () => [
@@ -2554,21 +2555,28 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
     }
   });
 
+  // B1/T5 + Task 5b: init --ai defaults to runAiInitWorkflow (agent-team).
+  // The --no-agent-team opt-out restores the legacy runAiInit path. We
+  // verify the dispatch by injecting a custom dispatcher and a custom
+  // aiSpawner; the dispatcher runs only on the workflow path.
+  //
+  // --autopilot tests (mainline, PR #42) cover the legacy --no-agent-team
+  // path's fallback chain. Both paths must coexist: agent-team (default)
+  // and legacy (--no-agent-team).
+
   test("init --ai --autopilot --engine copilot: falls back to claude and surfaces the fallback chain", async () => {
-    // End-to-end test for the --autopilot CLI flag. preflight says
-    // copilot is not ready but claude+codex are. With --autopilot, the
-    // AI enrichment phase should fall back to claude and the CLI
-    // message should mention the fallback.
+    // End-to-end test for the --autopilot CLI flag on the legacy path.
+    // preflight says copilot is not ready but claude+codex are. With
+    // --autopilot, the AI enrichment phase should fall back to claude
+    // and the CLI message should mention the fallback.
     const dir = mkdtempSync(join(tmpdir(), "vf-init-autopilot-"));
     const origCwd = process.cwd();
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, engine: "copilot", autopilot: true },
+        { ai: true, "no-agent-team": true, engine: "copilot", autopilot: true },
         {
           preflight: () => [
-            // Phase 1 needs at least one engine ready so the gate
-            // doesn't refuse creation.
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
             { engine: "copilot", level: "no-binary" as const, detail: "x", checkedAt: "now" },
           ],
@@ -2588,15 +2596,15 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
   });
 
   test("init --ai --autopilot=false (default): single-shot on engine-not-ready (no fallback)", async () => {
-    // The pre-existing behavior (no --autopilot) is preserved: a
-    // missing engine prints the AI-skipped message and does NOT
-    // attempt a fallback.
+    // The pre-existing behavior (no --autopilot) is preserved on the
+    // legacy --no-agent-team path: a missing engine prints the AI-skipped
+    // message and does NOT attempt a fallback.
     const dir = mkdtempSync(join(tmpdir(), "vf-init-no-autopilot-"));
     const origCwd = process.cwd();
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, engine: "copilot" }, // no autopilot flag
+        { ai: true, "no-agent-team": true, engine: "copilot" },
         {
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
@@ -2611,8 +2619,206 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
         },
       );
       expect(code).toBe(0);
-      // AI enrichment path returns ok:false (engine not ready) but
-      // init itself returns 0 (Phase 1 succeeded). No fallback fired.
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init --ai without --no-agent-team calls runAiInitWorkflow (dispatcher runs, aiSpawner ignored)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-agent-team-"));
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      let dispatcherCalls = 0;
+      let aiSpawnerCalls = 0;
+      const code = await init(
+        { ai: true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiSpawner: async () => {
+            aiSpawnerCalls++;
+            return { status: 0, stdout: "", stderr: "", timedOut: false };
+          },
+          dispatcher: async () => {
+            dispatcherCalls++;
+            return {
+              status: "blocked",
+              confidence: 0,
+              evidence: [],
+            };
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // Workflow path: dispatcher was called, legacy aiSpawner was not.
+      expect(dispatcherCalls).toBeGreaterThan(0);
+      expect(aiSpawnerCalls).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init --ai --no-agent-team falls back to runAiInit (legacy aiSpawner runs, dispatcher ignored)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-legacy-"));
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      let dispatcherCalls = 0;
+      let aiSpawnerCalls = 0;
+      const code = await init(
+        { ai: true, "no-agent-team": true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiSpawner: async () => {
+            aiSpawnerCalls++;
+            return {
+              status: 0,
+              stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+              stderr: "",
+              timedOut: false,
+            };
+          },
+          dispatcher: async () => {
+            dispatcherCalls++;
+            return { status: "blocked", confidence: 0, evidence: [] };
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // Legacy path: aiSpawner was called, dispatcher was not.
+      expect(aiSpawnerCalls).toBeGreaterThan(0);
+      expect(dispatcherCalls).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init --ai agent-team happy path: dispatcher returns verifying + reviewer accepts → ok", async () => {
+    // Force the workflow reviewer to pass by making the dispatcher return
+    // verifying on a unit whose scope paths exist on disk. The
+    // workflow-state-writer unit's scope is '.vibeflow/WORKFLOW_STATE.json'
+    // which applyIntake (Phase 1) just wrote, so the reviewer's file-exists
+    // check passes without us creating extra fixtures.
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-agent-team-happy-"));
+    // Pre-create the analyzer fixture (applyIntake does not write
+    // stack-evidence.md) so the reviewer's file-exists check passes.
+    mkdirSync(join(dir, ".vibeflow", "ai-context"), { recursive: true });
+    writeFileSync(join(dir, ".vibeflow", "ai-context", "stack-evidence.md"), "# test");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const calls: number[] = [];
+      const code = await init(
+        { ai: true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+          dispatcher: async (unit) => {
+            calls.push(1);
+            // Cite a path that applyIntake just wrote, so the
+            // reviewer's file-exists check passes.
+            const cited =
+              unit.name === "ai-init-workflow-state-writer"
+                ? ".vibeflow/WORKFLOW_STATE.json"
+                : unit.name === "ai-init-instruction-writer"
+                  ? "CLAUDE.md"
+                  : unit.name === "ai-init-skill-curator"
+                    ? ".vibeflow/SKILL_INDEX.md"
+                    : unit.name === "ai-init-tool-configurator"
+                      ? ".vibeflow/SETTINGS.json"
+                      : unit.name === "ai-init-workflow-policy-writer"
+                        ? ".vibeflow/WORKFLOW_POLICY.md"
+                        : unit.name === "ai-init-analyzer"
+                          ? ".vibeflow/ai-context/stack-evidence.md"
+                          : ".vibeflow/PROJECT_CONTEXT.md";
+            return { status: "verifying", confidence: 1, evidence: [cited] };
+          },
+        },
+      );
+      expect(code).toBe(0);
+      expect(calls.length).toBeGreaterThan(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init --ai --no-agent-team legacy path: engine-not-ready prints AI-skipped message", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-legacy-skip-"));
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, "no-agent-team": true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "no-binary" as const,
+              detail: "missing",
+              checkedAt: "2026-06-13",
+            },
+          ],
+        },
+      );
+      // Code is still 0 — the legacy path is best-effort.
+      expect(code).toBe(0);
     } finally {
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });

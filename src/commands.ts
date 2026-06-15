@@ -1262,11 +1262,21 @@ export async function init(
     // preflight (overriding its default real-probe). Production
     // callers leave this undefined.
     aiPreflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+    // Test seam: forwarded to `runAiInitWorkflow` (B1/T5) when the
+    // --ai path uses the agent-team shape. Ignored on the legacy
+    // `runAiInit` path. Production callers leave this undefined.
+    dispatcher?: UnitDispatcher;
   } = {},
 ): Promise<number> {
   const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
   const dry = Boolean(flags["dry-run"]);
   const ai = Boolean(flags.ai);
+  // B1/T5 + Task 5b: --ai defaults to the agent-team workflow shape
+  // (runAiInitWorkflow). The --no-agent-team opt-out restores the
+  // legacy runAiInit path. The default is the workflow because the
+  // agent-team is the forward-looking surface; users on tight CI
+  // budgets can opt out per-run.
+  const useAgentTeam = ai && !flags["no-agent-team"];
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
   const result = applyIntake(
@@ -1296,64 +1306,101 @@ export async function init(
   // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded)
   if (ai && !dry && !result.refused) {
     out("vf");
-    const { runAiInit } = await import("./ai-init.js");
     const aiEngine = typeof flags.engine === "string" ? (flags.engine as Engine) : undefined;
     const prefix = aiEngine ? `[${aiEngine}]` : "[ai]";
-    const aiResult = await runAiInit({
-      base: cwd(),
-      dryRun: dry,
-      // Test seam: use the injected aiSpawner if provided, so unit
-      // tests can stub the engine call. Production callers fall
-      // through to the default makeAsyncSpawner factory.
-      spawner:
-        inject.aiSpawner ??
-        makeAsyncSpawner({
-          timeoutMs: 30_000,
-          idleTimeoutMs: 300_000,
-          onChunk(text) {
-            for (const line of text.split("\n")) {
-              if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
-            }
-          },
-          onStderrChunk(text) {
-            for (const line of text.split("\n")) {
-              if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
-            }
-          },
-        }),
-      forceEngine: aiEngine,
-      // --autopilot: opt-in auto-fallback when the chosen engine is
-      // unavailable or returns a permission error. Default false to
-      // preserve single-shot behavior (any failure is the user's
-      // problem to debug). With --autopilot, runAiInit transparently
-      // retries with the next-best ready engine.
-      autopilot: Boolean(flags.autopilot),
-      // Test seam: forward inject.aiPreflight so unit tests can stub
-      // engine readiness checks in the AI enrichment phase. The
-      // applyIntake call above uses inject.preflight (a different
-      // PreflightFn signature) for the Phase 1 deterministic step.
-      preflight: inject.aiPreflight,
-    });
-    if (aiResult.ok) {
-      const used = aiResult.engine ?? "?";
-      if (aiResult.fallback) {
+    if (useAgentTeam) {
+      // B1/T5: --ai defaults to the agent-team workflow shape. The workflow
+      // runs 7 adapter units in parallel (analyzer, instruction-writer,
+      // skill-curator, tool-configurator, workflow-policy-writer,
+      // workflow-state-writer, context-updater) and a reviewer per unit.
+      // The CLI synthesises a minimal intake from the flags because the
+      // web intake wizard is the primary intake source; the CLI path
+      // runs the workflow against a "init" goal with no user-supplied
+      // workflow phases (Tier 2 stays empty; Tier 1 still runs).
+      const { runAiInitWorkflow } = await import("./ai-init.js");
+      const workflowResult = await runAiInitWorkflow({
+        base: cwd(),
+        intake: { goal: "init", engines: aiEngine ? [aiEngine] : [] },
+        forceEngine: aiEngine,
+        preflight: inject.aiPreflight,
+        dispatcher: inject.dispatcher,
+        spawner: inject.aiSpawner,
+      });
+      if (workflowResult.ok) {
         out(
           "vf",
           c.green(
-            `✔ AI analysis complete (${used}; fell back from ${aiResult.fallback.original} via --autopilot)`,
+            `✔ agent-team workflow complete (${workflowResult.units.length} units via ${workflowResult.reviews[0]?.reason ?? "reviewer"})`,
           ),
         );
       } else {
-        out("vf", c.green(`✔ AI analysis complete (${used})`));
+        out("vf", c.yellow(`! agent-team workflow skipped: ${workflowResult.reason}`));
+        out(
+          "vf",
+          c.dim(
+            "  Deterministic context files are in place. Re-run with --ai when an engine is ready.",
+          ),
+        );
       }
     } else {
-      out("vf", c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
-      out(
-        "vf",
-        c.dim(
-          "  Deterministic context files are in place. Re-run with --ai when an engine is ready.",
-        ),
-      );
+      // Legacy --no-agent-team path: original runAiInit shape.
+      const { runAiInit } = await import("./ai-init.js");
+      const aiResult = await runAiInit({
+        base: cwd(),
+        dryRun: dry,
+        // Test seam: use the injected aiSpawner if provided, so unit
+        // tests can stub the engine call. Production callers fall
+        // through to the default makeAsyncSpawner factory.
+        spawner:
+          inject.aiSpawner ??
+          makeAsyncSpawner({
+            timeoutMs: 30_000,
+            idleTimeoutMs: 300_000,
+            onChunk(text) {
+              for (const line of text.split("\n")) {
+                if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
+              }
+            },
+            onStderrChunk(text) {
+              for (const line of text.split("\n")) {
+                if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
+              }
+            },
+          }),
+        forceEngine: aiEngine,
+        // --autopilot: opt-in auto-fallback when the chosen engine is
+        // unavailable or returns a permission error. Default false to
+        // preserve single-shot behavior (any failure is the user's
+        // problem to debug). With --autopilot, runAiInit transparently
+        // retries with the next-best ready engine.
+        autopilot: Boolean(flags.autopilot),
+        // Test seam: forward inject.aiPreflight so unit tests can stub
+        // engine readiness checks in the AI enrichment phase. The
+        // applyIntake call above uses inject.preflight (a different
+        // PreflightFn signature) for the Phase 1 deterministic step.
+        preflight: inject.aiPreflight,
+      });
+      if (aiResult.ok) {
+        const used = aiResult.engine ?? "?";
+        if (aiResult.fallback) {
+          out(
+            "vf",
+            c.green(
+              `✔ AI analysis complete (${used}; fell back from ${aiResult.fallback.original} via --autopilot)`,
+            ),
+          );
+        } else {
+          out("vf", c.green(`✔ AI analysis complete (${used})`));
+        }
+      } else {
+        out("vf", c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
+        out(
+          "vf",
+          c.dim(
+            "  Deterministic context files are in place. Re-run with --ai when an engine is ready.",
+          ),
+        );
+      }
     }
   } else if (ai && dry) {
     // Dry-run --ai: show the prompt that would be sent
