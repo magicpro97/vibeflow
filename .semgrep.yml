@@ -1,0 +1,17 @@
+rules:
+  - .semgrep/vibeflow.yml
+
+# Defence-in-depth: scan only `src/`. test/ has fixtures, dist/ is built,
+# .vibeflow/ is internal state. Each rule above ALSO lists its own exclude
+# for the same paths — both layers are intentional (rule-level for fine
+# tuning, root-level for performance).
+exclude:
+  - test/
+  - dist/
+  - node_modules/
+  - .vibeflow/
+  - .hermes/
+  - assets/vendor/
+  - "*.lock"
+  - "*.md"
+  - bun.lock
