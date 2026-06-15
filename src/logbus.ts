@@ -97,6 +97,10 @@ export class Logbus {
   /** In-process serialization chain (each write waits for the previous to finish). */
   private chain: Promise<void> = Promise.resolve();
   private closed = false;
+  /** Test seam: lets unit tests inject a lockfile module to exercise failure paths. */
+  private readonly lockfileModule: typeof import("proper-lockfile");
+  /** Test seam: lets unit tests inject fs modules to exercise failure paths. */
+  private readonly fsModule: Pick<typeof import("node:fs"), "rmSync" | "appendFileSync" | "existsSync" | "statSync">;
 
   constructor(opts: {
     runId: string;
@@ -105,6 +109,10 @@ export class Logbus {
     maxRotations?: number;
     retentionDays?: number;
     retentionMaxBytes?: number;
+    /** Test seam only — do not use in production. */
+    lockfile?: typeof import("proper-lockfile");
+    /** Test seam only — do not use in production. */
+    fsModule?: Pick<typeof import("node:fs"), "rmSync" | "appendFileSync" | "existsSync" | "statSync">;
   }) {
     this.runId = opts.runId;
     this.dir = opts.dir;
@@ -112,6 +120,8 @@ export class Logbus {
     this.maxRotations = opts.maxRotations ?? DEFAULTS.maxRotations;
     this.retentionDays = opts.retentionDays ?? DEFAULTS.retentionDays;
     this.retentionMaxBytes = opts.retentionMaxBytes ?? DEFAULTS.retentionMaxBytes;
+    this.lockfileModule = opts.lockfile ?? lockfile;
+    this.fsModule = opts.fsModule ?? { rmSync, appendFileSync, existsSync, statSync };
     this.lockfilePath = join(this.dir, "current.log.lock");
 
     mkdirSync(this.dir, { recursive: true });
@@ -164,7 +174,7 @@ export class Logbus {
   private async writeLocked(ev: LogEvent): Promise<void> {
     let release: (() => Promise<void>) | undefined;
     try {
-      release = await lockfile.lock(this.currentFile(), {
+      release = await this.lockfileModule.lock(this.currentFile(), {
         realpath: false,
         lockfilePath: this.lockfilePath,
         retries: {
@@ -223,7 +233,7 @@ export class Logbus {
   async rotate(): Promise<void> {
     let release: (() => Promise<void>) | undefined;
     try {
-      release = await lockfile.lock(this.currentFile(), {
+      release = await this.lockfileModule.lock(this.currentFile(), {
         realpath: false,
         lockfilePath: this.lockfilePath,
         retries: {
@@ -302,7 +312,7 @@ export class Logbus {
       for (const e of entries) {
         if (e.mtimeMs < cutoff) {
           try {
-            rmSync(e.path, { force: true });
+            this.fsModule.rmSync(e.path, { force: true });
           } catch (err) {
             process.stderr.write(`[logbus] prune remove failed: ${(err as Error).message}\n`);
           }
@@ -317,7 +327,7 @@ export class Logbus {
         for (const e of kept) {
           if (totalBytes <= this.retentionMaxBytes) break;
           try {
-            rmSync(e.path, { force: true });
+            this.fsModule.rmSync(e.path, { force: true });
             totalBytes -= e.size;
           } catch (err) {
             process.stderr.write(`[logbus] prune size-cap failed: ${(err as Error).message}\n`);
