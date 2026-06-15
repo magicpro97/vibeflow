@@ -219,7 +219,19 @@ export interface AiInitResult {
   reason?: string;
   prompt?: string;
   raw?: string;
+  /**
+   * Autopilot fallback chain. Present only when the caller passed
+   * `autopilot: true` AND the originally requested engine was not
+   * the one that ultimately ran. Lets the CLI surface a
+   * "you asked for copilot, fell back to claude" message.
+   * `original` is the engine the caller requested via --engine.
+   * `used` is the engine that actually executed the work.
+   */
+  fallback?: { original: Engine; used: Engine };
 }
+
+const PERMISSION_DENIED_RE = /permission[\s_-]*denied|could not request permission|not authorized/i;
+const UNAVAILABLE_RE = /not found|unavailable|not installed|cli not found|missing/i;
 
 /**
  * Pick the best available engine from readiness results.
@@ -504,6 +516,15 @@ export interface AiInitOpts {
   spawner?: AsyncSpawner;
   /** When set, skip ready check and use this engine directly (for --engine flag). */
   forceEngine?: Engine;
+  /**
+   * When true, fall back to the next-best ready engine if the chosen
+   * engine is unavailable OR returns a permission/unauthorized error.
+   * Capped at 3 retries; the fallback engine must be DIFFERENT from
+   * the one that just failed (no point retrying the same engine).
+   * The result includes `fallback: { original, used }` so the caller
+   * can surface "you asked for X, ran on Y".
+   */
+  autopilot?: boolean;
   /** Inject preflight for tests (avoids live engine probes). */
   preflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
   /** Streaming callbacks forwarded to internal spawners (shell pipe path). */
@@ -520,7 +541,22 @@ export interface AiInitOpts {
   // to exercise the shell-pipe timedOut branch (line 528-533)
   // without waiting for the real timeout.
   makeAsyncSpawner?: typeof makeAsyncSpawner;
+  /**
+   * Test seam: lets unit tests inject a custom per-iteration
+   * executor. The autopilot loop calls this in place of the real
+   * `runAiInitOnce` to simulate unreachable code paths (e.g. the
+   * post-loop fallback). Production callers never set this.
+   */
+  runOnceForTest?: (
+    opts: AiInitOpts,
+    tried: Set<Engine>,
+    cachedPrompt?: string,
+    cachedProfile?: ProjectProfile,
+  ) => Promise<AiInitResult & { __profile?: ProjectProfile }>;
 }
+
+/** Hard cap on autopilot retries. No point looping if all 3 alternatives also fail. */
+const AUTOPILOT_MAX_RETRIES = 3;
 
 /**
  * Run the AI-powered init phase.
@@ -533,8 +569,130 @@ export interface AiInitOpts {
  *
  * The engine writes files directly in the project directory via its own tools.
  * On failure, the caller's Phase 1 deterministic output remains intact.
+ *
+ * Autopilot mode: when `opts.autopilot === true`, if the chosen engine is
+ * unavailable OR returns a permission/unauthorized error, retry with the
+ * next-best ready engine (skipping already-tried ones). Capped at
+ * {@link AUTOPILOT_MAX_RETRIES} retries. Non-autopilot callers see the
+ * pre-existing single-shot behavior — the autopilot loop is opt-in.
  */
 export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
+  const { autopilot = false } = opts;
+  const originalRequested = opts.forceEngine;
+
+  // Autopilot loop. The no-autopilot path is a single iteration (skip the
+  // while loop). Each iteration can re-evaluate readiness and pick a
+  // different engine. The loop ends on success, on a non-retryable error,
+  // or when retries are exhausted.
+  const tried = new Set<Engine>();
+  let lastResult: AiInitResult | null = null;
+  let prompt: string | undefined;
+  let profile: ProjectProfile | null = null;
+
+  for (let attempt = 0; attempt <= AUTOPILOT_MAX_RETRIES; attempt++) {
+    // Per-iteration opts: when autopilot has already fallen back from
+    // `forceEngine`, clear `forceEngine` so the next iteration picks
+    // the next-best engine instead of stubbornly retrying the same one.
+    const iterOpts: AiInitOpts =
+      autopilot && opts.forceEngine && tried.size > 0 ? { ...opts, forceEngine: undefined } : opts;
+    const result: AiInitResult & { __profile?: ProjectProfile; __break?: boolean } =
+      opts.runOnceForTest
+        ? await opts.runOnceForTest(iterOpts, tried, prompt ?? undefined, profile ?? undefined)
+        : await runAiInitOnce(iterOpts, tried, prompt ?? undefined, profile ?? undefined);
+    // Test seam: a stubbed runOnceForTest can return a `__break: true`
+    // marker to force the loop to fall off the end without returning.
+    // This exercises the post-loop fallback in tests.
+    if ((result as { __break?: boolean }).__break) {
+      lastResult = result as AiInitResult;
+      break;
+    }
+    if (result.ok) {
+      if (autopilot && originalRequested && result.engine && result.engine !== originalRequested) {
+        result.fallback = { original: originalRequested, used: result.engine };
+      }
+      return result;
+    }
+    lastResult = result;
+    prompt = result.prompt;
+    profile = (result as { __profile?: ProjectProfile }).__profile ?? profile;
+    // Track which engine we just attempted (or would have attempted,
+    // in the engine-selection-failure case). Adding to `tried` is
+    // critical even when `result.engine` is undefined: it prevents the
+    // next iteration from picking the same (unready) engine again.
+    // For the "forceEngine is not ready" case the candidate we just
+    // rejected was the requested engine itself, even though we never
+    // actually executed against it.
+    const candidateThisAttempt = result.engine ?? originalRequested;
+    if (candidateThisAttempt) tried.add(candidateThisAttempt);
+    if (!autopilot) return result;
+    // Retryable conditions (autopilot only):
+    //   1. ForceEngine was requested and is not ready (engine === undefined
+    //      on first iteration only — once tried.size > 0 we already cleared
+    //      forceEngine and the next iteration picks the best available).
+    //   2. Invocation reported the engine as unavailable (CLI missing).
+    //   3. Spawner returned a permission-denied / unauthorized pattern.
+    // Non-retryable: timeouts and unknown non-zero status codes.
+    const reason = result.reason ?? "";
+    const isPermission = PERMISSION_DENIED_RE.test(reason);
+    const isInvocationUnavail =
+      result.engine !== undefined && UNAVAILABLE_RE.test(reason) && !result.raw;
+    const isForceUnready =
+      result.engine === undefined && attempt === 0 && originalRequested !== undefined;
+    if (!isPermission && !isInvocationUnavail && !isForceUnready) {
+      // Not a retryable failure. Two wrapping paths:
+      //   (a) "exhausted autopilot fallbacks" — when autopilot was on
+      //       AND the loop has already retried (tried.size > 1) AND
+      //       we are past the first attempt. A single failure with
+      //       no fallbacks attempted is just a plain failure (don't
+      //       wrap it with the "exhausted" message).
+      //   (b) "forced engine X is not ready" — when a specific engine
+      //       was requested and no candidate was reachable.
+      if (originalRequested && !result.engine) {
+        return {
+          ...result,
+          reason: `forced engine ${originalRequested} is not ready and no fallback engine is available — run \`vf doctor --probe\` to diagnose`,
+        };
+      }
+      if (tried.size > 1 && autopilot) {
+        return {
+          ...result,
+          reason: `${result.engine ?? "engine"} ${result.reason ?? "failed"} — exhausted ${AUTOPILOT_MAX_RETRIES} autopilot fallbacks; original request was ${originalRequested ?? "auto"}`,
+        };
+      }
+      return result;
+    }
+    // Retryable: continue the loop. The for-loop's `attempt <=
+    // AUTOPILOT_MAX_RETRIES` guard means we never exceed the budget
+    // — the "exhausted" message is emitted from the non-retryable
+    // branch above when we run out of candidates.
+  }
+
+  // TS-required return for code paths that fall off the end of the
+  // loop. The loop body's return paths cover every iteration in
+  // practice, so this is a defensive default.
+  return (
+    lastResult ?? {
+      ok: false,
+      reason: "autopilot loop exited without a result",
+    }
+  );
+}
+
+/**
+ * Run a single attempt of the AI init against a specific engine. The
+ * caller (runAiInit) is responsible for selecting which engine and
+ * looping on autopilot. This function does not know about retries.
+ *
+ * The `tried` set lets the autopilot loop pass already-failed engines
+ * down to the next-best selector so we never retry the same engine
+ * twice in one run.
+ */
+async function runAiInitOnce(
+  opts: AiInitOpts,
+  tried: Set<Engine> = new Set(),
+  cachedPrompt?: string,
+  cachedProfile?: ProjectProfile,
+): Promise<AiInitResult & { __profile?: ProjectProfile }> {
   const {
     base,
     timeoutMs = AI_INIT_TIMEOUT_MS,
@@ -544,16 +702,28 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
     preflight,
   } = opts;
 
-  // Determine which engine to use
+  // Determine which engine to use. With `tried` (from the autopilot
+  // loop), pick the best non-already-tried engine.
   const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
+  const readiness = probe(ENGINES, { probe: true });
   let engine: Engine | null = null;
   if (forceEngine) {
-    const readiness = probe(ENGINES, { probe: true });
     const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
     engine = match ? forceEngine : null;
   } else {
-    const readiness = probe(ENGINES, { probe: true });
-    engine = selectBestEngine(readiness);
+    const base = selectBestEngine(readiness);
+    // If the autopilot loop has already failed an engine, the
+    // next-best selector should skip it. We do that here (locally) by
+    // re-running selectBestEngine against a synthetic readiness list
+    // that downgrades the tried engines below all other ready ones.
+    if (tried.size > 0 && base) {
+      const filtered = readiness.map((r) =>
+        tried.has(r.engine) ? { ...r, level: "no-binary" as const } : r,
+      );
+      engine = selectBestEngine(filtered);
+    } else {
+      engine = base;
+    }
   }
 
   if (!engine) {
@@ -565,8 +735,9 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
     };
   }
 
-  // Scan the project
-  const profile = scanRepo(base);
+  // Scan the project (cached across attempts so we don't re-scan
+  // the same project multiple times in an autopilot fallback chain).
+  const profile = cachedProfile ?? scanRepo(base);
 
   // Build the prompt text WITHOUT writing context files yet. The slim
   // prompt is short, so this is cheap and lets us run the Windows 32K
@@ -574,11 +745,9 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // chars of writes when we would just abort). Test seam: allow tests
   // to inject a stubbed prompt to exercise the >30000 char threshold
   // without depending on the real profile.
-  const contextFiles = listContextFiles(base, profile);
-  const prompt = (opts.buildPrompt ?? ((p, b) => renderSlimPrompt(p, b, listContextFiles(b, p))))(
-    profile,
-    base,
-  );
+  const prompt =
+    cachedPrompt ??
+    (opts.buildPrompt ?? ((p, b) => renderSlimPrompt(p, b, listContextFiles(b, p))))(profile, base);
 
   // The original promptFile write/read block (Task 7 follow-up) was
   // DEAD CODE: claude and codex read prompts from stdin (no file
@@ -590,7 +759,13 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
 
   // Dry run: return prompt without writing context files or spawning
   if (dryRun) {
-    return { ok: true, engine, prompt, reason: "dry run — prompt ready for inspection" };
+    return {
+      ok: true,
+      engine,
+      prompt,
+      reason: "dry run — prompt ready for inspection",
+      __profile: profile,
+    };
   }
 
   // Resolve engine invocation
@@ -600,7 +775,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
     // Write context files before returning — they are still useful
     // diagnostic output for the caller.
     writeContextFiles(base, profile);
-    return { ok: false, engine, reason: invocation.unavailable, prompt };
+    return { ok: false, engine, reason: invocation.unavailable, prompt, __profile: profile };
   }
 
   // Windows cmd-line length guard for copilot. If the prompt is too
@@ -620,6 +795,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       engine,
       reason: `copilot prompt is ${prompt.length} chars; Windows cmd-line limit is ~32K. Switch to claude or codex (they read from stdin).`,
       prompt,
+      __profile: profile,
     };
   }
 
@@ -645,6 +821,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       engine,
       reason: `${engine} AI analysis timed out after ${timeoutMs / 1000}s — deterministic context files are in place`,
       raw: result.stdout,
+      __profile: profile,
     };
   }
 
@@ -656,8 +833,9 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       engine,
       reason: `${engine} exited with status ${result.status}${stderrHint}`,
       raw: result.stdout,
+      __profile: profile,
     };
   }
 
-  return { ok: true, engine, raw: result.stdout };
+  return { ok: true, engine, raw: result.stdout, __profile: profile };
 }

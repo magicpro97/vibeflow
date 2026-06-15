@@ -96,6 +96,23 @@ vf init --dry-run             # show what would be written
 # renderer is available (see src/agents/render.ts); see AGENT_ORCHESTRATION_POLICY.md
 ```
 
+`vf init --ai` runs the AI enrichment phase on top of the deterministic
+context. The chosen engine is the first ready one in priority order
+(`claude > copilot > codex`), unless `--engine` is set.
+
+```bash
+vf init --ai                                # auto-pick the best engine
+vf init --ai --engine copilot              # force a specific engine
+vf init --ai --autopilot                   # fall back to next-best if engine fails
+vf init --ai --engine copilot --autopilot  # ask for copilot, fall back to claude/codex if it errors
+```
+
+`--autopilot` retries with the next-best ready engine when the chosen
+engine is unavailable or returns a permission error. Capped at 3
+fallbacks; never retries the same engine twice. Off by default — the
+single-shot failure mode is preserved unless you opt in. See
+`docs/COVERAGE.md` for the full reference.
+
 `init` scans the repo (README, manifests, lockfiles, CI) and writes `.viteflow/*` plus the
 engine files (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`). It runs a live
 readiness probe first and **refuses to create a workflow when no engine is ready** —

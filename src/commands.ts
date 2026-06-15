@@ -1322,6 +1322,12 @@ export async function init(
           },
         }),
       forceEngine: aiEngine,
+      // --autopilot: opt-in auto-fallback when the chosen engine is
+      // unavailable or returns a permission error. Default false to
+      // preserve single-shot behavior (any failure is the user's
+      // problem to debug). With --autopilot, runAiInit transparently
+      // retries with the next-best ready engine.
+      autopilot: Boolean(flags.autopilot),
       // Test seam: forward inject.aiPreflight so unit tests can stub
       // engine readiness checks in the AI enrichment phase. The
       // applyIntake call above uses inject.preflight (a different
@@ -1329,7 +1335,17 @@ export async function init(
       preflight: inject.aiPreflight,
     });
     if (aiResult.ok) {
-      out("vf", c.green(`✔ AI analysis complete (${aiResult.engine})`));
+      const used = aiResult.engine ?? "?";
+      if (aiResult.fallback) {
+        out(
+          "vf",
+          c.green(
+            `✔ AI analysis complete (${used}; fell back from ${aiResult.fallback.original} via --autopilot)`,
+          ),
+        );
+      } else {
+        out("vf", c.green(`✔ AI analysis complete (${used})`));
+      }
     } else {
       out("vf", c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
       out(

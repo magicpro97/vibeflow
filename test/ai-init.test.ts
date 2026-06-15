@@ -724,3 +724,200 @@ describe("dirListing: FS catch branches (line 80, 92)", () => {
     }
   });
 });
+
+describe("runAiInit: autopilot auto-fallback (--autopilot flag)", () => {
+  // Autopilot is opt-in via `autopilot: true`. When the requested
+  // engine is unavailable OR returns a permission-denied error, the
+  // call retries with the next-best ready engine (capped at 3
+  // fallbacks, never retrying the same engine twice).
+
+  test("autopilot=true + forceEngine=copilot + copilot unavailable → falls back to claude", async () => {
+    // preflight says claude+codex are ready, copilot is not. The
+    // user asked for copilot. Autopilot should pick the next-best
+    // engine (claude) and succeed.
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      forceEngine: "copilot",
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "copilot", level: "no-binary" as const, detail: "missing", checkedAt: "now" },
+        { engine: "codex", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      spawner: async () => ({ status: 0, stdout: "ok", stderr: "", timedOut: false }),
+    });
+    expect(result.ok).toBe(true);
+    // The user asked for copilot; autopilot fell back to claude.
+    expect(result.engine).toBe("claude");
+    expect(result.fallback).toEqual({ original: "copilot", used: "claude" });
+  });
+
+  test("autopilot=true + no ready fallback → returns last error with explicit message", async () => {
+    // Only copilot is in readiness list, all others are no-binary.
+    // User asks for copilot, but copilot is no-binary. No fallback
+    // engine is available — return the engine-selection failure.
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      forceEngine: "copilot",
+      preflight: () => [
+        { engine: "claude", level: "no-binary" as const, detail: "x", checkedAt: "now" },
+        { engine: "copilot", level: "no-binary" as const, detail: "missing", checkedAt: "now" },
+        { engine: "codex", level: "no-binary" as const, detail: "x", checkedAt: "now" },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    // The wrapper surfaces a clear "forced engine X is not ready and
+    // no fallback engine is available" message.
+    expect(result.reason).toContain("forced engine copilot is not ready");
+    expect(result.reason).toContain("no fallback engine is available");
+  });
+
+  test("autopilot=false (default) + forceEngine=copilot + copilot unavailable → returns original error (no fallback)", async () => {
+    // preflight says copilot is ready (so engine-selection passes) and
+    // engineCommandFn makes the engine "unavailable" mid-flight. The
+    // pre-existing single-shot behavior is preserved: autopilot=false
+    // means the loop is bypassed and we return the copilot error.
+    const result = await runAiInit({
+      base: process.cwd(),
+      // autopilot NOT set → defaults to false
+      forceEngine: "copilot",
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "codex", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      engineCommandFn: () => ({ unavailable: "copilot CLI not found" }),
+    });
+    expect(result.ok).toBe(false);
+    // No fallback attempted — error references copilot, not claude.
+    expect(result.reason).toContain("copilot CLI not found");
+    expect(result.fallback).toBeUndefined();
+  });
+
+  test("autopilot=true + spawner returns permission-denied → falls back to next engine", async () => {
+    // preflight says all 3 engines are ready (so the engine-selection
+    // step passes). The user asks for copilot. The spawner returns
+    // status 1 with stderr containing 'permission denied' (matching
+    // the copilot auth flow). Autopilot should retry with the next
+    // engine.
+    let callCount = 0;
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      forceEngine: "copilot",
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "codex", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      engineCommandFn: () => ({
+        cmd: "copilot",
+        args: ["-p", "--allow-all"],
+        promptMode: "arg" as const,
+      }),
+      spawner: async (_cmd, _args, _input) => {
+        callCount++;
+        // First call: copilot fails with permission denied.
+        // Second call: claude succeeds.
+        if (callCount === 1) {
+          return {
+            status: 1,
+            stdout: "",
+            stderr: "Permission denied: cannot request permission from user",
+            timedOut: false,
+          };
+        }
+        return { status: 0, stdout: "ok", stderr: "", timedOut: false };
+      },
+    });
+    expect(callCount).toBe(2);
+    expect(result.ok).toBe(true);
+    expect(result.engine).toBe("claude");
+    expect(result.fallback).toEqual({ original: "copilot", used: "claude" });
+  });
+
+  test("autopilot=true + all engines fail with permission-denied → returns last error + fallback chain exhausted", async () => {
+    // preflight says all 3 engines are ready. Every engine returns
+    // permission denied. Autopilot tries all 3 (up to AUTOPILOT_MAX_RETRIES),
+    // exhausts the budget, returns the last error.
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      // No forceEngine — autopilot auto-picks the first engine from
+      // selectBestEngine, then falls through.
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "codex", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      spawner: async () => ({
+        status: 1,
+        stdout: "",
+        stderr: "Permission denied",
+        timedOut: false,
+      }),
+    });
+    expect(result.ok).toBe(false);
+    // The final reason should mention the exhaust budget (proves
+    // autopilot actually tried fallbacks, not bailed on first error).
+    expect(result.reason).toMatch(/exhausted|autopilot/i);
+    // Sanity: the spawner's permission-denied text leaked into at
+    // least one intermediate failure (kept for debugging) — but the
+    // final wrap drops the raw "Permission denied" in favor of the
+    // "exhausted fallbacks" message. Assert that exhaust wrap fired.
+    expect(result.reason).toContain("exhausted");
+  });
+
+  test("autopilot=true + timeout is NOT retried (timeout ≠ fallback opportunity)", async () => {
+    // Timeouts indicate an engine issue, not an availability issue.
+    // Autopilot should NOT fall back on timeout — return the timeout
+    // error on the first attempt.
+    let callCount = 0;
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      forceEngine: "claude",
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      engineCommandFn: () => ({ cmd: "claude", args: ["-p"], promptMode: "stdin" as const }),
+      spawner: async () => {
+        callCount++;
+        return { status: 124, stdout: "partial", stderr: "", timedOut: true };
+      },
+    });
+    expect(callCount).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("timed out");
+    // No fallback — autopilot did not retry.
+    expect(result.fallback).toBeUndefined();
+  });
+
+  test("autopilot loop fallback: post-loop exit sentinel returns lastResult or default (test seam)", async () => {
+    // The post-loop fallback (lines after the for-loop) is defensive
+    // code that should never fire in production. Use the `runOnceForTest`
+    // seam + `__break: true` marker to force the loop to fall off the
+    // end without returning, then assert the fallback returns the
+    // last result (or a default).
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      // No forceEngine — autopilot auto-picks.
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        { engine: "codex", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      // Stub the per-iteration executor to always return a
+      // `__break: true` marker, forcing the loop to fall off the
+      // end. The fallback should return the last (stubbed) result.
+      runOnceForTest: async () => {
+        return { ok: false, reason: "stubbed — fallback test", __break: true } as never;
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("stubbed — fallback test");
+  });
+});

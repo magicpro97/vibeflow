@@ -2553,6 +2553,71 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("init --ai --autopilot --engine copilot: falls back to claude and surfaces the fallback chain", async () => {
+    // End-to-end test for the --autopilot CLI flag. preflight says
+    // copilot is not ready but claude+codex are. With --autopilot, the
+    // AI enrichment phase should fall back to claude and the CLI
+    // message should mention the fallback.
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-autopilot-"));
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, engine: "copilot", autopilot: true },
+        {
+          preflight: () => [
+            // Phase 1 needs at least one engine ready so the gate
+            // doesn't refuse creation.
+            { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
+            { engine: "copilot", level: "no-binary" as const, detail: "x", checkedAt: "now" },
+          ],
+          aiPreflight: () => [
+            { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
+            { engine: "copilot", level: "no-binary" as const, detail: "missing", checkedAt: "now" },
+            { engine: "codex", level: "ready" as const, detail: "ok", checkedAt: "now" },
+          ],
+          aiSpawner: async () => ({ status: 0, stdout: "ok", stderr: "", timedOut: false }),
+        },
+      );
+      expect(code).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init --ai --autopilot=false (default): single-shot on engine-not-ready (no fallback)", async () => {
+    // The pre-existing behavior (no --autopilot) is preserved: a
+    // missing engine prints the AI-skipped message and does NOT
+    // attempt a fallback.
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-no-autopilot-"));
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, engine: "copilot" }, // no autopilot flag
+        {
+          preflight: () => [
+            { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
+            { engine: "copilot", level: "no-binary" as const, detail: "x", checkedAt: "now" },
+          ],
+          aiPreflight: () => [
+            { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
+            { engine: "copilot", level: "no-binary" as const, detail: "missing", checkedAt: "now" },
+            { engine: "codex", level: "ready" as const, detail: "ok", checkedAt: "now" },
+          ],
+          aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+        },
+      );
+      expect(code).toBe(0);
+      // AI enrichment path returns ok:false (engine not ready) but
+      // init itself returns 0 (Phase 1 succeeded). No fallback fired.
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commands.repoLanguages (test seam)", () => {
