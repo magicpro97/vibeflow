@@ -107,7 +107,18 @@
   biome.json
   bun.lock
   coverage/
-    .tmp/
+    coverage-summary.json
+    lcov-report/
+      base.css
+      block-navigation.js
+      favicon.png
+      index.html
+      prettify.css
+      prettify.js
+      sort-arrow-sprite.png
+      sorter.js
+      src/
+    lcov.info
   docs/
     AGENT_ORCHESTRATION_POLICY.md
     ARCHITECTURE.md
