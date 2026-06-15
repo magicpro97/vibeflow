@@ -23,16 +23,18 @@ const profile: ProjectProfile = {
 };
 
 describe("planAiInitUnits", () => {
-  test("emits 4 stable units in canonical order", () => {
+  test("emits 7 Tier-1 adapter units in canonical order (no phase units without intake)", () => {
     const units = planAiInitUnits(profile, { goal: "ship it" });
-    expect(units).toHaveLength(4);
+    expect(units).toHaveLength(7);
     expect(units.map((u) => u.name)).toEqual([
       "ai-init-analyzer",
       "ai-init-instruction-writer",
       "ai-init-skill-curator",
       "ai-init-context-updater",
+      "ai-init-tool-configurator",
+      "ai-init-workflow-policy-writer",
+      "ai-init-workflow-state-writer",
     ]);
-    // Same set of names is exported for stable IDs.
     expect(AI_INIT_UNIT_NAMES).toHaveLength(4);
   });
 
@@ -56,7 +58,6 @@ describe("planAiInitUnits", () => {
     const units = planAiInitUnits(profile, {});
     for (const u of units) {
       expect(u.owner_agent).toBeTruthy();
-      // Role names from role-templates (stable set)
       const VALID = new Set([
         "cli-engine",
         "web-ui",
@@ -80,7 +81,6 @@ describe("planAiInitUnits", () => {
     for (const u of units) {
       expect(u.spec).toContain("demo");
       expect(u.spec).toContain("add web UI");
-      // Each spec names the unit, so a dispatched agent knows its own name.
       expect(u.spec).toContain(u.name);
     }
   });
@@ -107,8 +107,73 @@ describe("planAiInitUnits", () => {
       expect(u.acceptance.length).toBeGreaterThan(0);
       seen.add(u.acceptance);
     }
-    // All 4 acceptance strings are distinct (so a reviewer can tell them apart).
-    expect(seen.size).toBe(4);
+    expect(seen.size).toBe(7);
+  });
+
+  test("emits one Tier-2 unit per WorkflowPhase, after the 7 adapters", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [
+        { name: "analyze", description: "Read the repo", dod: "stack table written" },
+        { name: "ship", description: "Open a PR", dod: "PR opened" },
+      ],
+    });
+    expect(units).toHaveLength(9);
+    expect(units[7]?.name).toMatch(/^ai-init-phase-analyze-1$/);
+    expect(units[8]?.name).toMatch(/^ai-init-phase-ship-2$/);
+  });
+
+  test("phase unit scope falls back to a sentinel when outputs are missing", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [{ name: "noop", description: "no outputs", dod: "noop" }],
+    });
+    const phase = units[7];
+    expect(phase).toBeDefined();
+    expect(phase?.scope).toEqual([".vibeflow/phase-outputs/noop.md"]);
+  });
+
+  test("phase unit name is path-safe (no traversal from crafted phase.name)", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [{ name: "../../../etc/passwd", description: "x", dod: "x" }],
+    });
+    const phase = units[7];
+    expect(phase).toBeDefined();
+    expect(phase?.name).not.toContain("..");
+    expect(phase?.name).not.toContain("/");
+    expect(phase?.name).toMatch(/^ai-init-phase-/);
+  });
+
+  test("phase unit owner_agent resolves from ownerHint", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [
+        { name: "build-cli", description: "add flag", ownerHint: "cli-engine", dod: "ok" },
+        { name: "ui-thing", description: "add panel", ownerHint: "ui", dod: "ok" },
+        { name: "docs-update", description: "readme", ownerHint: "doc", dod: "ok" },
+      ],
+    });
+    expect(units[7]?.owner_agent).toBe("cli-engine");
+    expect(units[8]?.owner_agent).toBe("web-ui");
+    expect(units[9]?.owner_agent).toBe("doc-writer");
+  });
+
+  test("phase unit carries skills_injected and skills_required from the resolved role", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [{ name: "x", description: "x", ownerHint: "cli-engine", dod: "x" }],
+    });
+    const phase = units[7];
+    expect(phase).toBeDefined();
+    expect(phase?.skills_injected).toBeDefined();
+    expect(phase?.skills_required).toBeDefined();
+    expect(phase?.skills_injected?.length).toBeGreaterThan(0);
+    expect(phase?.skills_required?.length).toBeGreaterThan(0);
+  });
+
+  test("Tier-1 adapters carry skills_injected and skills_required", () => {
+    const units = planAiInitUnits(profile, {});
+    for (const u of units) {
+      expect(u.skills_injected).toBeDefined();
+      expect(u.skills_required).toBeDefined();
+      expect(u.skills_injected?.length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -189,5 +254,111 @@ describe("aiInitReviewer", () => {
     });
     expect(r.pass).toBe(false);
     expect(r.reason).toContain("blocked");
+  });
+
+  test("passes tool-configurator when evidence cites SETTINGS.json", () => {
+    const u = unit("ai-init-tool-configurator");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["updated .vibeflow/SETTINGS.json tools.codegraph"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails tool-configurator when evidence is unrelated", () => {
+    const u = unit("ai-init-tool-configurator");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["updated README"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("SETTINGS.json");
+  });
+
+  test("passes workflow-policy-writer when evidence cites WORKFLOW_POLICY.md", () => {
+    const u = unit("ai-init-workflow-policy-writer");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: [".vibeflow/WORKFLOW_POLICY.md updated"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails workflow-policy-writer when evidence is unrelated", () => {
+    const u = unit("ai-init-workflow-policy-writer");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["updated README"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("WORKFLOW_POLICY");
+  });
+
+  test("passes workflow-state-writer when evidence cites WORKFLOW_STATE.json", () => {
+    const u = unit("ai-init-workflow-state-writer");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: [".vibeflow/WORKFLOW_STATE.json updated with 3 work units"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails workflow-state-writer when evidence is unrelated", () => {
+    const u = unit("ai-init-workflow-state-writer");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["updated README"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("WORKFLOW_STATE");
+  });
+
+  test("passes phase unit when evidence cites one of the declared outputs", () => {
+    const phase = planAiInitUnits(profile, {
+      workflowPhases: [
+        {
+          name: "build",
+          description: "build the thing",
+          outputs: ["dist/bundle.js", "dist/index.html"],
+          dod: "build done",
+        },
+      ],
+    })[7];
+    expect(phase).toBeDefined();
+    if (!phase) return;
+    const r = aiInitReviewer(phase, {
+      status: "done",
+      confidence: 1,
+      evidence: ["dist/bundle.js written"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails phase unit when evidence never cites a declared output", () => {
+    const phase = planAiInitUnits(profile, {
+      workflowPhases: [
+        {
+          name: "build",
+          description: "build the thing",
+          outputs: ["dist/bundle.js"],
+          dod: "build done",
+        },
+      ],
+    })[7];
+    expect(phase).toBeDefined();
+    if (!phase) return;
+    const r = aiInitReviewer(phase, {
+      status: "done",
+      confidence: 1,
+      evidence: ["wrote some scratch file"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("dist/bundle.js");
   });
 });

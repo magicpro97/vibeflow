@@ -1,23 +1,25 @@
 /**
  * AI-init workflow decomposition.
  *
- * The previous `buildAiInitPrompt` (src/ai-init.ts) assembled a single mega-prompt
- * covering 4 distinct concerns: project analysis, instruction-file authoring, skill
- * curation, and project-context update. The plan below splits that work into 4
- * parallel work units (analyzer, instruction-writer, skill-curator, context-updater)
- * that the existing orchestrator (src/orchestrator/run.ts) can dispatch concurrently
- * with disjoint file scopes, run an independent reviewer over each, and gate close on
- * goalEval (confidence = 1.0 with recorded evidence per unit).
+ * Decomposes the AI-init surface into 2 tiers of work units that the
+ * orchestrator (src/orchestrator/run.ts) can dispatch concurrently with
+ * disjoint file scopes, run an independent reviewer over each, and gate
+ * close on goalEval (confidence = 1.0 with recorded evidence per unit).
  *
- * The 4 unit shapes mirror the deterministic phase-1 outputs that applyIntake already
- * produces, so a successful workflow closes on the same on-disk artifacts (CLAUDE.md,
- * AGENTS.md, .github/copilot-instructions.md, .agents/instructions.md, .vibeflow/skills/,
- * .vibeflow/PROJECT_CONTEXT.md, .vibeflow/SKILL_INDEX.md, .claude/agents/, .codex/agents/,
- * .github/agents/) — but with the AI phase going through the orchestrator's review/goal
- * gates instead of a single confidence check at the end of one giant prompt.
+ *   Tier 1 (always 7 adapter units): analyzer, instruction-writer,
+ *     skill-curator, context-updater, tool-configurator,
+ *     workflow-policy-writer, workflow-state-writer. They cover the
+ *     canonical baseline (instruction files, skills, project context,
+ *     tool config, workflow policy, workflow state).
  *
- * Pure module: no I/O, no engine calls. Both `planAiInitUnits` and `buildUnitBriefs`
- * are deterministic given (profile, intake) so unit tests can pin the decomposition.
+ *   Tier 2 (0..N phase units): one unit per `WorkflowPhase` in the
+ *     intake, named `ai-init-phase-<slug>-<n>`. Each phase unit carries
+ *     the phase's owner_hint, scope (declared outputs), acceptance
+ *     signal (the phase's dod), and skill wiring.
+ *
+ * Pure module: no I/O, no engine calls. Both `planAiInitUnits` and
+ * `aiInitReviewer` are deterministic given (profile, intake) so unit
+ * tests can pin the decomposition.
  */
 
 import { ROLE_NAMES, type RoleName } from "./agents/role-templates.js";
@@ -35,6 +37,44 @@ export interface AiInitIntake {
   expectedResult?: string;
   sample?: string;
   repoPath?: string;
+  /** Workflow phases the user wants this init to cover. Each phase
+   *  becomes a work unit in Tier 2 of the planner. Empty array (or
+   *  undefined) is valid — the planner still emits the Tier 1 adapter
+   *  units so a project with no explicit phases still gets the full
+   *  baseline. */
+  workflowPhases?: WorkflowPhase[];
+  /** Code-navigation tools the user wants enabled. When absent, the
+   *  planner leaves `SETTINGS.json` untouched (user opt-in only). */
+  toolToggles?: { codegraph?: boolean; lsp?: boolean };
+  /** When true, the planner generates the agent-team agent files
+   *  (`.claude/agents/<role>.md` × N roles) alongside the rest. Default
+   *  true — matches the legacy `agentFiles()` behaviour. */
+  generateAgentTeam?: boolean;
+}
+
+/** A single user-declared workflow phase. Mirrors the structure the
+ *  web intake wizard already exposes in `src/ui/shell.html` (workflow
+ *  steps with name, description, definition of done). */
+export interface WorkflowPhase {
+  /** Stable phase name; the planner uses it as the work-unit name
+   *  (`ai-init-phase-<slug>-<n>`). MUST be unique within `workflowPhases`. */
+  name: string;
+  /** Free-text description the engine sees as the unit spec. */
+  description: string;
+  /** Inputs this phase consumes (file paths, env, or upstream phase names). */
+  inputs?: string[];
+  /** Outputs this phase produces (file paths, commands, or downstream
+   *  phase names). The reviewer gates on evidence citing at least one. */
+  outputs?: string[];
+  /** Template the engine should follow (file path or inline body). */
+  template?: string;
+  /** Definition of done — reviewer reads this to set the acceptance
+   *  signal for the phase's work unit. */
+  dod?: string;
+  /** Hint the planner uses to assign `owner_agent`. Matches a role name
+   *  (see `agents/role-templates.ts`) or a substring the planner can
+   *  fuzzy-route against detected roles. */
+  ownerHint?: string;
 }
 
 /** A work unit tailored for the AI init phase. Same fields as
@@ -44,7 +84,7 @@ export interface AiInitIntake {
  * human-readable description (what the engine receives). */
 export interface AiInitUnit extends WorkUnit {
   /** Disjoint file scope — used by the orchestrator to detect conflicts and
-   *  serialize overlapping units. The 4 default units below have disjoint
+   *  serialize overlapping units. The default units below have disjoint
    *  scopes so they all run in parallel under `scheduleWaves`. */
   scope: string[];
   /** Acceptance signal the reviewer checks (e.g. "all 4 instruction files
@@ -52,9 +92,25 @@ export interface AiInitUnit extends WorkUnit {
   acceptance: string;
 }
 
-/** Stable IDs for the 4 default init units. The orchestrator depends on
- *  stable names (no UUIDs) so the same workflow reproduces identical work
- *  units on a re-run. */
+/** Stable IDs for the Tier 1 (adapter) init units. The orchestrator
+ *  depends on stable names (no UUIDs) so the same workflow reproduces
+ *  identical work units on a re-run. Tier 2 phase units are emitted
+ *  with names `ai-init-phase-<slug>-<n>` (one per `WorkflowPhase` in
+ *  intake). */
+export const AI_INIT_ADAPTER_NAMES = [
+  "ai-init-analyzer",
+  "ai-init-instruction-writer",
+  "ai-init-skill-curator",
+  "ai-init-context-updater",
+  "ai-init-tool-configurator",
+  "ai-init-workflow-policy-writer",
+  "ai-init-workflow-state-writer",
+] as const;
+export type AiInitAdapterName = (typeof AI_INIT_ADAPTER_NAMES)[number];
+
+/** Back-compat export: a flat list of the original 4 unit names. New
+ *  code should reference `AI_INIT_ADAPTER_NAMES` (7 entries). Kept so
+ *  external callers and the existing test suite still resolve. */
 export const AI_INIT_UNIT_NAMES = [
   "ai-init-analyzer",
   "ai-init-instruction-writer",
@@ -63,23 +119,27 @@ export const AI_INIT_UNIT_NAMES = [
 ] as const;
 export type AiInitUnitName = (typeof AI_INIT_UNIT_NAMES)[number];
 
-/** Map each init unit to a default role (owner_agent). The reviewer passes
- *  when the unit's evidence cites the expected role's output paths. */
-const DEFAULT_OWNER: Record<AiInitUnitName, RoleName> = {
+/** Map each Tier-1 adapter unit to its default role (owner_agent). The
+ *  reviewer passes when the unit's evidence cites the expected role's
+ *  output paths. The 3 newly-added adapters (tool-configurator,
+ *  workflow-policy-writer, workflow-state-writer) all map to
+ *  `dispatch-runner` or `doc-writer` — they wire the orchestrator's
+ *  runtime state. */
+const ADAPTER_OWNER: Record<AiInitAdapterName, RoleName> = {
   "ai-init-analyzer": "cli-engine",
   "ai-init-instruction-writer": "doc-writer",
   "ai-init-skill-curator": "skill-author",
   "ai-init-context-updater": "doc-writer",
+  "ai-init-tool-configurator": "dispatch-runner",
+  "ai-init-workflow-policy-writer": "doc-writer",
+  "ai-init-workflow-state-writer": "dispatch-runner",
 };
 
-/** Per-unit file scope. Disjoint by design so the orchestrator's
- *  `findScopeConflicts` reports zero conflicts and all 4 units run in
- *  parallel under `runParallel`. The analyzer's scope is intentionally a
- *  READ-only investigation target (`.vibeflow/ai-context/`); the
- *  context-updater owns the WRITE path (`.vibeflow/PROJECT_CONTEXT.md`).
- *  These two scopes are still disjoint at the `findScopeConflicts` level
- *  because the analyzer does not declare `.vibeflow/` as a parent. */
-const UNIT_SCOPE: Record<AiInitUnitName, string[]> = {
+/** Per-adapter file scope. Disjoint by design so the orchestrator's
+ *  `findScopeConflicts` reports zero conflicts and all units run in
+ *  parallel under `runParallel`. Each adapter owns a distinct on-disk
+ *  artifact so two units never try to write the same path. */
+const ADAPTER_SCOPE: Record<AiInitAdapterName, string[]> = {
   "ai-init-analyzer": [".vibeflow/ai-context/stack-evidence.md"],
   "ai-init-instruction-writer": [
     "CLAUDE.md",
@@ -89,12 +149,15 @@ const UNIT_SCOPE: Record<AiInitUnitName, string[]> = {
   ],
   "ai-init-skill-curator": [".vibeflow/skills/", ".vibeflow/SKILL_INDEX.md"],
   "ai-init-context-updater": [".vibeflow/PROJECT_CONTEXT.md"],
+  "ai-init-tool-configurator": [".vibeflow/SETTINGS.json"],
+  "ai-init-workflow-policy-writer": [".vibeflow/WORKFLOW_POLICY.md"],
+  "ai-init-workflow-state-writer": [".vibeflow/WORKFLOW_STATE.json"],
 };
 
-/** Per-unit acceptance signal the reviewer uses to decide pass/fail. The
- *  strings are evidence patterns: the unit's recorded evidence must cite
- *  at least one of these (file path) for the reviewer to pass it. */
-const UNIT_ACCEPTANCE: Record<AiInitUnitName, string> = {
+/** Per-adapter acceptance signal the reviewer uses to decide pass/fail.
+ *  The strings are evidence patterns: the unit's recorded evidence must
+ *  cite at least one of these (file path) for the reviewer to pass it. */
+const ADAPTER_ACCEPTANCE: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "stack-evidence.md written, ProjectProfile summary backed by >=3 manifest/dependency citations",
   "ai-init-instruction-writer":
@@ -103,10 +166,16 @@ const UNIT_ACCEPTANCE: Record<AiInitUnitName, string> = {
     ">=1 skill installed under .vibeflow/skills/, SKILL_INDEX.md regenerated, ctx7 (or fallback) cited as source",
   "ai-init-context-updater":
     ".vibeflow/PROJECT_CONTEXT.md updated with detected stack + architecture insights, human-curated sections preserved",
+  "ai-init-tool-configurator":
+    ".vibeflow/SETTINGS.json updated with the requested codegraph/lsp toggles (only flips tools the user explicitly asked for)",
+  "ai-init-workflow-policy-writer":
+    ".vibeflow/WORKFLOW_POLICY.md updated with the active workflow, agent-team roster, and the code-navigation decision tree (only when tools are enabled)",
+  "ai-init-workflow-state-writer":
+    ".vibeflow/WORKFLOW_STATE.json carries a `work_units` block with one unit per declared WorkflowPhase (name, status=pending, confidence=0, scope, owner_agent, skills_injected, skills_required, gates, resources), and `success_criteria` folds in each phase's `dod`",
 };
 
-/** Per-unit description (the spec the engine receives when dispatched). */
-const UNIT_DESCRIPTION: Record<AiInitUnitName, string> = {
+/** Per-adapter description (the spec the engine receives when dispatched). */
+const ADAPTER_DESCRIPTION: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "Investigate the project until confidence = 1.0 on every finding (build/test/lint commands, package manager, language + framework versions, CI). Read package.json, tsconfig/biome config, source tree, sample source files (>=5 across modules), and >=2 test files. Write .vibeflow/ai-context/stack-evidence.md with file/manifest evidence per component. Do not guess.",
   "ai-init-instruction-writer":
@@ -115,12 +184,93 @@ const UNIT_DESCRIPTION: Record<AiInitUnitName, string> = {
     "Discover and install skills for the detected stack via `npx ctx7 skills install --yes --all --claude` (headless), or fall back to manual SKILL.md authored from `ctx7 docs`. Follow the SKILL.md format from .vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md. Copy to .claude/skills/, .agents/skills/, .github/skills/. Verify with `vf skills validate` and regenerate .vibeflow/SKILL_INDEX.md. Project-fit skills live under .vibeflow/skills/.",
   "ai-init-context-updater":
     "Update .vibeflow/PROJECT_CONTEXT.md with the detected stack (evidence-backed), architecture insights, code conventions, and the active workflow. Preserve any human-authored sections outside the generated block. This is the canonical source of truth for all subsequent `vf init` regenerations.",
+  "ai-init-tool-configurator":
+    "Edit .vibeflow/SETTINGS.json to enable only the code-navigation tools the user explicitly asked for in intake.toolToggles (codegraph and/or lsp). NEVER flip a tool the user did not request — settings are user opt-in. Preserve every other key in the file. Validate the resulting JSON before closing.",
+  "ai-init-workflow-policy-writer":
+    "Update .vibeflow/WORKFLOW_POLICY.md with: the active workflow, the agent-team roster (per detected role), the code-navigation decision tree (only when codegraph or lsp is enabled in SETTINGS.json), and the Skills-first + Knowledge-first operating loop. Preserve any human-authored sections outside the generated block.",
+  "ai-init-workflow-state-writer":
+    "Update .vibeflow/WORKFLOW_STATE.json to declare one work unit per user-supplied WorkflowPhase (or omit `work_units` when the user supplied no phases). Each phase unit has: name (matching the phase), status=pending, confidence=0, scope (one entry per declared output), owner_agent (resolved from phase.ownerHint via fuzzy match against detected roles, defaulting to dispatch-runner), skills_injected + skills_required (resolved from the role's known skill list), gates=pending, resources=zero. Fold each phase.dod into `success_criteria` (dedup, preserve order).",
 };
 
-/** Build the spec text for one unit, given the live project context. The
- *  spec is what the engine receives as `unit.spec` in the dispatch prompt. */
-function buildSpec(
-  name: AiInitUnitName,
+/** Skills wiring per role. A small built-in catalogue that the planner
+ *  injects into the relevant adapter / phase units as
+ *  `skills_injected` (already loaded in the engine) and `skills_required`
+ *  (must be present in the engine's skill store for the unit to count as
+ *  done). The reviewer uses the same catalogue to validate that the
+ *  evidence cites at least one of the required skills. */
+const ROLE_SKILLS: Record<RoleName, { injected: string[]; required: string[] }> = {
+  "cli-engine": {
+    injected: ["vf-skills", "vf-doctor"],
+    required: ["ctx7:bash", "ctx7:find-skills"],
+  },
+  "web-ui": {
+    injected: ["vf-skills", "imagegen-frontend-web"],
+    required: ["ctx7:react", "ctx7:svelte"],
+  },
+  "skill-author": {
+    injected: ["vf-skills", "skill-creator"],
+    required: ["ctx7:skill-authoring"],
+  },
+  "preflight-engine": {
+    injected: ["vf-skills", "vf-doctor"],
+    required: ["ctx7:engine-probe"],
+  },
+  "dispatch-runner": {
+    injected: ["vf-skills", "vf-orchestrate"],
+    required: ["ctx7:work-unit", "ctx7:goal-eval"],
+  },
+  "doc-writer": {
+    injected: ["vf-skills", "doc-coauthoring"],
+    required: ["ctx7:markdown-lint"],
+  },
+};
+
+/** Resolve the owner_agent for a phase based on the phase's
+ *  `ownerHint`. Exact role-name match wins; otherwise the planner
+ *  fuzzy-matches the hint (lowercased) against role-name substrings.
+ *  Default is `dispatch-runner` (the role that owns cross-cutting
+ *  orchestration work). */
+function resolveOwner(hint: string | undefined, detected: RoleName[]): RoleName {
+  if (!hint) return "dispatch-runner";
+  const lower = hint.toLowerCase().trim();
+  for (const role of detected) {
+    if (role === lower) return role;
+  }
+  for (const role of detected) {
+    if (role.includes(lower) || lower.includes(role)) return role;
+  }
+  if (/(cli|command|flag|subcommand)/.test(lower)) return "cli-engine";
+  if (/(ui|web|frontend|view|panel)/.test(lower)) return "web-ui";
+  if (/(skill|capability)/.test(lower)) return "skill-author";
+  if (/(preflight|readiness|probe|quota)/.test(lower)) return "preflight-engine";
+  if (/(dispatch|orchestrat|runner|workflow)/.test(lower)) return "dispatch-runner";
+  if (/(doc|readme|changelog|comment)/.test(lower)) return "doc-writer";
+  return "dispatch-runner";
+}
+
+/** Slug a phase name to a path-safe unit suffix. Strips path-traversal
+ *  sequences so a crafted phase name can never escape the canonical
+ *  `ai-init-phase-` prefix. */
+function phaseSlug(name: string): string {
+  const cleaned = name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned.length > 0 ? cleaned : "unnamed";
+}
+
+/** Skill wiring for each Tier-1 adapter (looked up via the role it
+ *  maps to in ADAPTER_OWNER). Adapters that share a role share the
+ *  same catalogue. */
+function adapterSkills(name: AiInitAdapterName): { injected: string[]; required: string[] } {
+  return ROLE_SKILLS[ADAPTER_OWNER[name]];
+}
+
+/** Build the spec text for one Tier-1 adapter unit, given the live
+ *  project context. The spec is what the engine receives as `unit.spec`
+ *  in the dispatch prompt. */
+function buildAdapterSpec(
+  name: AiInitAdapterName,
   profile: ProjectProfile,
   intake: AiInitIntake,
   detectedRoles: RoleName[],
@@ -136,42 +286,98 @@ function buildSpec(
     `Project: ${profile.name} (${profile.languages.join(", ") || "unknown"})`,
     `Active roles in this repo: ${roleList}`,
     "",
-    UNIT_DESCRIPTION[name],
+    ADAPTER_DESCRIPTION[name],
   ].join("\n");
 }
 
+/** Build one Tier-2 work unit per WorkflowPhase in the intake. Each
+ *  phase becomes a unit the orchestrator can dispatch in parallel
+ *  alongside the Tier-1 adapter units. The unit's owner_agent,
+ *  skills_injected, and skills_required are derived from the resolved
+ *  role so the reviewer gates on the right evidence. */
+function buildPhaseUnits(intake: AiInitIntake, detectedRoles: RoleName[]): AiInitUnit[] {
+  const phases = intake.workflowPhases ?? [];
+  if (phases.length === 0) return [];
+  return phases.map((phase, idx): AiInitUnit => {
+    const slug = phaseSlug(phase.name);
+    const unitName = `ai-init-phase-${slug}-${idx + 1}`;
+    const owner = resolveOwner(phase.ownerHint, detectedRoles);
+    const roleSkills = ROLE_SKILLS[owner];
+    const scope = (phase.outputs ?? []).map((o) => o.trim()).filter(Boolean);
+    const finalScope = scope.length > 0 ? scope : [`.vibeflow/phase-outputs/${slug}.md`];
+    const acceptance = phase.dod?.trim() || `phase ${phase.name} completed (one output path cited)`;
+    const spec = [
+      `## ${unitName}`,
+      "",
+      `Phase: ${phase.name}`,
+      phase.description ? `Description: ${phase.description}` : "",
+      phase.inputs?.length ? `Inputs: ${phase.inputs.join(", ")}` : "",
+      phase.outputs?.length ? `Outputs: ${phase.outputs.join(", ")}` : "",
+      phase.template ? `Template: ${phase.template}` : "",
+      phase.dod ? `Definition of done: ${phase.dod}` : "",
+      "",
+      "Execute this phase end-to-end. Produce the declared outputs and",
+      "stop. Do not start the next phase. If a declared output cannot be",
+      "produced, mark the unit blocked and explain why in the JSON output.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return {
+      name: unitName,
+      status: "pending",
+      confidence: 0,
+      owner_agent: owner,
+      spec,
+      scope: finalScope,
+      acceptance,
+      skills_injected: [...roleSkills.injected],
+      skills_required: [...roleSkills.required],
+      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      evidence: [],
+    };
+  });
+}
+
 /**
- * Decompose the AI-init phase into 4 parallel work units. Pure: no I/O. The
- * orchestrator can feed the result straight into `planWorkUnits` and
- * `scheduleWaves` (no conflicts; all 4 land in wave 0).
+ * Decompose the AI-init phase into 2 tiers of work units.
  *
- * @param profile       scanner profile (always available — applyIntake calls
- *                      scanRepo before phase 2)
+ * Pure: no I/O. The orchestrator can feed the result straight into
+ * `planWorkUnits` + `scheduleWaves` (no conflicts; all units land in
+ * wave 0).
+ *
+ * @param profile       scanner profile (always available — applyIntake
+ *                      calls scanRepo before phase 2)
  * @param intake        trimmed intake answers (all fields optional)
- * @param detectedRoles roles detectRolesForRepo returned for this repo. The
- *                      planner includes them in each unit's spec so the
- *                      engine knows which specialist agents to consult.
+ * @param detectedRoles roles detectRolesForRepo returned for this repo.
+ *                      Used to (a) interpolate into adapter specs and
+ *                      (b) resolve phase.ownerHint into owner_agent.
  */
 export function planAiInitUnits(
   profile: ProjectProfile,
   intake: AiInitIntake,
   detectedRoles: RoleName[] = [...ROLE_NAMES],
 ): AiInitUnit[] {
-  return AI_INIT_UNIT_NAMES.map((name): AiInitUnit => {
-    const spec = buildSpec(name, profile, intake, detectedRoles);
+  const adapterUnits: AiInitUnit[] = AI_INIT_ADAPTER_NAMES.map((name): AiInitUnit => {
+    const spec = buildAdapterSpec(name, profile, intake, detectedRoles);
+    const skills = adapterSkills(name);
     return {
       name,
       status: "pending",
       confidence: 0,
-      owner_agent: DEFAULT_OWNER[name],
+      owner_agent: ADAPTER_OWNER[name],
       spec,
-      scope: UNIT_SCOPE[name],
-      acceptance: UNIT_ACCEPTANCE[name],
+      scope: ADAPTER_SCOPE[name],
+      acceptance: ADAPTER_ACCEPTANCE[name],
+      skills_injected: [...skills.injected],
+      skills_required: [...skills.required],
       gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
       resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       evidence: [],
     };
   });
+  const phaseUnits = buildPhaseUnits(intake, detectedRoles);
+  return [...adapterUnits, ...phaseUnits];
 }
 
 /**
@@ -194,15 +400,10 @@ export function aiInitReviewer(
   if (!outcome.evidence?.length) {
     return { pass: false, reason: "no evidence recorded" };
   }
-  // For instruction-writer and context-updater, evidence must cite a real
-  // file path (one of the scoped paths or any .vibeflow/* path). Other
-  // units are gated purely on evidence presence + confidence 1.0.
-  const name = unit.name as AiInitUnitName;
+  const name = unit.name as string;
   if (name === "ai-init-instruction-writer") {
-    const REQUIRED = UNIT_SCOPE[name];
-    const hit = outcome.evidence.some((e) =>
-      REQUIRED.some((p) => e.includes(p) || e.endsWith(p.replace(/^\.\//, ""))),
-    );
+    const REQUIRED = ADAPTER_SCOPE["ai-init-instruction-writer"] ?? [];
+    const hit = outcome.evidence.some((e) => REQUIRED.some((p) => e.includes(p)));
     if (!hit) {
       return {
         pass: false,
@@ -216,6 +417,49 @@ export function aiInitReviewer(
     );
     if (!hit) {
       return { pass: false, reason: "no evidence cites a skill file or SKILL_INDEX update" };
+    }
+  }
+  if (name === "ai-init-tool-configurator") {
+    const hit = outcome.evidence.some((e) => e.includes("SETTINGS.json") || e.includes("settings"));
+    if (!hit) {
+      return {
+        pass: false,
+        reason: "no evidence cites SETTINGS.json — the tool-configurator must update it",
+      };
+    }
+  }
+  if (name === "ai-init-workflow-policy-writer") {
+    const hit = outcome.evidence.some(
+      (e) => e.includes("WORKFLOW_POLICY") || e.includes("workflow-policy"),
+    );
+    if (!hit) {
+      return {
+        pass: false,
+        reason: "no evidence cites WORKFLOW_POLICY.md — the workflow-policy-writer must update it",
+      };
+    }
+  }
+  if (name === "ai-init-workflow-state-writer") {
+    const hit = outcome.evidence.some(
+      (e) => e.includes("WORKFLOW_STATE") || e.includes("workflow-state"),
+    );
+    if (!hit) {
+      return {
+        pass: false,
+        reason: "no evidence cites WORKFLOW_STATE.json — the workflow-state-writer must update it",
+      };
+    }
+  }
+  if (name.startsWith("ai-init-phase-")) {
+    const REQUIRED = unit.scope ?? [];
+    const hit = outcome.evidence.some((e) =>
+      REQUIRED.some((p) => e.includes(p) || p.endsWith(e) || e.endsWith(p)),
+    );
+    if (!hit) {
+      return {
+        pass: false,
+        reason: `no phase evidence cites one of the declared outputs: ${REQUIRED.join(", ")}`,
+      };
     }
   }
   return { pass: true, reason: "evidence + confidence 1.0" };

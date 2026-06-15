@@ -50,9 +50,8 @@ describe("runAiInitWorkflow", () => {
     expect(result.reason).toContain("claude is not ready");
   });
 
-  test("dispatches 4 units, returns per-unit reviews + ok=true when reviewer passes", async () => {
+  test("dispatches 7 units, returns per-unit reviews + ok=true when reviewer passes", async () => {
     const dispatcher: UnitDispatcher = async (unit) => {
-      // Map each unit to a UnitOutcome whose evidence cites the unit's scope.
       return {
         status: "done",
         confidence: 1,
@@ -69,16 +68,43 @@ describe("runAiInitWorkflow", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.goalMet).toBe(true);
-    expect(result.units).toHaveLength(4);
-    expect(result.reviews).toHaveLength(4);
+    expect(result.units).toHaveLength(7);
+    expect(result.reviews).toHaveLength(7);
     expect(result.reviews.every((r) => r.pass)).toBe(true);
     expect(result.units.every((u) => u.status === "done")).toBe(true);
     expect(result.units.every((u) => u.confidence === 1)).toBe(true);
   });
 
+  test("includes phase units in the dispatch set when intake.workflowPhases is set", async () => {
+    const dispatcher: UnitDispatcher = async (unit) => {
+      return {
+        status: "done",
+        confidence: 1,
+        evidence: unit.scope ?? [],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+      };
+    };
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: {
+        workflowPhases: [
+          { name: "analyze", description: "x", dod: "x" },
+          { name: "ship", description: "y", dod: "y" },
+        ],
+      },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      dispatcher,
+    });
+    expect(result.units).toHaveLength(9);
+    expect(result.units.map((u) => u.name).slice(7)).toEqual([
+      "ai-init-phase-analyze-1",
+      "ai-init-phase-ship-2",
+    ]);
+  });
+
   test("returns ok=false when reviewer rejects one unit (instruction-writer with no evidence)", async () => {
     const dispatcher: UnitDispatcher = async (unit) => {
-      // The instruction-writer must cite CLAUDE.md etc. or it fails review.
       if (unit.name === "ai-init-instruction-writer") {
         return { status: "done", confidence: 1, evidence: [] };
       }
@@ -98,17 +124,14 @@ describe("runAiInitWorkflow", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.goalMet).toBe(false);
-    // Exactly one review failed (the instruction-writer).
     const failed = result.reviews.filter((r) => !r.pass);
     expect(failed).toHaveLength(1);
     expect(failed[0]?.unit).toBe("ai-init-instruction-writer");
-    // And that unit's status is "blocked" (orchestrator's policy).
     const blockedUnit = result.units.find((u) => u.name === "ai-init-instruction-writer");
     expect(blockedUnit?.status).toBe("blocked");
   });
 
   test("goalMet reflects every unit passing review", async () => {
-    // Mixed confidence: 3 units at conf=1 with real evidence, 1 at conf=0.5.
     const dispatcher: UnitDispatcher = async (unit) => {
       if (unit.name === "ai-init-analyzer") {
         return { status: "done", confidence: 0.5, evidence: unit.scope ?? [] };
