@@ -145,6 +145,35 @@ describe("planAiInitUnits", () => {
     expect(phase?.name).toMatch(/^ai-init-phase-/);
   });
 
+  // T4: phase.name uniqueness is enforced at plan time. Two phases sharing
+  // a name would produce two units with the SAME semantic identity, breaking
+  // re-runs (one would shadow the other in WORKFLOW_STATE.json) and the
+  // orchestrator's conflict detection.
+  test("throws when two workflowPhases share the same name", () => {
+    expect(() =>
+      planAiInitUnits(profile, {
+        workflowPhases: [
+          { name: "build-cli", description: "first", dod: "ok" },
+          { name: "build-cli", description: "second", dod: "ok" },
+        ],
+      }),
+    ).toThrow(/duplicate phase name/i);
+  });
+
+  test("throws on case-insensitive duplicate phase names (build-cli vs Build-CLI)", () => {
+    // Phase names are user-facing labels; "build-cli" and "Build-CLI"
+    // would be visually identical in the dashboard. Normalize to lowercase
+    // for the dedup check so we catch this class of mistake.
+    expect(() =>
+      planAiInitUnits(profile, {
+        workflowPhases: [
+          { name: "build-cli", description: "first", dod: "ok" },
+          { name: "Build-CLI", description: "second", dod: "ok" },
+        ],
+      }),
+    ).toThrow(/duplicate phase name/i);
+  });
+
   test("phase unit owner_agent resolves from ownerHint", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [

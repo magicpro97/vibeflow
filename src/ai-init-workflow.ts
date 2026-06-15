@@ -299,6 +299,23 @@ function buildAdapterSpec(
 function buildPhaseUnits(intake: AiInitIntake, detectedRoles: RoleName[]): AiInitUnit[] {
   const phases = intake.workflowPhases ?? [];
   if (phases.length === 0) return [];
+  // T4: enforce phase.name uniqueness. Two phases with the same name would
+  // produce two units whose `name` differs only by the position suffix
+  // (e.g. ai-init-phase-build-cli-1 and ai-init-phase-build-cli-2), but
+  // they share the same slug — a re-run would shadow the first in
+  // WORKFLOW_STATE.json and the orchestrator's conflict detection would
+  // silently merge them. Case-insensitive: "build-cli" and "Build-CLI"
+  // are visually identical in the dashboard.
+  const seen = new Set<string>();
+  for (const phase of phases) {
+    const key = phase.name.trim().toLowerCase();
+    if (seen.has(key)) {
+      throw new Error(
+        `duplicate phase name "${phase.name}" in workflowPhases (phase names must be unique, case-insensitive)`,
+      );
+    }
+    seen.add(key);
+  }
   return phases.map((phase, idx): AiInitUnit => {
     const slug = phaseSlug(phase.name);
     const unitName = `ai-init-phase-${slug}-${idx + 1}`;
