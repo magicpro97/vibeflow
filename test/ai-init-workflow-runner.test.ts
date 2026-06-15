@@ -20,6 +20,18 @@ describe("runAiInitWorkflow", () => {
     mkdirSync(join(repo, "src"), { recursive: true });
     writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "demo", version: "0.0.0" }));
     writeFileSync(join(repo, "src", "cli.ts"), "// cli");
+    // MINOR-2/3/4: the reviewer now requires cited files to exist on
+    // disk. Pre-create the AI-init framework files the adapter units
+    // will cite as evidence.
+    mkdirSync(join(repo, ".vibeflow", "ai-context"), { recursive: true });
+    writeFileSync(join(repo, ".vibeflow/ai-context/stack-evidence.md"), "# stack\n");
+    writeFileSync(join(repo, "CLAUDE.md"), "# claude\n");
+    mkdirSync(join(repo, ".vibeflow", "skills"), { recursive: true });
+    writeFileSync(join(repo, ".vibeflow/SKILL_INDEX.md"), "# index\n");
+    writeFileSync(join(repo, ".vibeflow/PROJECT_CONTEXT.md"), "# ctx\n");
+    writeFileSync(join(repo, ".vibeflow/SETTINGS.json"), "{}");
+    writeFileSync(join(repo, ".vibeflow/WORKFLOW_POLICY.md"), "# policy\n");
+    writeFileSync(join(repo, ".vibeflow/WORKFLOW_STATE.json"), "{}");
   });
 
   afterEach(() => {
@@ -51,14 +63,24 @@ describe("runAiInitWorkflow", () => {
   });
 
   test("dispatches 7 units, returns per-unit reviews + ok=true when reviewer passes", async () => {
-    const dispatcher: UnitDispatcher = async (unit) => {
-      return {
-        status: "done",
-        confidence: 1,
-        evidence: unit.scope ?? [],
-        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
-      };
+    // MINOR-2/3/4: cite each adapter's required acceptance file
+    // (pre-created in beforeEach) so the reviewer's evidence + file-exists
+    // checks pass.
+    const SCOPE_BY_NAME: Record<string, string> = {
+      "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
+      "ai-init-instruction-writer": "CLAUDE.md",
+      "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
+      "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
+      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
+      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
+      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
     };
+    const dispatcher: UnitDispatcher = async (unit) => ({
+      status: "done",
+      confidence: 1,
+      evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+    });
     const result = await runAiInitWorkflow({
       base: repo,
       intake: { goal: "add web UI" },
@@ -76,14 +98,23 @@ describe("runAiInitWorkflow", () => {
   });
 
   test("includes phase units in the dispatch set when intake.workflowPhases is set", async () => {
-    const dispatcher: UnitDispatcher = async (unit) => {
-      return {
-        status: "done",
-        confidence: 1,
-        evidence: unit.scope ?? [],
-        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
-      };
+    // MINOR-3: phase units now go through file-exists review. Cite a
+    // real file (pre-created in beforeEach) so the reviewer passes.
+    const SCOPE_BY_NAME: Record<string, string> = {
+      "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
+      "ai-init-instruction-writer": "CLAUDE.md",
+      "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
+      "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
+      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
+      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
+      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
     };
+    const dispatcher: UnitDispatcher = async (unit) => ({
+      status: "done",
+      confidence: 1,
+      evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+    });
     const result = await runAiInitWorkflow({
       base: repo,
       intake: {
@@ -104,14 +135,24 @@ describe("runAiInitWorkflow", () => {
   });
 
   test("returns ok=false when reviewer rejects one unit (instruction-writer with no evidence)", async () => {
+    const SCOPE_BY_NAME: Record<string, string> = {
+      "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
+      "ai-init-instruction-writer": "CLAUDE.md",
+      "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
+      "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
+      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
+      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
+      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
+    };
     const dispatcher: UnitDispatcher = async (unit) => {
       if (unit.name === "ai-init-instruction-writer") {
         return { status: "done", confidence: 1, evidence: [] };
       }
+      // MINOR-2/3/4: cite each adapter's own required file
       return {
         status: "done",
         confidence: 1,
-        evidence: unit.scope ?? [],
+        evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
         gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
       };
     };

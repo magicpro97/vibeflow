@@ -274,7 +274,7 @@ describe("investigateUnit — bounded async investigation (defect #5)", () => {
           ? { pass: true, reason: "ok" }
           : { pass: false, reason: "low" },
     });
-    expect(pass.find((u) => u.name === "a")?.gates.review).toBe("pass");
+    expect(pass.find((u) => u.name === "a")?.gates.review as string).toBe("pass");
     const { units: fail } = await orchestrateUnits({
       units: [
         {
@@ -293,7 +293,7 @@ describe("investigateUnit — bounded async investigation (defect #5)", () => {
           ? { pass: true, reason: "ok" }
           : { pass: false, reason: "low" },
     });
-    expect(fail.find((u) => u.name === "b")?.status).toBe("blocked");
-    expect(fail.find((u) => u.name === "b")?.gates.review).toBe("fail");
+    expect(fail.find((u) => u.name === "b")?.status as string).toBe("blocked");
+    expect(fail.find((u) => u.name === "b")?.gates.review as string).toBe("fail");
   });
 });

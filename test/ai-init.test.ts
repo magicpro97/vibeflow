@@ -984,7 +984,9 @@ describe("defaultAiInitDispatcher", () => {
     );
     expect(outcome.status).toBe("blocked");
     expect(outcome.confidence).toBe(0);
-    expect(outcome.evidence).toEqual([]);
+    // Evidence carries a structured marker so the workflow-level
+    // summary can show why the unit blocked (see MINOR-1 fix).
+    expect(outcome.evidence).toEqual([expect.stringMatching(/^dispatcher-nonzero:/)]);
   });
 
   test("returns status=blocked when the engine times out", async () => {
@@ -996,10 +998,7 @@ describe("defaultAiInitDispatcher", () => {
       makeUnit({ scope: [".vibeflow/ai-context/stack-evidence.md"] }),
     );
     expect(outcome.status).toBe("blocked");
-    // The dispatcher surfaces a non-zero/timeout failure as `status="blocked"`;
-    // the orchestrator carries the underlying error elsewhere (it can read
-    // it from the spawner test seam in production wiring).
-    expect(outcome.evidence).toEqual([]);
+    expect(outcome.evidence).toEqual([expect.stringMatching(/^dispatcher-timeout:/)]);
   });
 
   test("returns status=blocked when the engine is unavailable (binary missing)", async () => {
@@ -1012,6 +1011,10 @@ describe("defaultAiInitDispatcher", () => {
     const outcome = await dispatcher(makeUnit());
     expect(outcome.status).toBe("blocked");
     expect(outcome.confidence).toBe(0);
-    expect(outcome.evidence).toEqual([]);
+    // Evidence carries the unavailable reason so the workflow summary
+    // can show the actual cause (MINOR-1).
+    expect(outcome.evidence).toEqual([
+      expect.stringMatching(/^engine-unavailable:claude:binary not found$/),
+    ]);
   });
 });

@@ -22,7 +22,8 @@
  * tests can pin the decomposition.
  */
 
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { ROLE_NAMES, type RoleName } from "./agents/role-templates.js";
 import type { WorkUnit } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
@@ -408,6 +409,10 @@ export function planAiInitUnits(
 export function aiInitReviewer(
   unit: WorkUnit,
   outcome: { status: WorkUnit["status"]; confidence: number; evidence: string[] },
+  // MINOR-4: pass the project base so the reviewer can resolve cited
+  // paths against it. Defaults to process.cwd() for back-compat with
+  // existing tests (which chdir into a tmpdir before each case).
+  base: string = process.cwd(),
 ): { pass: boolean; reason: string } {
   if (outcome.status === "blocked") {
     // Production dispatchers return "verifying" (per src/orchestrator/run.ts:96-99);
@@ -440,6 +445,18 @@ export function aiInitReviewer(
     }
     return null;
   };
+  const pathIsFile = (p: string): boolean => {
+    // Returns true only for existing regular files. Rejects directories,
+    // symlinks-to-dirs, and missing paths. Catches the bug where a unit
+    // could claim "I wrote `.vibeflow/skills/`" (a dir) and pass review
+    // (MINOR-2 fix). Cited paths may be relative; resolve them against
+    // the project base (MINOR-4 fix).
+    try {
+      return statSync(resolve(base, p)).isFile();
+    } catch {
+      return false;
+    }
+  };
   const checkFileExists = (
     e: string,
     required: string[],
@@ -454,10 +471,10 @@ export function aiInitReviewer(
     const fileEntries = required.filter((p) => !p.endsWith("/"));
     if (fileEntries.length > 0) {
       const cited = citeExists(e, fileEntries);
-      if (cited && !existsSync(cited)) {
+      if (cited && !pathIsFile(cited)) {
         return {
           ok: false,
-          reason: `file does not exist on disk: ${cited} (claimed by evidence "${e}")`,
+          reason: `path is not a regular file (missing or a directory): ${cited} (claimed by evidence "${e}")`,
         };
       }
     }
@@ -472,10 +489,10 @@ export function aiInitReviewer(
         const wordEndRel = after.search(/\s/);
         const end = wordEndRel === -1 ? e.length : idx + wordEndRel;
         const candidate = start === -1 ? e.slice(idx, end) : e.slice(start, end);
-        if (existsSync(candidate)) return { ok: true };
+        if (pathIsFile(candidate)) return { ok: true };
         return {
           ok: false,
-          reason: `file does not exist on disk: ${candidate} (claimed by evidence "${e}")`,
+          reason: `path is not a regular file (missing or a directory): ${candidate} (claimed by evidence "${e}")`,
         };
       }
     }
@@ -572,6 +589,14 @@ export function aiInitReviewer(
         pass: false,
         reason: `no phase evidence cites one of the declared outputs: ${REQUIRED.join(", ")}`,
       };
+    }
+    // MINOR-3: phase units now also pass through the file-exists check
+    // (consistency with adapter units). Previously a phase could claim
+    // to write `.vibeflow/phase-outputs/foo.md` and pass review even
+    // when the file wasn't on disk.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, REQUIRED);
+      if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
   return { pass: true, reason: "evidence + confidence 1.0" };

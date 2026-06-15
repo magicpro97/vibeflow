@@ -347,7 +347,7 @@ describe("aiInitReviewer", () => {
       evidence: ["CLAUDE.md", "AGENTS.md"],
     });
     expect(r.pass).toBe(false);
-    expect(r.reason).toMatch(/file does not exist on disk/);
+    expect(r.reason).toMatch(/not a regular file/);
   });
 
   test("tool-configurator fails when SETTINGS.json fixture is deleted (substring match but file missing)", () => {
@@ -359,7 +359,7 @@ describe("aiInitReviewer", () => {
       evidence: ["updated .vibeflow/SETTINGS.json tools.codegraph"],
     });
     expect(r.pass).toBe(false);
-    expect(r.reason).toMatch(/file does not exist on disk/);
+    expect(r.reason).toMatch(/not a regular file/);
   });
 
   test("analyzer passes when stack-evidence.md exists on disk (file-exists green path)", () => {
@@ -390,7 +390,7 @@ describe("aiInitReviewer", () => {
       evidence: ["wrote .vibeflow/skills/missing/SKILL.md"],
     });
     expect(r.pass).toBe(false);
-    expect(r.reason).toMatch(/file does not exist on disk/);
+    expect(r.reason).toMatch(/not a regular file/);
   });
 
   test("analyzer file-exists red path: stack-evidence.md missing", () => {
@@ -402,7 +402,7 @@ describe("aiInitReviewer", () => {
       evidence: ["wrote .vibeflow/ai-context/stack-evidence.md"],
     });
     expect(r.pass).toBe(false);
-    expect(r.reason).toMatch(/file does not exist on disk/);
+    expect(r.reason).toMatch(/not a regular file/);
   });
 
   test("instruction-writer wordStart=-1 branch: evidence starts with the scope path", () => {
@@ -535,6 +535,10 @@ describe("aiInitReviewer", () => {
     })[7];
     expect(phase).toBeDefined();
     if (!phase) return;
+    // Create the cited output file on disk so the file-exists check
+    // passes (MINOR-3 consistency).
+    mkdirSync(join(tmpDir, "dist"), { recursive: true });
+    writeFileSync(join(tmpDir, "dist/bundle.js"), "// bundle\n");
     const r = aiInitReviewer(phase, {
       status: "done",
       confidence: 1,
@@ -563,5 +567,45 @@ describe("aiInitReviewer", () => {
     });
     expect(r.pass).toBe(false);
     expect(r.reason).toContain("dist/bundle.js");
+  });
+
+  // MINOR-3: phase units also pass through file-exists review.
+  test("fails phase unit when cited output file does not exist on disk (MINOR-3)", () => {
+    const phase = planAiInitUnits(profile, {
+      workflowPhases: [
+        {
+          name: "ship",
+          description: "ship the thing",
+          outputs: [".vibeflow/phase-outputs/ship.md"],
+          dod: "ship done",
+        },
+      ],
+    })[7];
+    expect(phase).toBeDefined();
+    if (!phase) return;
+    // Do NOT create the cited file on disk. The reviewer must reject.
+    const r = aiInitReviewer(phase, {
+      status: "done",
+      confidence: 1,
+      evidence: ["wrote .vibeflow/phase-outputs/ship.md"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/not a regular file/);
+  });
+
+  // MINOR-2: a unit that claims to have "written" a directory (not a
+  // file) used to pass review because existsSync returns true for
+  // directories. The reviewer must now distinguish.
+  test("dir-scope evidence that resolves to a directory (not a file inside) is rejected (MINOR-2)", () => {
+    // .vibeflow/skills/foo/ is a real dir (created in beforeEach). Cite
+    // the dir itself (no trailing /SKILL.md) — pathIsFile returns false.
+    const u = unit("ai-init-skill-curator");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["installed .vibeflow/skills/foo"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/not a regular file/);
   });
 });

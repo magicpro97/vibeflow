@@ -871,10 +871,10 @@ export interface AiInitWorkflowResult {
   reason?: string;
   /** Per-unit work-unit state (post-dispatch). Empty when the planner
    *  produced no units or the run failed before dispatch. The
-   *  orchestrator returns plain `WorkUnit`s; `acceptance` is preserved
-   *  on each unit because we feed `AiInitUnit`s in (the orchestrator
-   *  only reads the `WorkUnit` fields, never strips extras). */
-  units: WorkUnit[];
+   *  orchestrator preserves each input's shape (via `...unit` in
+   *  applyOutcome), so AiInitUnit fields like `acceptance` are kept
+   *  (MINOR-5: typed as AiInitUnit[] here, not WorkUnit[]). */
+  units: AiInitUnit[];
   /** Per-unit review verdicts in dispatch order. */
   reviews: Array<{ unit: string; pass: boolean; reason: string }>;
   /** True when every unit passed review and reached confidence 1.0. */
@@ -937,10 +937,15 @@ export function defaultAiInitDispatcher(
   return async (unit): Promise<UnitOutcome> => {
     const invocation = resolveInvocation(engine);
     if (isUnavailable(invocation)) {
+      // Surface the engine's reason so callers and CI logs can see why
+      // the workflow blocked. Stderr (for the user) + evidence marker
+      // (for the workflow-level summary).
+      const reason = invocation.unavailable;
+      process.stderr.write(`[ai-init-dispatcher] engine ${engine} unavailable: ${reason}\n`);
       return {
         status: "blocked",
         confidence: 0,
-        evidence: [],
+        evidence: [`engine-unavailable:${engine}:${reason}`],
       };
     }
     const materialized = materializePrompt(
@@ -949,17 +954,21 @@ export function defaultAiInitDispatcher(
     );
     const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input);
     if (result.timedOut) {
+      const reason = `timed out after ${timeoutMs}ms`;
+      process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
       return {
         status: "blocked",
         confidence: 0,
-        evidence: [],
+        evidence: [`dispatcher-timeout:${unit.name}:${reason}`],
       };
     }
     if (result.status !== 0) {
+      const reason = `exit ${result.status}`;
+      process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
       return {
         status: "blocked",
         confidence: 0,
-        evidence: [],
+        evidence: [`dispatcher-nonzero:${unit.name}:${reason}`],
       };
     }
     return {
@@ -1027,10 +1036,12 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
       timeoutMs: opts.timeoutMs,
     });
 
-  const result = await orchestrateUnits({
+  const result = await orchestrateUnits<AiInitUnit>({
     units,
     dispatcher,
-    reviewer: aiInitReviewer,
+    // MINOR-4: pass `base` so the reviewer can resolve cited paths
+    // against the project root (not process.cwd()).
+    reviewer: (u, o) => aiInitReviewer(u, o, base),
     concurrency,
     agent: engine,
   });

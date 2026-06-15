@@ -82,8 +82,11 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
   };
 }
 
-export interface OrchestrationResult {
-  units: WorkUnit[];
+export interface OrchestrationResult<U extends WorkUnit = WorkUnit> {
+  // MINOR-5: generic over the unit type so callers (e.g. runAiInitWorkflow
+  // with AiInitUnit) don't lose type information preserved by
+  // applyOutcome's `...unit` spread. Default to WorkUnit for back-compat.
+  units: U[];
   reviews: Array<{ unit: string; pass: boolean; reason: string }>;
 }
 
@@ -98,18 +101,18 @@ export interface OrchestrationResult {
  * sets `status = "blocked"` and `gates.review = "fail"`; a passed review sets
  * `gates.review = "pass"`. Reviews are written by index for deterministic ordering.
  */
-export async function orchestrateUnits(opts: {
-  units: WorkUnit[];
+export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
+  units: U[];
   dispatcher: UnitDispatcher;
   reviewer: Reviewer;
   concurrency?: number;
   /** Engine/agent identifier written into dispatch markers for observability. */
   agent?: string;
-}): Promise<OrchestrationResult> {
+}): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   // Log initial markers for visibility before the first unit dispatches.
   for (const u of opts.units) createMarker(u.name, opts.agent);
-  const units = await runParallel(
+  const units = (await runParallel(
     opts.units,
     async (u, i) => {
       updateMarker(u.name, { status: "running" });
@@ -157,7 +160,7 @@ export async function orchestrateUnits(opts: {
       return reviewed;
     },
     opts.concurrency ?? DEFAULT_CONCURRENCY,
-  );
+  )) as U[];
   return { units, reviews };
 }
 
