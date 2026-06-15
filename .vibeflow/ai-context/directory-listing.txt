@@ -109,6 +109,9 @@
   coverage/
     .tmp/
       coverage-0.json
+      coverage-1.json
+      coverage-2.json
+      coverage-3.json
   docs/
     AGENT_ORCHESTRATION_POLICY.md
     ARCHITECTURE.md
