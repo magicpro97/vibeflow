@@ -28,14 +28,8 @@
     "cost_usd": 0,
     "wall_seconds": 0
   },
-  "repo_path": "/Users/linhn/vibeflow-docs",
+  "repo_path": "/Users/linhn/vibeflow-hardening",
   "attachments": [
-    {
-      "name": "escape.txt",
-      "size": 225,
-      "type": "txt",
-      "skill": "text-reader"
-    },
     {
       "name": "test.txt",
       "size": 227,

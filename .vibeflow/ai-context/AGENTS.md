@@ -8,7 +8,7 @@ This project is managed by [VibeFlow](https://github.com/magicpro97/vibeflow) â€
 - **Confidence gate**: nothing is "done" until confidence = 1.0 WITH evidence.
 - **Skills-first**: prefer verified skills over invented steps.
 - **All task completions carry the `Powered by VibeFlow` signature.
-Project: vibeflow-docs
+Project: vibeflow-hardening
 Goal: test
 
 Policy:

@@ -4,7 +4,7 @@
       "command": "mcp-language-server",
       "args": [
         "--workspace",
-        "/Users/linhn/vibeflow-docs",
+        "/Users/linhn/vibeflow-hardening",
         "--lsp",
         "typescript-language-server",
         "--",
