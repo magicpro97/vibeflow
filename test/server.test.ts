@@ -1,6 +1,29 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { startServer } from "../src/server";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  handleAssetRoute,
+  handleAttachmentsRoute,
+  handleEventsRoute,
+  handleIndexRoute,
+  handleLogsRecentRoute,
+  handleLogsStreamRoute,
+  handleMarkersRoute,
+  handleRequest,
+  handleSettingsGetRoute,
+  handleSkillsRoute,
+  handleStateRoute,
+  handleUploadDeleteRoute,
+  handleUploadPostRoute,
+  handleWriteJsonRoute,
+  isGuarded,
+  makeCtx,
+  type ServerCtx,
+  startServer,
+} from "../src/server";
 
 /** Fetch the CSRF token from the HTML page served at `/`. */
 async function csrfToken(url: string): Promise<string> {
@@ -967,3 +990,1277 @@ describe("server HTTP API handlers", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pure-function tests (no Bun.serve) — drive every route handler directly
+// to maximize branch coverage under vitest/node where Bun.serve is missing.
+// ---------------------------------------------------------------------------
+
+/** Convenience builder for a request with a CSRF token + loopback Host. */
+function makeReq(url: string, init: RequestInit = {}): Request {
+  const headers = new Headers(init.headers);
+  if (!headers.has("host")) headers.set("host", "127.0.0.1:3000");
+  return new Request(url, { ...init, headers });
+}
+
+function makeReqWithToken(
+  url: string,
+  token: string,
+  init: RequestInit = {},
+): Request {
+  const headers = new Headers(init.headers);
+  if (!headers.has("host")) headers.set("host", "127.0.0.1:3000");
+  headers.set("x-vibeflow-token", token);
+  return new Request(url, { ...init, headers });
+}
+
+describe("server pure-function route handlers", () => {
+  const token = "test-token-abc";
+  const baseCtx: ServerCtx = makeCtx("/tmp", token, "<html>__CSRF__</html>");
+
+  test("isGuarded: host not loopback → false", () => {
+    const req = new Request("http://example.com/api/init", {
+      headers: { host: "example.com", "x-vibeflow-token": token },
+    });
+    expect(isGuarded(req, token)).toBe(false);
+  });
+
+  test("isGuarded: token missing → false", () => {
+    const req = new Request("http://127.0.0.1:3000/api/init", {
+      headers: { host: "127.0.0.1:3000" },
+    });
+    expect(isGuarded(req, token)).toBe(false);
+  });
+
+  test("isGuarded: valid token + loopback host → true", () => {
+    const req = new Request("http://127.0.0.1:3000/api/init", {
+      headers: { host: "127.0.0.1:3000", "x-vibeflow-token": token },
+    });
+    expect(isGuarded(req, token)).toBe(true);
+  });
+
+  test("isGuarded: origin with non-loopback host → false", () => {
+    const req = new Request("http://127.0.0.1:3000/api/init", {
+      headers: {
+        host: "127.0.0.1:3000",
+        "x-vibeflow-token": token,
+        origin: "http://evil.example.com",
+      },
+    });
+    expect(isGuarded(req, token)).toBe(false);
+  });
+
+  test("isGuarded: referer with non-loopback host → false", () => {
+    const req = new Request("http://127.0.0.1:3000/api/init", {
+      headers: {
+        host: "127.0.0.1:3000",
+        "x-vibeflow-token": token,
+        referer: "http://evil.example.com/x",
+      },
+    });
+    expect(isGuarded(req, token)).toBe(false);
+  });
+
+  test("isGuarded: origin with invalid URL → false (URL parse throw)", () => {
+    const req = new Request("http://127.0.0.1:3000/api/init", {
+      headers: {
+        host: "127.0.0.1:3000",
+        "x-vibeflow-token": token,
+        origin: "not a valid url: :",
+      },
+    });
+    expect(isGuarded(req, token)).toBe(false);
+  });
+
+  test("isGuarded: origin with loopback host → true", () => {
+    const req = new Request("http://127.0.0.1:3000/api/init", {
+      headers: {
+        host: "127.0.0.1:3000",
+        "x-vibeflow-token": token,
+        origin: "http://localhost:8080",
+      },
+    });
+    expect(isGuarded(req, token)).toBe(true);
+  });
+
+  test("handleIndexRoute: returns HTML with CSP", async () => {
+    const res = await handleIndexRoute(
+      new Request("http://127.0.0.1:3000/"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("content-security-policy")).toBeTruthy();
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  test("handleStateRoute: returns JSON state", async () => {
+    const res = await handleStateRoute(
+      new Request("http://127.0.0.1:3000/state"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as unknown;
+    expect(body === null || typeof body === "object").toBe(true);
+  });
+
+  test("handleMarkersRoute: returns markers list", async () => {
+    const res = await handleMarkersRoute(
+      new Request("http://127.0.0.1:3000/api/markers"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { markers: unknown[] };
+    expect(Array.isArray(body.markers)).toBe(true);
+  });
+
+  test("handleAttachmentsRoute: returns attachments list", async () => {
+    const res = await handleAttachmentsRoute(
+      new Request("http://127.0.0.1:3000/api/attachments"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { attachments: unknown[] };
+    expect(Array.isArray(body.attachments)).toBe(true);
+  });
+
+  test("handleSkillsRoute: returns skills + needs", async () => {
+    const res = await handleSkillsRoute(
+      new Request("http://127.0.0.1:3000/api/skills"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { skills: unknown[]; needs: unknown };
+    expect(Array.isArray(body.skills)).toBe(true);
+  });
+
+  test("handleSettingsGetRoute: returns settings + tools", async () => {
+    const res = await handleSettingsGetRoute(
+      new Request("http://127.0.0.1:3000/api/settings"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { settings: unknown; tools: unknown[] };
+    expect(typeof body.settings).toBe("object");
+    expect(Array.isArray(body.tools)).toBe(true);
+  });
+
+  test("handleLogsStreamRoute: no bus → no-logbus chunk", async () => {
+    const controller = new AbortController();
+    const res = handleLogsStreamRoute(
+      new Request("http://127.0.0.1:3000/api/logs/stream", {
+        signal: controller.signal,
+      }),
+      baseCtx,
+      null,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("expected body");
+    const dec = new TextDecoder();
+    let buf = "";
+    while (buf.length < 1024) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value);
+      if (buf.includes("no logbus instance found")) break;
+    }
+    expect(buf).toContain("vibeflow-logs-1");
+    expect(buf).toContain("no logbus instance found");
+    controller.abort();
+  });
+
+  test("handleLogsRecentRoute: no bus → 404", async () => {
+    const res = await handleLogsRecentRoute(
+      new Request("http://127.0.0.1:3000/api/logs/recent"),
+      baseCtx,
+      null,
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("no logbus instance");
+  });
+
+  test("handleLogsRecentRoute: parse since/limit with bus", async () => {
+    const { installLogbus, setLogbusForTests } = await import(
+      "../src/logbus.js"
+    );
+    const orig = (await import("../src/logbus.js")).getLogbus();
+    const bus = installLogbus();
+    try {
+      const req = new Request(
+        "http://127.0.0.1:3000/api/logs/recent?since=0&limit=10",
+      );
+      const res = await handleLogsRecentRoute(req, baseCtx, bus);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { events: unknown[] };
+      expect(Array.isArray(body.events)).toBe(true);
+    } finally {
+      setLogbusForTests(orig);
+    }
+  });
+
+  test("handleLogsRecentRoute: invalid since/limit parsed as NaN-safe", async () => {
+    const { installLogbus, setLogbusForTests } = await import(
+      "../src/logbus.js"
+    );
+    const orig = (await import("../src/logbus.js")).getLogbus();
+    const bus = installLogbus();
+    try {
+      // Empty params → Number(null) === 0 fallback
+      const req = new Request("http://127.0.0.1:3000/api/logs/recent");
+      const res = await handleLogsRecentRoute(req, baseCtx, bus);
+      expect(res.status).toBe(200);
+    } finally {
+      setLogbusForTests(orig);
+    }
+  });
+
+  test("handleEventsRoute: emits data: payload", async () => {
+    const controller = new AbortController();
+    const res = handleEventsRoute(
+      new Request("http://127.0.0.1:3000/events", {
+        signal: controller.signal,
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("expected body");
+    const dec = new TextDecoder();
+    const { value, done } = await reader.read();
+    expect(done).toBe(false);
+    const txt = dec.decode(value);
+    expect(txt.startsWith("data:")).toBe(true);
+    controller.abort();
+  });
+
+  test("handleUploadPostRoute: invalid filename → 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    const ctx = makeCtx(dir, token, "");
+    try {
+      const req = makeReq(`http://127.0.0.1:3000/api/upload?name=${"x".repeat(201)}.txt`, {
+        method: "POST",
+        body: new Blob(["x"]),
+      });
+      const res = await handleUploadPostRoute(req, ctx);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid filename");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleUploadPostRoute: ok → writes file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    const ctx = makeCtx(dir, token, "");
+    try {
+      const req = makeReq("http://127.0.0.1:3000/api/upload?name=hello.txt", {
+        method: "POST",
+        body: new Blob(["hello world"]),
+      });
+      const res = await handleUploadPostRoute(req, ctx);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        attachment: { name: string; size: number };
+        attachments: unknown[];
+      };
+      expect(body.ok).toBe(true);
+      expect(body.attachment.name).toBe("hello.txt");
+      expect(body.attachment.size).toBe(11);
+      expect(Array.isArray(body.attachments)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleUploadPostRoute: too large → 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    const ctx = makeCtx(dir, token, "");
+    try {
+      const big = new Uint8Array(51 * 1024 * 1024);
+      const req = makeReq("http://127.0.0.1:3000/api/upload?name=big.bin", {
+        method: "POST",
+        body: new Blob([big]),
+      });
+      const res = await handleUploadPostRoute(req, ctx);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("file too large");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleUploadDeleteRoute: invalid name → 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    const ctx = makeCtx(dir, token, "");
+    try {
+      const req = makeReq(`http://127.0.0.1:3000/api/upload?name=${"x".repeat(201)}.txt`, {
+        method: "DELETE",
+      });
+      const res = await handleUploadDeleteRoute(req, ctx);
+      expect(res.status).toBe(400);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleUploadDeleteRoute: deletes existing file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    const ctx = makeCtx(dir, token, "");
+    const attDir = join(dir, ".vibeflow", "attachments");
+    try {
+      // Create a file to delete
+      const { mkdirSync } = await import("node:fs");
+      mkdirSync(attDir, { recursive: true });
+      const target = join(attDir, "todelete.txt");
+      writeFileSync(target, "bye");
+      expect(existsSync(target)).toBe(true);
+      const req = makeReq(
+        "http://127.0.0.1:3000/api/upload?name=todelete.txt",
+        { method: "DELETE" },
+      );
+      const res = await handleUploadDeleteRoute(req, ctx);
+      expect(res.status).toBe(200);
+      expect(existsSync(target)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleWriteJsonRoute: unknown path → null", async () => {
+    const res = await handleWriteJsonRoute("/api/unknown", {}, baseCtx);
+    expect(res).toBeNull();
+  });
+
+  test("handleWriteJsonRoute: /api/detect with path", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-det-"));
+    try {
+      const res = await handleWriteJsonRoute(
+        "/api/detect",
+        { path: dir },
+        baseCtx,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.status).toBe(200);
+      const body = (await res?.json()) as { ok: boolean; repo: string };
+      expect(body.ok).toBe(true);
+      expect(body.repo).toBe(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleWriteJsonRoute: /api/init applies intake", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleWriteJsonRoute(
+        "/api/init",
+        { goal: "test goal" },
+        ctx,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.status).toBe(200);
+      const body = (await res?.json()) as { ok: boolean; state: { goal: string } };
+      expect(body.ok).toBe(true);
+      expect(body.state.goal).toBe("test goal");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleWriteJsonRoute: /api/dispatch valid engine", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/dispatch",
+      { engine: "claude" },
+      baseCtx,
+    );
+    expect(res?.status).toBe(200);
+  });
+
+  test("handleWriteJsonRoute: /api/dispatch invalid engine → 400", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/dispatch",
+      { engine: "bogus" },
+      baseCtx,
+    );
+    expect(res?.status).toBe(400);
+  });
+
+  test("handleWriteJsonRoute: /api/orchestrate runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-orc-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleWriteJsonRoute(
+        "/api/orchestrate",
+        { engine: "claude" },
+        ctx,
+      );
+      expect(res?.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleWriteJsonRoute: /api/discover empty query → 400", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/discover",
+      { query: "" },
+      baseCtx,
+    );
+    expect(res?.status).toBe(400);
+  });
+
+  test("handleWriteJsonRoute: /api/discover docs with approved", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/discover",
+      { kind: "docs", query: "react", approved: true },
+      baseCtx,
+    );
+    // May be 200, 400, or 500 depending on network; route must not crash
+    expect([200, 400, 500]).toContain(res?.status);
+  });
+
+  test("handleWriteJsonRoute: /api/discover skills", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/discover",
+      { kind: "skills", query: "react" },
+      baseCtx,
+    );
+    expect([200, 400, 500]).toContain(res?.status);
+  });
+
+  test("handleWriteJsonRoute: /api/units invalid action → 400", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/units",
+      { action: "bogus", unit: { name: "x" } },
+      baseCtx,
+    );
+    expect(res?.status).toBe(400);
+  });
+
+  test("handleWriteJsonRoute: /api/units update non-existent → 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-units-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      // First init to create the workflow
+      await handleWriteJsonRoute("/api/init", { goal: "g" }, ctx);
+      const res = await handleWriteJsonRoute(
+        "/api/units",
+        { action: "update", unit: { name: "ghost" } },
+        ctx,
+      );
+      expect(res?.status).toBe(400);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleWriteJsonRoute: /api/units add creates unit", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-units-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      await handleWriteJsonRoute("/api/init", { goal: "g" }, ctx);
+      const res = await handleWriteJsonRoute(
+        "/api/units",
+        { action: "add", unit: { name: "u1", status: "pending" } },
+        ctx,
+      );
+      expect(res?.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleWriteJsonRoute: /api/preflight returns readiness", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/preflight",
+      { engines: ["claude"], probe: false },
+      baseCtx,
+    );
+    expect(res?.status).toBe(200);
+    const body = (await res?.json()) as { ok: boolean; readiness: unknown[] };
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.readiness)).toBe(true);
+  });
+
+  test("handleWriteJsonRoute: /api/settings applies + returns view", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-set-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleWriteJsonRoute(
+        "/api/settings",
+        { tools: { codegraph: false, lsp: true } },
+        ctx,
+      );
+      expect(res?.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handleAssetRoute: empty path → 404", async () => {
+    const res = await handleAssetRoute(
+      new Request("http://127.0.0.1:3000/assets/"),
+      baseCtx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("handleAssetRoute: '..' in path → 404", async () => {
+    const res = await handleAssetRoute(
+      new Request("http://127.0.0.1:3000/assets/..%2Fpackage.json"),
+      baseCtx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("handleAssetRoute: null byte in path → 404", async () => {
+    const res = await handleAssetRoute(
+      new Request("http://127.0.0.1:3000/assets/foo%00bar.css"),
+      baseCtx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("handleAssetRoute: unknown ext → 404", async () => {
+    const res = await handleAssetRoute(
+      new Request("http://127.0.0.1:3000/assets/foo.unknown"),
+      baseCtx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("handleAssetRoute: missing file with known ext → 404", async () => {
+    const res = await handleAssetRoute(
+      new Request("http://127.0.0.1:3000/assets/missing.css"),
+      baseCtx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("handleAssetRoute: known asset file → 200 with content-type", async () => {
+    const res = await handleAssetRoute(
+      new Request("http://127.0.0.1:3000/assets/fonts.css"),
+      baseCtx,
+    );
+    // If the file actually exists at the resolved path, status is 200.
+    // Otherwise, it's 404 (file.exists() returns false in node).
+    expect([200, 404]).toContain(res.status);
+    if (res.status === 200) {
+      expect(res.headers.get("content-type")).toContain("text/css");
+    }
+  });
+
+  test("handleAssetRoute: relative escape outside assets dir → 404", async () => {
+    // Construct a custom assetsDir and try to escape it
+    const customDir = new URL("file:///tmp/");
+    const res = await handleAssetRoute(
+      new Request("http://127.0.0.1:3000/assets/../../etc/passwd"),
+      baseCtx,
+      customDir,
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("server handleRequest dispatcher", () => {
+  const token = "test-token-abc";
+  const baseCtx: ServerCtx = makeCtx("/tmp", token, "<html></html>");
+
+  test("GET / → handleIndexRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/"),
+      baseCtx,
+    );
+    expect(res.headers.get("content-type")).toContain("text/html");
+  });
+
+  test("GET /index.html → handleIndexRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/index.html"),
+      baseCtx,
+    );
+    expect(res.headers.get("content-type")).toContain("text/html");
+  });
+
+  test("GET /state → handleStateRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/state"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("GET /api/markers → handleMarkersRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/markers"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("GET /api/attachments → handleAttachmentsRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/attachments"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("GET /api/skills → handleSkillsRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/skills"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("GET /api/settings → handleSettingsGetRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/settings"),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("GET /api/logs/stream (no bus) → SSE", async () => {
+    const controller = new AbortController();
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/logs/stream", {
+        signal: controller.signal,
+      }),
+      baseCtx,
+      { bus: null },
+    );
+    expect(res.status).toBe(200);
+    controller.abort();
+  });
+
+  test("GET /api/logs/recent (no bus) → 404", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/logs/recent"),
+      baseCtx,
+      { bus: null },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("GET /events → SSE", async () => {
+    const controller = new AbortController();
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/events", {
+        signal: controller.signal,
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+    controller.abort();
+  });
+
+  test("POST /api/init without token → 403", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/init", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ goal: "x" }),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  test("POST /api/init with token → 200", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-disp-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleRequest(
+        new Request("http://127.0.0.1:3000/api/init", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ goal: "x" }),
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("POST /api/dispatch valid → 200", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/dispatch", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ engine: "claude" }),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("POST /api/dispatch invalid → 400", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/dispatch", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ engine: "bogus" }),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /api/detect → 200", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-detc-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleRequest(
+        new Request("http://127.0.0.1:3000/api/detect", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-vibeflow-token": token,
+          },
+          body: JSON.stringify({ path: dir }),
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("POST /api/orchestrate → 200", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-orc-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleRequest(
+        new Request("http://127.0.0.1:3000/api/orchestrate", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-vibeflow-token": token,
+          },
+          body: JSON.stringify({ engine: "claude" }),
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("POST /api/discover empty → 400", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/discover", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ query: "" }),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /api/units invalid action → 400", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/units", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ action: "bogus" }),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /api/preflight → 200", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/preflight", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ engines: ["claude"], probe: false }),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("POST /api/settings → 200", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-set-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleRequest(
+        new Request("http://127.0.0.1:3000/api/settings", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-vibeflow-token": token,
+          },
+          body: JSON.stringify({ tools: { codegraph: false } }),
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("POST /api/upload → 200", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleRequest(
+        new Request("http://127.0.0.1:3000/api/upload?name=foo.txt", {
+          method: "POST",
+          body: new Blob(["x"]),
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("POST /api/upload invalid name → 400", async () => {
+    const res = await handleRequest(
+      new Request(`http://127.0.0.1:3000/api/upload?name=${"x".repeat(201)}.txt`, {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /api/upload too large → 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const big = new Uint8Array(51 * 1024 * 1024);
+      const res = await handleRequest(
+        new Request("http://127.0.0.1:3000/api/upload?name=big.bin", {
+          method: "POST",
+          body: new Blob([big]),
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(400);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("DELETE /api/upload → 200", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-up-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const { mkdirSync } = await import("node:fs");
+      mkdirSync(join(dir, ".vibeflow", "attachments"), { recursive: true });
+      writeFileSync(
+        join(dir, ".vibeflow", "attachments", "todelete.txt"),
+        "x",
+      );
+      const res = await handleRequest(
+        new Request("http://127.0.0.1:3000/api/upload?name=todelete.txt", {
+          method: "DELETE",
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("DELETE /api/upload invalid name → 400", async () => {
+    const res = await handleRequest(
+      new Request(`http://127.0.0.1:3000/api/upload?name=${"x".repeat(201)}.txt`, {
+        method: "DELETE",
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /api/* invalid JSON → 400 via catch", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/init", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: "not valid json{",
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /api/unknown with valid JSON → 404", async () => {
+    // Send a POST to a write path that doesn't match any handleWriteJsonRoute
+    // branch. Since /api/unknown isn't in the isWrite allowlist, it falls
+    // through to the outer 404 handler. To exercise the safety-net 404 at
+    // line 712, we need an isWrite-listed path. Trick: spoof by using
+    // /api/upload via POST with an unknown extension… but that's handled.
+    // Use a "POST to a non-write path" to confirm the outer 404 is reached.
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/api/nonexistent", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ foo: "bar" }),
+      }),
+      baseCtx,
+    );
+    // /api/nonexistent is not in isWrite, so it falls through to
+    // the bottom 404.
+    expect(res.status).toBe(404);
+  });
+
+  test("GET /assets/* → handleAssetRoute", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/assets/foo.css"),
+      baseCtx,
+    );
+    expect([200, 404]).toContain(res.status);
+  });
+
+  test("GET unknown → 404 fallback", async () => {
+    const res = await handleRequest(
+      new Request("http://127.0.0.1:3000/some/unknown/path"),
+      baseCtx,
+    );
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect(text).toBe("not found");
+  });
+});
+
+describe("server safeAttachName branches", () => {
+  // Re-import safeAttachName via the public exports — it's not exported, so
+  // we trigger it via handleUploadPostRoute.
+  const token = "test-token";
+  const baseCtx: ServerCtx = makeCtx("/tmp", token, "");
+
+  test("rejects empty string", async () => {
+    const res = await handleUploadPostRoute(
+      new Request("http://127.0.0.1:3000/api/upload?name=", {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects control characters", async () => {
+    const res = await handleUploadPostRoute(
+      new Request("http://127.0.0.1:3000/api/upload?name=foo%01bar.txt", {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects path separators", async () => {
+    const res = await handleUploadPostRoute(
+      new Request("http://127.0.0.1:3000/api/upload?name=foo%2Fbar.txt", {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects backslash", async () => {
+    const res = await handleUploadPostRoute(
+      new Request("http://127.0.0.1:3000/api/upload?name=foo%5Cbar.txt", {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects dotfile", async () => {
+    const res = await handleUploadPostRoute(
+      new Request("http://127.0.0.1:3000/api/upload?name=.hidden", {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects '..'", async () => {
+    const res = await handleUploadPostRoute(
+      new Request("http://127.0.0.1:3000/api/upload?name=..", {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects '.'", async () => {
+    const res = await handleUploadPostRoute(
+      new Request("http://127.0.0.1:3000/api/upload?name=.", {
+        method: "POST",
+        body: new Blob(["x"]),
+      }),
+      baseCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("server requestedEngines branches", () => {
+  // Triggered via /api/preflight — but we need to test the function
+  // semantics directly. Since it's not exported, we drive via
+  // handleWriteJsonRoute.
+  const token = "test-token";
+  const baseCtx: ServerCtx = makeCtx("/tmp", token, "");
+
+  test("engines absent → defaults to all ENGINES", async () => {
+    const res = await handleWriteJsonRoute("/api/preflight", {}, baseCtx);
+    const body = (await res?.json()) as { readiness: { engine: string }[] };
+    // Should include all known engines
+    expect(body.readiness.length).toBeGreaterThan(1);
+  });
+
+  test("engines: [] → defaults to all ENGINES (empty pick)", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/preflight",
+      { engines: [] },
+      baseCtx,
+    );
+    const body = (await res?.json()) as { readiness: { engine: string }[] };
+    expect(body.readiness.length).toBeGreaterThan(1);
+  });
+
+  test("engines: ['bogus'] → defaults to all (no valid picks)", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/preflight",
+      { engines: ["bogus"] },
+      baseCtx,
+    );
+    const body = (await res?.json()) as { readiness: { engine: string }[] };
+    expect(body.readiness.length).toBeGreaterThan(1);
+  });
+
+  test("engines: ['claude'] + non-string entries → filters to valid", async () => {
+    const res = await handleWriteJsonRoute(
+      "/api/preflight",
+      { engines: ["claude", 123, null] },
+      baseCtx,
+    );
+    const body = (await res?.json()) as { readiness: { engine: string }[] };
+    expect(body.readiness.length).toBe(1);
+    expect(body.readiness[0].engine).toBe("claude");
+  });
+});
+
+describe("server replayFromLog branches", () => {
+  // replayFromLog is exported — call it directly.
+  // We need to import it. Since it was already exported, we can do so.
+  // But the test import block doesn't include it. Use require.
+  test("non-existent file → []", () => {
+    // @ts-ignore
+    const { replayFromLog } = require("../src/server.js");
+    const evs = replayFromLog("/tmp/definitely-does-not-exist-xyz", 0, 100);
+    expect(evs).toEqual([]);
+  });
+
+  test("empty file → []", () => {
+    const { writeFileSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "vf-replay-"));
+    const f = join(dir, "empty.log");
+    writeFileSync(f, "");
+    try {
+      // @ts-ignore
+      const { replayFromLog } = require("../src/server.js");
+      expect(replayFromLog(f, 0, 100)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("file with valid events → returns matching ones", () => {
+    const { writeFileSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "vf-replay-"));
+    const f = join(dir, "log.txt");
+    writeFileSync(
+      f,
+      `${JSON.stringify({ seq: 1, level: "info", text: "a" })}\n` +
+        `${JSON.stringify({ seq: 2, level: "info", text: "b" })}\n` +
+        `not json line\n` +
+        `${JSON.stringify({ seq: 3, level: "info", text: "c" })}\n`,
+    );
+    try {
+      // @ts-ignore
+      const { replayFromLog } = require("../src/server.js");
+      const evs = replayFromLog(f, 2, 100);
+      expect(evs.length).toBe(2);
+      expect(evs[0].seq).toBe(2);
+      expect(evs[1].seq).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("file respects limit", () => {
+    const { writeFileSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "vf-replay-"));
+    const f = join(dir, "log.txt");
+    writeFileSync(
+      f,
+      `${JSON.stringify({ seq: 1, level: "info", text: "a" })}\n` +
+        `${JSON.stringify({ seq: 2, level: "info", text: "b" })}\n` +
+        `${JSON.stringify({ seq: 3, level: "info", text: "c" })}\n`,
+    );
+    try {
+      // @ts-ignore
+      const { replayFromLog } = require("../src/server.js");
+      const evs = replayFromLog(f, 0, 2);
+      expect(evs.length).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("file > 2MB → large file path with tail window", () => {
+    const { writeFileSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "vf-replay-"));
+    const f = join(dir, "big.log");
+    // Generate > 2MB of data
+    const big = `${JSON.stringify({ seq: 1, level: "info", text: "x" })}\n`.repeat(
+      200_000,
+    );
+    writeFileSync(f, big);
+    try {
+      // @ts-ignore
+      const { replayFromLog } = require("../src/server.js");
+      const evs = replayFromLog(f, 0, 10);
+      // The first JSON line is skipped when the file is too big (firstNl slice).
+      // We just need the function to return without crashing.
+      expect(Array.isArray(evs)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("server listAttachments / syncAttachments branches", () => {
+  // We exercise via the handleXRoute wrappers. To hit the non-empty
+  // branch of listAttachments, we need a real attachments dir.
+  const token = "test-token";
+
+  test("listAttachments: missing dir → []", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-att-"));
+    try {
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleAttachmentsRoute(
+        new Request("http://127.0.0.1:3000/api/attachments"),
+        ctx,
+      );
+      const body = (await res.json()) as { attachments: unknown[] };
+      expect(body.attachments).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("listAttachments: with files → returns list", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-att-"));
+    const { mkdirSync } = await import("node:fs");
+    const attDir = join(dir, ".vibeflow", "attachments");
+    try {
+      mkdirSync(attDir, { recursive: true });
+      writeFileSync(join(attDir, "a.txt"), "hi");
+      writeFileSync(join(attDir, "b.png"), "x");
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleAttachmentsRoute(
+        new Request("http://127.0.0.1:3000/api/attachments"),
+        ctx,
+      );
+      const body = (await res.json()) as { attachments: { name: string }[] };
+      const names = body.attachments.map((a) => a.name).sort();
+      expect(names).toEqual(["a.txt", "b.png"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("syncAttachments: with prior state → updates state.attachments", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-att-"));
+    const { mkdirSync } = await import("node:fs");
+    const attDir = join(dir, ".vibeflow", "attachments");
+    try {
+      mkdirSync(attDir, { recursive: true });
+      writeFileSync(join(attDir, "x.txt"), "hi");
+      const { writeState } = await import("../src/core.js");
+      writeState(dir, {
+        task_id: "T",
+        goal: "g",
+        success_criteria: [],
+        work_units: [],
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const ctx = makeCtx(dir, token, "");
+      const res = await handleAttachmentsRoute(
+        new Request("http://127.0.0.1:3000/api/attachments"),
+        ctx,
+      );
+      const body = (await res.json()) as { attachments: { name: string }[] };
+      expect(body.attachments.length).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
