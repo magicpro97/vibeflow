@@ -43,6 +43,7 @@ import type { AsyncSpawner } from "../src/dispatch.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
 import { writeSettings } from "../src/settings.js";
+import { type Spawner, asSpawnSync, makeFakeSpawner } from "./helpers/fake-spawner.js";
 
 // ---------------------------------------------------------------------------
 //  Test helpers
@@ -1402,17 +1403,14 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const calls: string[][] = [];
-      const fakeSpawner = ((cmd: string, args: string[]) => {
-        calls.push([cmd, ...args]);
-        return { status: 0, stdout: Buffer.from(""), stderr: Buffer.from("") } as never;
-      }) as never;
-      const code = verify({ spawner: fakeSpawner });
+      const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+      const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "gradle", status: 0 } });
+      const code = verify({ spawner: asSpawnSync(spawner) });
       expect(code).toBe(0);
       // Verify the gradle path was actually exercised
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.[0]).toBe("gradle");
-      expect(calls[0]?.slice(1)).toEqual(["check"]);
+      expect(calls[0]?.cmd).toBe("gradle");
+      expect(calls[0]?.args).toEqual(["check"]);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1463,22 +1461,22 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const calls: Array<{ cmd: string; status: number }> = [];
-      const fakeSpawner = ((cmd: string, args: string[]) => {
-        // The npm test calls `npm run lint` (or just `lint` if
-        // plan.runner is npm). The lint script is "false" which
-        // exits 1 in real life. In our fake, we treat any call
-        // matching the lint gate pattern as exit 1.
-        const isLint = args.includes("run") && args.includes("lint");
-        const status = isLint ? 1 : 0;
-        calls.push({ cmd: `${cmd} ${args.join(" ")}`, status });
-        return { status, stdout: Buffer.from(""), stderr: Buffer.from("") } as never;
-      }) as never;
-      const code = verify({ spawner: fakeSpawner });
+      const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+      const baseSpawner = makeFakeSpawner({ calls });
+      // Override the npm run lint call to fail
+      const wrappedSpawner: Spawner = (cmd, args, options) => {
+        const result = baseSpawner(cmd, args, options);
+        if (args.includes("run") && args.includes("lint")) {
+          return { ...result, status: 1 };
+        }
+        return result;
+      };
+      const code = verify({ spawner: asSpawnSync(wrappedSpawner) });
       // code === 1 because the lint gate failed
       expect(code).toBe(1);
       // Sanity: the spawner was called and the failure was recorded
-      expect(calls.some((c) => c.status === 1)).toBe(true);
+      const lintCall = calls.find((c) => c.args.includes("run") && c.args.includes("lint"));
+      expect(lintCall).toBeDefined();
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
