@@ -415,6 +415,9 @@ describe("server HTTP API handlers", () => {
   });
 
   test("POST /api/discover with docs + approved returns 200 (line 530-533)", async () => {
+    // CI flake guard: 5s default timeout is too tight for a real
+    // network call to Context7 on the self-hosted runner. Add
+    // per-test timeout to absorb spikes (real local: ~4.8s, CI: 5-7s).
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
@@ -433,7 +436,7 @@ describe("server HTTP API handlers", () => {
     } finally {
       server.stop();
     }
-  });
+  }, 30_000);
 
   test("POST /api/settings returns 200 (line 548)", async () => {
     const { server, url } = (await startServer()) as {
