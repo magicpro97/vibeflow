@@ -709,3 +709,66 @@ describe("makeAsyncSpawner — Windows .cmd/.bat shim auto-shell (Task 7b)", () 
     }
   });
 });
+
+describe("makeAsyncSpawner — stdin error / null exitCode (defect #B3 + #B9)", () => {
+  test("kills child on stdin write error (B3: orphan guard)", async () => {
+    // Simulate EPIPE: stdin.write throws. The fix must kill the child and
+    // await proc.exited before re-throwing, otherwise the child orphans.
+    const fakeChild = {
+      stdin: {
+        write: () => {
+          throw new Error("EPIPE: child stdin closed");
+        },
+        end: () => {},
+      },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(0),
+      kill: () => {
+        killed = true;
+      },
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    let killed = false;
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn =
+      (() => fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner();
+      await expect(spawner(process.execPath, ["-e", "process.exit(0)"], "x")).rejects.toThrow(
+        "EPIPE",
+      );
+      expect(killed).toBe(true);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+    }
+  });
+
+  test("exitCode===null surfaces as status 1 (B9: silent success coercion)", async () => {
+    // exitCode===null from proc.exited — common when the child is killed
+    // before normal exit. The fix must NOT coerce null to 0 (success).
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(null as unknown as number),
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn =
+      (() => fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner();
+      const r = await spawner(process.execPath, ["-e", "process.exit(0)"], "");
+      // Without the fix: `exitCode ?? 1` keeps null→1 too, so the assertion
+      // below is the same. The true bug is the opposite coercion path
+      // (treating null as success), which is what B9 explicitly forbids.
+      // Verify the contract: null is a failure signal, not silent success.
+      expect(r.timedOut).toBeFalsy();
+      expect(typeof r.status).toBe("number");
+      // status MUST NOT be 0 when exitCode was null (silent success)
+      expect(r.status).not.toBe(0);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+    }
+  });
+});

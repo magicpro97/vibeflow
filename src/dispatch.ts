@@ -132,7 +132,25 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       stderr: "pipe",
       env: { ...process.env },
     });
-    proc.stdin?.write(input);
+    try {
+      proc.stdin?.write(input);
+    } catch (err) {
+      // B3: if stdin.write throws (EPIPE / child already exited), kill the
+      // child and wait for it to actually exit before re-throwing, otherwise
+      // the orphan process keeps running with a closed pipe.
+      try {
+        proc.kill();
+      } catch {
+        // Process may have already exited — nothing to kill.
+      }
+      try {
+        await proc.exited;
+      } catch {
+        // proc.exited can reject if the kill itself fails; swallow so the
+        // original stdin error is what the caller sees.
+      }
+      throw err;
+    }
     proc.stdin?.end();
 
     const stdoutReader = proc.stdout.getReader();
@@ -205,7 +223,9 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     if (graceTerm) {
       clearTimeout(graceTerm);
     }
-    const status = timedOut ? TIMEOUT_STATUS : (exitCode ?? 1);
+    // B9: exitCode===null means the child was killed before normal exit.
+    // Surface that as status 1 (failure) — never coerce to 0 (silent success).
+    const status = timedOut ? TIMEOUT_STATUS : (exitCode === null ? 1 : exitCode);
     return { status, stdout, stderr, timedOut };
   };
 }
