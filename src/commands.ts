@@ -476,8 +476,30 @@ export function applyDispatch(
   if (!(ENGINES as string[]).includes(engineName)) return null;
   const engine = engineName as Engine;
   const state = readState(base);
-  const ctx: ProjectContext = { ...defaultContext(), goal: state?.goal ?? defaultContext().goal };
-  const units = state ? state.work_units.map((u) => u.name) : [];
+  // PR28 audit Task 6 (M2): when no workflow state exists (user skipped `vf init`)
+  // the old code fell back to `defaultContext().goal` — a LITERAL PLACEHOLDER
+  // string ("Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an
+  // engine."). The engine would then receive a prompt that is just a TODO note,
+  // and the user gets a meaningless dispatch with no error. The audit calls this
+  // "the run/applyDispatch placeholder goal trap."
+  //
+  // Fix: refuse to dispatch when no state exists. The caller (server.ts:525)
+  // surfaces a 400 with a clear "run vf init" message. This is the same contract
+  // as `verify()` (Task 2): state is mandatory for any meaningful run.
+  if (!state) return null;
+  // Also refuse when the goal is missing/empty — the placeholder string was a
+  // symptom of init not having collected a real goal.
+  const goal = state.goal?.trim();
+  if (!goal) return null;
+  const baseCtx = defaultContext();
+  const ctx: ProjectContext = {
+    ...baseCtx,
+    goal,
+    // Carry through the state task_id as the context name when present, so
+    // the engine's prompt header references a stable identifier.
+    name: baseCtx.name,
+  };
+  const units = state.work_units.map((u) => u.name);
   const prompt = dispatchPrompt(engine, ctx, units);
   const rel = `${CTX_DIR}/dispatch/${engine}.md`;
   writeFileSafe(join(base, rel), prompt);
@@ -1615,9 +1637,34 @@ export async function run(
   }
   const engine = engineArg as Engine;
   const base = inject.base ?? cwd();
-  const ctx = defaultContext();
+  // PR28 audit Task 6 (M2): the old `const ctx = defaultContext()` left the goal as
+  // a literal placeholder string. The engine then receives a prompt that is just
+  // "Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine."
+  // Same trap as `applyDispatch`. Refuse to dispatch when no state exists, and
+  // overlay state.goal onto the context when it does.
   const state = readState(base);
-  const units = state ? state.work_units.map((u) => u.name) : [];
+  if (!state) {
+    out(
+      "vf",
+      c.red(
+        "no workflow state — run `vf init` to set the goal and work units before `vf run`.",
+      ),
+      { level: "error" },
+    );
+    return 1;
+  }
+  const goal = state.goal?.trim();
+  if (!goal) {
+    out(
+      "vf",
+      c.red("workflow state has no goal — run `vf init` to set one before `vf run`."),
+      { level: "error" },
+    );
+    return 1;
+  }
+  const baseCtx = defaultContext();
+  const ctx: ProjectContext = { ...baseCtx, goal };
+  const units = state.work_units.map((u) => u.name);
   const prompt = dispatchPrompt(engine, ctx, units);
   writeFileSafe(ctxPathIn(base, "dispatch", `${engine}.md`), prompt);
   out("vf", `${c.green("+")} ${CTX_DIR}/dispatch/${engine}.md`);

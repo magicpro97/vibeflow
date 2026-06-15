@@ -221,11 +221,44 @@ describe("commands.applyDispatch", () => {
     }
   });
 
-  test("applyDispatch with no state still produces a prompt (uses default goal)", () => {
+  // PR28 audit Task 6 (M2): the old behavior was "no state → fall back to placeholder
+  // goal string and produce a prompt". The placeholder string is literally "Describe
+  // the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine." — which
+  // meant the engine received a TODO note as the goal. The audit calls this the
+  // "placeholder goal trap". Fix: refuse to dispatch when no state exists. The
+  // caller (server.ts) handles the null and returns a clear "run vf init" error.
+  test("applyDispatch with no state returns null (placeholder goal trap fix, M2)", () => {
     const dir = freshDir("vf-disp-nostate-");
     const r = applyDispatch("claude", dir);
+    expect(r).toBeNull();
+  });
+
+  test("applyDispatch with state but empty goal returns null (placeholder goal trap fix, M2)", () => {
+    const dir = freshDir("vf-disp-emptygoal-");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "   ", // whitespace-only — same trap as missing
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const r = applyDispatch("claude", dir);
+    expect(r).toBeNull();
+  });
+
+  test("applyDispatch with real goal uses state.goal verbatim (not placeholder)", () => {
+    const dir = freshDir("vf-disp-realgoal-");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "ship the vibeflow audit fix",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const r = applyDispatch("claude", dir);
     expect(r).not.toBeNull();
-    expect(r?.file).toBe(`${CTX_DIR}/dispatch/claude.md`);
+    expect(r?.prompt).toContain("ship the vibeflow audit fix");
+    expect(r?.prompt).not.toContain("Describe the task in");
   });
 });
 
@@ -520,16 +553,54 @@ describe("commands.run branches", () => {
     expect(code).toBe(2);
   });
 
+  // PR28 audit Task 6 (M2): the old run() used `defaultContext()` directly so it
+  // worked even without state — the engine just received a placeholder goal
+  // string. With the fix, run() refuses to dispatch without state. The tests
+  // below now seed a real workflow state first.
   test("run: dry (no --yes) writes the dispatch prompt and exits 0 (line 1375-1378)", async () => {
     const dir = freshDir("vf-run-dry-");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "do a thing",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
     const code = await run("claude", {}, { base: dir });
     // Dry run: still writes the prompt; engine check is best-effort.
     expect([0, 1]).toContain(code);
     expect(existsSync(join(dir, CTX_DIR, "dispatch", "claude.md"))).toBe(true);
   });
 
+  test("run: no state (placeholder goal trap fix, M2) returns 1 and writes nothing", async () => {
+    const dir = freshDir("vf-run-nostate-");
+    const code = await run("claude", {}, { base: dir });
+    expect(code).toBe(1);
+    expect(existsSync(join(dir, CTX_DIR, "dispatch", "claude.md"))).toBe(false);
+  });
+
+  test("run: empty goal (placeholder goal trap fix, M2) returns 1 and writes nothing", async () => {
+    const dir = freshDir("vf-run-emptygoal-");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "   ",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const code = await run("claude", {}, { base: dir });
+    expect(code).toBe(1);
+  });
+
   test("run: --yes + spawner returning ok returns 0 (line 1432-1435)", async () => {
     const dir = freshDir("vf-run-yes-");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "do a thing",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
     const code = await run(
       "claude",
       { yes: true },
@@ -548,6 +619,13 @@ describe("commands.run branches", () => {
 
   test("run: --yes + spawner returning failure returns 1 (line 1432-1435)", async () => {
     const dir = freshDir("vf-run-yes-fail-");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "do a thing",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
     const code = await run(
       "claude",
       { yes: true },
