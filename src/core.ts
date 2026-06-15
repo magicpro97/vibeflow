@@ -1,4 +1,11 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -196,9 +203,30 @@ export function writeState(base: string, state: WorkflowState): void {
   writeFileSafe(statePath(base), JSON.stringify(state, null, 2));
 }
 
-export function writeFileSafe(path: string, content: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content.endsWith("\n") ? content : `${content}\n`);
+/** Crash-safe write: temp file in the same directory, then atomic rename. A SIGKILL / power loss /
+ * OOM between the open-truncate of a plain `writeFileSync` and the final write would leave the
+ * target file EMPTY (0 bytes) or partial. POSIX guarantees `rename(2)` is atomic on the same
+ * filesystem, so the target either has the previous content or the new content — never a mix.
+ * Same-FS invariant: the `.tmp-<pid>-<ts>` suffix is constructed in the same directory as the
+ * target (cross-FS rename degrades to copy+delete, which is NOT atomic).
+ * Test seam: callers can inject a throwing `writeFileSync` to simulate a SIGKILL mid-write. */
+export function writeFileSafe(
+  path: string,
+  content: string,
+  inject: {
+    mkdirSync?: (p: string, opts: { recursive: boolean }) => void;
+    writeFileSync?: (p: string, data: string) => void;
+    renameSync?: (from: string, to: string) => void;
+  } = {},
+): void {
+  const _mkdir = inject.mkdirSync ?? mkdirSync;
+  const _write = inject.writeFileSync ?? writeFileSync;
+  const _rename = inject.renameSync ?? renameSync;
+  _mkdir(dirname(path), { recursive: true });
+  const finalContent = content.endsWith("\n") ? content : `${content}\n`;
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  _write(tmp, finalContent);
+  _rename(tmp, path);
 }
 
 /** Coerce an untrusted value (parsed engine JSON / hand-edited ledger) to a string array;
