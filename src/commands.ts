@@ -2240,12 +2240,15 @@ export function detectToolchain(
   return { kind: "none" };
 }
 
-export function verify(): number {
+export function verify(inject: { spawner?: typeof spawnSync } = {}): number {
   let failed = 0;
   const base = cwd();
   const runGate = (label: string, cmd: string, args: string[], dir = base) => {
     out("vf", c.cyan(`▶ ${label}`));
-    const r = spawnSync(cmd, args, { stdio: "inherit", cwd: dir });
+    // Test seam: tests inject a fake spawner to avoid the 28s
+    // gradle download on CI. Production callers fall through to
+    // the real spawnSync.
+    const r = (inject.spawner ?? spawnSync)(cmd, args, { stdio: "inherit", cwd: dir });
     if (r.status !== 0) {
       failed++;
       out("vf", c.red(`✗ ${label} failed`));

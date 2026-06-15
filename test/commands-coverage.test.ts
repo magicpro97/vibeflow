@@ -1383,15 +1383,13 @@ describe("commands.verify branches", () => {
   });
 
   test("verify with gradle build runs gradle check (line 2227-2228)", () => {
-    // Skip in environments where `gradle` is not installed (e.g. CI).
-    // The test exercises the gradle path of `verify()` which spawns
-    // `gradle check` as a subprocess. If gradle is missing, spawn
-    // returns ENOENT and the test takes 22s+ trying to download deps
-    // before timing out. Use the `which` check to skip cleanly.
-    if (!Bun.which("gradle")) {
-      console.log("[skip] gradle not installed; skipping real-gradle test");
-      return;
-    }
+    // The test exercises the gradle path of `verify()` which would
+    // normally spawn `gradle check` as a subprocess. On GitHub Actions
+    // ubuntu-latest, gradle is pre-installed but takes 28s+ to
+    // bootstrap a fresh `gradle check` before timing out at
+    // bun:test's default 5s. Inject a fake spawner so the test
+    // never actually runs gradle — the spawner just records the
+    // call and returns exit 0. The line is still covered.
     const dir = freshDir("vf-verify-gradle-");
     writeFileSync(join(dir, "build.gradle.kts"), "// empty gradle file");
     writeState(dir, {
@@ -1404,8 +1402,17 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify();
-      expect([0, 1]).toContain(code);
+      const calls: string[][] = [];
+      const fakeSpawner = ((cmd: string, args: string[]) => {
+        calls.push([cmd, ...args]);
+        return { status: 0, stdout: Buffer.from(""), stderr: Buffer.from("") } as never;
+      }) as never;
+      const code = verify({ spawner: fakeSpawner });
+      expect(code).toBe(0);
+      // Verify the gradle path was actually exercised
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.[0]).toBe("gradle");
+      expect(calls[0]?.slice(1)).toEqual(["check"]);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1430,6 +1437,48 @@ describe("commands.verify branches", () => {
       // The journal entry was written
       const journal = existsSync(join(dir, CTX_DIR, "knowledge", "log.md"));
       expect(journal).toBe(true);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify with failing npm gate: runGate failure branch (line 2250-2251)", () => {
+    // The `verify appends a journal entry on pass` test only covers
+    // the success path of runGate (lint exits 0). The fail branch
+    // (`failed++` + red "✗" output) needs a separate test where
+    // the gate exits non-zero. Use `false` as the lint script so
+    // the npm-spawned process exits 1 quickly without any toolchain
+    // download overhead. Inject a fake spawner to keep the test
+    // fully deterministic and CI-portable.
+    const dir = freshDir("vf-verify-fail-gate-");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "false" } }));
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const calls: Array<{ cmd: string; status: number }> = [];
+      const fakeSpawner = ((cmd: string, args: string[]) => {
+        // The npm test calls `npm run lint` (or just `lint` if
+        // plan.runner is npm). The lint script is "false" which
+        // exits 1 in real life. In our fake, we treat any call
+        // matching the lint gate pattern as exit 1.
+        const isLint = args.includes("run") && args.includes("lint");
+        const status = isLint ? 1 : 0;
+        calls.push({ cmd: `${cmd} ${args.join(" ")}`, status });
+        return { status, stdout: Buffer.from(""), stderr: Buffer.from("") } as never;
+      }) as never;
+      const code = verify({ spawner: fakeSpawner });
+      // code === 1 because the lint gate failed
+      expect(code).toBe(1);
+      // Sanity: the spawner was called and the failure was recorded
+      expect(calls.some((c) => c.status === 1)).toBe(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
