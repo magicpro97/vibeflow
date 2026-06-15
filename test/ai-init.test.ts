@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAiInitPrompt, runAiInit, selectBestEngine } from "../src/ai-init.js";
@@ -82,20 +82,69 @@ describe("buildAiInitPrompt", () => {
     expect(prompt).toContain("bun test");
   });
 
-  test("includes task structure", () => {
+  // RAG-style slim prompt: the bulky "Your Tasks" body lives in
+  // .vibeflow/ai-context/INSTRUCTIONS.md (written to disk), not in the
+  // prompt. The prompt itself is just summary + file list + read order.
+  test("prompt is slim (< 2K chars) — RAG pattern keeps argv under Windows 32K limit", () => {
     const prompt = buildAiInitPrompt(profile, "/tmp");
-    expect(prompt).toContain("Analyze the Project (INVESTIGATE");
-    expect(prompt).toContain("Write/Update Instruction Files");
-    expect(prompt).toContain("Discover and Install Skills");
-    expect(prompt).toContain("Update Project Context");
+    expect(prompt.length).toBeLessThan(2_000);
   });
 
-  test("includes constraint section", () => {
+  test("prompt points at INSTRUCTIONS.md as the first read", () => {
     const prompt = buildAiInitPrompt(profile, "/tmp");
-    expect(prompt).toContain("Critical Constraints");
-    expect(prompt).toContain("NEVER delete or truncate");
-    expect(prompt).toContain("vibeflow:start");
-    expect(prompt).toContain("vibeflow:end");
+    expect(prompt).toContain("INSTRUCTIONS.md");
+    expect(prompt).toContain("Read");
+    // INSTRUCTIONS.md must appear before other context files
+    const instrIdx = prompt.indexOf("INSTRUCTIONS.md");
+    const dirListIdx = prompt.indexOf("directory-listing.txt");
+    expect(instrIdx).toBeGreaterThan(0);
+    expect(dirListIdx).toBeGreaterThan(instrIdx);
+  });
+
+  test("INSTRUCTIONS.md is written to .vibeflow/ai-context/", () => {
+    // The bulky body lives on disk, not in argv. The engine reads it
+    // via its own read_file tool.
+    const dir = mkdtempSync(join(tmpdir(), "vf-instr-"));
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    try {
+      buildAiInitPrompt(profile, dir);
+      const p = join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md");
+      expect(existsSync(p)).toBe(true);
+      const body = readFileSync(p, "utf8");
+      expect(body).toContain("Your Tasks");
+      expect(body).toContain("confidence = 1.0");
+      expect(body).toContain("vibeflow:start");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("INSTRUCTIONS.md contains all task sections (moved out of prompt)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-instr-sections-"));
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    try {
+      buildAiInitPrompt(profile, dir);
+      const body = readFileSync(join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md"), "utf8");
+      expect(body).toContain("Pre-flight Check");
+      expect(body).toContain("Analyze the Project");
+      expect(body).toContain("Write/Update Instruction Files");
+      expect(body).toContain("Discover and Install Skills");
+      expect(body).toContain("Update Project Context");
+      expect(body).toContain("Confidence Gate Protocol");
+      expect(body).toContain("Critical Constraints");
+      expect(body).toContain("NEVER delete or truncate");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("prompt does NOT inline the bulky task body (moved to INSTRUCTIONS.md)", () => {
+    const prompt = buildAiInitPrompt(profile, "/tmp");
+    // These headings used to be in the prompt; now they live only in INSTRUCTIONS.md.
+    expect(prompt).not.toContain("Pre-flight Check");
+    expect(prompt).not.toContain("Confidence Gate Protocol");
+    expect(prompt).not.toContain("Critical Constraints");
+    expect(prompt).not.toContain("Evidence checklist");
   });
 
   test("includes directory listing section", () => {
