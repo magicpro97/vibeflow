@@ -112,6 +112,7 @@
       coverage-1.json
       coverage-2.json
       coverage-3.json
+      coverage-4.json
   docs/
     AGENT_ORCHESTRATION_POLICY.md
     ARCHITECTURE.md

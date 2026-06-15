@@ -39,7 +39,7 @@ describe("ui: table", () => {
     expect(out).toContain("tool");
     expect(out).toContain("status");
     expect(out).toContain("node");
-    expect(out.split("\n").length).toBe(6);
+    expect(out.split("\n").length).toBe(5);
   });
 });
 
@@ -140,6 +140,16 @@ describe("ui: link", () => {
       const out = link("click", "https://example.com");
       expect(out).toContain("\x1b]8;;https://example.com");
       expect(out).toContain("click");
+    } finally {
+      setTtyOverride(undefined);
+    }
+  });
+
+  test("setTtyOverride(false) returns the non-TTY fallback in link()", () => {
+    setTtyOverride(false);
+    try {
+      const out = link("click", "https://example.com");
+      expect(out).toBe("click (https://example.com)");
     } finally {
       setTtyOverride(undefined);
     }
