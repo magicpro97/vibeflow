@@ -227,3 +227,36 @@ describe("terminal prompts — SIGINT backstop (defect #B17)", () => {
     expect(process.listenerCount("exit")).toBe(before);
   });
 });
+
+describe("terminal prompts — setRawMode rollback (defect #B18)", () => {
+  test("selectOne rejects (does not hang) and restores raw mode when HIDE_CURSOR throws AFTER setRawMode succeeded", async () => {
+    installTtyMock();
+    const captured: string[] = [];
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    (process.stdout as unknown as { write: (s: string) => boolean }).write =
+      ((s: string) => {
+        captured.push(s);
+        // Throw on the FIRST HIDE_CURSOR. The setRawMode(true) + resume() succeeded.
+        // Without the rollback fix (or if HIDE_CURSOR sits OUTSIDE the try/catch),
+        // the throw bubbles out of the Promise executor with no reject → caller hangs.
+        if (s === "\x1b[?25l") {
+          throw new Error("simulated EPIPE on HIDE_CURSOR");
+        }
+        return true;
+      }) as typeof process.stdout.write;
+    try {
+      const start = Date.now();
+      await expect(
+        selectOne("Pick", ["A"], { timeoutMs: 500 }),
+      ).rejects.toThrow("simulated EPIPE");
+      // Must reject fast — the bug was: never-settling Promise.
+      expect(Date.now() - start).toBeLessThan(1_500);
+      // Rollback MUST have written SHOW_CURSOR after the failure.
+      const sawShow = captured.includes("\x1b[?25h");
+      expect(sawShow).toBe(true);
+    } finally {
+      (process.stdout as unknown as { write: typeof process.stdout.write }).write =
+        origStdoutWrite;
+    }
+  });
+});

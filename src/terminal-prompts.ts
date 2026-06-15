@@ -170,18 +170,20 @@ export async function selectOne(
 
   return await new Promise<string>((resolve, reject) => {
     let settled = false;
-    // B18: setRawMode + HIDE_CURSOR must be inside the Promise executor with
-    // try/catch so a failure (e.g. stdin is not actually a TTY under a faked
-    // isTTY) rolls back gracefully instead of leaving the terminal stuck in
-    // raw mode with the cursor hidden.
+    // B18: setRawMode + resume + HIDE_CURSOR must be inside the Promise
+    // executor with try/catch so a failure in ANY of the three rolls back
+    // gracefully (call restoreRawMode + SHOW_CURSOR, reject) instead of
+    // leaving the terminal stuck in raw mode with the cursor hidden and
+    // a never-settling Promise.
     try {
       process.stdin.setRawMode(true);
+      process.stdin.resume();
+      write(HIDE_CURSOR);
     } catch (err) {
+      try { restoreRawMode(wasRaw, true); } catch { /* ignore */ }
       reject(err);
       return;
     }
-    process.stdin.resume();
-    write(HIDE_CURSOR);
 
     // B17: SIGINT/synchronous-exit backstop. If the process dies before
     // cleanup() runs (parent SIGINT, uncaught throw, OOM), the raw-mode +
@@ -202,10 +204,6 @@ export async function selectOne(
       settled = true;
       if (timer) clearTimeout(timer);
       process.stdin.off("keypress", onKeypress);
-      // B5: defensive — removeAllListeners so any keypress subscriber
-      // installed by other code (e.g. our own emitKeypressEvents + future
-      // ad-hoc listeners) can't leak either.
-      process.stdin.removeAllListeners("keypress");
       process.off("exit", exitHandler);
       restoreRawMode(wasRaw, true);
     };
@@ -289,16 +287,17 @@ export async function selectMany(
 
   return await new Promise<string[]>((resolve, reject) => {
     let settled = false;
-    // B18: see selectOne — setRawMode + HIDE_CURSOR must be inside the
-    // Promise executor so a failure rolls back gracefully.
+    // B18: see selectOne — setRawMode + resume + HIDE_CURSOR must be inside
+    // the Promise executor with one try/catch so any failure rolls back.
     try {
       process.stdin.setRawMode(true);
+      process.stdin.resume();
+      write(HIDE_CURSOR);
     } catch (err) {
+      try { restoreRawMode(wasRaw, true); } catch { /* ignore */ }
       reject(err);
       return;
     }
-    process.stdin.resume();
-    write(HIDE_CURSOR);
 
     // B17: SIGINT/synchronous-exit backstop — see selectOne.
     const exitHandler = () => {
@@ -316,8 +315,6 @@ export async function selectMany(
       settled = true;
       if (timer) clearTimeout(timer);
       process.stdin.off("keypress", onKeypress);
-      // B5: defensive keypress listener cleanup.
-      process.stdin.removeAllListeners("keypress");
       process.off("exit", exitHandler);
       restoreRawMode(wasRaw, true);
     };

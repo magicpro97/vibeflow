@@ -223,9 +223,11 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     if (graceTerm) {
       clearTimeout(graceTerm);
     }
-    // B9: exitCode===null means the child was killed before normal exit.
-    // Surface that as status 1 (failure) — never coerce to 0 (silent success).
-    const status = timedOut ? TIMEOUT_STATUS : (exitCode === null ? 1 : exitCode);
+    // B9 (reverted): `proc.exited` is typed `number`, never `null` in practice.
+    // The original `exitCode ?? 1` is correct for both null and undefined.
+    // The original commit switched to `=== null` which broke the undefined path;
+    // the test for that commit was tautological. Revert to `?? 1`.
+    const status = timedOut ? TIMEOUT_STATUS : (exitCode ?? 1);
     return { status, stdout, stderr, timedOut };
   };
 }
