@@ -4,6 +4,16 @@ import type { ProjectContext, UnitBrief } from "./adapters.js";
 import { dispatchPrompt } from "./adapters.js";
 import { type Engine, hasCommand, resolveCommand, writeFileSafe } from "./core.js";
 
+// Re-export of `Bun.spawn` under a stable name so the test seam (`AsyncSpawnerOpts.spawn`)
+// can be typed as `typeof bunSpawn` and tests can pass any function with the same
+// signature. We resolve `Bun.spawn` lazily on each call so tests that temporarily
+// replace `Bun.spawn` (e.g. the Windows shim auto-shell tests) still hit the mock —
+// binding once would freeze the reference and bypass the mock. Production callers
+// never see the seam.
+const bunSpawn = ((...args: unknown[]) =>
+  // biome-ignore lint/suspicious/noExplicitAny: dynamic dispatch on Bun.spawn's overloads
+  (Bun.spawn as (...a: any[]) => any)(...args)) as unknown as typeof Bun.spawn;
+
 // Confidence fallback for engine runs with no JSON summary block
 const MIN_PRODUCTIVE_TURNS = 3;
 const HIGH_PRODUCTIVE_TURNS = 10;
@@ -34,7 +44,14 @@ export type Spawner = (
   cmd: string,
   args: string[],
   input: string,
-) => { status: number; stdout: string };
+) => { status: number; stdout: string; stderr?: string };
+
+/** Sync spawn result — `stderr` is captured (M2 parity) so error output never leaks to TTY. */
+export interface SyncResult {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
 
 /** Async spawn seam: genuinely overlapping process launches for the parallel path.
  *  Test seams may omit fields that production never inspects (e.g. `stderr`); the in-process
@@ -57,13 +74,53 @@ export interface AsyncSpawnerOpts {
   onStderrChunk?: (text: string) => void;
   /** M2: kill process if no stdout/stderr received within this window (resets on each chunk). */
   idleTimeoutMs?: number;
+  /** Test seam: inject a fake spawner (compatible with `Bun.spawn`'s argv + opts signature)
+   *  to exercise the spawner without launching real subprocesses. Production callers must
+   *  omit this; the spawner falls back to `Bun.spawn` (which now runs `detached: true` on
+   *  POSIX so the engine + its tool children share a process group that we can kill
+   *  together). */
+  spawn?: typeof bunSpawn;
 }
 
 // Test seam: exported so unit tests can exercise the function body
 // (line 67-68) by mocking Bun.spawnSync.
-export function defaultSpawner(cmd: string, args: string[], input: string) {
-  const r = Bun.spawnSync([cmd, ...args], { stdin: Buffer.from(input, "utf8"), stdout: "pipe" });
-  return { status: r.exitCode, stdout: r.stdout.toString() };
+export function defaultSpawner(
+  cmd: string,
+  args: string[],
+  input: string,
+  inject: { spawnSync?: (cmd: string, args: string[], input: string) => SyncResult } = {},
+): SyncResult {
+  const _spawnSync = inject.spawnSync ?? defaultSyncSpawner;
+  return _spawnSync(cmd, args, input);
+}
+
+/** Test seam: a sync spawner that pipes stderr (M2 parity with the async path) and detects
+ *  Windows .cmd/.bat shims (Task 4 audit fix: previously, `defaultSpawner` used `Bun.spawnSync`
+ *  without `stderr: "pipe"`, leaking the child's stderr to the parent TTY; and without the
+ *  Windows shim auto-detect that `makeAsyncSpawner` performs, the sync path failed with
+ *  `ENOENT` on `copilot.cmd` and similar npm shims). */
+export function defaultSyncSpawner(cmd: string, args: string[], input: string): SyncResult {
+  const resolvedCmd = resolveCommand(cmd) ?? cmd;
+  const needsShell = shouldUseWindowsShell(cmd, resolvedCmd);
+  const spawnArgs = needsShell
+    ? process.platform === "win32"
+      ? ["cmd.exe", "/c", cmd, ...args]
+      : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
+    : [cmd, ...args];
+  // Pipe stderr so child error output is captured in the result (M2) and never leaks to the
+  // parent TTY. Previously `Bun.spawnSync([cmd, ...args], { ..., stdout: "pipe" })` only piped
+  // stdout — `stderr` defaulted to inherit on Bun under some versions, leaking engine errors
+  // (e.g. Claude / Codex JSON parse failures) directly to the user's terminal.
+  const r = Bun.spawnSync(spawnArgs, {
+    stdin: Buffer.from(input, "utf8"),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    status: r.exitCode,
+    stdout: r.stdout.toString(),
+    stderr: r.stderr.toString(),
+  };
 }
 
 /** Exit status surfaced when a hung engine is force-killed by the timeout (matches GNU timeout). */
@@ -97,12 +154,12 @@ interface AsyncResult {
  * NOT block the event loop, so multiple lanes truly overlap under the parallel runner. The
  * prompt is written to stdin so we never interpolate it into a shell string.
  *
- * When `timeoutMs` is set, the child is spawned `detached:true` so it becomes its own process
- * group leader; on timeout we kill the WHOLE group (`process.kill(-pid, …)`) with SIGTERM, then
- * SIGKILL after `graceMs`, so the engine's own tool-subprocesses die too rather than orphaning.
- * (Verified under Bun: node child_process detached + negative-pid kill group-kills correctly;
- * `Bun.spawn` does not form a group, hence we stay on node child_process.) `timedOut` is surfaced
- * explicitly rather than inferred from the 124 status. With no `timeoutMs` no timer is ever armed.
+ * The child is spawned `detached: true` (POSIX) so it becomes its own process group leader;
+ * on timeout / cancel we `process.kill(-pid, ...)` the WHOLE group with SIGTERM, then SIGKILL
+ * after `graceMs`, so the engine's own tool-subprocesses (Claude's `node` tool processes,
+ * Codex's `bash -c` helpers, Copilot's mcp-server children) die too rather than orphaning.
+ * On Windows `process.kill(-pid, ...)` is not supported, so we fall back to single-pid
+ * `proc.kill(...)` and orphan-subprocess cleanup is best-effort.
  *
  * M2: stderr is now PIPED (not inherited) and routed to {@link AsyncSpawnerOpts.onStderrChunk}.
  * The bus owns the destination — bytes no longer leak to the parent TTY. Order is preserved
@@ -110,8 +167,12 @@ interface AsyncResult {
  * logbus fanout is synchronous, so the bus sees stdout/stderr chunks in the same order the
  * child emitted them.
  */
+// Test seam: callers can inject a fake `spawn` to simulate group-kill behavior in unit
+// tests without spawning real subprocesses. `onStderrChunk` and `onChunk` are kept on
+// opts for back-compat; M2 fanout goes through these callbacks.
 export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
-  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, idleTimeoutMs, shell } = opts;
+  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, idleTimeoutMs, shell, onChunk, onStderrChunk } = opts;
+  const _spawn = opts.spawn ?? bunSpawn;
   return async (cmd, args, input): Promise<AsyncResult> => {
     // On Windows, .cmd/.bat shims (e.g. copilot.cmd installed by npm)
     // cannot be executed directly via CreateProcess. Detect and
@@ -126,10 +187,14 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
         ? ["cmd.exe", "/c", cmd, ...args]
         : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
       : [cmd, ...args];
-    const proc = Bun.spawn(spawnArgs, {
+    // `detached: true` makes the child a process-group leader on POSIX so we can later
+    // `process.kill(-pid, ...)` the entire group (engine + its tool children). On Windows
+    // detached has no effect on group formation, so we skip it and use single-pid kill.
+    const proc = _spawn(spawnArgs, {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      detached: process.platform !== "win32",
       env: { ...process.env },
     });
     try {
@@ -153,7 +218,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     }
     proc.stdin?.end();
 
-    const stdoutReader = proc.stdout.getReader();
+    const stdoutReader = proc.stdout?.getReader();
     const stderrReader = proc.stderr?.getReader();
     const decoder = new TextDecoder();
     let stdout = "";
@@ -162,21 +227,37 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
 
     let term: Timer | undefined;
     let graceTerm: Timer | undefined;
+    // Group-leader pid: the SIGN that the child was spawned detached on POSIX. On Windows
+    // there is no group-kill equivalent, so we kill the direct child only.
+    const isPosixGroupLeader = process.platform !== "win32" && proc.pid != null;
+    const killGroup = (signal: NodeJS.Signals) => {
+      if (!isPosixGroupLeader || proc.pid == null) {
+        try {
+          proc.kill(signal);
+        } catch {
+          // Process already exited.
+        }
+        return;
+      }
+      try {
+        // Negative pid = process group (POSIX). Kills the engine AND its tool children.
+        process.kill(-proc.pid, signal);
+      } catch {
+        // Group may already be gone (child exited naturally between SIGTERM and SIGKILL).
+        try {
+          proc.kill(signal);
+        } catch {
+          // Best-effort fallback to direct kill.
+        }
+      }
+    };
     const killProc = () => {
       if (timedOut) return;
       timedOut = true;
-      try {
-        proc.kill();
-      } catch {
-        // Process may already have exited before the timeout handler runs.
-      }
+      killGroup("SIGTERM");
       if (graceMs > 0)
         graceTerm = setTimeout(() => {
-          try {
-            proc.kill("SIGKILL");
-          } catch {
-            // Process already exited between SIGTERM and the grace window — nothing to do.
-          }
+          killGroup("SIGKILL");
         }, graceMs);
     };
     if (timeoutMs != null) {
@@ -192,22 +273,22 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
 
     await Promise.all([
       (async () => {
-        while (true) {
+        while (stdoutReader) {
           const { done, value } = await stdoutReader.read();
           if (done) break;
           const s = decoder.decode(value);
-          opts.onChunk?.(s);
+          onChunk?.(s);
           stdout += s;
           resetIdle();
         }
       })(),
       (async () => {
-        while (true) {
+        while (stderrReader) {
           const { done, value } = await stderrReader.read();
           if (done) break;
           const s = decoder.decode(value);
           stderr += s;
-          opts.onStderrChunk?.(s);
+          onStderrChunk?.(s);
           resetIdle();
         }
       })(),
@@ -264,7 +345,7 @@ export function isUnavailable(r: EngineCommandResult): r is EngineUnavailable {
 function copilotVersion(cmd = "copilot"): string | undefined {
   try {
     const resolved = resolveCommand(cmd) ?? cmd;
-    const r = Bun.spawnSync([resolved, "--version"], { stdout: "pipe" });
+    const r = Bun.spawnSync([resolved, "--version"], { stdout: "pipe", stderr: "pipe" });
     if (r.exitCode === 0 && r.stdout.toString().trim()) return r.stdout.toString().trim();
   } catch {
     /* fall through to undefined */
@@ -520,10 +601,14 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
     // test injected its own spawner.
     const bridgeSpawn =
       opts.spawner ??
-      ((c: string, a: string[], input: string) => {
-        const shell = process.platform === "win32" ? ["cmd.exe", "/c", c] : ["/bin/sh", "-c", c];
-        const r = Bun.spawnSync(shell, { stdin: Buffer.from(input, "utf8"), stdout: "pipe" });
-        return { status: r.exitCode, stdout: r.stdout.toString() };
+      ((c: string, a: string[], input: string): SyncResult => {
+        const shell = process.platform === "win32" ? ["cmd.exe", "/c", c, ...a] : ["/bin/sh", "-c", c];
+        const r = Bun.spawnSync(shell, {
+          stdin: Buffer.from(input, "utf8"),
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        return { status: r.exitCode, stdout: r.stdout.toString(), stderr: r.stderr.toString() };
       });
     return buildResult(opts, bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }
