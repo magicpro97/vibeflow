@@ -114,6 +114,38 @@ describe("orchestrateUnits — reviewer blocks on failed review (defect #4)", ()
     expect(b?.gates.review).toBe("fail");
   });
 
+  // Cross-debate review #1 (PR #43): a custom dispatcher that throws
+  // synchronously must NOT abort the whole workflow. The orchestrator
+  // treats the throw as a per-unit "blocked" outcome so siblings still
+  // complete and `reviews[]` is fully populated.
+  test("throwing dispatcher: per-unit outcome is blocked, workflow continues, reviews[] populated", async () => {
+    const { units, reviews } = await orchestrateUnits({
+      units: [unit("a"), unit("b"), unit("c")],
+      dispatcher: async (u) => {
+        if (u.name === "b") throw new Error("dispatcher boom");
+        return { status: "verifying", confidence: 1, evidence: [`${u.name}.log`] };
+      },
+      // Reviewer treats the throw's outcome (status=blocked) as a fail
+      // because the default aiInitReviewer maps "blocked" → pass=false.
+      reviewer: (_u, o) =>
+        o.status === "blocked"
+          ? { pass: false, reason: "dispatcher reported blocked" }
+          : { pass: true, reason: "ok" },
+    });
+    const a = units.find((u) => u.name === "a");
+    const b = units.find((u) => u.name === "b");
+    const c = units.find((u) => u.name === "c");
+    expect(a?.status).toBe("done");
+    expect(b?.status).toBe("blocked");
+    expect(b?.gates.review).toBe("fail");
+    expect(c?.status).toBe("done");
+    // reviews[] is fully populated (no undefined slots from a Promise.all rejection)
+    expect(reviews).toHaveLength(3);
+    expect(reviews[0]?.pass).toBe(true);
+    expect(reviews[1]?.pass).toBe(false);
+    expect(reviews[2]?.pass).toBe(true);
+  });
+
   test("reviews are ordered by input index (deterministic)", async () => {
     const { reviews } = await orchestrateUnits({
       units: [unit("a"), unit("b"), unit("c")],
