@@ -411,9 +411,14 @@ export function buildAiInitPrompt(profile: ProjectProfile, base: string): string
   return prompt;
 }
 
-/** List the file paths that would be written to .vibeflow/ai-context/.
- *  Pure / no side effects — used by buildAiInitPrompt and tests. */
-function listContextFiles(base: string, profile: ProjectProfile): string[] {
+/** Plan the file paths that would be written to .vibeflow/ai-context/.
+ *  Touches the filesystem (existsSync) but does not WRITE — used by
+ *  both buildAiInitPrompt (to pass the list to renderSlimPrompt)
+ *  and writeContextFiles (which does the actual disk writes). The
+ *  split is intentional: list = read-only probe, write =
+ *  side-effectful I/O. Exported so unit tests can probe the list
+ *  without going through runAiInit. */
+export function listContextFiles(base: string, profile: ProjectProfile): string[] {
   const written: string[] = [];
   for (const f of INSTRUCTION_FILES) {
     if (existsSync(join(base, f))) written.push(`${AI_CONTEXT_DIR}/${f}`);
@@ -430,9 +435,16 @@ function listContextFiles(base: string, profile: ProjectProfile): string[] {
   return written;
 }
 
-/** Render the slim prompt body (no disk I/O). The engine is told to use
- *  its Read tool to pull the bulky task body from INSTRUCTIONS.md on disk. */
-function renderSlimPrompt(profile: ProjectProfile, base: string, contextFiles: string[]): string {
+/** Render the slim prompt body (no disk I/O, no I/O at all). The
+ *  engine is told to use its Read tool to pull the bulky task body
+ *  from INSTRUCTIONS.md on disk. Exported for unit-test isolation
+ *  (so tests can assert prompt structure without going through
+ *  runAiInit or writeContextFiles). */
+export function renderSlimPrompt(
+  profile: ProjectProfile,
+  base: string,
+  contextFiles: string[],
+): string {
   const langList = profile.languages.length ? profile.languages.join(", ") : "unknown";
   const fwList = profile.frameworks.length ? profile.frameworks.join(", ") : "none detected";
   const pkgMgr = profile.packageManager ?? "unknown";

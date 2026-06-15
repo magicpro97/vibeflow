@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildAiInitPrompt, runAiInit, selectBestEngine } from "../src/ai-init.js";
+import {
+  buildAiInitPrompt,
+  listContextFiles,
+  renderSlimPrompt,
+  runAiInit,
+  selectBestEngine,
+} from "../src/ai-init.js";
 import type { Engine } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import type { EngineReadiness } from "../src/preflight.js";
@@ -215,6 +221,45 @@ describe("buildAiInitPrompt", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("listContextFiles + renderSlimPrompt (unit-test isolation, exported in commit a1b2c3d)", () => {
+  // The two functions are exported so unit tests can probe the RAG
+  // pattern without going through runAiInit (which has the side
+  // effects of writing files + spawning the engine).
+  const profile: ProjectProfile = {
+    name: "test-project",
+    summary: "test",
+    languages: ["ts"],
+    frameworks: [],
+    packageManager: "bun",
+    buildCommand: "bun run build",
+    testCommand: "bun test",
+    lintCommand: "bun run lint",
+    hasCI: false,
+    manifests: [],
+    findings: [],
+  };
+
+  test("listContextFiles returns the file list that would be written, without writing anything", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-list-ctx-"));
+    writeFileSync(join(dir, "AGENTS.md"), "# agents");
+    const files = listContextFiles(dir, profile);
+    expect(files).toContain(".vibeflow/ai-context/AGENTS.md");
+    expect(files).toContain(".vibeflow/ai-context/project-profile.json");
+    expect(files).toContain(".vibeflow/ai-context/INSTRUCTIONS.md");
+    expect(existsSync(join(dir, ".vibeflow"))).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("renderSlimPrompt is pure (no I/O, deterministic)", () => {
+    const fileList = [".vibeflow/ai-context/INSTRUCTIONS.md", ".vibeflow/ai-context/AGENTS.md"];
+    const a = renderSlimPrompt(profile, "/tmp/fake", fileList);
+    const b = renderSlimPrompt(profile, "/tmp/fake", fileList);
+    expect(a).toBe(b);
+    expect(a.length).toBeLessThan(2_000);
+    expect(a.indexOf("INSTRUCTIONS.md")).toBeLessThan(a.indexOf("AGENTS.md"));
   });
 });
 
