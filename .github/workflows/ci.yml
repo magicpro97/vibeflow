@@ -58,12 +58,30 @@ jobs:
         run: bun run test:e2e
 
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
+    # Only run release-please on main-branch pushes. Self-hosted
+    # runner so it doesn't queue on cloud throttling.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: actions/checkout@v4
+      - name: release-please action
+        # Token priority:
+        # 1. VIBEFLOW_BOT_TOKEN (PAT, no repo setting required)
+        # 2. GITHUB_TOKEN (default, requires "Allow GitHub Actions
+        #    to create and approve pull requests" in repo settings)
+        #
+        # Set VIBEFLOW_BOT_TOKEN at
+        # https://github.com/magicpro97/vibeflow/settings/secrets/actions
+        # (a PAT from a bot account with `contents: write` and
+        # `pull-requests: write` on the repo). Falls back to
+        # GITHUB_TOKEN if the PAT is missing — which works only if
+        # the repo setting "Allow GitHub Actions to create and
+        # approve pull requests" is enabled.
+        env:
+          GITHUB_TOKEN: ${{ secrets.VIBEFLOW_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        uses: googleapis/release-please-action@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.VIBEFLOW_BOT_TOKEN || secrets.GITHUB_TOKEN }}
