@@ -196,7 +196,7 @@ export class Logbus {
 
     try {
       const line = `${stringifyEvent(ev)}\n`;
-      appendFileSync(this.currentFile(), line, "utf8");
+      this.fsModule.appendFileSync(this.currentFile(), line, "utf8");
       this.currentSize += Buffer.byteLength(line, "utf8");
 
       // Rotate if we've crossed the threshold AND we have at least minRotateSize bytes

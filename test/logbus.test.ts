@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
 import {
   existsSync,
   mkdtempSync,
@@ -10,7 +10,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LogEvent, Logbus, getLogbus, out } from "../src/logbus.js";
+import {
+  type LogEvent,
+  Logbus,
+  getLogbus,
+  installLogbus,
+  out,
+  setLogbusForTests,
+  watchLogbus,
+} from "../src/logbus.js";
 
 const FIXTURE_EVENT = {
   channel: "vf" as const,
