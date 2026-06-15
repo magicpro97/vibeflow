@@ -1299,6 +1299,22 @@ describe("commands.verify branches", () => {
     }
   });
 
+  test("verify on a fresh repo with NO WORKFLOW_STATE.json returns 1 (no-workflow-state) (PR28 audit C2)", () => {
+    // Regression: a CI that runs `vf verify` on a fresh clone (no `vf init`) used to exit 0
+    // because policyGates(null) silently passed. After the fix, policyGates(null) returns
+    // ok:false and verify() returns 1 with a clear "run `vf init`" message.
+    const dir = freshDir("vf-verify-no-state-");
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      // No writeState call — no .vibeflow/WORKFLOW_STATE.json on disk.
+      expect(verify()).toBe(1);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("verify with a package.json runs gates (line 2148-2152)", () => {
     const dir = freshDir("vf-verify-npm-");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
