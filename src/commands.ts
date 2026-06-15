@@ -942,37 +942,65 @@ export function makeDispatcher(
     } catch {
       /* best effort */
     }
-    const streamSpawner =
-      spawner ??
-      // Test seam: allow unit tests to inject a chunk-emitting spawner
-      // (which is a different signature than the dispatch AsyncSpawner)
-      // without going through the real Bun.spawn path.
-      makeAsyncSpawner({
-        onChunk: (text) => {
-          try {
-            const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
-            appendFileSafe(streamPath, line);
-          } catch {
-            /* streaming is best-effort */
-          }
-          // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
-          // both see engine progress without a second read of the spawner.
-          out("engine-stdout", text, {
-            unit: u.name,
-            meta: { engine, unit: u.name },
-          });
-        },
-        onStderrChunk: (text) => {
-          // M2: route engine warnings/errors/progress noise to the bus as
-          // warn-level events. Stderr no longer leaks to the parent TTY
-          // (stdio is now piped — see dispatch.ts); the bus owns visibility.
-          out("engine-stderr", text, {
-            level: "warn",
-            unit: u.name,
-            meta: { engine, unit: u.name },
-          });
-        },
-      });
+    // PR28 audit Task 5 (M1): the old code used `spawner ?? makeAsyncSpawner({ onChunk, ... })`,
+    // which meant when a custom spawner was injected (e.g. for testing or for a different
+    // chunk strategy) the per-unit `onChunk` and `onStderrChunk` callbacks were NEVER
+    // fired — the file stream was never appended, and the logbus never saw engine
+    // progress, breaking the SSE relay for that unit. Fix: if a custom `spawner` is
+    // provided, WRAP it so the per-unit callbacks fire around the result. The chunks
+    // arrive post-hoc (after the spawner resolves) rather than during streaming, but
+    // the SSE log and logbus fanout are now CORRECT. The default path (no spawner) is
+    // unchanged — `makeAsyncSpawner({ onChunk, onStderrChunk })` still streams live.
+    const streamSpawner: AsyncSpawner =
+      spawner == null
+        ? makeAsyncSpawner({
+            onChunk: (text) => {
+              try {
+                const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
+                appendFileSafe(streamPath, line);
+              } catch {
+                /* streaming is best-effort */
+              }
+              // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
+              // both see engine progress without a second read of the spawner.
+              out("engine-stdout", text, {
+                unit: u.name,
+                meta: { engine, unit: u.name },
+              });
+            },
+            onStderrChunk: (text) => {
+              // M2: route engine warnings/errors/progress noise to the bus as
+              // warn-level events. Stderr no longer leaks to the parent TTY
+              // (stdio is now piped — see dispatch.ts); the bus owns visibility.
+              out("engine-stderr", text, {
+                level: "warn",
+                unit: u.name,
+                meta: { engine, unit: u.name },
+              });
+            },
+          })
+        : async (cmd, args, input) => {
+            // Composed path: invoke the injected spawner, then fan the accumulated
+            // stdout/stderr out via the per-unit callbacks. The callbacks are
+            // best-effort: a logging failure must not break the dispatch.
+            const r = await spawner(cmd, args, input);
+            try {
+              if (r.stdout) {
+                const line = `data: ${JSON.stringify({ unit: u.name, text: r.stdout, ts: Date.now() })}\n\n`;
+                appendFileSafe(streamPath, line);
+              }
+              if (r.stdout) {
+                out("engine-stdout", r.stdout, { unit: u.name, meta: { engine, unit: u.name } });
+              }
+              // Stderr: AsyncSpawner's return type only has { status, stdout, timedOut? };
+              // the base spawner may not surface stderr. The composed callback stays
+              // for shape compatibility; production engines route stderr via the
+              // orchestrator-level onStderrChunk (see orchestrate()).
+            } catch {
+              /* per-unit stream fanout is best-effort */
+            }
+            return r;
+          };
     const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
     // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
     // side-effect. It must never write result JSON nor append to the persisted evidence

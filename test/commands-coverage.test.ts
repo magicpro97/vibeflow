@@ -1891,6 +1891,70 @@ describe("commands.makeDispatcher (test seam)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // PR28 audit Task 5 (M1): when a custom spawner is injected, the per-unit onChunk /
+  // onStderrChunk fanout (file stream + logbus) MUST still fire. The old code used
+  // `spawner ?? makeAsyncSpawner({...})` which bypassed the callbacks entirely.
+  test("makeDispatcher: composed spawner path still fans stdout to per-unit log + logbus", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-composed-spawner-"));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      // Inject a custom spawner that returns a known stdout payload. The per-unit
+      // stream.log + logbus fanout must still observe that payload.
+      const customSpawner: AsyncSpawner = async (_cmd, _args, _input) => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      // Mock Bun.spawn to satisfy the prompt-write path even if the orchestrator tries
+      // to fall back. We don't expect it to fire here.
+      const originalSpawn = Bun.spawn;
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => ({
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+        stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+        exited: Promise.resolve(0),
+        kill: () => {},
+      })) as unknown as typeof Bun.spawn;
+      try {
+        // SPAWNER INJECTED → composed path (line 933 fix)
+        const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", customSpawner);
+        await dispatcher({
+          name: "u1",
+          status: "pending",
+          confidence: 0,
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        });
+        // The composed path appends the spawner's stdout to the per-unit stream.log
+        // and emits to the logbus. Assert the log file was written with the spawner's
+        // stdout (the SSE line is JSON-encoded, so the embedded text is escaped —
+        // the original `{"confidence": 1}` appears as `{\"confidence\": 1}` in the
+        // file). This is the regression test for the audit's M1 finding.
+        const streamLogPath = join(dir, CTX_DIR, "workunits", "u1", "stream.log");
+        const logContent = readFileSync(streamLogPath, "utf8");
+        expect(logContent).toContain('"unit":"u1"');
+        expect(logContent).toContain('confidence');
+      } finally {
+        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commands.orchestrate: orchestrator-level safety-net onStderrChunk (line 1150-1153)", () => {
