@@ -97,10 +97,28 @@ export function progressBar(current: number, total: number, width = 24): string 
 /* ─── Table ───────────────────────────────────────────────────────────────── */
 
 export function table(headers: string[], rows: string[][]): string {
-  const colW = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]?.length ?? 0)));
+  // `noUncheckedIndexedAccess` widens index reads to `T | undefined`. We
+  // collapse the read into a single `?? ""` fallback per cell (one branch
+  // per cell) and cast the column-width array to a fixed-arity tuple so
+  // the inner `colW[i]` read returns `number`, not `number | undefined`.
+  const cellText = (r: string[], i: number): string => r[i] ?? "";
+  const colW: number[] = headers.map((h, i) => {
+    let max = h.length;
+    for (const r of rows) {
+      const w = cellText(r, i).length;
+      if (w > max) max = w;
+    }
+    return max;
+  });
+  // `as readonly [number, ...number[]]` is a length-pinned view that
+  // makes `colWTuple[i]` return `number` (not `number | undefined`),
+  // avoiding per-cell `?? 0` branches in the render path.
+  const colWTuple = colW as unknown as readonly [number, ...number[]];
   const sep = colW.map((w) => "─".repeat(w)).join("─┬─");
-  const line = (row: string[]) =>
-    ` ${row.map((cell, i) => cell.padEnd(colW[i] ?? 0)).join(" │ ")} `;
+  const line = (row: string[]): string => {
+    const cells: string[] = row.map((cell, i) => cell.padEnd(colWTuple[i]));
+    return ` ${cells.join(" │ ")} `;
+  };
   const hdr = line(headers);
   const div = `─${sep}─`;
   const body = rows.map(line).join("\n");
