@@ -1,0 +1,802 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for src/gates.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../prettify.css" />
+    <link rel="stylesheet" href="../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">src</a> gates.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>0/139</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>0/94</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>0/15</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>0/113</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a>
+<a name='L204'></a><a href='#L204'>204</a>
+<a name='L205'></a><a href='#L205'>205</a>
+<a name='L206'></a><a href='#L206'>206</a>
+<a name='L207'></a><a href='#L207'>207</a>
+<a name='L208'></a><a href='#L208'>208</a>
+<a name='L209'></a><a href='#L209'>209</a>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a>
+<a name='L226'></a><a href='#L226'>226</a>
+<a name='L227'></a><a href='#L227'>227</a>
+<a name='L228'></a><a href='#L228'>228</a>
+<a name='L229'></a><a href='#L229'>229</a>
+<a name='L230'></a><a href='#L230'>230</a>
+<a name='L231'></a><a href='#L231'>231</a>
+<a name='L232'></a><a href='#L232'>232</a>
+<a name='L233'></a><a href='#L233'>233</a>
+<a name='L234'></a><a href='#L234'>234</a>
+<a name='L235'></a><a href='#L235'>235</a>
+<a name='L236'></a><a href='#L236'>236</a>
+<a name='L237'></a><a href='#L237'>237</a>
+<a name='L238'></a><a href='#L238'>238</a>
+<a name='L239'></a><a href='#L239'>239</a>
+<a name='L240'></a><a href='#L240'>240</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { type WorkflowState, strArray } from "./core.js";
+&nbsp;
+export interface GateReport {
+  ok: boolean;
+  failures: string[];
+  passed: string[];
+  /**
+   * Non-fatal advisories. The skill gate emits here; warnings NEVER affect `ok`.
+   * The regex classifier and engine self-reported `skills_used` are too weak to FAIL on.
+   */
+  warnings: string[];
+}
+&nbsp;
+/** Normalize a scope glob/prefix to a comparable path prefix. */
+function <span class="fstat-no" title="function not covered" >normPrefix(s</span>: string): string {
+<span class="cstat-no" title="statement not covered" >  return s.replace(/\*+$/, "").replace(/\/+$/, "");</span>
+}
+&nbsp;
+/** Two scope prefixes overlap when one is a path-prefix of the other. */
+function <span class="fstat-no" title="function not covered" >prefixesOverlap(a</span>: string, b: string): boolean {
+<span class="cstat-no" title="statement not covered" >  if (a === "" || b === "") <span class="cstat-no" title="statement not covered" >return true; // an empty scope means "whole repo"</span></span>
+<span class="cstat-no" title="statement not covered" >  return (</span>
+    a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`) || a.startsWith(b) || b.startsWith(a)
+  );
+}
+&nbsp;
+/** Detect overlapping scopes among proposed units (for the planner, before dispatch). */
+export function <span class="fstat-no" title="function not covered" >findScopeConflicts(</span>
+  units: Array&lt;{ name: string; scope?: string[] }&gt;,
+): Array&lt;[string, string]&gt; {
+  const conflicts: Array&lt;[string, string]&gt; = <span class="cstat-no" title="statement not covered" >[];</span>
+<span class="cstat-no" title="statement not covered" >  for (let i = <span class="cstat-no" title="statement not covered" >0; i</span> &lt; units.length; i++) {</span>
+<span class="cstat-no" title="statement not covered" >    for (let j = <span class="cstat-no" title="statement not covered" >i + 1; j</span> &lt; units.length; j++) {</span>
+      const a = <span class="cstat-no" title="statement not covered" >units[i];</span>
+      const b = <span class="cstat-no" title="statement not covered" >units[j];</span>
+      const <span class="cstat-no" title="statement not covered" >sa = (a?.scope ?? []).map(normPrefix);</span>
+      const <span class="cstat-no" title="statement not covered" >sb = (b?.scope ?? []).map(normPrefix);</span>
+<span class="cstat-no" title="statement not covered" >      if (!sa.length || !sb.length) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+<span class="cstat-no" title="statement not covered" >      if (sa.<span class="fstat-no" title="function not covered" >some((p</span>a) =&gt; <span class="cstat-no" title="statement not covered" >sb.<span class="fstat-no" title="function not covered" >some((p</span>b) =&gt; <span class="cstat-no" title="statement not covered" >prefixesOverlap(pa, pb))</span>)</span>) {</span>
+<span class="cstat-no" title="statement not covered" >        conflicts.push([a?.name ?? "?", b?.name ?? "?"]);</span>
+      }
+    }
+  }
+<span class="cstat-no" title="statement not covered" >  return conflicts;</span>
+}
+&nbsp;
+/**
+ * The three policy gates that compose with build/lint/test (WORK_UNIT_ORCHESTRATION.md):
+ *  - confidence: no work unit may sit below 1.0 (orchestrator is still guessing).
+ *  - evidence:   a unit marked `done` must carry recorded evidence.
+ *  - scope:      no two units may declare overlapping file scopes (parallel safety).
+ * Pure over a WorkflowState so it is unit-testable and reusable by hooks + `vf verify`.
+ */
+export function <span class="fstat-no" title="function not covered" >policyGates(s</span>tate: WorkflowState | null): GateReport {
+  const failures: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
+  const passed: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
+  const warnings: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
+<span class="cstat-no" title="statement not covered" >  if (!state) {</span>
+<span class="cstat-no" title="statement not covered" >    return {</span>
+      ok: true,
+      failures: [],
+      passed: ["no workflow state — nothing to gate"],
+      warnings: [],
+    };
+  }
+  const units = <span class="cstat-no" title="statement not covered" >state.work_units ?? [];</span>
+&nbsp;
+  // Confidence gate.
+  const lowConf = <span class="cstat-no" title="statement not covered" >units.<span class="fstat-no" title="function not covered" >filter((<span class="cstat-no" title="statement not covered" >u</span>) =&gt; (u.confidence ?? 0) &lt; 1)</span>;</span>
+<span class="cstat-no" title="statement not covered" >  if (lowConf.length) {</span>
+<span class="cstat-no" title="statement not covered" >    for (const u of lowConf) {</span>
+<span class="cstat-no" title="statement not covered" >      failures.push(</span>
+        `confidence&lt;1: "${u.name}" at ${u.confidence} — investigate/debate before close`,
+      );
+    }
+  } else {
+<span class="cstat-no" title="statement not covered" >    passed.push("confidence: all units at 1.0");</span>
+  }
+&nbsp;
+  // Evidence gate.
+  const noEvidence = <span class="cstat-no" title="statement not covered" >units.<span class="fstat-no" title="function not covered" >filter((u</span>) =&gt; <span class="cstat-no" title="statement not covered" >u.status === "done" &amp;&amp; !u.evidence?.length)</span>;</span>
+<span class="cstat-no" title="statement not covered" >  if (noEvidence.length) {</span>
+<span class="cstat-no" title="statement not covered" >    for (const u of noEvidence) {</span>
+<span class="cstat-no" title="statement not covered" >      failures.push(`no-evidence: "${u.name}" is done but has no recorded evidence`);</span>
+    }
+  } else {
+<span class="cstat-no" title="statement not covered" >    passed.push("evidence: every done unit has recorded evidence");</span>
+  }
+&nbsp;
+  // Scope-overlap gate.
+  let overlapFound = <span class="cstat-no" title="statement not covered" >false;</span>
+<span class="cstat-no" title="statement not covered" >  for (let i = <span class="cstat-no" title="statement not covered" >0; i</span> &lt; units.length; i++) {</span>
+<span class="cstat-no" title="statement not covered" >    for (let j = <span class="cstat-no" title="statement not covered" >i + 1; j</span> &lt; units.length; j++) {</span>
+      const a = <span class="cstat-no" title="statement not covered" >units[i];</span>
+      const b = <span class="cstat-no" title="statement not covered" >units[j];</span>
+      const <span class="cstat-no" title="statement not covered" >sa = (a?.scope ?? []).map(normPrefix);</span>
+      const <span class="cstat-no" title="statement not covered" >sb = (b?.scope ?? []).map(normPrefix);</span>
+<span class="cstat-no" title="statement not covered" >      if (!sa.length || !sb.length) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+      const clash = <span class="cstat-no" title="statement not covered" >sa.<span class="fstat-no" title="function not covered" >some((p</span>a) =&gt; <span class="cstat-no" title="statement not covered" >sb.<span class="fstat-no" title="function not covered" >some((p</span>b) =&gt; <span class="cstat-no" title="statement not covered" >prefixesOverlap(pa, pb))</span>)</span>;</span>
+<span class="cstat-no" title="statement not covered" >      if (clash) {</span>
+<span class="cstat-no" title="statement not covered" >        overlapFound = true;</span>
+<span class="cstat-no" title="statement not covered" >        failures.push(`scope-overlap: "${a?.name}" and "${b?.name}" declare overlapping scopes`);</span>
+      }
+    }
+  }
+<span class="cstat-no" title="statement not covered" >  if (!overlapFound) <span class="cstat-no" title="statement not covered" >passed.push("scope: no overlapping work-unit scopes");</span></span>
+&nbsp;
+  // Skill gate — WARN/report only, NEVER fail (see GateReport.warnings).
+  // Acts only on units that CLAIM completion AND were classified knowledge-heavy at dispatch.
+  // `=== true` is deliberate: legacy/undefined units (pre-feature) are skipped, not gated.
+  const khDone = <span class="cstat-no" title="statement not covered" >units.<span class="fstat-no" title="function not covered" >filter((u</span>) =&gt; <span class="cstat-no" title="statement not covered" >u.knowledge_heavy === true &amp;&amp; u.status === "done")</span>;</span>
+  let waived = <span class="cstat-no" title="statement not covered" >0;</span>
+<span class="cstat-no" title="statement not covered" >  for (const u of khDone) {</span>
+<span class="cstat-no" title="statement not covered" >    if (u.skill_waiver?.reason) {</span>
+<span class="cstat-no" title="statement not covered" >      waived++;</span>
+<span class="cstat-no" title="statement not covered" >      passed.push(`skills: "${u.name}" closed under waiver (${u.skill_waiver.reason})`);</span>
+<span class="cstat-no" title="statement not covered" >      continue;</span>
+    }
+<span class="cstat-no" title="statement not covered" >    if (u.knowledge_heavy_source === "regex") {</span>
+<span class="cstat-no" title="statement not covered" >      warnings.push(</span>
+        `skills(warn): "${u.name}" flagged knowledge-heavy by heuristic; verify manually`,
+      );
+<span class="cstat-no" title="statement not covered" >      continue;</span>
+    }
+    const <span class="cstat-no" title="statement not covered" >required = strArray(u.skills_required);</span>
+<span class="cstat-no" title="statement not covered" >    if (!required.length) {</span>
+<span class="cstat-no" title="statement not covered" >      warnings.push(</span>
+        `skills(warn): "${u.name}" knowledge-heavy but no verified skill matched — author one or record a waiver (vf units waiver "${u.name}" --reason ...)`,
+      );
+<span class="cstat-no" title="statement not covered" >      continue;</span>
+    }
+    const used = <span class="cstat-no" title="statement not covered" >new Set(strArray(u.skills_used));</span>
+<span class="cstat-no" title="statement not covered" >    if (required.<span class="fstat-no" title="function not covered" >some((r</span>) =&gt; <span class="cstat-no" title="statement not covered" >used.has(r))</span>) {</span>
+<span class="cstat-no" title="statement not covered" >      passed.push(`skills: "${u.name}" applied a required skill`);</span>
+    } else {
+      // FUTURE: a persisted reviewer gap-flag turns this into a real failure.
+      // Until that signal exists, never FAIL on skill grounds — self-report is untrusted.
+<span class="cstat-no" title="statement not covered" >      warnings.push(</span>
+        `skills(warn): "${u.name}" did not report using a required skill (required: ${required.join(", ")}; used: ${[...used].join(", ") || "none"}) — reviewer should confirm from the diff`,
+      );
+    }
+  }
+<span class="cstat-no" title="statement not covered" >  if (!khDone.length) <span class="cstat-no" title="statement not covered" >passed.push("skills: no knowledge-heavy completed units to check");</span></span>
+<span class="cstat-no" title="statement not covered" >  if (waived) <span class="cstat-no" title="statement not covered" >warnings.push(`skills: ${waived} unit(s) closed under skill waiver`);</span></span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  return { ok: failures.length === 0, failures, passed, warnings };</span>
+}
+&nbsp;
+// ─── E2E advisory gates (non-blocking warnings) ───────────────────────────
+&nbsp;
+const E2E_GLOB = <span class="cstat-no" title="statement not covered" >/^e2e\/.*\.(spec|e2e)\.ts$/;</span>
+const TEXT_SELECTOR_RE =
+<span class="cstat-no" title="statement not covered" >  /"(text=[^"]*[-￿][^"]*)"|hasText:\s*"([^"]*[-￿][^"]*)"|hasText:\s*\/([^/]*[-￿][^/]*)\//g;</span>
+&nbsp;
+function <span class="fstat-no" title="function not covered" >findE2eFiles(b</span>ase: string): string[] {
+  const out: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
+  const <span class="cstat-no" title="statement not covered" >e2eDir = join(base, "e2e");</span>
+<span class="cstat-no" title="statement not covered" >  if (!existsSync(e2eDir)) <span class="cstat-no" title="statement not covered" >return out;</span></span>
+<span class="cstat-no" title="statement not covered" >  try {</span>
+<span class="cstat-no" title="statement not covered" >    for (const entry of readdirSync(e2eDir)) {</span>
+      const rel = <span class="cstat-no" title="statement not covered" >`e2e/${entry}`;</span>
+<span class="cstat-no" title="statement not covered" >      if (E2E_GLOB.test(rel)) <span class="cstat-no" title="statement not covered" >out.push(rel);</span></span>
+    }
+  } catch {
+    /* no e2e directory */
+  }
+<span class="cstat-no" title="statement not covered" >  return out;</span>
+}
+&nbsp;
+/** Scan e2e specs for Unicode text selectors — fragile to normalization mismatches. */
+export function <span class="fstat-no" title="function not covered" >e2eUnicodeSelectorWarning(b</span>ase: string): string[] {
+  const warnings: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
+<span class="cstat-no" title="statement not covered" >  for (const rel of findE2eFiles(base)) {</span>
+    const <span class="cstat-no" title="statement not covered" >abs = join(base, rel);</span>
+    let src: string;
+<span class="cstat-no" title="statement not covered" >    try {</span>
+<span class="cstat-no" title="statement not covered" >      src = readFileSync(abs, "utf8");</span>
+    } catch {
+<span class="cstat-no" title="statement not covered" >      continue;</span>
+    }
+    const lines = <span class="cstat-no" title="statement not covered" >src.split("\n");</span>
+<span class="cstat-no" title="statement not covered" >    for (let i = <span class="cstat-no" title="statement not covered" >0; i</span> &lt; lines.length; i++) {</span>
+      const line = <span class="cstat-no" title="statement not covered" >lines[i] ?? "";</span>
+<span class="cstat-no" title="statement not covered" >      TEXT_SELECTOR_RE.lastIndex = 0;</span>
+<span class="cstat-no" title="statement not covered" >      for (let m = <span class="cstat-no" title="statement not covered" >TEXT_SELECTOR_RE.exec(line); m</span> !== null; m = TEXT_SELECTOR_RE.exec(line)) {</span>
+        const text = <span class="cstat-no" title="statement not covered" >m[1] || m[2] || m[3] || "";</span>
+<span class="cstat-no" title="statement not covered" >        warnings.push(`e2e:${rel}:${i + 1} Unicode text selector "${text}" — prefer data-testid`);</span>
+      }
+    }
+  }
+<span class="cstat-no" title="statement not covered" >  return warnings;</span>
+}
+&nbsp;
+/** Scan e2e specs for dynamic import() inside page.evaluate() — fails in bundled builds. */
+export function <span class="fstat-no" title="function not covered" >e2eEvaluateDynamicImportWarning(b</span>ase: string): string[] {
+  const warnings: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
+<span class="cstat-no" title="statement not covered" >  for (const rel of findE2eFiles(base)) {</span>
+    const <span class="cstat-no" title="statement not covered" >abs = join(base, rel);</span>
+    let src = <span class="cstat-no" title="statement not covered" >"";</span>
+<span class="cstat-no" title="statement not covered" >    try {</span>
+<span class="cstat-no" title="statement not covered" >      src = readFileSync(abs, "utf8");</span>
+    } catch {
+      /* file unreadable — treat as empty */
+    }
+    const lines = <span class="cstat-no" title="statement not covered" >src.split("\n");</span>
+    let inEvaluate = <span class="cstat-no" title="statement not covered" >false;</span>
+    let depth = <span class="cstat-no" title="statement not covered" >0;</span>
+<span class="cstat-no" title="statement not covered" >    for (let i = <span class="cstat-no" title="statement not covered" >0; i</span> &lt; lines.length; i++) {</span>
+      const line = <span class="cstat-no" title="statement not covered" >lines[i] ?? "";</span>
+<span class="cstat-no" title="statement not covered" >      if (!inEvaluate) {</span>
+        const idx = <span class="cstat-no" title="statement not covered" >line.indexOf(".evaluate(");</span>
+<span class="cstat-no" title="statement not covered" >        if (idx === -1) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+        const rest = <span class="cstat-no" title="statement not covered" >line.slice(idx + ".evaluate(".length).trim();</span>
+<span class="cstat-no" title="statement not covered" >        if (/\bimport\s*\(/.test(rest)) {</span>
+<span class="cstat-no" title="statement not covered" >          warnings.push(</span>
+            `e2e:${rel}:${i + 1} dynamic import() inside page.evaluate() — fails in bundled builds`,
+          );
+<span class="cstat-no" title="statement not covered" >          continue;</span>
+        }
+<span class="cstat-no" title="statement not covered" >        if (rest.startsWith("(") || rest.startsWith("{") || rest === "") {</span>
+          // Multi-line .evaluate() call: the inline import() check
+          // above already ran on this line. We don't re-check on
+          // subsequent lines (the original multi-line tracker never
+          // re-checked either; it only counted parens to find the
+          // end of the call). Mark this evaluate call as consumed.
+<span class="cstat-no" title="statement not covered" >          inEvaluate = true;</span>
+<span class="cstat-no" title="statement not covered" >          depth = 0;</span>
+<span class="cstat-no" title="statement not covered" >          for (const ch of rest) {</span>
+<span class="cstat-no" title="statement not covered" >            if (ch === "(" || ch === "{") <span class="cstat-no" title="statement not covered" >depth++;</span></span>
+            else <span class="cstat-no" title="statement not covered" >if (ch === ")" || ch === "}") <span class="cstat-no" title="statement not covered" >depth--;</span></span>
+          }
+        }
+      }
+    }
+  }
+<span class="cstat-no" title="statement not covered" >  return warnings;</span>
+}
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-06-15T02:50:00.745Z
+            </div>
+        <script src="../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../sorter.js"></script>
+        <script src="../block-navigation.js"></script>
+    </body>
+</html>
+    
