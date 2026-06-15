@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   AI_INIT_UNIT_NAMES,
   type AiInitUnit,
@@ -155,6 +158,44 @@ describe("planAiInitUnits", () => {
     expect(units[9]?.owner_agent).toBe("doc-writer");
   });
 
+  // Branch coverage for resolveOwner: every regex branch in src/ai-init-workflow.ts:243-248
+  // + the default fallback at line 249.
+  test("resolveOwner fuzzy-matches skill/capability keywords to skill-author", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [{ name: "sk", description: "add new skill", ownerHint: "skill", dod: "ok" }],
+    });
+    expect(units[7]?.owner_agent).toBe("skill-author");
+  });
+
+  test("resolveOwner fuzzy-matches preflight/probe/quota keywords to preflight-engine", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [
+        { name: "pf", description: "add preflight probe", ownerHint: "preflight", dod: "ok" },
+      ],
+    });
+    expect(units[7]?.owner_agent).toBe("preflight-engine");
+  });
+
+  test("resolveOwner fuzzy-matches dispatch/orchestrat/runner/workflow keywords to dispatch-runner", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [
+        { name: "dr", description: "add workflow runner", ownerHint: "dispatch", dod: "ok" },
+      ],
+    });
+    expect(units[7]?.owner_agent).toBe("dispatch-runner");
+  });
+
+  test("resolveOwner defaults to dispatch-runner when hint is empty/unknown", () => {
+    const units = planAiInitUnits(profile, {
+      workflowPhases: [
+        { name: "u1", description: "no hint", ownerHint: "totally-unknown-role", dod: "ok" },
+        { name: "u2", description: "no hint at all", dod: "ok" },
+      ],
+    });
+    expect(units[7]?.owner_agent).toBe("dispatch-runner");
+    expect(units[8]?.owner_agent).toBe("dispatch-runner");
+  });
+
   test("phase unit carries skills_injected and skills_required from the resolved role", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "x", description: "x", ownerHint: "cli-engine", dod: "x" }],
@@ -185,6 +226,37 @@ describe("aiInitReviewer", () => {
     return found;
   }
 
+  // Fixture for the T3 file-exists check: chdir to a tmpdir populated with
+  // the adapter-scope files so existsSync() sees them. Original cwd restored
+  // in afterEach.
+  let origCwd: string;
+  let tmpDir: string;
+  beforeEach(() => {
+    origCwd = process.cwd();
+    tmpDir = mkdtempSync(join(tmpdir(), "vf-ai-init-reviewer-"));
+    process.chdir(tmpDir);
+    mkdirSync(join(tmpDir, ".github"), { recursive: true });
+    mkdirSync(join(tmpDir, ".agents"), { recursive: true });
+    mkdirSync(join(tmpDir, ".vibeflow"), { recursive: true });
+    mkdirSync(join(tmpDir, ".vibeflow/ai-context"), { recursive: true });
+    mkdirSync(join(tmpDir, ".vibeflow/skills/foo"), { recursive: true });
+    writeFileSync(join(tmpDir, "CLAUDE.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, "AGENTS.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".github/copilot-instructions.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".agents/instructions.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".vibeflow/ai-context/stack-evidence.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".vibeflow/skills/foo/SKILL.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".vibeflow/SKILL_INDEX.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".vibeflow/PROJECT_CONTEXT.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".vibeflow/SETTINGS.json"), "{}\n");
+    writeFileSync(join(tmpDir, ".vibeflow/WORKFLOW_POLICY.md"), "# fixture\n");
+    writeFileSync(join(tmpDir, ".vibeflow/WORKFLOW_STATE.json"), "{}\n");
+  });
+  afterEach(() => {
+    process.chdir(origCwd);
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   test("passes when status=done, confidence=1, and evidence cites a scoped path", () => {
     const u = unit("ai-init-instruction-writer");
     const r = aiInitReviewer(u, {
@@ -211,6 +283,108 @@ describe("aiInitReviewer", () => {
     });
     expect(r.pass).toBe(false);
     expect(r.reason).toContain("CLAUDE.md");
+  });
+
+  test("passes when status=verifying with confidence=1 and valid evidence (per orchestrateUnits contract)", () => {
+    const u = unit("ai-init-analyzer");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: [".vibeflow/ai-context/stack-evidence.md"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails when status=blocked even with full evidence", () => {
+    const u = unit("ai-init-analyzer");
+    const r = aiInitReviewer(u, {
+      status: "blocked",
+      confidence: 1,
+      evidence: [".vibeflow/ai-context/stack-evidence.md"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("blocked");
+  });
+
+  // T3 file-exists tests: substring pre-filter is not enough; the cited path
+  // must actually exist on disk.
+  test("instruction-writer fails when CLAUDE.md fixture is deleted", () => {
+    rmSync(join(tmpDir, "CLAUDE.md"));
+    rmSync(join(tmpDir, "AGENTS.md"));
+    const u = unit("ai-init-instruction-writer");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["CLAUDE.md", "AGENTS.md"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/file does not exist on disk/);
+  });
+
+  test("tool-configurator fails when SETTINGS.json fixture is deleted (substring match but file missing)", () => {
+    rmSync(join(tmpDir, ".vibeflow/SETTINGS.json"));
+    const u = unit("ai-init-tool-configurator");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["updated .vibeflow/SETTINGS.json tools.codegraph"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/file does not exist on disk/);
+  });
+
+  test("analyzer passes when stack-evidence.md exists on disk (file-exists green path)", () => {
+    const u = unit("ai-init-analyzer");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: [".vibeflow/ai-context/stack-evidence.md"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("skill-curator dir-entry green path: file inside .vibeflow/skills/ exists", () => {
+    const u = unit("ai-init-skill-curator");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["wrote .vibeflow/skills/foo/SKILL.md"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("skill-curator dir-entry red path: file inside .vibeflow/skills/ does not exist", () => {
+    const u = unit("ai-init-skill-curator");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["wrote .vibeflow/skills/missing/SKILL.md"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/file does not exist on disk/);
+  });
+
+  test("analyzer file-exists red path: stack-evidence.md missing", () => {
+    rmSync(join(tmpDir, ".vibeflow/ai-context/stack-evidence.md"));
+    const u = unit("ai-init-analyzer");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["wrote .vibeflow/ai-context/stack-evidence.md"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/file does not exist on disk/);
+  });
+
+  test("instruction-writer wordStart=-1 branch: evidence starts with the scope path", () => {
+    // "CLAUDE.md content" → idx 0, wordStart -1, candidate "CLAUDE.md"
+    const u = unit("ai-init-instruction-writer");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["CLAUDE.md content updated"],
+    });
+    expect(r.pass).toBe(true);
   });
 
   test("fails skill-curator when evidence never cites .vibeflow/skills/ or SKILL_INDEX", () => {

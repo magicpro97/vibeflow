@@ -22,6 +22,7 @@
  * tests can pin the decomposition.
  */
 
+import { existsSync } from "node:fs";
 import { ROLE_NAMES, type RoleName } from "./agents/role-templates.js";
 import type { WorkUnit } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
@@ -391,8 +392,10 @@ export function aiInitReviewer(
   unit: WorkUnit,
   outcome: { status: WorkUnit["status"]; confidence: number; evidence: string[] },
 ): { pass: boolean; reason: string } {
-  if (outcome.status !== "done") {
-    return { pass: false, reason: `dispatcher reported status=${outcome.status}, not done` };
+  if (outcome.status === "blocked") {
+    // Production dispatchers return "verifying" (per src/orchestrator/run.ts:96-99);
+    // the reviewer is the gate, not the dispatcher. Only "blocked" is fatal.
+    return { pass: false, reason: "dispatcher reported status=blocked" };
   }
   if (outcome.confidence < 1) {
     return { pass: false, reason: `confidence=${outcome.confidence} < 1.0` };
@@ -401,6 +404,66 @@ export function aiInitReviewer(
     return { pass: false, reason: "no evidence recorded" };
   }
   const name = unit.name as string;
+  // Helper: for an evidence line, extract a path-like token that contains p.
+  // - "edited CLAUDE.md" → "CLAUDE.md" (idx 7, word start at 0, end at 16)
+  // - "updated .vibeflow/SETTINGS.json tools.codegraph" → ".vibeflow/SETTINGS.json"
+  // - "CLAUDE.md content" → "CLAUDE.md" (idx 0, wordStart -1)
+  const citeExists = (e: string, required: string[]): string | null => {
+    for (const p of required) {
+      const idx = e.indexOf(p);
+      if (idx === -1) continue;
+      const after = e.slice(idx);
+      const wordEndRel = after.search(/\s/);
+      const end = wordEndRel === -1 ? e.length : idx + wordEndRel;
+      const before = e.slice(0, idx);
+      const wordStart = before.search(/\S+$/);
+      const start = wordStart === -1 || e.slice(wordStart, idx).trim() === "" ? wordStart : idx;
+      const candidate = start === -1 ? e.slice(idx, end) : e.slice(start, end);
+      if (candidate.length > 0) return candidate;
+    }
+    return null;
+  };
+  const checkFileExists = (
+    e: string,
+    required: string[],
+  ): { ok: true } | { ok: false; reason: string } => {
+    // File-scope entries (don't end with "/"): cited path must exist on disk.
+    // Dir-scope entries (end with "/"): the path that starts at the dir prefix
+    // and continues to the next whitespace must exist on disk.
+    // Both are checked independently. The substring pre-filter upstream
+    // guarantees at least one match in REQUIRED; if it was a file path, it
+    // must exist; if a dir-scope path, the cited file inside the dir must exist.
+    const dirEntries = required.filter((p) => p.endsWith("/"));
+    const fileEntries = required.filter((p) => !p.endsWith("/"));
+    if (fileEntries.length > 0) {
+      const cited = citeExists(e, fileEntries);
+      if (cited && !existsSync(cited)) {
+        return {
+          ok: false,
+          reason: `file does not exist on disk: ${cited} (claimed by evidence "${e}")`,
+        };
+      }
+    }
+    if (dirEntries.length > 0) {
+      for (const p of dirEntries) {
+        const idx = e.indexOf(p);
+        if (idx === -1) continue;
+        const before = e.slice(0, idx);
+        const wordStart = before.search(/\S+$/);
+        const start = wordStart === -1 || e.slice(wordStart, idx).trim() === "" ? wordStart : idx;
+        const after = e.slice(idx);
+        const wordEndRel = after.search(/\s/);
+        const end = wordEndRel === -1 ? e.length : idx + wordEndRel;
+        const candidate = start === -1 ? e.slice(idx, end) : e.slice(start, end);
+        if (existsSync(candidate)) return { ok: true };
+        return {
+          ok: false,
+          reason: `file does not exist on disk: ${candidate} (claimed by evidence "${e}")`,
+        };
+      }
+    }
+    return { ok: true };
+  };
   if (name === "ai-init-instruction-writer") {
     const REQUIRED = ADAPTER_SCOPE["ai-init-instruction-writer"] ?? [];
     const hit = outcome.evidence.some((e) => REQUIRED.some((p) => e.includes(p)));
@@ -410,6 +473,11 @@ export function aiInitReviewer(
         reason: `no evidence cites one of: ${REQUIRED.join(", ")}`,
       };
     }
+    // T3: file-exists check on the cited path.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, REQUIRED);
+      if (!r.ok) return { pass: false, reason: r.reason };
+    }
   }
   if (name === "ai-init-skill-curator") {
     const hit = outcome.evidence.some(
@@ -417,6 +485,11 @@ export function aiInitReviewer(
     );
     if (!hit) {
       return { pass: false, reason: "no evidence cites a skill file or SKILL_INDEX update" };
+    }
+    // T3: file-exists check.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-skill-curator"] ?? []);
+      if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
   if (name === "ai-init-tool-configurator") {
@@ -426,6 +499,11 @@ export function aiInitReviewer(
         pass: false,
         reason: "no evidence cites SETTINGS.json — the tool-configurator must update it",
       };
+    }
+    // T3: file-exists check on .vibeflow/SETTINGS.json.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-tool-configurator"] ?? []);
+      if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
   if (name === "ai-init-workflow-policy-writer") {
@@ -438,6 +516,11 @@ export function aiInitReviewer(
         reason: "no evidence cites WORKFLOW_POLICY.md — the workflow-policy-writer must update it",
       };
     }
+    // T3: file-exists check.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-workflow-policy-writer"] ?? []);
+      if (!r.ok) return { pass: false, reason: r.reason };
+    }
   }
   if (name === "ai-init-workflow-state-writer") {
     const hit = outcome.evidence.some(
@@ -448,6 +531,18 @@ export function aiInitReviewer(
         pass: false,
         reason: "no evidence cites WORKFLOW_STATE.json — the workflow-state-writer must update it",
       };
+    }
+    // T3: file-exists check.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-workflow-state-writer"] ?? []);
+      if (!r.ok) return { pass: false, reason: r.reason };
+    }
+  }
+  if (name === "ai-init-analyzer") {
+    // T3: file-exists check on the single scope file.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-analyzer"] ?? []);
+      if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
   if (name.startsWith("ai-init-phase-")) {
