@@ -144,7 +144,9 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
         setTimeout(() => {
           try {
             proc.kill("SIGKILL");
-          } catch {}
+          } catch {
+            // Process already exited between SIGTERM and the grace window — nothing to do.
+          }
         }, graceMs);
     };
     if (timeoutMs != null) term = setTimeout(killProc, timeoutMs);

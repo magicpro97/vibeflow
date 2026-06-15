@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { spawnSync as cpSpawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -208,14 +209,14 @@ describe("adapters", () => {
 
 describe("cli help routing", () => {
   const runCli = (args: string[]): { code: number; stdout: string; stderr: string } => {
-    const r = Bun.spawnSync(["bun", "run", "src/cli.ts", ...args], {
+    const r = cpSpawnSync("bun", ["run", "src/cli.ts", ...args], {
       cwd: process.cwd(),
       env: { ...process.env, NO_COLOR: "1" },
     });
     return {
-      code: r.exitCode,
-      stdout: new TextDecoder().decode(r.stdout),
-      stderr: new TextDecoder().decode(r.stderr),
+      code: r.status ?? 1,
+      stdout: typeof r.stdout === "string" ? r.stdout : new TextDecoder().decode(r.stdout),
+      stderr: typeof r.stderr === "string" ? r.stderr : new TextDecoder().decode(r.stderr),
     };
   };
 

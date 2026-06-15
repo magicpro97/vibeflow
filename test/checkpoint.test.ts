@@ -350,13 +350,13 @@ describe("createCheckpoint: backup error branches (line 170-173)", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-cp-err-"));
     try {
       // Initialize a git repo with one commit so it counts as a real repo.
-      Bun.spawnSync(["git", "init", "-q"], { cwd: dir });
-      Bun.spawnSync(["git", "config", "user.email", "t@t"], { cwd: dir });
-      Bun.spawnSync(["git", "config", "user.name", "t"], { cwd: dir });
+      execFileSync("git", ["init", "-q"], { cwd: dir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+      execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
       writeFileSync(join(dir, "real.txt"), "data");
       writeFileSync(join(dir, ".gitignore"), ".env\n");
-      Bun.spawnSync(["git", "add", "."], { cwd: dir });
-      Bun.spawnSync(["git", "commit", "-q", "-m", "init"], { cwd: dir });
+      execFileSync("git", ["add", "."], { cwd: dir });
+      execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
       // Now create an ignored file that we want to back up but whose
       // copyFile will fail.
       writeFileSync(join(dir, ".env"), "secret");

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { link, panel, progressBar, table } from "../src/ui.js";
 
 describe("ui: table", () => {
@@ -69,13 +70,11 @@ describe("ui: panel", () => {
 
 describe("ui: link", () => {
   test("non-TTY fallback appends URL in parens", () => {
-    const r = Bun.spawnSync([
-      "bun",
+    const r = execFileSync("bun", [
       "-e",
       'import { link } from "./src/ui.js"; process.stdout.write(link("click here", "https://example.com"));',
     ]);
-    const out = new TextDecoder().decode(r.stdout);
-    expect(r.exitCode).toBe(0);
+    const out = new TextDecoder().decode(r);
     expect(out).toBe("click here (https://example.com)");
   });
 
