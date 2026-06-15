@@ -477,19 +477,13 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // the >10000 char threshold without depending on the real profile.
   const prompt = (opts.buildPrompt ?? ((p, b) => buildAiInitPrompt(p, b)))(profile, base);
 
-  // Windows 32K cmd-line limit workaround: write prompt to file
-  const usePromptFile = process.platform === "win32" || prompt.length > 10000;
-  let promptFile: string | undefined;
-  if (usePromptFile) {
-    try {
-      const ctxDir = join(base, CTX_DIR, "ai-context");
-      mkdirSync(ctxDir, { recursive: true });
-      promptFile = join(ctxDir, "ai-init-prompt.txt");
-      writeFileSync(promptFile, prompt);
-    } catch {
-      /* fallback to arg mode */
-    }
-  }
+  // The original promptFile write/read block (Task 7 follow-up) was
+  // DEAD CODE: claude and codex read prompts from stdin (no file
+  // needed); copilot has no --prompt-file flag and the file content
+  // was ultimately put back on cmd-line as argv anyway, defeating
+  // the original purpose of bypassing Windows's 32K argv limit.
+  // We just pass the prompt inline as argv and let Windows complain
+  // if it's > 32K (fail-fast below).
 
   // Dry run: return prompt without spawning
   if (dryRun) {
@@ -503,46 +497,31 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
     return { ok: false, engine, reason: invocation.unavailable, prompt };
   }
 
+  // Windows cmd-line length guard for copilot. If the prompt is too
+  // long to fit on cmd-line, fail-fast with a clear message instead
+  // of letting Windows produce a confusing "command line too long"
+  // error or copilot's silent interactive mode fallback. The 32K
+  // argv limit is a hard constraint: copilot has no --prompt-file
+  // flag, and claude/codex read from stdin (so they are not
+  // affected). Switch to claude or codex for huge prompts.
+  if (process.platform === "win32" && engine === "copilot" && prompt.length > 30_000) {
+    return {
+      ok: false,
+      engine,
+      reason: `copilot prompt is ${prompt.length} chars; Windows cmd-line limit is ~32K. Switch to claude or codex (they read from stdin).`,
+      prompt,
+    };
+  }
+
   // Handle the copilot promptMode: prompt goes as -p value
-  let materialized = materializePrompt(
+  const materialized = materializePrompt(
     { cmd: invocation.cmd, args: invocation.args, promptMode: invocation.promptMode },
     prompt,
   );
-
-  // Copilot workaround for huge prompts: read the promptFile and
-  // treat its content as the prompt. We CANNOT pipe via stdin
-  // (copilot's -p mode requires the prompt as argv value) and we
-  // CANNOT use a shell pipe (Windows `type file | copilot -p`
-  // results in copilot receiving `-p --allow-all-tools` with no
-  // prompt value, falling back to interactive mode — see "You're
-  // in <cwd>... What should I do next?"). The only working
-  // approach is to read the file in JS and pass the content as
-  // the `-p` argv element via direct Bun.spawn (no shell, so
-  // args[1] isn't reinterpreted by cmd.exe).
-  if (engine === "copilot" && promptFile) {
-    try {
-      const fileContent = readFileSync(promptFile, "utf8");
-      materialized = materializePrompt(
-        {
-          cmd: invocation.cmd,
-          args: invocation.args,
-          promptMode: invocation.promptMode,
-        },
-        fileContent,
-      );
-    } catch {
-      // If the file can't be read, fall through with the original
-      // materialized (which has the truncated prompt). This is
-      // best-effort — the dispatch may still fail, but we'll see
-      // a clear error from copilot instead of a silent interactive
-      // mode fallback.
-    }
-  }
   const args = materialized.args;
   const input = materialized.input;
 
-  // Spawn the engine via direct Bun.spawn (no shell, so the
-  // args[1] prompt value isn't reinterpreted by cmd.exe).
+  // Spawn the engine via direct Bun.spawn
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
 
   const result = await asyncSpawn(invocation.cmd, args, input);

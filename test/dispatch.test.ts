@@ -479,3 +479,141 @@ describe("defaultSpawner (test seam)", () => {
     expect(r.reason).toBe("claude CLI not found");
   });
 });
+
+describe("makeAsyncSpawner — Windows .cmd/.bat shim auto-shell (Task 7b)", () => {
+  // On Windows, copilot is often installed as a .cmd shim (npm puts
+  // shims in C:\Program Files\nodejs\copilot.cmd). CreateProcess can't
+  // execute .cmd shims directly — you need `cmd.exe /c <shim>`. Without
+  // shell mode, Bun.spawn fails with ENOENT "uv_spawn 'copilot'".
+  // The fix in makeAsyncSpawner auto-enables shell when the resolved
+  // command path ends in .cmd or .bat.
+  test("auto-enables shell on Windows when resolved command is a .cmd shim (regression: ENOENT uv_spawn 'copilot')", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    // Stub Bun.which to report a .cmd shim path for "copilot".
+    const origWhich = Bun.which;
+    const fakeWhich = (cmd: string) =>
+      cmd === "copilot" ? "C:\\Program Files\\nodejs\\copilot.cmd" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    const calls: { cmd: string; args: string[] }[] = [];
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (..._args: unknown[]) => {
+      const arr = _args[0] as string | readonly string[];
+      const list = Array.isArray(arr) ? arr : [arr];
+      calls.push({ cmd: (list[0] ?? "") as string, args: list.slice(1) as string[] });
+      return fakeChild;
+    };
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn =
+      fakeSpawn as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner();
+      await spawner("copilot", ["-p", "hello", "--allow-all-tools"], "");
+      // Expect cmd.exe /c copilot ... (NOT direct copilot ...).
+      expect(calls).toHaveLength(1);
+      const c = calls[0];
+      expect(c).toBeDefined();
+      if (!c) return;
+      expect(c.cmd).toBe("cmd.exe");
+      expect(c.args[0]).toBe("/c");
+      expect(c.args[1]).toBe("copilot");
+      expect(c.args.slice(2)).toEqual(["-p", "hello", "--allow-all-tools"]);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("does NOT auto-enable shell on Windows when resolved command is NOT a shim", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    // Bun.which returns null → resolveCommand returns undefined →
+    // the spawner falls back to the raw cmd name. "native-copilot" is
+    // not a shim and the spawner must NOT prepend cmd.exe /c.
+    const origWhich = Bun.which;
+    const fakeWhich = () => null as string | null;
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    const calls: { cmd: string; args: string[] }[] = [];
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (..._args: unknown[]) => {
+      const arr = _args[0] as string | readonly string[];
+      const list = Array.isArray(arr) ? arr : [arr];
+      calls.push({ cmd: (list[0] ?? "") as string, args: list.slice(1) as string[] });
+      return fakeChild;
+    };
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn =
+      fakeSpawn as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner();
+      await spawner("native-copilot", ["-p", "hello"], "");
+      // Direct spawn (no cmd.exe wrapping).
+      expect(calls).toHaveLength(1);
+      const c = calls[0];
+      expect(c).toBeDefined();
+      if (!c) return;
+      expect(c.cmd).toBe("native-copilot");
+      expect(c.args).toEqual(["-p", "hello"]);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("does NOT auto-enable shell on non-Windows even if the resolved path ends in .cmd", async () => {
+    // The auto-shell detection is platform-gated. On linux/darwin
+    // (no Windows), a path ending in .cmd must NOT trigger shell.
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const origWhich = Bun.which;
+    const fakeWhich = (cmd: string) =>
+      cmd === "fake" ? "/usr/local/bin/fake.cmd" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    const calls: { cmd: string; args: string[] }[] = [];
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (..._args: unknown[]) => {
+      const arr = _args[0] as string | readonly string[];
+      const list = Array.isArray(arr) ? arr : [arr];
+      calls.push({ cmd: (list[0] ?? "") as string, args: list.slice(1) as string[] });
+      return fakeChild;
+    };
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn =
+      fakeSpawn as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner();
+      await spawner("fake", [], "");
+      // No shell wrapping on linux.
+      expect(calls).toHaveLength(1);
+      const c = calls[0];
+      expect(c).toBeDefined();
+      if (!c) return;
+      expect(c.cmd).toBe("fake");
+      expect(c.args).toEqual([]);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+});

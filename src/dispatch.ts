@@ -106,7 +106,16 @@ interface AsyncResult {
 export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
   const { timeoutMs, graceMs = DEFAULT_GRACE_MS, idleTimeoutMs, shell } = opts;
   return async (cmd, args, input): Promise<AsyncResult> => {
-    const spawnArgs = shell
+    // On Windows, .cmd/.bat shims (e.g. copilot.cmd installed by npm)
+    // cannot be executed directly via CreateProcess. Detect and
+    // auto-enable shell mode so the existing spawner works without
+    // every caller having to pass shell: true. Resolve the command
+    // path first; if the resolved path is a .cmd/.bat shim, use
+    // shell. The explicit `shell` opt still wins if caller sets it.
+    const resolvedCmd = resolveCommand(cmd) ?? cmd;
+    const needsShell =
+      shell ?? (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(resolvedCmd));
+    const spawnArgs = needsShell
       ? process.platform === "win32"
         ? ["cmd.exe", "/c", cmd, ...args]
         : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
