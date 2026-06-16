@@ -22,7 +22,9 @@ function newBus(): { bus: Logbus; dir: string; cleanup: () => void } {
 }
 
 describe("out()", () => {
-  beforeEach(() => { resetActiveSpinner(); });
+  beforeEach(() => {
+    resetActiveSpinner();
+  });
   afterEach(() => setLogbusForTests(null));
 
   it("joins multiple parts with a single space (console.log semantics)", () => {

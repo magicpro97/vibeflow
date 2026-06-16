@@ -12,7 +12,9 @@ const TTY = (): boolean => Boolean(process.stderr?.isTTY);
 
 export let activeSpinner: Spinner | null = null;
 /** @internal reset for tests */
-export function resetActiveSpinner(): void { activeSpinner = null; }
+export function resetActiveSpinner(): void {
+  activeSpinner = null;
+}
 
 /* ─── Spinner ─────────────────────────────────────────────────────────────── */
 

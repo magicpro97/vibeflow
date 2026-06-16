@@ -14,9 +14,9 @@ import {
   watchFile,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { activeSpinner } from "./ui.js";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
+import { activeSpinner } from "./ui.js";
 
 // ---------------------------------------------------------------------------
 // Types
