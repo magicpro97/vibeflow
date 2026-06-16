@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { cwd } from "node:process";
-import { confirmInput, selectMany, selectOne } from "../src/terminal-prompts.js";
+import {
+  type TerminalDeps,
+  confirmInput,
+  selectMany,
+  selectOne,
+  textInput,
+} from "../src/terminal-prompts.js";
 
 const repoRoot = cwd();
 
@@ -214,5 +220,384 @@ describe("terminal prompts", () => {
     process.stdin.emit("keypress", "", { name: "space" });
     process.stdin.emit("keypress", "", { name: "return" });
     await expect(promise).resolves.toEqual(["B", "C"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-process unit tests driven by the test seam (deps injection). The
+// subprocess-based tests above cover the production code paths in a
+// real bun process; the tests below cover the same paths from the
+// current process, which is what bun:coverage instruments. Together
+// they bring src/terminal-prompts.ts to 100% line coverage.
+// ---------------------------------------------------------------------------
+
+describe("terminal prompts (in-process via test seam)", () => {
+  test("textInput delegates to deps.readLine", async () => {
+    const deps: TerminalDeps = { readLine: async (_q, d) => `mocked-${d}` };
+    await expect(textInput("Name", "fallback", deps)).resolves.toBe("mocked-fallback");
+  });
+
+  test("confirmInput resolves true for yes via deps.readLine", async () => {
+    const deps: TerminalDeps = { readLine: async () => "y" };
+    await expect(confirmInput("Ok?", false, deps)).resolves.toBe(true);
+  });
+
+  test("confirmInput resolves false for no via deps.readLine", async () => {
+    const deps: TerminalDeps = { readLine: async () => "n" };
+    await expect(confirmInput("Ok?", true, deps)).resolves.toBe(false);
+  });
+
+  test("confirmInput returns default for empty input via deps.readLine", async () => {
+    const deps: TerminalDeps = { readLine: async () => "" };
+    await expect(confirmInput("Ok?", true, deps)).resolves.toBe(true);
+  });
+
+  test("confirmInput throws on invalid answer via deps.readLine", async () => {
+    const deps: TerminalDeps = { readLine: async () => "maybe" };
+    await expect(confirmInput("Ok?", false, deps)).rejects.toThrow("invalid answer");
+  });
+
+  test("selectOne throws when no options and allowCustom is false", async () => {
+    await expect(selectOne("Pick", [], {})).rejects.toThrow(
+      "selectOne: no options and allowCustom is false",
+    );
+  });
+
+  test("selectOne uses deps.readLine in non-TTY mode", async () => {
+    const deps: TerminalDeps = {
+      isTTY: () => false,
+      readLine: async (_q, d) => `from-readline-${d}`,
+    };
+    await expect(selectOne("Pick", ["A", "B"], {}, deps)).resolves.toBe("from-readline-A");
+  });
+
+  test("selectOne uses deps.readLine when setRawMode is null", async () => {
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: null,
+      readLine: async (_q, d) => `no-rawmode-${d}`,
+    };
+    await expect(selectOne("Pick", ["A"], {}, deps)).resolves.toBe("no-rawmode-A");
+  });
+
+  test("selectOne resolves with custom value via deps.readLine", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+      readLine: async (_q, d) => `custom-${d}`,
+    };
+    const promise = selectOne("Pick", [], { allowCustom: true }, deps);
+    // Allow the keypress handler to register + render to happen.
+    await new Promise((r) => setTimeout(r, 5));
+    // Trigger return on the custom option (cursor=0 since options=[]).
+    for (const h of handlers) h("", { name: "return" });
+    await expect(promise).resolves.toBe("custom-");
+  });
+
+  test("selectOne rejects on Ctrl+C via deps.onKeypress", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+    };
+    const promise = selectOne("Pick", ["A", "B"], { timeoutMs: 1_000 }, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    for (const h of handlers) h("", { ctrl: true, name: "c" });
+    await expect(promise).rejects.toThrow("cancelled");
+  });
+
+  test("selectOne rejects on Escape via deps.onKeypress", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+    };
+    const promise = selectOne("Pick", ["A", "B"], { timeoutMs: 1_000 }, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    for (const h of handlers) h("", { name: "escape" });
+    await expect(promise).rejects.toThrow("cancelled");
+  });
+
+  test("selectOne rejects on timeout", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+    };
+    const promise = selectOne("Pick", ["A", "B"], { timeoutMs: 5 }, deps);
+    await expect(promise).rejects.toThrow("selection timed out");
+  });
+
+  test("selectMany uses deps.readLine in non-TTY mode and parses comma list", async () => {
+    const deps: TerminalDeps = {
+      isTTY: () => false,
+      readLine: async () => "A, C",
+    };
+    await expect(selectMany("Pick", ["A", "B", "C"], {}, deps)).resolves.toEqual(["A", "C"]);
+  });
+
+  test("selectMany uses deps.readLine when setRawMode is null", async () => {
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: null,
+      readLine: async () => "A,B",
+    };
+    await expect(selectMany("Pick", ["A", "B"], {}, deps)).resolves.toEqual(["A", "B"]);
+  });
+
+  test("selectMany returns fallback when readLine returns empty", async () => {
+    const deps: TerminalDeps = {
+      isTTY: () => false,
+      readLine: async () => "",
+    };
+    await expect(selectMany("Pick", ["A", "B"], {}, deps)).resolves.toEqual(["A"]);
+  });
+
+  test("selectMany falls back to defaultValues when readLine empty", async () => {
+    const deps: TerminalDeps = {
+      isTTY: () => false,
+      readLine: async () => "",
+    };
+    await expect(selectMany("Pick", ["A", "B"], { defaultValues: ["B"] }, deps)).resolves.toEqual([
+      "B",
+    ]);
+  });
+
+  test("selectMany rejects on Ctrl+C via deps.onKeypress", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+    };
+    const promise = selectMany("Pick", ["A", "B"], { timeoutMs: 1_000 }, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    for (const h of handlers) h("", { ctrl: true, name: "c" });
+    await expect(promise).rejects.toThrow("cancelled");
+  });
+
+  test("selectMany rejects on Escape via deps.onKeypress", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+    };
+    const promise = selectMany("Pick", ["A", "B"], { timeoutMs: 1_000 }, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    for (const h of handlers) h("", { name: "escape" });
+    await expect(promise).rejects.toThrow("cancelled");
+  });
+
+  test("selectMany rejects on timeout", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+    };
+    const promise = selectMany("Pick", ["A", "B"], { timeoutMs: 5 }, deps);
+    await expect(promise).rejects.toThrow("selection timed out");
+  });
+
+  test("selectMany resolves with custom items + custom readLine", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+      readLine: async () => "X,Y",
+    };
+    const promise = selectMany("Pick", ["A"], { allowCustom: true, timeoutMs: 1_000 }, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    // Cursor starts at 0 = "A". Press down to go to "Custom..." (index 1).
+    for (const h of handlers) h("", { name: "down" });
+    // Space to select Custom.
+    for (const h of handlers) h("", { name: "space" });
+    // Enter to confirm.
+    for (const h of handlers) h("", { name: "return" });
+    await expect(promise).resolves.toEqual(["X", "Y"]);
+  });
+
+  test("selectOne rejects when custom readLine throws", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+      readLine: async () => {
+        throw new Error("custom-input-failed");
+      },
+    };
+    const promise = selectOne("Pick", [], { allowCustom: true, timeoutMs: 1_000 }, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    for (const h of handlers) h("", { name: "return" });
+    await expect(promise).rejects.toThrow("custom-input-failed");
+  });
+
+  test("selectMany rejects when custom readLine throws", async () => {
+    const handlers: Array<(str: string, key: { name?: string; ctrl?: boolean }) => void> = [];
+    const deps: TerminalDeps = {
+      isTTY: () => true,
+      setRawMode: () => {},
+      emitKeypressEvents: () => {},
+      onKeypress: (handler) => {
+        handlers.push(handler);
+        return () => {};
+      },
+      readLine: async () => {
+        throw new Error("custom-list-failed");
+      },
+    };
+    const promise = selectMany("Pick", ["A"], { allowCustom: true, timeoutMs: 1_000 }, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    for (const h of handlers) h("", { name: "down" });
+    for (const h of handlers) h("", { name: "space" });
+    for (const h of handlers) h("", { name: "return" });
+    await expect(promise).rejects.toThrow("custom-list-failed");
+  });
+
+  // ------------------------------------------------------------------
+  // The tests below cover the production `node:readline` code paths
+  // (readLineImpl and confirmInput's "re-prompt on invalid" branch) by
+  // injecting a fake readline interface via deps.createInterface. This
+  // is the test seam that lets bun:coverage instrument lines that
+  // would otherwise only be reachable through a real stdin/TTY.
+  // ------------------------------------------------------------------
+
+  function makeFakeReadline(): {
+    rl: {
+      question: (q: string, cb: (a: string) => void) => void;
+      on: (ev: string, cb: (...a: unknown[]) => void) => unknown;
+      once: (ev: string, cb: (...a: unknown[]) => void) => unknown;
+      close: () => void;
+    };
+    emit: (event: "SIGINT" | "close" | "data", payload?: unknown) => void;
+    answer: (a: string) => void;
+  } {
+    const handlers: { SIGINT: Array<() => void>; close: Array<() => void> } = {
+      SIGINT: [],
+      close: [],
+    };
+    let pendingQuestion: { q: string; cb: (a: string) => void } | null = null;
+    const rl = {
+      question: (q: string, cb: (a: string) => void) => {
+        pendingQuestion = { q, cb };
+      },
+      on: (ev: string, cb: () => void) => {
+        if (ev in handlers) (handlers as Record<string, Array<() => void>>)[ev]?.push(cb);
+        return rl;
+      },
+      once: (ev: string, cb: () => void) => {
+        if (ev in handlers) (handlers as Record<string, Array<() => void>>)[ev]?.push(cb);
+        return rl;
+      },
+      close: () => {
+        for (const cb of handlers.close) cb();
+      },
+    };
+    return {
+      rl,
+      emit: (event: "SIGINT" | "close" | "data", payload?: unknown) => {
+        if (event === "data" && payload && pendingQuestion) {
+          const p = pendingQuestion;
+          pendingQuestion = null;
+          p.cb(String(payload));
+          return;
+        }
+        if (event === "SIGINT") {
+          for (const cb of handlers.SIGINT) cb();
+        } else if (event === "close") {
+          for (const cb of handlers.close) cb();
+        }
+      },
+      answer: (a: string) => {
+        if (!pendingQuestion) throw new Error("no pending question");
+        const p = pendingQuestion;
+        pendingQuestion = null;
+        p.cb(a);
+      },
+    };
+  }
+
+  test("textInput production readlineImpl SIGINT path (covers lines 116-120)", async () => {
+    const fake = makeFakeReadline();
+    const deps: TerminalDeps = { createInterface: () => fake.rl as never };
+    const promise = textInput("Name", "", deps);
+    await new Promise((r) => setTimeout(r, 5));
+    fake.emit("SIGINT");
+    await expect(promise).rejects.toThrow("cancelled");
+  });
+
+  test("textInput production readlineImpl close (EOF) path", async () => {
+    const fake = makeFakeReadline();
+    const deps: TerminalDeps = { createInterface: () => fake.rl as never };
+    const promise = textInput("Name", "default", deps);
+    await new Promise((r) => setTimeout(r, 5));
+    fake.emit("close");
+    await expect(promise).resolves.toBe("default");
+  });
+
+  test("confirmInput production readlineImpl SIGINT path (covers lines 165-169)", async () => {
+    const fake = makeFakeReadline();
+    const deps: TerminalDeps = { createInterface: () => fake.rl as never };
+    const promise = confirmInput("Ok?", false, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    fake.emit("SIGINT");
+    await expect(promise).rejects.toThrow("cancelled");
+  });
+
+  test("confirmInput invalid answer triggers re-prompt (covers lines 176-179)", async () => {
+    const fake = makeFakeReadline();
+    const deps: TerminalDeps = { createInterface: () => fake.rl as never };
+    const promise = confirmInput("Ok?", false, deps);
+    await new Promise((r) => setTimeout(r, 5));
+    // Answer "maybe" (invalid) — should re-prompt, not resolve.
+    fake.answer("maybe");
+    await new Promise((r) => setTimeout(r, 5));
+    // Now answer "y" — should resolve.
+    fake.answer("y");
+    await expect(promise).resolves.toBe(true);
   });
 });

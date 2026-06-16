@@ -33,8 +33,82 @@ function normalizeIndex(index: number, length: number): number {
   return (index + length) % length;
 }
 
-async function readLine(question: string, defaultValue = ""): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+/**
+ * Test seam: dependencies injected into terminal prompts so unit tests can
+ * drive the prompt flow in-process. Production callers leave this undefined
+ * and the production implementations (`node:readline` + raw keypress events)
+ * are used. The seam is intentionally narrow: only the surfaces that need
+ * to be mocked (readLine, isTTY, setRawMode) are exposed. Everything else
+ * (render, clearLines, normalizeIndex) is left as pure helpers and is
+ * covered by exercising the public functions end-to-end.
+ */
+export interface TerminalDeps {
+  /**
+   * Replacement for the readLine fallback used when stdin is not a TTY
+   * (or, with `forceReadLine: true`, in TTY mode too). Defaults to
+   * `readLineImpl`, the production `node:readline`-backed implementation.
+   */
+  readLine?: (question: string, defaultValue: string, deps?: TerminalDeps) => Promise<string>;
+  /**
+   * Override the isTTY check. Defaults to `() => Boolean(process.stdin.isTTY)`.
+   * Set to `() => true` to force the raw-mode path in unit tests, or
+   * `() => false` to force the readLine fallback.
+   */
+  isTTY?: () => boolean;
+  /**
+   * Override stdin.setRawMode. Defaults to `process.stdin.setRawMode`.
+   * Useful when the test environment has no setRawMode.
+   */
+  setRawMode?: ((value: boolean) => void) | null;
+  /**
+   * Override the SIGINT listener registration. Defaults to registering
+   * `process.stdin` directly via `rl.on("SIGINT", ...)`. Tests that
+   * have already mocked readLine generally don't need to override this.
+   */
+  onSigint?: (handler: () => void) => () => void;
+  /**
+   * Override the EOF ("close" event) listener registration. Defaults
+   * to `rl.once("close", ...)`. Tests that have already mocked
+   * readLine generally don't need to override this.
+   */
+  onClose?: (handler: () => void) => () => void;
+  /**
+   * Override the keypress listener registration. Defaults to
+   * `process.stdin.on("keypress", handler)`. Tests can pass
+   * `() => () => {}` to suppress keypress wiring entirely when
+   * driving via timers.
+   */
+  onKeypress?: (
+    handler: (str: string, key: { name?: string; ctrl?: boolean }) => void,
+  ) => () => void;
+  /**
+   * Override emitKeypressEvents. Defaults to `emitKeypressEvents(process.stdin)`.
+   * Set to `() => {}` in tests that don't need keypress events.
+   */
+  emitKeypressEvents?: (input: NodeJS.ReadableStream) => void;
+  /**
+   * Override the default keypress handler registration for readLine.
+   * `false` (default) means readLine uses the production
+   * `rl.question` + `rl.on("SIGINT")` + `rl.once("close")` paths.
+   * `true` means readLine is fully mocked by `deps.readLine`.
+   */
+  forceReadLine?: boolean;
+  /**
+   * Override the `node:readline` createInterface factory. Defaults to
+   * the production `createInterface` from `node:readline`. Used by
+   * readLineImpl to allow unit tests to inject a fake readline
+   * interface that supports the question/SIGINT/close events.
+   */
+  createInterface?: typeof createInterface;
+}
+
+async function readLineImpl(
+  question: string,
+  defaultValue = "",
+  deps: TerminalDeps = {},
+): Promise<string> {
+  const createInterfaceFn = deps.createInterface ?? createInterface;
+  const rl = createInterfaceFn({ input: process.stdin, output: process.stdout });
   const suffix = defaultValue ? ` ${c.dim(`[${defaultValue}]`)}` : "";
   return await new Promise<string>((resolve, reject) => {
     let settled = false;
@@ -62,12 +136,29 @@ async function readLine(question: string, defaultValue = ""): Promise<string> {
   });
 }
 
-export async function textInput(question: string, defaultValue = ""): Promise<string> {
-  return await readLine(question, defaultValue);
+export async function textInput(
+  question: string,
+  defaultValue = "",
+  deps: TerminalDeps = {},
+): Promise<string> {
+  return await (deps.readLine ?? readLineImpl)(question, defaultValue, deps);
 }
 
-export async function confirmInput(question: string, defaultValue = false): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+export async function confirmInput(
+  question: string,
+  defaultValue = false,
+  deps: TerminalDeps = {},
+): Promise<boolean> {
+  if (deps.readLine) {
+    const raw = await deps.readLine(question, defaultValue ? "Y" : "N");
+    const answer = raw.trim();
+    if (!answer) return defaultValue;
+    if (/^(y|yes|true|1)$/i.test(answer)) return true;
+    if (/^(n|no|false|0)$/i.test(answer)) return false;
+    throw new Error("invalid answer");
+  }
+  const createInterfaceFn = deps.createInterface ?? createInterface;
+  const rl = createInterfaceFn({ input: process.stdin, output: process.stdout });
   return await new Promise<boolean>((resolve, reject) => {
     let settled = false;
     let suffix = "";
@@ -128,19 +219,27 @@ export async function selectOne(
   question: string,
   options: string[],
   opts: SelectOptions = {},
+  deps: TerminalDeps = {},
 ): Promise<string> {
   if (options.length === 0 && !opts.allowCustom) {
     throw new Error("selectOne: no options and allowCustom is false");
   }
   const items = selectItems(options, opts);
   const fallback = opts.defaultValue ?? options[0] ?? "";
-  if (!process.stdin.isTTY || !process.stdin.setRawMode) {
-    return await readLine(`${question} (${items.map((i) => i.label).join("/")})`, fallback);
+  const isTty = deps.isTTY ? deps.isTTY() : Boolean(process.stdin.isTTY);
+  if (!isTty || deps.setRawMode === null || (!deps.setRawMode && !process.stdin.setRawMode)) {
+    return await (deps.readLine ?? readLineImpl)(
+      `${question} (${items.map((i) => i.label).join("/")})`,
+      fallback,
+      deps,
+    );
   }
 
-  emitKeypressEvents(process.stdin);
+  (deps.emitKeypressEvents ?? emitKeypressEvents)(process.stdin);
   const wasRaw = process.stdin.isRaw ?? false;
-  process.stdin.setRawMode(true);
+  const setRaw =
+    deps.setRawMode ?? (process.stdin.setRawMode?.bind(process.stdin) as (v: boolean) => void);
+  setRaw(true);
   process.stdin.resume();
   write(HIDE_CURSOR);
 
@@ -163,7 +262,11 @@ export async function selectOne(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      process.stdin.off("keypress", onKeypress);
+      if (deps.onKeypress) {
+        offKeypress();
+      } else {
+        process.stdin.off("keypress", onKeypress);
+      }
       restoreRawMode(wasRaw, true);
     };
     const timer = setTimeout(() => {
@@ -174,7 +277,9 @@ export async function selectOne(
     const finish = async (value: string, custom: boolean) => {
       cleanup();
       try {
-        const answer = custom ? await readLine(`${question} custom`, fallback) : value;
+        const answer = custom
+          ? await (deps.readLine ?? readLineImpl)(`${question} custom`, fallback, deps)
+          : value;
         resolve(answer || fallback);
       } catch (err) {
         reject(err);
@@ -200,7 +305,12 @@ export async function selectOne(
       }
       render();
     };
-    process.stdin.on("keypress", onKeypress);
+    let offKeypress: () => void = () => {};
+    if (deps.onKeypress) {
+      offKeypress = deps.onKeypress(onKeypress);
+    } else {
+      process.stdin.on("keypress", onKeypress);
+    }
     render();
   });
 }
@@ -209,13 +319,16 @@ export async function selectMany(
   question: string,
   options: string[],
   opts: SelectOptions = {},
+  deps: TerminalDeps = {},
 ): Promise<string[]> {
   const items = selectItems(options, opts);
   const fallback = opts.defaultValues ?? (options[0] ? [options[0]] : []);
-  if (!process.stdin.isTTY || !process.stdin.setRawMode) {
-    const raw = await readLine(
+  const isTty = deps.isTTY ? deps.isTTY() : Boolean(process.stdin.isTTY);
+  if (!isTty || deps.setRawMode === null || (!deps.setRawMode && !process.stdin.setRawMode)) {
+    const raw = await (deps.readLine ?? readLineImpl)(
       `${question} (${items.map((i) => i.label).join(",")})`,
       fallback.join(","),
+      deps,
     );
     const values = raw
       .split(/[,\n]/)
@@ -224,9 +337,11 @@ export async function selectMany(
     return values.length ? values : fallback;
   }
 
-  emitKeypressEvents(process.stdin);
+  (deps.emitKeypressEvents ?? emitKeypressEvents)(process.stdin);
   const wasRaw = process.stdin.isRaw ?? false;
-  process.stdin.setRawMode(true);
+  const setRaw =
+    deps.setRawMode ?? (process.stdin.setRawMode?.bind(process.stdin) as (v: boolean) => void);
+  setRaw(true);
   process.stdin.resume();
   write(HIDE_CURSOR);
 
@@ -253,7 +368,11 @@ export async function selectMany(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      process.stdin.off("keypress", onKeypress);
+      if (deps.onKeypress) {
+        offKeypress();
+      } else {
+        process.stdin.off("keypress", onKeypress);
+      }
       restoreRawMode(wasRaw, true);
     };
     const timer = setTimeout(() => {
@@ -268,7 +387,7 @@ export async function selectMany(
       cleanup();
       try {
         const custom = picked.some((item) => item.custom)
-          ? await readLine(`${question} custom`, fallback.join(","))
+          ? await (deps.readLine ?? readLineImpl)(`${question} custom`, fallback.join(","), deps)
           : "";
         const values = [
           ...picked.filter((item) => !item.custom).map((item) => item.label),
@@ -304,7 +423,12 @@ export async function selectMany(
       }
       render();
     };
-    process.stdin.on("keypress", onKeypress);
+    let offKeypress: () => void = () => {};
+    if (deps.onKeypress) {
+      offKeypress = deps.onKeypress(onKeypress);
+    } else {
+      process.stdin.on("keypress", onKeypress);
+    }
     render();
   });
 }
