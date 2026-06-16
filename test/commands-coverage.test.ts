@@ -2751,3 +2751,114 @@ describe("commands.repoLanguages (test seam)", () => {
     expect(r).toEqual([]);
   });
 });
+
+// ── commands.init workflow-artifacts block (line 1341-1371) ──────────────
+// The workflow-artifacts block in `init()` is reached only when
+// `answers.workflowPhases` is set, which normally requires an
+// interactive `init-ask` TTY session. To exercise it from a unit test,
+// the seam `inject.answers` (added to `init()` in this PR) lets us
+// inject a pre-built IntakeAnswers object directly.
+describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
+  test("init with injected workflowPhases writes the workflow artifact files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-wfa-"));
+    const origCwd = process.cwd();
+    const origErr = console.error;
+    const origLog = console.log;
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    console.error = (...args: unknown[]) => stderrLines.push(args.join(" "));
+    console.log = (...args: unknown[]) => stdoutLines.push(args.join(" "));
+    const origIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-16",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-16",
+            },
+          ],
+          aiSpawner: async () => ({
+            status: 0,
+            stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+            stderr: "",
+            timedOut: false,
+          }),
+          answers: {
+            engines: ["claude"],
+            workflowPhases: [{ name: "Plan", description: "Outline the work" }],
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // The workflow-artifacts block should have written the orchestrator
+      // agent + 1 phase agent + 1 phase skill file = 3 files.
+      expect(existsSync(join(dir, ".claude/agents/workflow-orchestrator.md"))).toBe(true);
+      expect(existsSync(join(dir, ".claude/agents/phase-plan.md"))).toBe(true);
+      expect(existsSync(join(dir, ".claude/skills/plan/SKILL.md"))).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+      console.error = origErr;
+      console.log = origLog;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init dry-run with injected workflowPhases prints the enrichment prompt (line 1513-1530)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-wfa-dry-"));
+    const origCwd = process.cwd();
+    const origLog = console.log;
+    const origErr = console.error;
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    console.log = (...args: unknown[]) => stdoutLines.push(args.join(" "));
+    console.error = (...args: unknown[]) => stderrLines.push(args.join(" "));
+    const origIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude", "dry-run": true },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-16",
+            },
+          ],
+          answers: {
+            engines: ["claude"],
+            workflowPhases: [{ name: "Plan", description: "Outline the work" }],
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // The dry-run + workflowPhases branch prints the enrichment
+      // prompt header before slicing it to 1500 chars.
+      const all = [...stdoutLines, ...stderrLines].join("\n");
+      expect(all).toContain("dry-run: workflow enrichment prompt");
+    } finally {
+      process.chdir(origCwd);
+      console.log = origLog;
+      console.error = origErr;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

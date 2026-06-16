@@ -1276,6 +1276,12 @@ export async function init(
     // --ai path uses the agent-team shape. Ignored on the legacy
     // `runAiInit` path. Production callers leave this undefined.
     dispatcher?: UnitDispatcher;
+    // Test seam: when provided, bypass the interactive `init-ask`
+    // questionnaire and use this object as the intake answers.
+    // Lets unit tests drive the workflow-artifacts block
+    // (commands.ts L1341-1371) without depending on TTY + stdin.
+    // Production callers leave this undefined.
+    answers?: IntakeAnswers;
   } = {},
 ): Promise<number> {
   const initEngine: Engine =
@@ -1293,10 +1299,18 @@ export async function init(
   // budgets can opt out per-run.
   const useAgentTeam = ai && !flags["no-agent-team"];
   const ask = ai && !dry && !flags["no-ask"] && process.stdin.isTTY;
-  const questionnaire = ask ? await collectInitAskQuestionnaireData() : null;
-  const answers = ask
-    ? questionnaire && initAskQuestionnaireToIntakeAnswers(questionnaire, engines)
-    : { engines };
+  // Test seam: when `inject.answers` is provided, use it directly and
+  // skip the interactive questionnaire. Lets unit tests drive the
+  // workflow-artifacts block (L1341-1371) without a TTY. Production
+  // callers leave `inject.answers` undefined; the `ask` gate remains
+  // the only path for end users.
+  const injectedAnswers: IntakeAnswers | undefined = inject.answers;
+  const questionnaire = ask && !injectedAnswers ? await collectInitAskQuestionnaireData() : null;
+  const answers = injectedAnswers
+    ? injectedAnswers
+    : ask
+      ? questionnaire && initAskQuestionnaireToIntakeAnswers(questionnaire, engines)
+      : { engines };
   if (!answers) return process.stdin.isTTY ? 130 : 2;
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
