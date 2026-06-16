@@ -1339,7 +1339,7 @@ export async function init(
       let lineBuf = "";
       let errLineBuf = "";
       const aiSpinner = new Spinner();
-      aiSpinner.start(` `);
+      aiSpinner.start(" ");
       // B1/T5: --ai defaults to the agent-team workflow shape. The workflow
       // runs 7 adapter units in parallel (analyzer, instruction-writer,
       // skill-curator, tool-configurator, workflow-policy-writer,

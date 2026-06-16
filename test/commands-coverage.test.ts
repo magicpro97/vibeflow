@@ -2145,7 +2145,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, "no-ask": true, engine: "claude" },
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
           preflight: () => [
             {
@@ -2176,7 +2176,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       expect(stderr).toContain("Generating VibeFlow context");
       expect(stderr).toContain("VibeFlow context generated");
       expect(stderr).toContain("[claude]");
-      expect(stderr).toContain("agent-team workflow complete");
+      expect(stderr).toContain("AI enrichment complete");
     } finally {
       process.chdir(origCwd);
       console.error = origErr;

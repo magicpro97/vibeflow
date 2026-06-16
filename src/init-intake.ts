@@ -6,7 +6,20 @@ import { scanRepo } from "./scanner.js";
 import { confirmInput, selectMany, selectOne, textInput } from "./terminal-prompts.js";
 import { panel } from "./ui.js";
 
-function commaList(value: string, fallback: string[] = []): string[] {
+/** Test seam: dependencies injected into the questionnaire flow so unit tests
+ * can drive the prompts without touching real stdin. Each field is optional
+ * and falls back to the production implementation. */
+export interface InitAskDeps {
+  textInput?: typeof textInput;
+  confirmInput?: typeof confirmInput;
+  selectOne?: typeof selectOne;
+  selectMany?: typeof selectMany;
+  panel?: typeof panel;
+  out?: typeof out;
+  isTTY?: boolean;
+}
+
+export function commaList(value: string, fallback: string[] = []): string[] {
   const values = value
     .split(",")
     .map((s) => s.trim())
@@ -14,7 +27,7 @@ function commaList(value: string, fallback: string[] = []): string[] {
   return values.length ? values : fallback;
 }
 
-function suggestedFileTypes(languages: string[]): string[] {
+export function suggestedFileTypes(languages: string[]): string[] {
   const types = new Set<string>();
   for (const lang of languages) {
     if (lang === "TypeScript") {
@@ -182,19 +195,31 @@ export function initAskQuestionnaireToIntakeAnswers(
   };
 }
 
-export async function collectInitAskQuestionnaireData(): Promise<InitAskQuestionnaireData | null> {
-  if (!process.stdin.isTTY) {
-    out("vf", c.red("\nInit questionnaire requires an interactive terminal."), { level: "error" });
-    out("vf", c.dim("Re-run in a TTY, or pass --no-ask."), { level: "error" });
+export async function collectInitAskQuestionnaireData(
+  deps: InitAskDeps = {},
+): Promise<InitAskQuestionnaireData | null> {
+  const tty = deps.isTTY ?? process.stdin.isTTY;
+  const write = deps.out ?? out;
+  const paint = deps.panel ?? panel;
+  const askText = deps.textInput ?? textInput;
+  const askConfirm = deps.confirmInput ?? confirmInput;
+  const askSelectOne = deps.selectOne ?? selectOne;
+  const askSelectMany = deps.selectMany ?? selectMany;
+
+  if (!tty) {
+    write("vf", c.red("\nInit questionnaire requires an interactive terminal."), {
+      level: "error",
+    });
+    write("vf", c.dim("Re-run in a TTY, or pass --no-ask."), { level: "error" });
     return null;
   }
 
   try {
-    out("vf", panel("Init ask", c.bold("workflow questionnaire")));
-    const description = await textInput(INIT_ASK_PROMPTS.projectOverview);
-    const useAiSourceAnalysis = await confirmInput(INIT_ASK_PROMPTS.useAiSourceAnalysis, false);
+    write("vf", paint("Init ask", c.bold("workflow questionnaire")));
+    const description = await askText(INIT_ASK_PROMPTS.projectOverview);
+    const useAiSourceAnalysis = await askConfirm(INIT_ASK_PROMPTS.useAiSourceAnalysis, false);
     const normalizedPhases = normalizePhases(
-      await selectMany(
+      await askSelectMany(
         INIT_ASK_PROMPTS.phases,
         INIT_ASK_PHASE_OPTIONS.map((phase) => INIT_ASK_PHASE_LABELS[phase]),
         { defaultValues: [INIT_ASK_PHASE_LABELS["requirements-analysis"]] },
@@ -202,25 +227,25 @@ export async function collectInitAskQuestionnaireData(): Promise<InitAskQuestion
     );
     const phaseDetails: InitAskQuestionnaireInput["phaseDetails"] = {};
     for (const phase of normalizedPhases) {
-      out("vf", c.dim(`\n${INIT_ASK_PHASE_LABELS[phase]}`));
+      write("vf", c.dim(`\n${INIT_ASK_PHASE_LABELS[phase]}`));
       phaseDetails[phase] = {
-        input: await textInput("  Input"),
-        output: await textInput("  Output"),
-        template: await textInput("  Template"),
-        notes: await textInput("  Notes"),
+        input: await askText("  Input"),
+        output: await askText("  Output"),
+        template: await askText("  Template"),
+        notes: await askText("  Notes"),
       };
     }
-    const documentLocation = await selectOne(
+    const documentLocation = await askSelectOne(
       INIT_ASK_PROMPTS.documentLocation,
       ["Box", "Sharepoint", "Git"],
       { allowCustom: true, defaultValue: "Git" },
     );
-    const taskPlatform = await selectOne(
+    const taskPlatform = await askSelectOne(
       INIT_ASK_PROMPTS.taskPlatform,
       ["Jira", "Backlog", "Github"],
       { allowCustom: true, defaultValue: "Github" },
     );
-    const documentFileTypes = await selectMany(
+    const documentFileTypes = await askSelectMany(
       INIT_ASK_PROMPTS.documentFileTypes,
       ["md", "pdf", "excel"],
       {
