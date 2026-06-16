@@ -5,6 +5,7 @@ import { out } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { confirmInput, selectMany, selectOne, textInput } from "./terminal-prompts.js";
 import { panel } from "./ui.js";
+import type { WorkflowPhase } from "./workflow-artifacts.js";
 
 /** Test seam: dependencies injected into the questionnaire flow so unit tests
  * can drive the prompts without touching real stdin. Each field is optional
@@ -184,6 +185,28 @@ export function initAskQuestionnaireToIntakeAnswers(
     : "";
   const sample = [sourceAnalysis, phaseDetails].filter(Boolean).join("\n\n");
 
+  const workflowPhases: WorkflowPhase[] = data.answers.phases.map((phase): WorkflowPhase => {
+    const detail = data.answers.phaseDetails.find((d) => d.phase === phase);
+    return {
+      name: phase,
+      description: INIT_ASK_PHASE_LABELS[phase] || phase,
+      inputs: detail?.input
+        ? detail.input
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined,
+      outputs: detail?.output
+        ? detail.output
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined,
+      template: detail?.template?.trim() || undefined,
+      dod: detail?.notes?.trim() || undefined,
+    };
+  });
+
   return {
     goal,
     engines,
@@ -192,6 +215,7 @@ export function initAskQuestionnaireToIntakeAnswers(
     fileTypes: data.answers.documentFileTypes,
     expectedResult: phases ? `Workflow phases completed: ${phases}` : undefined,
     sample: sample || undefined,
+    workflowPhases: workflowPhases.length ? workflowPhases : undefined,
   };
 }
 

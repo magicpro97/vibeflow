@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import {
   type ProjectContext,
   agentFiles,
@@ -105,6 +105,12 @@ import { validateSkillRoots } from "./skills/validator.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
 import { Spinner, panel, table } from "./ui.js";
+import {
+  type WorkflowPhase,
+  buildEnrichmentPrompt,
+  copySkillCreator,
+  generateWorkflowArtifacts,
+} from "./workflow-artifacts.js";
 import {
   type CollisionPolicy,
   type DeletePlan,
@@ -233,6 +239,7 @@ export interface IntakeAnswers {
   expectedResult?: string;
   sample?: string;
   repoPath?: string;
+  workflowPhases?: WorkflowPhase[];
 }
 
 function chosenEngines(engines?: string[]): Engine[] {
@@ -1330,6 +1337,31 @@ export async function init(
     }
   }
 
+  // Phase 1.5: Deterministic workflow artifacts (from questionnaire phases)
+  const hasPhases = Boolean(answers.workflowPhases?.length);
+  if (!dry && hasPhases) {
+    const targetEngines = (answers.engines ?? ["copilot"]) as AgentEngine[];
+    const projectName = basename(cwd());
+    const phases = answers.workflowPhases as WorkflowPhase[];
+    const artifactFiles = generateWorkflowArtifacts({
+      phases,
+      engines: targetEngines,
+      projectName,
+      base: cwd(),
+    });
+    if (artifactFiles.length) {
+      out("vf");
+      out("vf", panel("Workflow", c.bold("artifacts")));
+      for (const rel of artifactFiles) {
+        out("vf", c.green(`+ ${rel}`));
+      }
+      out("vf", c.bold(`\nGenerated ${artifactFiles.length} workflow artifact(s).`));
+    }
+    for (const rel of copySkillCreator(cwd(), targetEngines)) {
+      out("vf", c.green(`+ ${rel}/SKILL.md`));
+    }
+  }
+
   // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded)
   if (ai && !dry && !result.refused) {
     out("vf");
@@ -1344,14 +1376,16 @@ export async function init(
       // runs 7 adapter units in parallel (analyzer, instruction-writer,
       // skill-curator, tool-configurator, workflow-policy-writer,
       // workflow-state-writer, context-updater) and a reviewer per unit.
-      // The CLI synthesises a minimal intake from the flags because the
-      // web intake wizard is the primary intake source; the CLI path
-      // runs the workflow against a "init" goal with no user-supplied
-      // workflow phases (Tier 2 stays empty; Tier 1 still runs).
+      // When the user supplied workflow phases, they are passed so the
+      // planner generates Tier 2 units alongside the Tier 1 baseline.
       const { runAiInitWorkflow } = await import("./ai-init.js");
       const workflowResult = await runAiInitWorkflow({
         base: cwd(),
-        intake: { goal: "init", engines: aiEngine ? [aiEngine] : [] },
+        intake: {
+          goal: "init",
+          engines: aiEngine ? [aiEngine] : [],
+          ...(hasPhases ? { workflowPhases: answers.workflowPhases as WorkflowPhase[] } : {}),
+        },
         forceEngine: aiEngine,
         preflight: inject.aiPreflight,
         dispatcher: inject.dispatcher,
@@ -1404,13 +1438,18 @@ export async function init(
       const aiSpinner = new Spinner();
       aiSpinner.start(`➥ Running AI enrichment ${prefix}`);
       // Legacy --no-agent-team path: original runAiInit shape.
+      // When workflow phases exist, use the enrichment prompt instead.
       const { runAiInit } = await import("./ai-init.js");
+      const phases = answers.workflowPhases as WorkflowPhase[];
       const aiResult = await runAiInit({
         base: cwd(),
+        buildPrompt: hasPhases
+          ? (profile, _base) => {
+              const targetEngines = (answers.engines ?? ["copilot"]) as AgentEngine[];
+              return buildEnrichmentPrompt(phases, targetEngines, profile, _base);
+            }
+          : undefined,
         dryRun: dry,
-        // Test seam: use the injected aiSpawner if provided, so unit
-        // tests can stub the engine call. Production callers fall
-        // through to the default makeAsyncSpawner factory.
         spawner:
           inject.aiSpawner ??
           makeAsyncSpawner({
@@ -1471,8 +1510,26 @@ export async function init(
         );
       }
     }
+  } else if (ai && dry && hasPhases) {
+    // Dry-run --ai with phases: show the enrichment prompt
+    out(
+      "vf",
+      c.dim("\ndry-run: workflow enrichment prompt would be sent to the best available engine"),
+    );
+    const { scanRepo } = await import("./scanner.js");
+    const base = cwd();
+    const profile = scanRepo(base);
+    const phases = answers.workflowPhases as WorkflowPhase[];
+    const targetEngines = (answers.engines ?? ["copilot"]) as AgentEngine[];
+    const prompt = buildEnrichmentPrompt(
+      phases,
+      targetEngines,
+      { name: profile.name, summary: profile.summary, languages: profile.languages },
+      base,
+    );
+    out("vf", c.dim(`\n${prompt.slice(0, 1500)}…`));
   } else if (ai && dry) {
-    // Dry-run --ai: show the prompt that would be sent
+    // Dry-run --ai without phases: show the original AI init prompt
     out("vf", c.dim("\ndry-run: prompt would be sent to the best available engine"));
     const { buildAiInitPrompt } = await import("./ai-init.js");
     const { scanRepo } = await import("./scanner.js");
