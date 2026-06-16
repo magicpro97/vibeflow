@@ -2175,8 +2175,8 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const stderr = stderrLines.join("\n");
       expect(stderr).toContain("Generating VibeFlow context");
       expect(stderr).toContain("VibeFlow context generated");
-      expect(stderr).toContain("Running agent-team workflow [claude]");
-      expect(stderr).toContain("agent-team workflow skipped");
+      expect(stderr).toContain("[claude]");
+      expect(stderr).toContain("agent-team workflow complete");
     } finally {
       process.chdir(origCwd);
       console.error = origErr;

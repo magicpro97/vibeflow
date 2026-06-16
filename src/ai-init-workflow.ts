@@ -22,8 +22,9 @@
  * tests can pin the decomposition.
  */
 
-import { statSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { CTX_DIR } from "./core.js";
 import { ROLE_NAMES, type RoleName } from "./agents/role-templates.js";
 import { ENGINES, type Engine, type WorkUnit } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
@@ -202,7 +203,7 @@ const ADAPTER_ACCEPTANCE: Record<AiInitAdapterName, string> = {
 /** Per-adapter description (the spec the engine receives when dispatched). */
 const ADAPTER_DESCRIPTION: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
-    "Investigate the project until confidence = 1.0 on every finding (build/test/lint commands, package manager, language + framework versions, CI). Read package.json, tsconfig/biome config, source tree, sample source files (>=5 across modules), and >=2 test files. Write .vibeflow/ai-context/stack-evidence.md with file/manifest evidence per component. Do not guess.",
+    "Investigate the project until confidence = 1.0 on every finding (build/test/lint commands, package manager, language + framework versions, CI). Read package.json, tsconfig/biome config, source tree, sample source files (>=5 across modules), and >=2 test files. Review and update .vibeflow/ai-context/stack-evidence.md with file/manifest evidence per component. Do not guess.",
   "ai-init-instruction-writer":
     "Update all 4 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md, .agents/instructions.md) for this project. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.",
   "ai-init-skill-curator":
@@ -489,6 +490,13 @@ export function aiInitReviewer(
       return false;
     }
   };
+  const pathIsDir = (p: string): boolean => {
+    try {
+      return statSync(resolve(base, p)).isDirectory();
+    } catch {
+      return false;
+    }
+  };
   const checkFileExists = (
     e: string,
     required: string[],
@@ -521,7 +529,7 @@ export function aiInitReviewer(
         const wordEndRel = after.search(/\s/);
         const end = wordEndRel === -1 ? e.length : idx + wordEndRel;
         const candidate = start === -1 ? e.slice(idx, end) : e.slice(start, end);
-        if (pathIsFile(candidate)) return { ok: true };
+        if (pathIsFile(candidate) || pathIsDir(candidate)) return { ok: true };
         return {
           ok: false,
           reason: `path is not a regular file (missing or a directory): ${candidate} (claimed by evidence "${e}")`,

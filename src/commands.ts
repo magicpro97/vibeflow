@@ -1304,7 +1304,7 @@ export async function init(
       useAi: false,
     });
   } catch (err) {
-    initSpinner.fail("❌ VibeFlow context generation failed");
+    initSpinner.fail("VibeFlow context generation failed");
     throw err;
   }
   if (result.refused) initSpinner.fail("Engine preflight refused init");
@@ -1339,7 +1339,7 @@ export async function init(
       let lineBuf = "";
       let errLineBuf = "";
       const aiSpinner = new Spinner();
-      aiSpinner.start(`➥ Running agent-team workflow ${prefix}`);
+      aiSpinner.start(` `);
       // B1/T5: --ai defaults to the agent-team workflow shape. The workflow
       // runs 7 adapter units in parallel (analyzer, instruction-writer,
       // skill-curator, tool-configurator, workflow-policy-writer,
@@ -1381,7 +1381,7 @@ export async function init(
           }),
       });
       if (workflowResult.ok) {
-        aiSpinner.succeed(`✅ agent-team workflow complete (${workflowResult.engine ?? "?"})`);
+        aiSpinner.succeed(`agent-team workflow complete (${workflowResult.engine ?? "?"})`);
         out(
           "vf",
           c.green(
@@ -1389,7 +1389,7 @@ export async function init(
           ),
         );
       } else {
-        aiSpinner.fail("❌ agent-team workflow skipped");
+        aiSpinner.fail("agent-team workflow skipped");
         out("vf", c.yellow(`! agent-team workflow skipped: ${workflowResult.reason}`));
         out(
           "vf",
@@ -1450,7 +1450,7 @@ export async function init(
       });
       if (aiResult.ok) {
         const used = aiResult.engine ?? "?";
-        aiSpinner.succeed(`✅ AI enrichment complete (${used})`);
+        aiSpinner.succeed(`AI enrichment complete (${used})`);
         if (aiResult.fallback) {
           out(
             "vf",

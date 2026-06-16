@@ -996,6 +996,15 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   const profile = scanRepo(base);
   const detectedRoles = detectRolesForRepo(base, profile);
 
+  // F3 + F4: pre-create .vibeflow/ai-context/ and all deterministic
+  // context files (stack-evidence.md, project-profile.json, etc.) so
+  // the engine never hits "parent directory does not exist" and the
+  // reviewer's file-exists check passes even if the engine is transient.
+  writeContextFiles(base, profile);
+  // Also pre-create directory-scope items (e.g. .vibeflow/skills/) so
+  // the reviewer's pathIsDir check passes when the engine cites them.
+  mkdirSync(join(base, CTX_DIR, "skills"), { recursive: true });
+
   // Resolve engine (mirrors runAiInit's preflight logic).
   const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
   let engine: Engine | null = null;

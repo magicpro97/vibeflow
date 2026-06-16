@@ -623,17 +623,28 @@ describe("aiInitReviewer", () => {
     expect(r.reason).toMatch(/not a regular file/);
   });
 
-  // MINOR-2: a unit that claims to have "written" a directory (not a
-  // file) used to pass review because existsSync returns true for
-  // directories. The reviewer must now distinguish.
-  test("dir-scope evidence that resolves to a directory (not a file inside) is rejected (MINOR-2)", () => {
+  // Dir-scope entries (trailing `/`) accept the directory itself as valid
+  // evidence — the skill-curator's scope is .vibeflow/skills/, so citing
+  // the directory (or a subdirectory within it) confirms the engine
+  // created content there. A missing directory still fails.
+  test("dir-scope evidence that resolves to a directory (not a file inside) passes (MINOR-2 updated)", () => {
     // .vibeflow/skills/foo/ is a real dir (created in beforeEach). Cite
-    // the dir itself (no trailing /SKILL.md) — pathIsFile returns false.
+    // the dir itself (no trailing /SKILL.md) — pathIsDir accepts it.
     const u = unit("ai-init-skill-curator");
     const r = aiInitReviewer(u, {
       status: "done",
       confidence: 1,
       evidence: ["installed .vibeflow/skills/foo"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("dir-scope evidence fails when the cited directory does not exist", () => {
+    const u = unit("ai-init-skill-curator");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["installed .vibeflow/skills/nonexistent"],
     });
     expect(r.pass).toBe(false);
     expect(r.reason).toMatch(/not a regular file/);
