@@ -350,6 +350,30 @@ describe("commands.mutateUnits branches", () => {
     expect(u?.spec).toBe("spec");
     expect(u?.evidence).toEqual(["e1"]);
   });
+
+  // HOTFIX pr48-regression: ai-init-workflow-state-writer can persist a
+  // state with no `work_units` key (the spec explicitly tells the engine
+  // to omit it when the user supplied no phases). mutateUnits used to
+  // crash with "Cannot read properties of undefined (reading 'findIndex')"
+  // and brick the smoke. Defensive: treat missing/non-array as empty.
+  test("mutateUnits tolerates state missing work_units (pr48-regression)", () => {
+    const dir = freshDir("vf-mut-nounits-");
+    const ctx = join(dir, CTX_DIR);
+    mkdirSync(ctx, { recursive: true });
+    // Write a state file with the key absent (mimics what the
+    // workflow-state-writer spec instructs on a no-phases intake).
+    const corrupt: Record<string, unknown> = {
+      task_id: "TASK-1",
+      goal: "g",
+      success_criteria: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    writeFileSync(join(ctx, "WORKFLOW_STATE.json"), JSON.stringify(corrupt));
+    // Should not throw, should return a state with the unit added.
+    const s = mutateUnits(dir, "add", { name: "smoke-unit" });
+    expect(s).not.toBeNull();
+    expect(s?.work_units).toEqual([expect.objectContaining({ name: "smoke-unit" })]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -575,6 +599,34 @@ describe("commands.units subcommand branches", () => {
     process.chdir(empty);
     try {
       expect(units("status", [])).toBe(1);
+    } finally {
+      process.chdir(o);
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  // HOTFIX pr48-regression: a state file missing `work_units` (written
+  // by ai-init-workflow-state-writer on no-phases intake) used to crash
+  // `units` with the same TypeError as mutateUnits. Now it should be
+  // treated like an empty array.
+  test("units: tolerates state missing work_units (pr48-regression)", () => {
+    const empty = freshDir("vf-units-nounits-corrupt-");
+    const o = process.cwd();
+    const ctx = join(empty, CTX_DIR);
+    mkdirSync(ctx, { recursive: true });
+    writeFileSync(
+      join(ctx, "WORKFLOW_STATE.json"),
+      JSON.stringify({
+        task_id: "T1",
+        goal: "g",
+        success_criteria: [],
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      }),
+    );
+    process.chdir(empty);
+    try {
+      // status path: should print "No work units" rather than throw.
+      expect(units("status", [])).toBe(0);
     } finally {
       process.chdir(o);
       rmSync(empty, { recursive: true, force: true });

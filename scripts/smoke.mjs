@@ -44,8 +44,13 @@ try {
   // Initialize vf context + a single work unit, then run a REAL bridge dispatch.
   // VIBEFLOW_AI is set for every call so init/orchestrate take the offline bridge path
   // (the named engine CLI is never spawned, so no real claude/codex is required).
+  // --no-ai skips the AI enrichment phase of `vf init` (the 7-unit agent-team workflow
+  // introduced in PR#43 + made default in PR#48). On CI the real `claude` binary either
+  // doesn't exist (preflight no-binary → ok:false, init returns in ms) or does exist but
+  // hangs on the API call (times out at 600s). The deterministic context files are
+  // sufficient for the ship-gate — orchestrate is the path the smoke actually exercises.
   const bridge = { VIBEFLOW_AI: `node ${FAKE}` };
-  run(["init", "--engine", "claude"], bridge);
+  run(["init", "--engine", "claude", "--no-ai"], bridge);
   run(["units", "add", "smoke-unit"], bridge);
   const out = run(["orchestrate", "--engine", "claude"], bridge);
 

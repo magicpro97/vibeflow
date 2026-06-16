@@ -536,6 +536,11 @@ export function mutateUnits(
 ): WorkflowState | null {
   const state = readState(base);
   if (!state) return null;
+  // HOTFIX pr48-regression: defend against state files missing `work_units`
+  // (e.g. an ai-init-workflow-state-writer that ran on a no-phases intake
+  // and persisted a state without the key). All downstream access assumes
+  // an array; treat missing/undefined as empty.
+  if (!Array.isArray(state.work_units)) state.work_units = [];
   const name = unit.name?.trim();
   if (!name) return null;
   const idx = state.work_units.findIndex((u) => u.name === name);
@@ -1689,6 +1694,9 @@ export function units(
     });
     return 1;
   }
+  // HOTFIX pr48-regression: tolerate state files that lack `work_units`
+  // (the ai-init-workflow-state-writer omits the key on no-phases intake).
+  if (!Array.isArray(state.work_units)) state.work_units = [];
   switch (sub) {
     case undefined:
     case "status": {
