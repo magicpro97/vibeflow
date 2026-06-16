@@ -14,6 +14,7 @@ import {
   watchFile,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { activeSpinner } from "./ui.js";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 
@@ -469,17 +470,26 @@ function emitToConsole(
   text: string,
 ): void {
   const toStderr = level === "warn" || level === "error" || level === "debug";
+  const prefix = toStderr || channel !== "vf" ? `[${channel}] ` : "";
+  const line = `${prefix}${text}`;
+
+  // When a spinner is active, stop its animation and clear its line so
+  // subsequent logs write cleanly without spinner interference.
+  if (activeSpinner) {
+    try {
+      activeSpinner.deactivate();
+      process.stderr.write(`${line}\n`);
+    } catch {
+      /* never throw out of out() */
+    }
+    return;
+  }
+
   // Use console.log / console.error (not raw process.stdout/stderr.write) so that
   // test harnesses that mock console.log/console.error can capture the no-bus fallback.
   // In production, console.log writes to process.stdout and console.error to process.stderr,
   // so the user-visible stream routing is identical.
   const log = toStderr ? console.error : console.log;
-  // Strip the redundant "[vf]" prefix on stdout for user-facing output;
-  // keep it on stderr so diagnostic lines stay identifiable.
-  // For non-"vf" channels (engine-stdout/stderr/user/hook), keep the prefix on both streams
-  // because the channel name is meaningful diagnostic context.
-  const prefix = toStderr || channel !== "vf" ? `[${channel}] ` : "";
-  const line = `${prefix}${text}`;
   try {
     log(line);
   } catch {

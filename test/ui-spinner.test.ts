@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Spinner } from "../src/ui.js";
+import { Spinner, resetActiveSpinner } from "../src/ui.js";
 
 let writtenToConsole: { channel: string; args: unknown[] }[] = [];
 let originalError: typeof console.error;
@@ -36,6 +36,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetActiveSpinner();
   console.error = originalError;
   console.log = originalLog;
   (process.stderr as { write: typeof process.stderr.write }).write = originalStderrWrite;

@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type LogEvent, Logbus, getLogbus, out, setLogbusForTests } from "../src/logbus.js";
+import { resetActiveSpinner } from "../src/ui.js";
 
 function newBus(): { bus: Logbus; dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "vf-out-"));
@@ -21,6 +22,7 @@ function newBus(): { bus: Logbus; dir: string; cleanup: () => void } {
 }
 
 describe("out()", () => {
+  beforeEach(() => { resetActiveSpinner(); });
   afterEach(() => setLogbusForTests(null));
 
   it("joins multiple parts with a single space (console.log semantics)", () => {
