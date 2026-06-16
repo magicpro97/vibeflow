@@ -180,3 +180,36 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
 ## [2026-06-12] test | ai-init copilot argv prompt expectation
 - Updated `test/ai-init.test.ts` to match current `runAiInit()` behavior: Copilot receives the full AI-init prompt through argv (`-p`) instead of a prompt-file reference.
 - Verification: `bun test test/ai-init.test.ts` passed 15/15; `bunx biome check test/ai-init.test.ts` passed; `bun run typecheck` passed.
+
+## [2026-06-16] update | agent-team init CLI loading and inline logs
+- Updated `src/commands.ts` so default `vf init --ai` agent-team workflow shows a spinner while `runAiInitWorkflow()` runs.
+- Added default agent-team spawner streaming callbacks matching the legacy `--no-agent-team` flow: stdout lines go to `engine-stdout`, stderr lines go to `engine-stderr`, both prefixed with the selected engine label.
+- Updated `test/commands-coverage.test.ts` loading expectations and added coverage for agent-team factory stdout/stderr streaming.
+- Verification: `bun test test/commands-coverage.test.ts` passed 163/163; `bun run typecheck` passed; `bun run lint` passed.
+
+## [2026-06-16] verify | fail
+1 gate(s) failed
+- confidence<1: "u1" at 0.5 — investigate/debate before close
+
+## [2026-06-16] update | init default engine and no-ask flag
+- Updated `src/commands.ts` so `vf init` defaults omitted `--engine` to `copilot` and safely falls back to `copilot` for invalid engine values.
+- Replaced the `--ask` init control with default `--ai` questionnaire behavior plus `--no-ask` opt-out; `--dry-run` remains non-interactive.
+- Updated `src/init-intake.ts` user-facing non-TTY guidance to say `pass --no-ask`.
+- Updated `test/cli.test.ts` and `test/commands-coverage.test.ts` for the new defaults, including coverage that init requests `copilot` when `--engine` is omitted.
+- Verification: `bun run typecheck` passed; `bun run lint` passed; `bun test test/cli.test.ts test/commands-coverage.test.ts` passed 258/258.
+
+## [2026-06-16] verify | fail
+1 gate(s) failed
+- confidence<1: "u1" at 0.5 — investigate/debate before close
+
+## [2026-06-16] update | agent-team instruction-writer scope follows selected engine
+- Agent-team planner now scopes `ai-init-instruction-writer` to only the files needed for the engine being initialized (not all 4 instruction files unconditionally).
+- Added `ENGINE_INSTRUCTION_SCOPE` mapping + `selectedInstructionScope` / `instructionDescription` / `instructionAcceptance` helpers in `src/ai-init-workflow.ts`.
+- Reviewer `aiInitReviewer` uses `unit.scope` dynamically (instead of static `ADAPTER_SCOPE`) for instruction-writer evidence checks.
+- `runAiInitWorkflow` in `src/ai-init.ts` now normalizes `intake.engines` from `forceEngine` when intake is empty, so planner picks the right scope.
+- Tests added: planner scope per engine, reviewer dynamic scope, runner with `forceEngine: "copilot"` and empty intake.
+- Verification: typecheck/lint clean, 55 workflow tests pass.
+
+## [2026-06-16] verify | fail
+1 gate(s) failed
+- confidence<1: "u1" at 0.5 — investigate/debate before close

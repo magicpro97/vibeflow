@@ -25,7 +25,7 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ROLE_NAMES, type RoleName } from "./agents/role-templates.js";
-import type { WorkUnit } from "./core.js";
+import { ENGINES, type Engine, type WorkUnit } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
 
 /** A trimmed intake-answers shape this planner depends on. The full
@@ -155,6 +155,29 @@ const ADAPTER_SCOPE: Record<AiInitAdapterName, string[]> = {
   "ai-init-workflow-policy-writer": [".vibeflow/WORKFLOW_POLICY.md"],
   "ai-init-workflow-state-writer": [".vibeflow/WORKFLOW_STATE.json"],
 };
+
+const ENGINE_INSTRUCTION_SCOPE: Record<Engine, string[]> = {
+  claude: ["CLAUDE.md"],
+  codex: ["AGENTS.md"],
+  copilot: ["AGENTS.md", ".github/copilot-instructions.md"],
+};
+
+function selectedInstructionScope(intake: AiInitIntake): string[] {
+  const selected = (intake.engines ?? []).filter((engine): engine is Engine =>
+    (ENGINES as readonly string[]).includes(engine),
+  );
+  if (selected.length === 0) return ADAPTER_SCOPE["ai-init-instruction-writer"];
+  return [...new Set(selected.flatMap((engine) => ENGINE_INSTRUCTION_SCOPE[engine]))];
+}
+
+function instructionDescription(scope: string[]): string {
+  const files = scope.join(", ");
+  return `Update only these instruction file(s): ${files}. Do not create or modify instruction files for engines outside this scope. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.`;
+}
+
+function instructionAcceptance(scope: string[]): string {
+  return `instruction file scope (${scope.join(", ")}) carries a fresh vibeflow:start block`;
+}
 
 /** Per-adapter acceptance signal the reviewer uses to decide pass/fail.
  *  The strings are evidence patterns: the unit's recorded evidence must
@@ -288,7 +311,9 @@ function buildAdapterSpec(
     `Project: ${profile.name} (${profile.languages.join(", ") || "unknown"})`,
     `Active roles in this repo: ${roleList}`,
     "",
-    ADAPTER_DESCRIPTION[name],
+    name === "ai-init-instruction-writer"
+      ? instructionDescription(selectedInstructionScope(intake))
+      : ADAPTER_DESCRIPTION[name],
   ].join("\n");
 }
 
@@ -380,14 +405,21 @@ export function planAiInitUnits(
   const adapterUnits: AiInitUnit[] = AI_INIT_ADAPTER_NAMES.map((name): AiInitUnit => {
     const spec = buildAdapterSpec(name, profile, intake, detectedRoles);
     const skills = adapterSkills(name);
+    const scope =
+      name === "ai-init-instruction-writer"
+        ? selectedInstructionScope(intake)
+        : ADAPTER_SCOPE[name];
     return {
       name,
       status: "pending",
       confidence: 0,
       owner_agent: ADAPTER_OWNER[name],
       spec,
-      scope: ADAPTER_SCOPE[name],
-      acceptance: ADAPTER_ACCEPTANCE[name],
+      scope,
+      acceptance:
+        name === "ai-init-instruction-writer"
+          ? instructionAcceptance(scope)
+          : ADAPTER_ACCEPTANCE[name],
       skills_injected: [...skills.injected],
       skills_required: [...skills.required],
       gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
@@ -499,7 +531,9 @@ export function aiInitReviewer(
     return { ok: true };
   };
   if (name === "ai-init-instruction-writer") {
-    const REQUIRED = ADAPTER_SCOPE["ai-init-instruction-writer"] ?? [];
+    const REQUIRED = unit.scope?.length
+      ? unit.scope
+      : (ADAPTER_SCOPE["ai-init-instruction-writer"] ?? []);
     const hit = outcome.evidence.some((e) => REQUIRED.some((p) => e.includes(p)));
     if (!hit) {
       return {

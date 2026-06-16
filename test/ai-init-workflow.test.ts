@@ -79,6 +79,23 @@ describe("planAiInitUnits", () => {
     expect(conflicts).toEqual([]);
   });
 
+  test("instruction-writer scope follows the selected engine", () => {
+    const copilot = planAiInitUnits(profile, { engines: ["copilot"] }).find(
+      (u) => u.name === "ai-init-instruction-writer",
+    );
+    expect(copilot?.scope).toEqual(["AGENTS.md", ".github/copilot-instructions.md"]);
+    expect(copilot?.spec).toContain(
+      "Update only these instruction file(s): AGENTS.md, .github/copilot-instructions.md",
+    );
+    expect(copilot?.spec).not.toContain("CLAUDE.md");
+    expect(copilot?.spec).not.toContain(".agents/instructions.md");
+
+    const claude = planAiInitUnits(profile, { engines: ["claude"] }).find(
+      (u) => u.name === "ai-init-instruction-writer",
+    );
+    expect(claude?.scope).toEqual(["CLAUDE.md"]);
+  });
+
   test("spec embeds the live project name + intake goal", () => {
     const units = planAiInitUnits(profile, { goal: "add web UI" });
     for (const u of units) {
@@ -292,6 +309,19 @@ describe("aiInitReviewer", () => {
       status: "done",
       confidence: 1,
       evidence: ["edited CLAUDE.md", "edited AGENTS.md"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("instruction-writer reviewer uses the unit scope instead of all engine files", () => {
+    const u = planAiInitUnits(profile, { engines: ["copilot"] }).find(
+      (candidate) => candidate.name === "ai-init-instruction-writer",
+    );
+    if (!u) throw new Error("instruction writer unit not in plan");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["edited AGENTS.md"],
     });
     expect(r.pass).toBe(true);
   });

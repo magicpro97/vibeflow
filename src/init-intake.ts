@@ -110,7 +110,7 @@ function normalizePhases(values: string[] | undefined): InitAskPhase[] {
 }
 
 /**
- * Data model for the `vf init --ask` questionnaire. This only accepts and normalizes answers;
+ * Data model for the `vf init --ai` questionnaire. This only accepts and normalizes answers;
  * command wiring happens separately in `init()` so the web UI path can evolve independently.
  */
 export function createInitAskQuestionnaireData(
@@ -185,7 +185,7 @@ export function initAskQuestionnaireToIntakeAnswers(
 export async function collectInitAskQuestionnaireData(): Promise<InitAskQuestionnaireData | null> {
   if (!process.stdin.isTTY) {
     out("vf", c.red("\nInit questionnaire requires an interactive terminal."), { level: "error" });
-    out("vf", c.dim("Re-run in a TTY, or omit --ask."), { level: "error" });
+    out("vf", c.dim("Re-run in a TTY, or pass --no-ask."), { level: "error" });
     return null;
   }
 
@@ -239,63 +239,6 @@ export async function collectInitAskQuestionnaireData(): Promise<InitAskQuestion
     });
   } catch (err) {
     if (["cancelled", "selection timed out"].includes((err as Error).message)) return null;
-    throw err;
-  }
-}
-
-/**
- * Active CLI intake for `vf init --ai --ask` / `vf init --ai --interactive`.
- * VibeFlow owns the user questions, while the spawned AI init phase stays headless and only
- * enriches the context captured here.
- */
-export async function collectAiInitIntake(
-  flags: Record<string, string | boolean>,
-): Promise<IntakeAnswers | null> {
-  if (!process.stdin.isTTY) {
-    out("vf", c.red("\nAI intake requires an interactive terminal."), { level: "error" });
-    out("vf", c.dim("Re-run in a TTY, or omit --ask/--interactive."), { level: "error" });
-    return null;
-  }
-
-  try {
-    const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
-    const profile = scanRepo(cwd());
-    const previous = readState();
-    const detected = [
-      `project: ${profile.name}`,
-      `languages: ${profile.languages.length ? profile.languages.join(", ") : "unknown"}`,
-      `frameworks: ${profile.frameworks.length ? profile.frameworks.join(", ") : "none detected"}`,
-      `package manager: ${profile.packageManager ?? "unknown"}`,
-      `build/test/lint: ${profile.buildCommand ?? "-"} / ${profile.testCommand ?? "-"} / ${profile.lintCommand ?? "-"}`,
-    ];
-
-    out("vf", panel("AI intake", c.bold("answer the missing workflow context")));
-    for (const line of detected) out("vf", c.dim(`  ${line}`));
-
-    const defaultGoal = previous?.goal ?? defaultContext().goal;
-    const defaultDone = previous?.success_criteria?.[0] ?? "";
-    const defaultDocs = "README.md";
-    const defaultFileTypes = suggestedFileTypes(profile.languages).join(",");
-
-    const goal = await textInput("Goal / task", defaultGoal);
-    const expectedResult = await textInput("Definition of Done", defaultDone);
-    const docSource = await textInput("Project docs source", defaultDocs);
-    const taskSource = await textInput("Task / issue source");
-    const fileTypeAnswer = await textInput("File types in scope (comma)", defaultFileTypes);
-    const sample = await textInput("Reference/sample (optional)");
-    const engineAnswer = await textInput("Engines (comma)", (engines ?? ENGINES).join(","));
-
-    return {
-      goal,
-      expectedResult,
-      docSource,
-      taskSource,
-      fileTypes: commaList(fileTypeAnswer, suggestedFileTypes(profile.languages)),
-      sample,
-      engines: commaList(engineAnswer, engines ?? ENGINES),
-    };
-  } catch (err) {
-    if ((err as Error)?.message === "cancelled") return null;
     throw err;
   }
 }

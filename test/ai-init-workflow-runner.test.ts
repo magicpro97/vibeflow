@@ -24,8 +24,11 @@ describe("runAiInitWorkflow", () => {
     // disk. Pre-create the AI-init framework files the adapter units
     // will cite as evidence.
     mkdirSync(join(repo, ".vibeflow", "ai-context"), { recursive: true });
+    mkdirSync(join(repo, ".github"), { recursive: true });
     writeFileSync(join(repo, ".vibeflow/ai-context/stack-evidence.md"), "# stack\n");
     writeFileSync(join(repo, "CLAUDE.md"), "# claude\n");
+    writeFileSync(join(repo, "AGENTS.md"), "# agents\n");
+    writeFileSync(join(repo, ".github/copilot-instructions.md"), "# copilot\n");
     mkdirSync(join(repo, ".vibeflow", "skills"), { recursive: true });
     writeFileSync(join(repo, ".vibeflow/SKILL_INDEX.md"), "# index\n");
     writeFileSync(join(repo, ".vibeflow/PROJECT_CONTEXT.md"), "# ctx\n");
@@ -95,6 +98,40 @@ describe("runAiInitWorkflow", () => {
     expect(result.reviews.every((r) => r.pass)).toBe(true);
     expect(result.units.every((u) => u.status === "done")).toBe(true);
     expect(result.units.every((u) => u.confidence === 1)).toBe(true);
+  });
+
+  test("uses the forced engine as instruction-writer scope when intake omits engines", async () => {
+    const SCOPE_BY_NAME: Record<string, string> = {
+      "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
+      "ai-init-instruction-writer": "AGENTS.md",
+      "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
+      "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
+      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
+      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
+      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
+    };
+    const scopes: Record<string, string[]> = {};
+    const dispatcher: UnitDispatcher = async (unit) => {
+      scopes[unit.name] = unit.scope ?? [];
+      return {
+        status: "done",
+        confidence: 1,
+        evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+      };
+    };
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: {},
+      forceEngine: "copilot",
+      preflight: () => [readiness("copilot", "ready")],
+      dispatcher,
+    });
+    expect(result.ok).toBe(true);
+    expect(scopes["ai-init-instruction-writer"]).toEqual([
+      "AGENTS.md",
+      ".github/copilot-instructions.md",
+    ]);
   });
 
   test("includes phase units in the dispatch set when intake.workflowPhases is set", async () => {

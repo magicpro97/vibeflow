@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
 import {
   type ProjectContext,
   agentFiles,
@@ -11,7 +10,7 @@ import {
   engineFiles,
 } from "./adapters.js";
 import { detectRolesForRepo } from "./agents/detect-roles.js";
-import { type AgentEngine } from "./agents/render.js";
+import type { AgentEngine } from "./agents/render.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -51,7 +50,6 @@ import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
 import {
-  collectAiInitIntake,
   collectInitAskQuestionnaireData,
   initAskQuestionnaireToIntakeAnswers,
 } from "./init-intake.js";
@@ -241,6 +239,8 @@ function chosenEngines(engines?: string[]): Engine[] {
   const valid = (engines ?? []).filter((e): e is Engine => (ENGINES as string[]).includes(e));
   return valid.length ? valid : [...ENGINES];
 }
+
+const INIT_DEFAULT_ENGINE: Engine = "copilot";
 
 /** Validate and resolve a user-supplied repo path to an absolute existing directory. */
 export function resolveRepo(path?: string): string {
@@ -1271,22 +1271,26 @@ export async function init(
     dispatcher?: UnitDispatcher;
   } = {},
 ): Promise<number> {
-  const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
+  const initEngine: Engine =
+    typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
+      ? (flags.engine as Engine)
+      : INIT_DEFAULT_ENGINE;
+  const engines = [initEngine];
   const dry = Boolean(flags["dry-run"]);
-  const ai = Boolean(flags.ai);
-  // B1/T5 + Task 5b: --ai defaults to the agent-team workflow shape
+  const ai = !flags["no-ai"];
+  // B1/T5 + Task 5b: AI enrichment is on by default; --no-ai opts out.
+  // Without --no-ai, the agent-team workflow shape is used.
   // (runAiInitWorkflow). The --no-agent-team opt-out restores the
   // legacy runAiInit path. The default is the workflow because the
   // agent-team is the forward-looking surface; users on tight CI
   // budgets can opt out per-run.
   const useAgentTeam = ai && !flags["no-agent-team"];
-  const questionnaire = flags.ask ? await collectInitAskQuestionnaireData() : null;
-  const answers = flags.ask
+  const ask = ai && !dry && !flags["no-ask"] && process.stdin.isTTY;
+  const questionnaire = ask ? await collectInitAskQuestionnaireData() : null;
+  const answers = ask
     ? questionnaire && initAskQuestionnaireToIntakeAnswers(questionnaire, engines)
-    : flags.interactive && ai
-      ? await collectAiInitIntake(flags)
-      : { engines };
-  if (!answers) return (flags.ask || flags.interactive) && process.stdin.isTTY ? 130 : 2;
+    : { engines };
+  if (!answers) return process.stdin.isTTY ? 130 : 2;
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
   const initSpinner = new Spinner();
@@ -1300,7 +1304,7 @@ export async function init(
       useAi: false,
     });
   } catch (err) {
-    initSpinner.fail("VibeFlow context generation failed");
+    initSpinner.fail("❌ VibeFlow context generation failed");
     throw err;
   }
   if (result.refused) initSpinner.fail("Engine preflight refused init");
@@ -1329,9 +1333,13 @@ export async function init(
   // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded)
   if (ai && !dry && !result.refused) {
     out("vf");
-    const aiEngine = typeof flags.engine === "string" ? (flags.engine as Engine) : undefined;
+    const aiEngine = initEngine;
     const prefix = aiEngine ? `[${aiEngine}]` : "[ai]";
     if (useAgentTeam) {
+      let lineBuf = "";
+      let errLineBuf = "";
+      const aiSpinner = new Spinner();
+      aiSpinner.start(`➥ Running agent-team workflow ${prefix}`);
       // B1/T5: --ai defaults to the agent-team workflow shape. The workflow
       // runs 7 adapter units in parallel (analyzer, instruction-writer,
       // skill-curator, tool-configurator, workflow-policy-writer,
@@ -1347,9 +1355,33 @@ export async function init(
         forceEngine: aiEngine,
         preflight: inject.aiPreflight,
         dispatcher: inject.dispatcher,
-        spawner: inject.aiSpawner,
+        spawner:
+          inject.aiSpawner ??
+          makeAsyncSpawner({
+            timeoutMs: 30_000_000,
+            idleTimeoutMs: 300_000,
+            onChunk(text) {
+              lineBuf += text;
+              const lines = lineBuf.split("\n");
+              lineBuf = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) out("engine-stdout", `${prefix} ${trimmed}`);
+              }
+            },
+            onStderrChunk(text) {
+              errLineBuf += text;
+              const lines = errLineBuf.split("\n");
+              errLineBuf = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) out("engine-stderr", `${prefix} ${trimmed}`);
+              }
+            },
+          }),
       });
       if (workflowResult.ok) {
+        aiSpinner.succeed(`✅ agent-team workflow complete (${workflowResult.engine ?? "?"})`);
         out(
           "vf",
           c.green(
@@ -1357,15 +1389,20 @@ export async function init(
           ),
         );
       } else {
+        aiSpinner.fail("❌ agent-team workflow skipped");
         out("vf", c.yellow(`! agent-team workflow skipped: ${workflowResult.reason}`));
         out(
           "vf",
           c.dim(
-            "  Deterministic context files are in place. Re-run with --ai when an engine is ready.",
+            "  Deterministic context files are in place. Install an engine or fix PATH and re-run.",
           ),
         );
       }
     } else {
+      let lineBuf = "";
+      let errLineBuf = "";
+      const aiSpinner = new Spinner();
+      aiSpinner.start(`➥ Running AI enrichment ${prefix}`);
       // Legacy --no-agent-team path: original runAiInit shape.
       const { runAiInit } = await import("./ai-init.js");
       const aiResult = await runAiInit({
@@ -1377,16 +1414,24 @@ export async function init(
         spawner:
           inject.aiSpawner ??
           makeAsyncSpawner({
-            timeoutMs: 30_000,
+            timeoutMs: 30_000_000,
             idleTimeoutMs: 300_000,
             onChunk(text) {
-              for (const line of text.split("\n")) {
-                if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
+              lineBuf += text;
+              const lines = lineBuf.split("\n");
+              lineBuf = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) out("engine-stdout", `${prefix} ${trimmed}`);
               }
             },
             onStderrChunk(text) {
-              for (const line of text.split("\n")) {
-                if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
+              errLineBuf += text;
+              const lines = errLineBuf.split("\n");
+              errLineBuf = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) out("engine-stderr", `${prefix} ${trimmed}`);
               }
             },
           }),
@@ -1405,6 +1450,7 @@ export async function init(
       });
       if (aiResult.ok) {
         const used = aiResult.engine ?? "?";
+        aiSpinner.succeed(`✅ AI enrichment complete (${used})`);
         if (aiResult.fallback) {
           out(
             "vf",
@@ -1420,14 +1466,14 @@ export async function init(
         out(
           "vf",
           c.dim(
-            "  Deterministic context files are in place. Re-run with --ai when an engine is ready.",
+            "  Deterministic context files are in place. Install an engine or fix PATH and re-run.",
           ),
         );
       }
     }
   } else if (ai && dry) {
     // Dry-run --ai: show the prompt that would be sent
-    out("vf", c.dim("\n--ai dry-run: prompt would be sent to the best available engine"));
+    out("vf", c.dim("\ndry-run: prompt would be sent to the best available engine"));
     const { buildAiInitPrompt } = await import("./ai-init.js");
     const { scanRepo } = await import("./scanner.js");
     const base = cwd();
@@ -1436,67 +1482,6 @@ export async function init(
     out("vf", c.dim(`\n${prompt.slice(0, 1500)}…`));
   }
 
-  return 0;
-}
-
-/** Interactive `vf init --interactive` — asks the intake questions in the terminal. */
-// Test seam: accepts an `askFn` to inject a fake question function so
-// unit tests can drive the intake flow without a real stdin.
-// Test seam: exported so unit tests can exercise the readline-free
-// default path (line 1361-1367). Without this, initInteractive's
-// default askFn uses node:readline + process.stdin which throws
-// "stream.listenerCount is not a function" in the test env.
-export function defaultAskFn(): (q: string, def?: string) => Promise<string> {
-  return (q: string, def = "") => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    return new Promise((res) =>
-      rl.question(`${q}${def ? ` [${def}]` : ""}: `, (a) => {
-        rl.close();
-        res(a.trim() || def);
-      }),
-    );
-  };
-}
-
-export async function initInteractive(
-  _flags: Record<string, string | boolean>,
-  inject: {
-    askFn?: (q: string, def?: string) => Promise<string>;
-    /** Test seam: forward to applyIntake's preflight inject so unit
-     *  tests can mark engines as ready without depending on PATH. */
-    preflight?: PreflightFn;
-  } = {},
-): Promise<number> {
-  const ask = inject.askFn ?? defaultAskFn();
-  out("vf", c.bold("VibeFlow — new workflow\n"));
-  const goal = await ask("Goal / task");
-  const engines = (await ask("Engines (comma)", ENGINES.join(","))).split(",");
-  const docSource = await ask("Project docs source (path/URL)");
-  const taskSource = await ask("Task / issue source");
-  const fileTypes = (await ask("File types (comma)")).split(",");
-  const expectedResult = await ask("Expected result (Definition of Done)");
-  // If using the injected askFn, no real rl was created.
-  // If using the default, rl was created+closed per question, so nothing to do.
-  const result = applyIntake(
-    {
-      goal,
-      engines,
-      docSource,
-      taskSource,
-      fileTypes,
-      expectedResult,
-    },
-    inject.preflight ? { preflight: inject.preflight } : {},
-  );
-  if (result.refused) return reportPreflightRefusal(result.readiness);
-  for (const rel of result.files) out("vf", `${c.green("+")} ${rel}`);
-  out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
-  for (const rel of result.backedUp ?? []) {
-    out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
-  }
-  for (const rel of result.backedUp ?? []) {
-    out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
-  }
   return 0;
 }
 
@@ -2935,7 +2920,7 @@ export function printHelp(): number {
     ${c.cyan("(none)")}            open the local web UI
     ${c.cyan("ui")}                open the local web UI
     ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
-    ${c.cyan("init")}             generate canonical context + engine files (--engine, --interactive, --dry-run)
+    ${c.cyan("init")}             generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
@@ -2980,21 +2965,22 @@ ${c.bold("Examples:")}
   vf doctor
   vf doctor --probe`,
 
-  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--interactive] [--ask] [--ai] [--dry-run]")}
+  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--no-ask] [--no-ai] [--dry-run]")}
 Generate the canonical context + engine instruction files and a workflow ledger.
 By default a hard creation gate refuses when no engine is ready; --dry-run previews
-offline (writes nothing).
+offline (writes nothing). When --engine is omitted, init targets copilot.
+AI enrichment is ON by default — pass --no-ai to skip the headless engine dispatch.
 
 ${c.bold("Options:")}
-  --engine <e>   generate for a single engine instead of all three
-  --interactive  ask the intake questions in the terminal (TTY only)
-  --ask          run the active CLI intake step before generation
-  --ai           enrich generated context by dispatching a ready engine headlessly
+  --engine <e>   generate for a single engine (default: copilot)
+  --no-ask       skip the intake questionnaire in TTY mode
+  --no-ai        skip AI enrichment (deterministic context files only)
   --dry-run      read-only preview — print what would be written, change nothing
 
 ${c.bold("Examples:")}
   vf init --engine claude
-  vf init --ai --ask
+  vf init --no-ask
+  vf init --no-ai
   vf init --dry-run`,
 
   run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot> [--yes]")}

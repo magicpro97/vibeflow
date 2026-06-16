@@ -486,7 +486,7 @@ export function renderSlimPrompt(
   return [
     "## VibeFlow AI-Powered Project Initialization",
     "",
-    "You are an AI agent performing project initialization for VibeFlow (`vf init --ai`).",
+    "You are an AI agent performing project initialization for VibeFlow (`vf init`).",
     "Your working directory IS the project root. Use your Read/Edit tools to act on the files listed below.",
     "",
     "## Workflow (RAG pattern)",
@@ -1020,7 +1020,11 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   }
 
   // Decompose into work units.
-  const units = planAiInitUnits(profile, intake, detectedRoles);
+  const plannerIntake: AiInitIntake = {
+    ...intake,
+    engines: intake.engines?.length ? intake.engines : [engine],
+  };
+  const units = planAiInitUnits(profile, plannerIntake, detectedRoles);
 
   // Dispatch through the orchestrator. The injected dispatcher defaults
   // to a placeholder (so unit tests stay deterministic); production

@@ -281,7 +281,7 @@ describe("commands.init", () => {
   });
 
   test("init writes canonical context and a valid ledger", async () => {
-    const code = await init({ engine: "claude" }, { preflight: allReady });
+    const code = await init({ engine: "claude", "no-ai": true }, { preflight: allReady });
     expect(code).toBe(0);
     const state = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`), "utf8"));
     expect(state.totals.units).toBe(0);
@@ -289,18 +289,33 @@ describe("commands.init", () => {
   });
 
   test("units status returns 0 on an initialized ledger", () => {
-    init({}, { preflight: allReady });
+    init({ "no-ai": true }, { preflight: allReady });
     expect(units("status", [])).toBe(0);
     expect(units("resources", [])).toBe(0);
   });
 
-  test("init --ai --ask refuses non-TTY instead of hanging", async () => {
-    const code = await init({ ai: true, ask: true }, { preflight: allReady });
-    expect(code).toBe(2);
-    expect(existsSync(join(dir, CTX_DIR))).toBe(false);
+  test("init defaults --engine to copilot", async () => {
+    let requested: Engine[] = [];
+    const code = await init(
+      { "no-ai": true },
+      {
+        preflight: (engines) => {
+          requested = engines;
+          return allReady(engines);
+        },
+      },
+    );
+    expect(code).toBe(0);
+    expect(requested).toEqual(["copilot"]);
   });
 
-  test("init --ask questionnaire stores stable phase ids and maps labels to intake", () => {
+  test("init with --no-ai skips AI enrichment but still writes context files", async () => {
+    const code = await init({ "no-ai": true }, { preflight: allReady });
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, CTX_DIR))).toBe(true);
+  });
+
+  test("init AI questionnaire stores stable phase ids and maps labels to intake", () => {
     const data = createInitAskQuestionnaireData({
       projectOverview: { description: "Project overview", useAiSourceAnalysis: true },
       phases: ["Basic design", "implement"],
