@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { parseFrontmatter } from "../frontmatter.js";
 
@@ -110,6 +111,7 @@ const SKILL_ROOTS = [
   join(".vibeflow", "skills"),
   join(".kiro", "skills"),
   join(".claude", "skills"),
+  join(homedir(), ".agents", "skills"),
 ];
 
 export interface SkillRootsValidationResult {
@@ -122,7 +124,9 @@ export interface SkillRootsValidationResult {
 export function validateSkillRoots(repo: string): SkillRootsValidationResult {
   const skills: SkillValidationResult[] = [];
   for (const root of SKILL_ROOTS) {
-    const base = join(repo, root);
+    // Absolute roots (e.g. `~/.agents/skills`) are used as-is; relative
+    // roots are joined against the repo path.
+    const base = root.startsWith("/") || /^[A-Za-z]:[\\/]/.test(root) ? root : join(repo, root);
     if (!existsSync(base)) continue;
     // base is verified to exist via existsSync above, so
     // readdirSync and statSync should not throw in practice.

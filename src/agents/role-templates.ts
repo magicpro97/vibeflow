@@ -260,6 +260,65 @@ routed sub-task named "doc-writer" / "docs".
 `;
 }
 
+/**
+ * Body for the `ios-engine` role. Triggered when the scanner detects a
+ * Swift package manifest (Package.swift), an Xcode project workspace, or
+ * any .swift source under the repo. This is the iOS/macOS counterpart
+ * to `cli-engine` / `web-ui` — it owns the SwiftUI/AVFoundation/SwiftData
+ * surface and ships the standard Apple-platform verification commands.
+ */
+function iosEngineBody(ctx: RoleContext): string {
+  return `# ios-engine
+
+You are the iOS/Apple-platform specialist for \`${ctx.projectName}\`. You own
+the Swift source tree, the SwiftUI / UIKit view layer, AVFoundation playback,
+SwiftData persistence, and the SPM package manifest.
+
+## Scope
+- Owns: \`Package.swift\`, \`Sources/**\`, \`App/\`, \`Features/**\`,
+  \`Core/**\` (anything ending in \`.swift\`).
+- Touches: \`*.xcodeproj\`, \`*.xcworkspace\` (Xcode project files — edit
+  via Tuist or by hand but never regenerate from scratch).
+- Does not own: server-side code, build infrastructure outside Xcode,
+  web frontend.
+
+## Common Tasks
+- Add a new SPM dependency: edit \`Package.swift\` \`dependencies\` array.
+- Wire an \`AVPlayer\` / \`AVAudioEngine\` pipeline with \`MPRemoteCommandCenter\`.
+- Add a SwiftData \`@Model\` and migrate the \`ModelContainer\` schema.
+- Build a new SwiftUI screen with \`@Observable\` view-model + \`.task\` modifier.
+- Wire \`AVAudioSession\` for background audio + lock-screen controls.
+- Write unit tests with Swift Testing (\`#expect\`, \`@Test\`) and UI smoke
+  tests via Xcode UI Testing or swift-snapshot-testing.
+- Tune SwiftLint rules in \`.swiftlint.yml\` and run \`swift run swiftlint\`.
+
+## Conventions
+- Minimum target: iOS 17+ (uses \`@Observable\`, \`ContentUnavailableView\`).
+- Swift 6 strict concurrency by default — every \`AVPlayer\` / \`URLSession\`
+  / disk I/O call site is an \`actor\` or behind \`Sendable\` boundaries.
+- Package manifest is canonical — no CocoaPods, no Carthage.
+- Build command: ${ctx.buildCommand ?? "xcodebuild -scheme <App> -destination 'platform=iOS Simulator,name=iPhone 15' build"}.
+- Test command: ${ctx.testCommand ?? "xcodebuild -scheme <App> -destination 'platform=iOS Simulator,name=iPhone 15' test"}.
+- Lint command: ${ctx.lintCommand ?? "swift run swiftlint"}.
+- Coverage gate: 100% on \`Core/Audio/PlaybackEngine.swift\` (per VibeFlow policy).
+- NEVER use \`ObservableObject\` — always \`@Observable\` (iOS 17+).
+- NEVER use \`Task { ... }\` inside a \`body\` — use \`.task { ... }\` instead.
+
+## When Invoked
+The user asks for "add a screen", "implement AVFoundation playback",
+"fix a SwiftUI bug", "wire background audio", "add a SwiftData model",
+"write a unit test", or a routed sub-task named "ios-engine" / "ios" / "swift".
+
+## Return Format
+- File path(s) touched (with \`path:line\`) in \`Sources/\` or \`Features/\`.
+- \`swift build\` output — must be clean (zero warnings).
+- \`swift test\` output — coverage report attached for any new code.
+- For UI changes: simulator screenshot path + Xcode UI test result.
+- When shipping audio/lock-screen code: confirm \`AVAudioSession\` category
+  is \`.playback\` and \`MPRemoteCommandCenter\` handlers are registered.
+`;
+}
+
 /** 6 default role specs. Each body is engine-agnostic markdown shared by
  * all 3 engines; renderers format the wrapper per engine. */
 function buildSpecs(ctx: RoleContext): RoleSpec[] {
@@ -278,6 +337,15 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       description:
         "Web UI specialist. Use for the local web console, intake wizard, and live log streaming.",
       body: webUiBody(ctx),
+      tools: ["read", "write", "edit", "bash", "grep", "glob"],
+      model: "sonnet",
+      sandbox: "workspace-write",
+    },
+    {
+      name: "ios-engine",
+      description:
+        "iOS/Apple-platform specialist. Use for any Swift, SwiftUI, AVFoundation, SwiftData, UIKit, or Xcode work in this repo.",
+      body: iosEngineBody(ctx),
       tools: ["read", "write", "edit", "bash", "grep", "glob"],
       model: "sonnet",
       sandbox: "workspace-write",
@@ -321,10 +389,11 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
   ];
 }
 
-/** Names of the 6 default roles. Stable order = spec order. */
+/** Names of the 7 default roles. Stable order = spec order. */
 export const ROLE_NAMES = [
   "cli-engine",
   "web-ui",
+  "ios-engine",
   "skill-author",
   "preflight-engine",
   "dispatch-runner",

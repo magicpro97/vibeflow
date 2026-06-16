@@ -9,17 +9,18 @@ import {
 } from "../src/agents/role-templates.js";
 
 describe("role-templates", () => {
-  test("exposes the 6 expected default roles", () => {
+  test("exposes the 7 expected default roles (incl. ios-engine)", () => {
     expect(ROLE_NAMES).toEqual([
       "cli-engine",
       "web-ui",
+      "ios-engine",
       "skill-author",
       "preflight-engine",
       "dispatch-runner",
       "doc-writer",
     ]);
     const specs = listRoleSpecs();
-    expect(specs).toHaveLength(6);
+    expect(specs).toHaveLength(7);
     for (const name of ROLE_NAMES) {
       expect(specs.find((s) => s.name === name)).toBeDefined();
     }

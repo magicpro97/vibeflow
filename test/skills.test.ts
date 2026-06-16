@@ -121,7 +121,10 @@ describe("registry provenance (never auto-verify external skills)", () => {
         ].join("\n"),
       );
       const found = discoverSkills(dir);
-      expect(found[0]?.status).toBe("verified");
+      // Sort is alphabetical across all roots, so look up by name rather
+      // than trusting position (user-level ~/.agents/skills/ may sort first).
+      const local = found.find((s) => s.name === "local-reader");
+      expect(local?.status).toBe("verified");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

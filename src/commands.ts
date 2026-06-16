@@ -100,6 +100,7 @@ import {
 import { importSkillFromDir, importSkillsFromParent } from "./skills/importer.js";
 import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/registry.js";
 import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
+import { pickStarterSkills, renderStarterSkillFile } from "./skills/starter-pack.js";
 import { syncSkillMirrors, verifySkillSync } from "./skills/sync.js";
 import { validateSkillRoots } from "./skills/validator.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
@@ -465,6 +466,24 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
   // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
   if (!opts.dry) ensureIndex(base);
+
+  // Auto-scaffold starter skills matched to the detected stack. Each skill
+  // is only written when its folder does not exist (first init) so a
+  // hand-curated or imported skill is never clobbered on re-init. The
+  // dispatcher picks these up via `discoverSkills` immediately, so a
+  // `vf orchestrate` after init has the right skills in scope.
+  if (!opts.dry) {
+    const profile = scanRepo(base);
+    const starterSkills = pickStarterSkills(profile);
+    for (const skill of starterSkills) {
+      const rel = `${CTX_DIR}/skills/${skill.name}/SKILL.md`;
+      const abs = join(base, rel);
+      if (existsSync(abs)) continue; // preserve user-curated
+      writeFileSafe(abs, renderStarterSkillFile(skill));
+      written.push(rel);
+    }
+  }
+
   return { files: written, state, readiness: gate.readiness, refused: false, backedUp };
 }
 

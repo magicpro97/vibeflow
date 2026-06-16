@@ -80,6 +80,45 @@ const FRAMEWORK_HINTS: Array<[string, string]> = [
   ["spring-boot", "Spring Boot"],
 ];
 
+/**
+ * iOS / Apple-platform framework hints matched against `Package.swift`
+ * dependencies (the SPM manifest equivalent of `package.json`). When
+ * the project uses `import` statements instead, the secondary pass below
+ * greps `.swift` source files.
+ */
+const IOS_FRAMEWORK_HINTS: Array<[string, string]> = [
+  ["SwiftUI", "SwiftUI"],
+  ["swiftui", "SwiftUI"],
+  [".swiftinterface", "SwiftUI"],
+  ["swift-data", "SwiftData"],
+  ["SwiftData", "SwiftData"],
+  ["swiftdata", "SwiftData"],
+  ["AVFoundation", "AVFoundation"],
+  ["avfoundation", "AVFoundation"],
+  ["AVKit", "AVKit"],
+  ["avkit", "AVKit"],
+  ["MediaPlayer", "MediaPlayer"],
+  ["mediaplayer", "MediaPlayer"],
+  ["UIKit", "UIKit"],
+  ["uikit", "UIKit"],
+  ["CoreData", "CoreData"],
+  ["coredata", "CoreData"],
+  ["Combine", "Combine"],
+  ["combine", "Combine"],
+  ["Alamofire", "Alamofire"],
+  ["SnapKit", "SnapKit"],
+];
+
+/** xcodebuild commands used for the standard iOS app verification flow.
+ *  When `Package.swift` declares an iOS executable target, we set the
+ *  default `build` / `test` / `lint` commands so `vf verify` knows what
+ *  to run without the user wiring anything by hand. */
+const IOS_BUILD_COMMANDS = {
+  build: "xcodebuild -scheme MusicApp -destination 'platform=iOS Simulator,name=iPhone 15' build",
+  test: "xcodebuild -scheme MusicApp -destination 'platform=iOS Simulator,name=iPhone 15' test",
+  lint: "swift run swiftlint",
+} as const;
+
 const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
@@ -93,6 +132,88 @@ const SKIP_DIRS = new Set([
   ".venv",
   "coverage",
 ]);
+
+/** Safe readdir that swallows ENOENT/ENOTDIR (e.g. when the path is
+ *  a file, not a directory). Used by the iOS detector to look for
+ *  `.xcodeproj` / `.xcworkspace` siblings of `Package.swift`. */
+function readdirSafe(path: string): string[] {
+  try {
+    return readdirSync(path);
+  } catch {
+    return [];
+  }
+}
+
+/** Recursive count of `.swift` files, skipping `SKIP_DIRS`. Capped to
+ *  keep `vf init` snappy on huge repos. Returns 0 when no source found. */
+function countSwiftSources(repo: string, cap = 500): number {
+  let count = 0;
+  function walk(dir: string, depth: number): void {
+    if (count >= cap) return;
+    for (const entry of readdirSafe(dir)) {
+      if (count >= cap) return;
+      if (SKIP_DIRS.has(entry)) continue;
+      const full = join(dir, entry);
+      let stat;
+      try {
+        stat = readdirStat(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        if (depth < 6) walk(full, depth + 1);
+      } else if (entry.endsWith(".swift")) {
+        count += 1;
+      }
+    }
+  }
+  walk(repo, 0);
+  return count;
+}
+
+/** statSync wrapped in try/catch (returns null on any FS error). */
+function readdirStat(path: string): { isDirectory(): boolean } {
+  return statSync(path);
+}
+
+/** Walk a bounded number of `.swift` files and collect the set of
+ *  `import` module names. Used as a fallback when `Package.swift` does
+ *  not list the framework as a declared dependency (e.g. system
+ *  frameworks like `Foundation` are always available implicitly). */
+function scanSwiftImports(repo: string, fileCap: number): Set<string> {
+  const found = new Set<string>();
+  let visited = 0;
+  function walk(dir: string, depth: number): void {
+    if (visited >= fileCap) return;
+    for (const entry of readdirSafe(dir)) {
+      if (visited >= fileCap) return;
+      if (SKIP_DIRS.has(entry)) continue;
+      const full = join(dir, entry);
+      let stat;
+      try {
+        stat = readdirStat(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        if (depth < 6) walk(full, depth + 1);
+      } else if (entry.endsWith(".swift")) {
+        visited += 1;
+        try {
+          const txt = readFileSync(full, "utf8");
+          for (const m of txt.matchAll(/^\s*import\s+([A-Za-z_][A-Za-z0-9_]*)/gm)) {
+            const name = m[1];
+            if (name) found.add(name);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+  walk(repo, 0);
+  return found;
+}
 
 function readJson(path: string): Record<string, unknown> | null {
   try {
@@ -255,6 +376,41 @@ export function scanRepo(repo: string): ProjectProfile {
       /* ignore */
     }
   }
+  // --- iOS / Apple-platform detection (Package.swift + .xcodeproj) ---
+  // VibeFlow treats Package.swift (SPM) as the canonical iOS manifest, but
+  // we also surface the Xcode project workspace when it exists so the
+  // generated `vf verify` commands know which scheme to build.
+  const packageSwift = existsSync(join(repo, "Package.swift"));
+  const xcodeproj = readdirSafe(repo).find((e) => e.endsWith(".xcodeproj"));
+  const xcworkspace = readdirSafe(repo).find((e) => e.endsWith(".xcworkspace"));
+  const swiftSources = countSwiftSources(repo);
+  if (packageSwift || xcodeproj || xcworkspace || swiftSources > 0) {
+    manifests.push(packageSwift ? "Package.swift" : "*.xcodeproj");
+    if (!packageManager) packageManager = "spm";
+
+    // 1. Match frameworks from Package.swift dependencies.
+    if (packageSwift) {
+      try {
+        const txt = readFileSync(join(repo, "Package.swift"), "utf8");
+        for (const [dep, fw] of IOS_FRAMEWORK_HINTS) if (txt.includes(dep)) frameworks.add(fw);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 2. Fallback: scan .swift source files for `import XxxModule` statements
+    //    (capped walk to keep `vf init` under 1s on big repos).
+    if (frameworks.size === 0 && swiftSources > 0) {
+      const seen = scanSwiftImports(repo, 50);
+      for (const [dep, fw] of IOS_FRAMEWORK_HINTS) if (seen.has(dep)) frameworks.add(fw);
+    }
+
+    // 3. Pick build/test/lint defaults if the user did not set them.
+    if (!buildCommand) buildCommand = IOS_BUILD_COMMANDS.build;
+    if (!testCommand) testCommand = IOS_BUILD_COMMANDS.test;
+    if (!lintCommand) lintCommand = IOS_BUILD_COMMANDS.lint;
+  }
+
   // Detect subproject build commands (web/)
   const webPkg = join(repo, "web", "package.json");
   if (existsSync(webPkg)) {

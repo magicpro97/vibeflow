@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ProjectProfile } from "../scanner.js";
 import { ROLE_NAMES, type RoleName } from "./role-templates.js";
@@ -7,6 +7,11 @@ import { ROLE_NAMES, type RoleName } from "./role-templates.js";
  * Map each role to the repo signals that should trigger it. A signal is
  * either a manifest/file path (relative to the repo root) or a
  * framework/language entry on the {@link ProjectProfile}.
+ *
+ * File paths support a single `*` wildcard segment so signals like
+ * `*.xcodeproj` match `MyApp.xcodeproj` without needing a full glob
+ * library. Anything more complex (deep globs, alternation) is the
+ * caller's job to model with a different signal.
  *
  * `detectRolesForRepo` returns every role whose at least one signal is
  * present, preserving the canonical order from {@link ROLE_NAMES}.
@@ -19,6 +24,14 @@ const ROLE_SIGNALS: Record<RoleName, { files: string[]; frameworkMatch: RegExp[]
   "web-ui": {
     files: ["src/server.ts", "src/ui/", "src/dispatch.ts", "public/", "web/"],
     frameworkMatch: [/react/i, /vue/i, /svelte/i, /next/i, /nuxt/i, /solid/i, /express/i],
+  },
+  "ios-engine": {
+    // Match when the project has an SPM manifest, an Xcode project, or any
+    // .swift source. `frameworkMatch` catches the frameworks that should
+    // always pull in the iOS role even when the manifest is missing
+    // (e.g. a single-file Swift script in a polyglot repo).
+    files: ["Package.swift", "*.xcodeproj", "*.xcworkspace", "Sources/", "App/", "Features/"],
+    frameworkMatch: [/swift/i, /swiftui/i, /uikit/i, /swiftdata/i, /coredata/i, /avfoundation/i, /avkit/i, /mediaplayer/i],
   },
   "skill-author": {
     files: [".vibeflow/skills/", ".claude/skills/", ".agents/skills/", ".github/skills/"],
@@ -38,9 +51,28 @@ const ROLE_SIGNALS: Record<RoleName, { files: string[]; frameworkMatch: RegExp[]
   },
 };
 
+/**
+ * Resolve a single signal path. Supports:
+ *  - `foo/`     → directory at the repo root
+ *  - `foo`      → file at the repo root
+ *  - `*.ext`    → any file/dir in the repo root whose name ends with `.ext`
+ *
+ * Wildcards are intentionally narrow (single `*` at the start of the
+ * last segment) so we never need to pull in a glob library for this
+ * one case.
+ */
 function hasFile(repo: string, rel: string): boolean {
-  // Treat trailing `/` as a directory prefix to scan (existsSync handles
-  // both files and dirs).
+  if (rel.startsWith("*.")) {
+    // Wildcard: scan the repo root for any entry matching the suffix.
+    let entries: string[];
+    try {
+      entries = readdirSync(repo);
+    } catch {
+      return false;
+    }
+    return entries.some((e) => e.endsWith(rel.slice(1)));
+  }
+  // Trailing `/` → directory; otherwise → file (existsSync handles both).
   return existsSync(join(repo, rel));
 }
 

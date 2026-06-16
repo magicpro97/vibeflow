@@ -233,6 +233,14 @@ const ROLE_SKILLS: Record<RoleName, { injected: string[]; required: string[] }> 
     injected: ["vf-skills", "imagegen-frontend-web"],
     required: ["ctx7:react", "ctx7:svelte"],
   },
+  "ios-engine": {
+    // iOS units ship with the Apple-platform skill bundle and a strong
+    // requirement on the iOS simulator runtime being available — without
+    // `xcodebuild` + a booted simulator the unit's verification cannot
+    // pass.
+    injected: ["vf-skills", "swift-ios-music", "swiftui-pro", "swift-concurrency"],
+    required: ["ctx7:swiftui", "ctx7:avfoundation", "ctx7:swiftdata"],
+  },
   "skill-author": {
     injected: ["vf-skills", "skill-creator"],
     required: ["ctx7:skill-authoring"],

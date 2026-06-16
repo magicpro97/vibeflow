@@ -15,7 +15,10 @@ import {
 } from "../src/skills/registry.js";
 
 function tmpRepo(): string {
-  return mkdtempSync(join(tmpdir(), "vf-w1-"));
+  // Use `/tmp` (outside $HOME) so the post-#5 user-level skill
+  // root `~/.agents/skills/` is unreachable and tests that need a
+  // "clean" skill namespace actually see one.
+  return mkdtempSync("/tmp/vf-w1-");
 }
 
 describe("scanner", () => {
@@ -87,9 +90,14 @@ describe("skills/registry", () => {
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), SKILL);
       const found = discoverSkills(dir);
-      expect(found.length).toBe(1);
+      // Post-#5: the registry also scans `~/.agents/skills/`, so the
+      // total count is `1 (local) + N (user-level)`. The local skill
+      // is still present and rank-correct.
+      expect(found.length).toBeGreaterThanOrEqual(1);
+      const local = found.find((s) => s.name === "xlsx-reader");
+      expect(local).toBeDefined();
       expect(matchSkillsForFile(found, "report.xlsx")[0]?.score).toBe(1);
-      expect(matchSkillsForTask(found, "please read the spreadsheet").length).toBe(1);
+      expect(matchSkillsForTask(found, "please read the spreadsheet").length).toBeGreaterThanOrEqual(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

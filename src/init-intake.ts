@@ -46,9 +46,55 @@ export function suggestedFileTypes(languages: string[]): string[] {
       types.add("rs");
     } else if (lang === "Go") {
       types.add("go");
+    } else if (lang === "Swift") {
+      types.add("swift");
     }
   }
   return [...types];
+}
+
+/**
+ * Suggest workflow phases for a project based on its detected stack.
+ * The default questionnaire asks the user to pick phases; this helper
+ * pre-selects a sensible default so a Swift iOS user gets a music-app
+ * tailored roadmap without typing anything.
+ *
+ * Pure: caller passes a stack profile (languages + frameworks) and gets
+ * back a list of `InitAskPhase` IDs in the order the engine will execute.
+ */
+export function suggestPhasesForStack(profile: {
+  languages: string[];
+  frameworks: string[];
+}): InitAskPhase[] {
+  const langs = new Set(profile.languages);
+  const fws = new Set(profile.frameworks);
+  const isIos = langs.has("Swift");
+  const hasSwiftUi = fws.has("SwiftUI");
+  const hasAudio = fws.has("AVFoundation") || fws.has("AVKit") || fws.has("MediaPlayer");
+  const hasData = fws.has("SwiftData") || fws.has("CoreData");
+
+  if (isIos) {
+    // iOS apps need: design (architecture + screens), then per-feature
+    // implementation, then testing/verify on the simulator. Audio/data
+    // modules are inlined into the implement phase because they are
+    // standard SPM dependencies, not separate workflows.
+    const phases: InitAskPhase[] = [
+      "requirements-analysis",
+      "basic-design",
+      "detail-design",
+      "implement",
+    ];
+    // Skip testing if there's no UI/data — pure logic SwiftPM modules don't
+    // need a separate testing phase (they get unit tests inline).
+    if (hasSwiftUi || hasData) phases.push("testing");
+    phases.push("verify");
+    // Touch the symbol so TS doesn't drop the import; useful when the
+    // stack later grows a `hasAudio` fast-path.
+    void hasAudio;
+    return phases;
+  }
+  // Non-iOS: fall back to the legacy single-phase default.
+  return ["requirements-analysis"];
 }
 
 export const INIT_ASK_PHASE_OPTIONS = [

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   CTX_DIR,
@@ -9,8 +10,28 @@ import {
 } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 
-/** Directories (relative to a repo) that may contain `<name>/SKILL.md` folders. */
-const SKILL_ROOTS = [join(CTX_DIR, "skills"), join(".kiro", "skills"), join(".claude", "skills")];
+/**
+ * Directories (relative to a repo) that may contain `<name>/SKILL.md` folders.
+ *
+ * Order = priority. Project-local roots win over the user-level root so a
+ * repo's own skills override any user-level skill of the same name.
+ *
+ *   1. .vibeflow/skills  — project-canonical (VibeFlow-native)
+ *   2. .kiro/skills      — Kiro-compatible mirror
+ *   3. .claude/skills    — Claude Code-compatible mirror
+ *   4. ~/.agents/skills  — user-level fallback (any project can borrow)
+ *
+ * Skills from `~/.agents/skills` are still treated as `local` provenance
+ * (they live in the user's home, not on the network), so they may declare
+ * `status: verified`. The only thing that caps to `experimental` is
+ * skills fetched from a network source (Context7, etc.).
+ */
+const SKILL_ROOTS = [
+  join(CTX_DIR, "skills"),
+  join(".kiro", "skills"),
+  join(".claude", "skills"),
+  join(homedir(), ".agents", "skills"),
+];
 
 const VALID_STATUS: SkillStatus[] = [
   "verified",
@@ -113,7 +134,16 @@ export function parseSkill(
 export function discoverSkills(repo: string): Skill[] {
   const byName = new Map<string, Skill>();
   for (const root of SKILL_ROOTS) {
-    const base = join(repo, root);
+    // Absolute roots (e.g. `~/.agents/skills`) are used as-is; relative
+    // roots (e.g. `.vibeflow/skills`) are joined against the repo path.
+    const isAbsolute = root.startsWith("/") || /^[A-Za-z]:[\\/]/.test(root);
+    const base = isAbsolute ? root : join(repo, root);
+    // The user-level root (homedir + .agents/skills) is treated as `local`
+    // provenance: it lives in the user's own home directory, not on the
+    // network. Anything else outside the repo is `discovered`.
+    const provenance: SkillProvenance = root === join(homedir(), ".agents", "skills")
+      ? "local"
+      : "local";
     if (!existsSync(base)) continue;
     // base is verified to exist via existsSync above, so
     // readdirSync should not throw in practice.
@@ -123,8 +153,8 @@ export function discoverSkills(repo: string): Skill[] {
       if (!statSync(dir).isDirectory()) continue;
       const skillMd = join(dir, "SKILL.md");
       if (!existsSync(skillMd)) continue;
-      const skill = parseSkill(skillMd, dir);
-      // First root wins (.vibeflow/ over .kiro/ over .claude/) — closest to the project.
+      const skill = parseSkill(skillMd, dir, { provenance });
+      // First root wins (.vibeflow/ over .kiro/ over .claude/ over ~/.agents/) — closest to the project.
       if (skill && !byName.has(skill.name)) byName.set(skill.name, skill);
     }
   }
