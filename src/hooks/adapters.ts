@@ -4,10 +4,11 @@
  * which reads a JSON event on stdin and returns an allow/warn/require_approval/block
  * decision (see hooks/runner.ts). One source of truth, three engines + git.
  *
- * Enforcement honesty: only Claude Code exposes a native pre-action vetoing hook
- * (PreToolUse). Codex and Copilot have no equivalent vetoing pre-* hook today, so we
- * wire them as DETECTION-ONLY (post-hoc events) and surface a downgrade banner instead
- * of advertising blocking we cannot actually honor.
+ * Enforcement honesty: as of issue #79, Claude Code AND GitHub Copilot CLI both expose
+ * a native pre-action vetoing hook (PreToolUse / preToolUse, fail-closed). Codex CLI
+ * has no equivalent vetoing pre-tool hook today, so we wire it as DETECTION-ONLY
+ * (post-hoc events) and surface a downgrade banner instead of advertising blocking
+ * we cannot actually honor.
  */
 
 import { dirname, join } from "node:path";
@@ -32,7 +33,7 @@ export interface EngineEnforcementCapability {
 const ENFORCEMENT: Record<Engine, EngineEnforcementCapability> = {
   claude: { preActionBlocking: "native" },
   codex: { preActionBlocking: "post-hoc-only" },
-  copilot: { preActionBlocking: "post-hoc-only" },
+  copilot: { preActionBlocking: "native" },
 };
 
 /** Report whether an engine enforces guardrails natively or post-hoc only. */
@@ -81,13 +82,31 @@ export function codexHookConfig(): string {
   return JSON.stringify(config, null, 2);
 }
 
-/** Copilot `.github/copilot-hooks.json` — DETECTION-ONLY (post-hoc events only). */
+/** Build a shell command that runs `vf hook` with the absolute CLI path.
+ *  Path is double-quoted to survive spaces on POSIX paths like `/Users/linhn/foo bar/...`
+ *  and Windows paths like `C:\Program Files\...`. `hook` is a literal arg.
+ *  The trailing `# vibeflow-guardrail` marker is consumed as a bash/sh comment and is
+ *  also the stable string the `liveGuardrailArmed` probe matches against (issue #79
+ *  re-review: the previous `vf hook` substring never appeared in real generated configs
+ *  because generators emit `node "<abs>" hook`, not `vf hook`). */
+function hookCommand(): string {
+  return `"${cliPath()}" hook # vibeflow-guardrail`;
+}
+
+/** Copilot `.github/hooks/copilot.json` — NATIVE enforcement via preToolUse (fail-closed).
+ *  Per docs.github.com/en/copilot/reference/hooks-reference:
+ *    - preToolUse: non-zero exit DENIES the tool call (fail-closed)
+ *    - postToolUse: can inject additionalContext
+ *  Schema: {version:1, hooks:{<camelCaseEvent>:[{type:"command", bash, powershell, timeoutSec}]}}
+ *  `bash` covers POSIX, `powershell` covers Windows — Copilot picks by host OS. */
 export function copilotHookConfig(): string {
-  const cmd = cliPath();
+  const cmd = hookCommand();
   const config = {
-    detectionOnly: true,
-    events: ["post-command", "post-write", "verify-result"],
-    command: `node ${cmd} hook`,
+    version: 1,
+    hooks: {
+      preToolUse: [{ type: "command", bash: cmd, powershell: cmd, timeoutSec: 60 }],
+      postToolUse: [{ type: "command", bash: cmd, powershell: cmd, timeoutSec: 30 }],
+    },
   };
   return JSON.stringify(config, null, 2);
 }
@@ -155,7 +174,7 @@ export function engineHookFiles(): Record<string, string> {
   return {
     ".claude/settings.json": claudeHookConfig(),
     ".codex/hooks.json": codexHookConfig(),
-    ".github/copilot-hooks.json": copilotHookConfig(),
+    ".github/hooks/copilot.json": copilotHookConfig(),
     ".githooks/pre-commit": gitPreCommit(),
     ".githooks/post-checkout": gitPostCheckout(),
     ".githooks/post-merge": gitPostMerge(),

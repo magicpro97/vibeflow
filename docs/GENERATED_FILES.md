@@ -189,7 +189,7 @@ per-event `.vibeflow/hooks/*.ts` scripts; instead every config delegates to the 
 ```text
 .claude/settings.json        (Claude PreToolUse/PostToolUse/Stop → `vf hook`)
 .codex/hooks.json            (Codex post-command/post-write/verify-result → `vf hook`)
-.github/copilot-hooks.json   (Copilot post-command/post-write/verify-result → `vf hook`)
+.github/hooks/copilot.json   (Copilot preToolUse (fail-closed) + postToolUse → `vf hook`)
 .githooks/pre-commit         (fail-closed shell hook routing staged files → `vf hook`)
 ```
 

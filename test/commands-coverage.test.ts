@@ -39,6 +39,7 @@ import {
 } from "../src/commands.js";
 import { CTX_DIR, type Engine, type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
+import { claudeHookConfig } from "../src/hooks/adapters.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
@@ -1261,18 +1262,10 @@ describe("commands.liveGuardrailArmed", () => {
   test("returns true when PreToolUse has a hook delegating to vf hook (line 2005-2009)", () => {
     const dir = freshDir("vf-armed-true-");
     mkdirSync(join(dir, ".claude"), { recursive: true });
-    writeFileSync(
-      join(dir, ".claude", "settings.json"),
-      JSON.stringify({
-        hooks: {
-          PreToolUse: [
-            {
-              hooks: [{ command: "vf hook" }],
-            },
-          ],
-        },
-      }),
-    );
+    // Round-trip the real Claude generator (issue #79 re-review: the previous
+    // hand-written "vf hook" string masked a real bug where the probe never
+    // matched real generator output. Generator emits `node <abs>/dist/cli.js hook`).
+    writeFileSync(join(dir, ".claude", "settings.json"), claudeHookConfig());
     expect(liveGuardrailArmed(dir)).toBe(true);
   });
 });

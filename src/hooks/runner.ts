@@ -82,6 +82,36 @@ function mapClaudeEvent(name: string): HookInput["event"] {
 }
 
 /**
+ * Map GitHub Copilot CLI's native camelCase event name to our internal HookEvent
+ * vocabulary. Per docs.github.com/en/copilot/reference/hooks-reference, Copilot
+ * events arrive as `hookEventName` (camelCase). The Claude adapter is a separate
+ * function (mapClaudeEvent) because Claude sends PascalCase via `hook_event_name`.
+ */
+function mapCopilotEvent(name: string): HookInput["event"] | null {
+  switch (name) {
+    case "preToolUse":
+      return "pre-tool-use";
+    case "postToolUse":
+      return "post-tool-use";
+    case "sessionStart":
+    case "userPromptSubmitted":
+      return "pre-tool-use"; // treat agent/session start as a recognized no-op gate
+    case "sessionEnd":
+      return "stop";
+    case "errorOccurred":
+    case "preCompact":
+    case "agentStop":
+    case "subagentStart":
+    case "subagentStop":
+    case "permissionRequest":
+    case "notification":
+      return null; // not yet modeled — drop the event so caller fail-opens distinctly
+    default:
+      return null;
+  }
+}
+
+/**
  * Parse Claude Code's native PreToolUse/PostToolUse/Stop stdin payload, which has NO
  * `event` field. Shape: {hook_event_name, tool_name, tool_input:{command|file_path|files}}.
  * Returns null if this isn't a Claude-native payload (so the caller can fail open distinctly).
@@ -104,9 +134,34 @@ function parseClaudeNative(obj: Record<string, unknown>): HookInput | null {
 }
 
 /**
+ * Parse GitHub Copilot CLI's native preToolUse/postToolUse stdin payload.
+ * Shape: {hookEventName: "preToolUse", toolName: "bash", toolArgs: {command: "..."}}
+ *  - hookEventName is camelCase (NOT snake_case like Claude)
+ *  - toolArgs holds the per-tool input; `command` is the field for the bash tool
+ * Returns null if this isn't a Copilot-native payload or the event isn't modeled.
+ */
+function parseCopilotNative(obj: Record<string, unknown>): HookInput | null {
+  const eventName = obj.hookEventName;
+  if (typeof eventName !== "string") return null;
+  const event = mapCopilotEvent(eventName);
+  if (event === null) return null;
+  const asStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+  const toolArgs = (obj.toolArgs ?? {}) as Record<string, unknown>;
+  const pathStr = asStr(toolArgs.path);
+  return {
+    event,
+    tool: asStr(obj.toolName),
+    workspace: asStr(obj.cwd),
+    command: asStr(toolArgs.command),
+    files: pathStr ? [pathStr] : undefined,
+  };
+}
+
+/**
  * Parse a raw hook payload (from stdin) into a validated HookInput, or null.
  * Tries the legacy `{event,...}` shape first (back-compat: git pre-commit + tests),
- * then falls back to Claude Code's native `{hook_event_name, tool_name, tool_input}` shape.
+ * then falls back to Claude Code's native `{hook_event_name, tool_name, tool_input}` shape,
+ * then to GitHub Copilot's native `{hookEventName, toolName, toolArgs}` shape.
  */
 export function parseHookInput(raw: string): HookInput | null {
   let obj: Record<string, unknown>;
@@ -133,7 +188,10 @@ export function parseHookInput(raw: string): HookInput | null {
     };
   }
   // No usable legacy `event` field — try Claude Code's native payload shape.
-  return parseClaudeNative(obj);
+  const claude = parseClaudeNative(obj);
+  if (claude !== null) return claude;
+  // Then try GitHub Copilot's native payload shape (camelCase hookEventName).
+  return parseCopilotNative(obj);
 }
 
 /**

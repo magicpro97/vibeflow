@@ -24,33 +24,53 @@ import {
   presentDecision,
 } from "../src/hooks/runner.js";
 
-// --- Defect 1: Codex/Copilot are detection-only (no false pre-action blocking) ---
-describe("adapters: enforcement capability honesty (defect 1)", () => {
-  test("codex/copilot configs emit ONLY post-hoc events, never pre-* vetoing events", () => {
-    const codex = codexHookConfig();
-    const copilot = copilotHookConfig();
-    for (const cfg of [codex, copilot]) {
-      expect(cfg).not.toContain("pre-command");
-      expect(cfg).not.toContain("pre-write");
-      expect(cfg).not.toContain("pre-tool-use");
-    }
-    // and they DO keep at least one post-hoc detection event
-    expect(codex).toMatch(/post-command|post-write|verify-result|final-verify/);
-    expect(copilot).toMatch(/post-command|post-write|verify-result|final-verify/);
+// --- Defect 1 (issue #79): Copilot now joins the native enforcement tier ---
+describe("adapters: copilot native enforcement (issue #79)", () => {
+  test("copilotHookConfig emits the official Copilot hooks schema (version:1, hooks:{...})", () => {
+    const raw = copilotHookConfig();
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    expect(parsed.version).toBe(1);
+    expect(typeof parsed.hooks).toBe("object");
+    const hooks = parsed.hooks as Record<string, unknown>;
+    expect(Array.isArray(hooks.preToolUse)).toBe(true);
+    expect(Array.isArray(hooks.postToolUse)).toBe(true);
+    // No fabricated event names from the old spec.
+    expect(hooks).not.toHaveProperty("post-command");
+    expect(hooks).not.toHaveProperty("post-write");
+    expect(hooks).not.toHaveProperty("verify-result");
+    expect(hooks).not.toHaveProperty("detectionOnly");
   });
 
-  test("engineEnforcement marks claude native, codex/copilot post-hoc-only", () => {
+  test("copilotHookConfig preToolUse entry is a command hook with bash + powershell", () => {
+    const parsed = JSON.parse(copilotHookConfig()) as {
+      hooks: { preToolUse: Array<Record<string, unknown>> };
+    };
+    const entry = parsed.hooks.preToolUse[0];
+    expect(entry).toBeDefined();
+    if (!entry) return; // narrow type for the linter
+    expect(entry.type).toBe("command");
+    expect(typeof entry.bash).toBe("string");
+    expect(typeof entry.powershell).toBe("string");
+    expect(typeof entry.timeoutSec).toBe("number");
+    expect(entry.timeoutSec).toBeGreaterThanOrEqual(30);
+    // bash + powershell must quote the path to survive spaces (e.g. C:\Program Files\...)
+    expect(entry.bash).toMatch(/"[^"]+"\s+hook/);
+    expect(entry.powershell).toMatch(/"[^"]+"\s+hook/);
+  });
+
+  test("engineEnforcement: copilot is now native (per preToolUse fail-closed semantics)", () => {
     expect(engineEnforcement("claude").preActionBlocking).toBe("native");
+    expect(engineEnforcement("copilot").preActionBlocking).toBe("native");
+    // codex stays post-hoc-only: it has no native pre-tool veto.
     expect(engineEnforcement("codex").preActionBlocking).toBe("post-hoc-only");
-    expect(engineEnforcement("copilot").preActionBlocking).toBe("post-hoc-only");
   });
 
-  test("downgradeBannerText warns for non-native engines and is empty for claude", () => {
+  test("downgradeBannerText: empty for native engines, warns only for codex", () => {
     expect(downgradeBannerText("claude")).toBe("");
+    expect(downgradeBannerText("copilot")).toBe("");
     const codexBanner = downgradeBannerText("codex");
     expect(codexBanner.length).toBeGreaterThan(0);
     expect(codexBanner.toLowerCase()).toContain("detection");
-    expect(downgradeBannerText("copilot").length).toBeGreaterThan(0);
   });
 });
 
@@ -93,6 +113,29 @@ describe("runner: require_approval actually blocks (defect 3)", () => {
     const p = presentDecision(r, { event: "pre-write", files: [".env"] });
     expect(p.exitCode).toBe(0);
     expect(p.json).toContain("require_approval");
+  });
+
+  // --- Issue #79: end-to-end Copilot preToolUse → block ---
+  test("Copilot preToolUse payload → score path runs → produces deny envelope (issue #79)", () => {
+    // Simulate the exact JSON shape Copilot CLI sends: camelCase hookEventName + toolArgs.
+    const raw = JSON.stringify({
+      hookEventName: "preToolUse",
+      toolName: "bash",
+      cwd: "/repo",
+      toolArgs: { command: "rm -rf /" },
+    });
+    const input = parseHookInput(raw);
+    expect(input).not.toBeNull();
+    if (!input) return; // narrow type for the linter
+    const result = evaluateHook(input);
+    expect(result.decision).toBe("block");
+    const p = presentDecision(result, input);
+    expect(p.exitCode).toBe(0);
+    // The envelope Copilot reads is `hookSpecificOutput.permissionDecision = "deny"`.
+    const env = JSON.parse(p.json) as {
+      hookSpecificOutput: { permissionDecision: string };
+    };
+    expect(env.hookSpecificOutput.permissionDecision).toBe("deny");
   });
 });
 
@@ -139,6 +182,68 @@ describe("runner: parseHookInput accepts Claude-native payloads (bug 1a)", () =>
   test("Stop maps to the stop event", () => {
     const parsed = parseHookInput(JSON.stringify({ hook_event_name: "Stop" }));
     expect(parsed?.event).toBe("stop");
+  });
+
+  // --- Issue #79: Copilot CLI emits camelCase `hookEventName` + `toolName` payload ---
+  test("Copilot preToolUse camelCase payload maps to pre-tool-use + extracts toolName/command (issue #79)", () => {
+    const raw = JSON.stringify({
+      hookEventName: "preToolUse",
+      toolName: "bash",
+      cwd: "/repo",
+      toolArgs: { command: "rm -rf /tmp/build" },
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.event).toBe("pre-tool-use");
+    expect(parsed?.tool).toBe("bash");
+    expect(parsed?.command).toBe("rm -rf /tmp/build");
+    expect(parsed?.workspace).toBe("/repo");
+  });
+
+  test("Copilot postToolUse camelCase payload maps to post-tool-use (issue #79)", () => {
+    const raw = JSON.stringify({
+      hookEventName: "postToolUse",
+      toolName: "create",
+      toolArgs: { path: "/repo/secret.txt" },
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("post-tool-use");
+    expect(parsed?.tool).toBe("create");
+    expect(parsed?.files).toEqual(["/repo/secret.txt"]);
+  });
+
+  test("Copilot sessionStart maps to pre-tool-use (recognized no-op gate, issue #79)", () => {
+    const raw = JSON.stringify({ hookEventName: "sessionStart", cwd: "/repo" });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("pre-tool-use");
+    expect(parsed?.workspace).toBe("/repo");
+  });
+
+  test("Copilot sessionEnd maps to stop (issue #79)", () => {
+    const raw = JSON.stringify({ hookEventName: "sessionEnd" });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("stop");
+  });
+
+  test("Copilot unmapped events (errorOccurred/preCompact/agentStop/etc.) return null — caller fail-opens distinctly (issue #79)", () => {
+    // Each event name below is not modeled in `mapCopilotEvent` and must return
+    // null from `parseHookInput` so the caller fail-opens distinctly (not silently
+    // allow). If a future refactor accidentally maps one of these to a real
+    // internal event, this test will fail loud.
+    const unmapped = [
+      "errorOccurred",
+      "preCompact",
+      "agentStop",
+      "subagentStart",
+      "subagentStop",
+      "permissionRequest",
+      "notification",
+      "totallyUnmappedEvent",
+    ];
+    for (const name of unmapped) {
+      const raw = JSON.stringify({ hookEventName: name });
+      expect(parseHookInput(raw)).toBeNull();
+    }
   });
 
   test("legacy {event:'pre-write',files:[...]} shape still parses (back-compat)", () => {
@@ -388,10 +493,10 @@ describe("live guardrail detection", () => {
       mkdirSync(claude, { recursive: true });
       writeFileSync(join(claude, "settings.json"), '{"hooks":{}}');
       expect(liveGuardrailArmed(dir)).toBe(false);
-      writeFileSync(
-        join(claude, "settings.json"),
-        '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"vf hook"}]}]}}',
-      );
+      // Round-trip the real Claude generator (issue #79 re-review: the previous
+      // hand-written `"vf hook"` substring masked a real bug where the probe
+      // never matched generator output. Generator emits `node <abs> hook`).
+      writeFileSync(join(claude, "settings.json"), claudeHookConfig());
       expect(liveGuardrailArmed(dir)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -409,6 +514,68 @@ describe("live guardrail detection", () => {
         '{"note":"run vf hook manually","hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo hi"}]}]}}',
       );
       expect(liveGuardrailArmed(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // --- Issue #79: Copilot config must also be detected as a live guardrail ---
+  // (re-review: previous version of this test hard-coded the literal "vf hook"
+  // string in the mock JSON — that masks the real bug where the probe never
+  // matches the actual generator output. Now we round-trip the real generator.)
+  test("ON when .github/hooks/copilot.json has preToolUse delegating to vf hook (issue #79)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-copilot-"));
+    try {
+      const ghHooks = join(dir, ".github", "hooks");
+      mkdirSync(ghHooks, { recursive: true });
+      // Empty file → OFF
+      writeFileSync(join(ghHooks, "copilot.json"), '{"version":1,"hooks":{}}');
+      expect(liveGuardrailArmed(dir)).toBe(false);
+      // preToolUse wired by the real generator → ON
+      const realConfig = JSON.parse(copilotHookConfig()) as {
+        hooks: { preToolUse: Array<Record<string, unknown>> };
+      };
+      // Sanity: the generator's bash field actually contains the sentinel
+      const generatedBash = String(realConfig.hooks.preToolUse[0]?.bash ?? "");
+      expect(generatedBash).toContain("vibeflow-guardrail");
+      writeFileSync(join(ghHooks, "copilot.json"), JSON.stringify(realConfig));
+      expect(liveGuardrailArmed(dir)).toBe(true);
+      // postToolUse only (no preToolUse) → OFF — preToolUse is the veto point.
+      // Strip preToolUse, keep postToolUse; the probe must NOT light up on a
+      // postToolUse-only config (issue #79 re-review: previously the test used
+      // the literal "vf hook" string and the function would still report ON).
+      const postOnly = JSON.parse(copilotHookConfig()) as {
+        hooks: Record<string, unknown>;
+      };
+      const hooksOnlyPost = { hooks: { postToolUse: postOnly.hooks.postToolUse } };
+      writeFileSync(join(ghHooks, "copilot.json"), JSON.stringify(hooksOnlyPost));
+      expect(liveGuardrailArmed(dir)).toBe(false);
+      // Hand-written config that mentions "vf hook" but does NOT delegate
+      // (a script the user added, not the generator) → still OFF: prevents
+      // false-positive "armed" reports for unrelated commands.
+      writeFileSync(
+        join(ghHooks, "copilot.json"),
+        '{"version":1,"hooks":{"preToolUse":[{"type":"command","bash":"echo vf hook"}]}}',
+      );
+      expect(liveGuardrailArmed(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // --- Issue #79 re-review: Claude probe must also work against the REAL
+  // generator output (was broken pre-re-review: only matched hand-written
+  // "vf hook" substrings, never `node <abs>/dist/cli.js hook`).
+  test("ON when .claude/settings.json has PreToolUse delegating to real vf hook (issue #79 re-review)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-claude-real-"));
+    try {
+      const claudeDir = join(dir, ".claude");
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(join(claudeDir, "settings.json"), '{"hooks":{"PreToolUse":[]}}');
+      expect(liveGuardrailArmed(dir)).toBe(false);
+      // Real generator output (node <abs> hook)
+      writeFileSync(join(claudeDir, "settings.json"), claudeHookConfig());
+      expect(liveGuardrailArmed(dir)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

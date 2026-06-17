@@ -770,7 +770,7 @@ describe("hooks emit is non-destructive by default (bug 2)", () => {
   const EMITTED = [
     ".claude/settings.json",
     ".codex/hooks.json",
-    ".github/copilot-hooks.json",
+    ".github/hooks/copilot.json",
     ".githooks/pre-commit",
     ".githooks/post-checkout",
     ".githooks/post-merge",

@@ -19,7 +19,7 @@ engine's native hook events to `vf hook`:
 ```text
 .claude/settings.json        → Claude PreToolUse/PostToolUse/Stop hooks → `vf hook`
 .codex/hooks.json            → Codex post-command/post-write/verify-result → `vf hook`
-.github/copilot-hooks.json   → Copilot post-command/post-write/verify-result → `vf hook`
+.github/hooks/copilot.json   → Copilot preToolUse (fail-closed) + postToolUse → `vf hook`
 .githooks/pre-commit         → shell hook routing staged files through `vf hook`
 ```
 
@@ -35,8 +35,9 @@ native, vetoing interception point. This cannot be assumed for every engine:
 
 ```text
 Claude Code → native blocking hooks available; full pre-action enforcement.
-Codex CLI   → no equivalent vetoing pre-command/pre-write hook today.
-Copilot CLI → no equivalent vetoing pre-command/pre-write hook today.
+Codex CLI   → no equivalent vetoing pre-tool hook today; detection-only.
+Copilot CLI → native preToolUse (fail-closed: non-zero exit DENIES the tool call);
+              full pre-action enforcement.
 ```
 
 Because the security guarantees (read-only by default, no silent install, `block` on
@@ -47,13 +48,14 @@ hooks degrades to detection-only. VibeFlow currently implements the fallback:
 Option A (future): run the engine under a VibeFlow-imposed process-level enforcement
   layer (sandbox / restricted FS overlay / shell-command proxy / PTY interceptor) that
   applies the same allow|warn|require_approval|block decisions independent of native hooks.
-Option B (implemented): only Claude Code gets vetoing pre-action hooks (PreToolUse); Codex
-  and Copilot are wired DETECTION-ONLY (post-command/post-write/verify-result events) and a
-  downgrade banner is printed to the user before such an engine launches.
+Option B (implemented, issue #79): Claude Code AND Copilot get vetoing pre-action hooks
+  (PreToolUse / preToolUse); Codex is wired DETECTION-ONLY (post-command/post-write
+  /verify-result events) and a downgrade banner is printed to the user before Codex
+  launches.
 ```
 
 The hook adapter (`src/hooks/adapters.ts`) exposes an enforcement-capability descriptor
-(`engineEnforcement` → `native` for Claude, `post-hoc-only` for Codex/Copilot) so the
+(`engineEnforcement` → `native` for Claude and Copilot, `post-hoc-only` for Codex) so the
 orchestrator knows, per engine, whether pre-action blocking is real or downgraded. When it
 is downgraded, `downgradeBannerText` is surfaced before the run starts.
 

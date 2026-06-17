@@ -2382,11 +2382,32 @@ export function hookSelftest(
   return 0;
 }
 
-/** True when .claude/settings.json wires a PreToolUse hook whose command delegates to
- * `vf hook` — the only way the live per-tool-call guardrail is actually armed. Parses the
- * JSON and inspects the PreToolUse entries so an unrelated mention of "vf hook" can't read
- * as ON. */
+/** True when an engine's hook config actually delegates to `vf hook` (the only way the
+ *  live per-tool-call guardrail is armed). For Claude Code, that means a `PreToolUse`
+ *  entry in `.claude/settings.json` whose command points at our CLI. For GitHub
+ *  Copilot, a `preToolUse` entry in `.github/hooks/copilot.json` whose `bash` /
+ *  `powershell` field points at our CLI. Codex has no native pre-tool veto, so its
+ *  config alone does not arm the guardrail. The probe matches on either the
+ *  `# vibeflow-guardrail` sentinel (Copilot) or a `dist/cli.js hook` argv (Claude) so
+ *  unrelated mentions of "vf hook" can never read as ON (issue #79 re-review). */
+
+/** Stable sentinel embedded by `hookCommand()` in every generated shell command.
+ *  Used by `liveGuardrailArmed` to detect a real config (issue #79 re-review: the
+ *  earlier `vf hook` substring never matched real generator output, which emits
+ *  `node "<abs>" hook` for Claude and `"<abs>" hook # vibeflow-guardrail` for Copilot). */
+const GUARDRAIL_SENTINEL = "vibeflow-guardrail";
+
 export function liveGuardrailArmed(base: string): boolean {
+  // Claude Code: .claude/settings.json with a PreToolUse entry that delegates to `vf hook`.
+  if (liveGuardrailArmedClaude(base)) return true;
+  // GitHub Copilot CLI: .github/hooks/copilot.json with a preToolUse entry that
+  // delegates to `vf hook` (issue #79 — Copilot's preToolUse is fail-closed).
+  if (liveGuardrailArmedCopilot(base)) return true;
+  // Codex: no native pre-tool veto today, so its config alone does not arm the guardrail.
+  return false;
+}
+
+function liveGuardrailArmedClaude(base: string): boolean {
   try {
     const raw = readFileSync(join(base, ".claude", "settings.json"), "utf8");
     const parsed = JSON.parse(raw) as {
@@ -2395,13 +2416,44 @@ export function liveGuardrailArmed(base: string): boolean {
     const pre = parsed.hooks?.PreToolUse;
     if (!Array.isArray(pre)) return false;
     return pre.some((entry) =>
-      (entry.hooks ?? []).some(
-        (h) => typeof h.command === "string" && /\bvf\s+hook\b/.test(h.command),
-      ),
+      (entry.hooks ?? []).some((h) => {
+        if (typeof h.command !== "string") return false;
+        // Claude's generator emits `node "<abs>" hook` — match on the absolute-path
+        // marker (it always ends in dist/cli.js) so this works on real configs.
+        return commandDelegatesToVibeflow(h.command);
+      }),
     );
   } catch {
     return false;
   }
+}
+
+function liveGuardrailArmedCopilot(base: string): boolean {
+  try {
+    const raw = readFileSync(join(base, ".github", "hooks", "copilot.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      hooks?: { preToolUse?: Array<{ bash?: unknown; powershell?: unknown }> };
+    };
+    const pre = parsed.hooks?.preToolUse;
+    if (!Array.isArray(pre)) return false;
+    return pre.some((entry) => {
+      const bash = typeof entry.bash === "string" ? entry.bash : "";
+      const ps = typeof entry.powershell === "string" ? entry.powershell : "";
+      return commandDelegatesToVibeflow(bash) || commandDelegatesToVibeflow(ps);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Returns true iff a shell command line was emitted by VibeFlow's hook generator.
+ *  Matches on either the `# vibeflow-guardrail` sentinel (Copilot; bash/sh comment)
+ *  or a trailing `dist/cli.js` argv token followed by `hook` (Claude; unquoted path).
+ *  Both are stable markers that hand-written configs will not contain by accident. */
+function commandDelegatesToVibeflow(cmd: string): boolean {
+  if (cmd.includes(GUARDRAIL_SENTINEL)) return true;
+  // Match Claude's pattern: `node /abs/path/dist/cli.js hook`
+  return /dist\/cli\.js\s+hook\b/.test(cmd);
 }
 
 /** A loud, actionable note when the live guardrail is OFF — silence reads as "protected". */
