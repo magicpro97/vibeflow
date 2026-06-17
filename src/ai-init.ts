@@ -20,8 +20,13 @@ import { type UnitDispatcher, type UnitOutcome, orchestrateUnits } from "./orche
 import { type EngineReadiness, preflightAll } from "./preflight.js";
 import { type ProjectProfile, renderFindingsTable, scanRepo } from "./scanner.js";
 
-/** Engine priority for AI init: prefer engines that produce higher-quality analysis. */
-const ENGINE_PRIORITY: Engine[] = ["claude", "copilot", "codex"];
+/**
+ * Engine priority comes from `ENGINES` in `core.ts` — single source of
+ * truth shared by `preflight-delegate.ts` (first-ready picker),
+ * `init-intake.ts` (default engines), and this module. The audit (C3)
+ * found that this module previously had its own `ENGINE_PRIORITY`
+ * constant that disagreed with `core.ts` and with docs/USER_GUIDE.md.
+ */
 
 /** Files the AI is asked to inspect and potentially edit. */
 const INSTRUCTION_FILES = [
@@ -247,7 +252,7 @@ const UNAVAILABLE_RE = /not found|unavailable|not installed|cli not found|missin
  */
 export function selectBestEngine(readiness: EngineReadiness[]): Engine | null {
   const ready = new Set(readiness.filter((r) => r.level === "ready").map((r) => r.engine));
-  for (const e of ENGINE_PRIORITY) {
+  for (const e of ENGINES) {
     if (ready.has(e)) return e;
   }
   // Fallback: engine installed but probe failed or auth issue → try it anyway
@@ -256,7 +261,7 @@ export function selectBestEngine(readiness: EngineReadiness[]): Engine | null {
       .filter((r) => r.level === "probe-failed" || r.level === "no-auth")
       .map((r) => r.engine),
   );
-  for (const e of ENGINE_PRIORITY) {
+  for (const e of ENGINES) {
     if (fallback.has(e)) return e;
   }
   return null;

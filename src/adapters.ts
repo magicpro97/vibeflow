@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
 import { type RoleName, getRoleSpec, roleContextFromProfile } from "./agents/role-templates.js";
 import type { RoleSpec } from "./agents/role.js";
-import { CTX_DIR, type Engine, VERSION, cwd } from "./core.js";
+import { CTX_DIR, ENGINES, type Engine, VERSION, cwd } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
 
 /** Banner shown in every generated instruction file so agents know VibeFlow is present. */
@@ -220,7 +220,7 @@ export function agentFiles(
   profile: ProjectProfile,
   roles: RoleName[],
   useAi = true,
-  engines: readonly AgentEngine[] = ["claude", "codex", "copilot"] as const,
+  engines: readonly AgentEngine[] = ENGINES as readonly AgentEngine[],
 ): Record<string, string> {
   const ctx = roleContextFromProfile(profile);
   const out: Record<string, string> = {};

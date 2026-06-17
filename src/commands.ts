@@ -399,7 +399,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   const targetEngines: readonly AgentEngine[] =
     gate.engines.length > 0
       ? (gate.engines as readonly AgentEngine[])
-      : (["claude", "codex", "copilot"] as const);
+      : (ENGINES as readonly AgentEngine[]);
   Object.assign(files, agentFiles(profile, roles, useAi, targetEngines));
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
   // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`

@@ -46,7 +46,17 @@ export const VERSION = readVersion();
 export const CTX_DIR = ".vibeflow";
 
 export type Engine = "claude" | "codex" | "copilot";
-export const ENGINES: Engine[] = ["claude", "codex", "copilot"];
+
+/**
+ * Canonical engine priority. Single source of truth for "which engine
+ * wins when more than one is ready?" — also used as the default-arg
+ * iteration order everywhere we render agent files / skill roots.
+ *
+ * The user-facing doc says: `claude > copilot > codex`. If you change
+ * this list, you MUST also update docs/USER_GUIDE.md AND the
+ * cross-file invariant test in test/engine-priority.test.ts.
+ */
+export const ENGINES: Engine[] = ["claude", "copilot", "codex"];
 
 export type GateState = "pass" | "fail" | "running" | "pending";
 
