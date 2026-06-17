@@ -211,6 +211,41 @@ describe("adapters", () => {
     expect(p).toContain("→ codex");
     expect(p).toContain("JSON summary");
   });
+
+  test("dispatch prompt trims trailing whitespace from goal so footer has no double-newlines (issue #91)", () => {
+    // User-provided goal with trailing whitespace and an embedded newline. Without trim,
+    // the footer "Powered by VibeFlow" line is preceded by 3+ newlines (double-blank).
+    const ctx = { ...defaultContext(), goal: "ship the thing\n\n" };
+    const p = dispatchPrompt("codex", ctx, ["auth"]);
+    // The line right before "Work units:" must not contain trailing whitespace OR an extra blank line.
+    // Specifically: the "Goal:" line should end with the user's goal text, then exactly one "\n".
+    const goalLineEnd = p.indexOf("Work units:");
+    expect(goalLineEnd).toBeGreaterThan(0);
+    const between = p.slice(0, goalLineEnd);
+    // The user's goal "ship the thing" must appear, trimmed (no trailing "\n\n").
+    expect(between).toContain("Goal: ship the thing\n");
+    expect(between).not.toContain("ship the thing\n\n");
+  });
+
+  test("engine body trims trailing whitespace from goal so 'Powered by VibeFlow' footer has no double-newlines (issue #91)", () => {
+    const ctx = { ...defaultContext(), goal: "ship the thing\n\n" };
+    const body = engineFiles("codex", ctx, false)["AGENTS.md"] ?? "";
+    expect(body).not.toBe("");
+    // The "Powered by VibeFlow" footer (the one OUTSIDE the backticked banner mention) is the
+    // line at the very end of the shared block. Find the LAST occurrence.
+    const goalIdx = body.indexOf("Goal: ship the thing");
+    const footerIdx = body.lastIndexOf("Powered by VibeFlow v");
+    expect(goalIdx).toBeGreaterThan(-1);
+    expect(footerIdx).toBeGreaterThan(goalIdx);
+    // The goal line must end with a single "\n" (the user's "\n\n" was trimmed, then the template
+    // adds its own "\n\n" -> exactly one blank line between goal and the next section).
+    const gap = body.slice(goalIdx, footerIdx);
+    expect(gap.startsWith("Goal: ship the thing\n")).toBe(true);
+    // The "Powered by VibeFlow" footer must be preceded by at most ONE blank line (i.e. "\n\n"
+    // at most before the footer) — never "\n\n\n" or more.
+    const beforeFooter = body.slice(0, footerIdx);
+    expect(beforeFooter.endsWith("\n\n")).toBe(true);
+  });
 });
 
 describe("cli help routing", () => {
