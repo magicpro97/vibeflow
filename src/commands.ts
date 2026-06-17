@@ -1401,9 +1401,6 @@ export async function init(
     for (const rel of result.backedUp ?? []) {
       out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
-    for (const rel of result.backedUp ?? []) {
-      out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
-    }
   }
 
   // Phase 1.5: Deterministic workflow artifacts (from questionnaire phases)

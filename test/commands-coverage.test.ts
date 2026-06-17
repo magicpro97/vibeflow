@@ -2997,7 +2997,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
 describe("commands.init: dropped readiness, files, backedUp branches (line 1258-1273)", () => {
   test("init non-dry: prints dropped engines, files, backed-up (line 1258-1273)", async () => {
     // Pre-populate CLAUDE.md with hand-edited content so applyIntake
-    // populates `backedUp` → triggers the duplicate for-loops.
+    // populates `backedUp` → exercises the backup-logging branch.
     const dir = mkdtempSync(join(tmpdir(), "vf-init-dropped-"));
     const origCwd = process.cwd();
     process.chdir(dir);
