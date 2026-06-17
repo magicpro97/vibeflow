@@ -8,10 +8,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { validateSkillDir } from "./validator.js";
 
 const CANONICAL = join(".vibeflow", "skills");
-const MIRRORS = [join(".claude", "skills"), join(".agents", "skills"), join(".github", "skills")];
+/**
+ * Mirror roots for skill sync. The list is imported from
+ * `workflow-artifacts.ts:SKILL_MIRRORS` so that the read side
+ * (`registry.ts`, `validator.ts`) and the write side never drift.
+ * Audit (C2) found the write side had a different list from the
+ * read side, hiding synced skills from `vf skills list`.
+ */
+const MIRRORS = SKILL_MIRRORS;
 
 export type SyncMode = "pointer" | "full";
 

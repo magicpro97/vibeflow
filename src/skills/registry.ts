@@ -8,9 +8,22 @@ import {
   type SkillStatus,
 } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
+import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 
-/** Directories (relative to a repo) that may contain `<name>/SKILL.md` folders. */
-const SKILL_ROOTS = [join(CTX_DIR, "skills"), join(".kiro", "skills"), join(".claude", "skills")];
+/**
+ * Directories (relative to a repo) that may contain `<name>/SKILL.md` folders.
+ *
+ * Built from two single sources of truth:
+ *  - CTX_DIR/skills        — the canonical local-authoring root
+ *  - SKILL_MIRRORS          — per-engine roots (workflow-artifacts.ts)
+ *  - .kiro/skills           — Kiro engine (third-party, not in our mirror list)
+ *
+ * Audit (C2) found this list had drifted from the WRITE side
+ * (`src/skills/sync.ts:MIRRORS`), so a skill synced to `.agents/skills/`
+ * or `.github/skills/` was invisible to `vf skills list`. The fix:
+ * derive from `SKILL_MIRRORS` so they can never disagree.
+ */
+const SKILL_ROOTS: string[] = [join(CTX_DIR, "skills"), join(".kiro", "skills"), ...SKILL_MIRRORS];
 
 const VALID_STATUS: SkillStatus[] = [
   "verified",

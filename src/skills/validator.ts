@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { CTX_DIR } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
+import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 
 const ALLOWED_CHILDREN = new Set(["SKILL.md", "LICENSE.txt", "scripts", "references", "assets"]);
 const ALLOWED_DIRS = new Set(["scripts", "references", "assets"]);
@@ -106,11 +108,7 @@ export function validateSkillDir(
   return { ok: errors.length === 0, dir, name: name || undefined, errors, warnings };
 }
 
-const SKILL_ROOTS = [
-  join(".vibeflow", "skills"),
-  join(".kiro", "skills"),
-  join(".claude", "skills"),
-];
+const SKILL_ROOTS = [join(CTX_DIR, "skills"), join(".kiro", "skills"), ...SKILL_MIRRORS];
 
 export interface SkillRootsValidationResult {
   ok: boolean;

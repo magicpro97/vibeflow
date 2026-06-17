@@ -32,6 +32,28 @@ const ENGINE_CONFIGS: Record<AgentEngine, EngineConfig> = {
   copilot: { instructionFiles: [".github/copilot-instructions.md"], skillRoot: ".github/skills" },
 };
 
+/**
+ * Single source of truth for per-engine skill mirror directories.
+ *
+ * This is the WRITE side: `vf init` and `vf skills sync` copy skills
+ * from `.vibeflow/skills/<name>/` into each of these roots. The READ
+ * side (`src/skills/registry.ts` and `src/skills/validator.ts`) MUST
+ * scan the same roots so that a freshly-synced skill is discoverable
+ * by `vf skills list` / `vf skills validate`.
+ *
+ * Audit (C2) found that this list was duplicated as `MIRRORS` in
+ * `src/skills/sync.ts` AND that the read side had a DIFFERENT,
+ * overlapping set of roots (`.vibeflow`, `.kiro`, `.claude`), missing
+ * `.agents` and `.github` — so a skill synced to codex/copilot mirrors
+ * was invisible to `vf skills list`. The fix: both sides import
+ * `SKILL_MIRRORS` from this module.
+ */
+export const SKILL_MIRRORS: string[] = [
+  ENGINE_CONFIGS.claude.skillRoot,
+  ENGINE_CONFIGS.codex.skillRoot,
+  ENGINE_CONFIGS.copilot.skillRoot,
+];
+
 // ── Public options ─────────────────────────────────────────────────────────
 
 export interface WorkflowArtifactOpts {
