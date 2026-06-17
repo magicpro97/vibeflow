@@ -3424,4 +3424,59 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("init with refused preflight and workflowPhases skips copySkillCreator (line 1426)", async () => {
+    // When preflight refuses (no engine ready), the workflow
+    // artifacts are still written (deterministic, no engine
+    // needed) but the skill-creator skill should NOT be copied
+    // into engine folders — no engine is ready to use it.
+    // Pre-fix: copySkillCreator ran unconditionally and the
+    // SKILL.md files were left in dead engine dirs.
+    // Post-fix: the new `if (!result.refused)` guard short-
+    // circuits the copy. Verify by checking that the skill
+    // file is NOT present in any engine dir.
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-refused-wfa-"));
+    const origCwd = process.cwd();
+    const origErr = console.error;
+    const origLog = console.log;
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    console.error = (...args: unknown[]) => stderrLines.push(args.join(" "));
+    console.log = (...args: unknown[]) => stdoutLines.push(args.join(" "));
+    const origIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: false, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          // All engines refused — gates the workflow to
+          // deterministic output only.
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "no-binary" as const,
+              detail: "claude not installed",
+              checkedAt: "2026-06-16",
+            },
+          ],
+          answers: {
+            engines: ["claude"],
+            workflowPhases: [{ name: "Plan", description: "Outline the work" }],
+          },
+        },
+      );
+      // Refused exits 1; what matters is the side-effect check below.
+      expect(code).toBeGreaterThanOrEqual(0);
+      // No SKILL.md should be in any engine folder.
+      const claudeSkill = join(dir, ".claude", "skills", "skill-creator", "SKILL.md");
+      expect(existsSync(claudeSkill)).toBe(false);
+    } finally {
+      process.chdir(origCwd);
+      console.log = origLog;
+      console.error = origErr;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -1423,8 +1423,15 @@ export async function init(
       }
       out("vf", c.bold(`\nGenerated ${artifactFiles.length} workflow artifact(s).`));
     }
-    for (const rel of copySkillCreator(cwd(), targetEngines)) {
-      out("vf", c.green(`+ ${rel}/SKILL.md`));
+    // Only copy the skill-creator into engine folders when at
+    // least one engine is ready. If preflight refused (no engines
+    // ready), the skill files would sit unused; better to skip
+    // the I/O and let the user re-run init when an engine is
+    // installed.
+    if (!result.refused) {
+      for (const rel of copySkillCreator(cwd(), targetEngines)) {
+        out("vf", c.green(`+ ${rel}/SKILL.md`));
+      }
     }
   }
 
