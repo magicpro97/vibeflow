@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -209,6 +210,12 @@ export function writeState(base: string, state: WorkflowState): void {
  * filesystem, so the target either has the previous content or the new content — never a mix.
  * Same-FS invariant: the `.tmp-<pid>-<ts>` suffix is constructed in the same directory as the
  * target (cross-FS rename degrades to copy+delete, which is NOT atomic).
+ * Permission invariant: the temp file is chmod'd to 0o600 (owner read/write only) BEFORE the
+ * rename, so the target — which inherits the temp's mode on POSIX — can never be world-readable.
+ * Mitigates CWE-732 (Incorrect Permission Assignment for Critical Resource): the temp file's
+ * window of world-readability is closed, and the renamed target is guaranteed 0o600 regardless
+ * of process umask. On Windows `chmodSync` is a best-effort no-op (NTFS uses ACLs, not POSIX
+ * mode bits) but the rename still inherits whatever the temp had.
  * Test seam: callers can inject a throwing `writeFileSync` to simulate a SIGKILL mid-write. */
 export function writeFileSafe(
   path: string,
@@ -217,15 +224,22 @@ export function writeFileSafe(
     mkdirSync?: (p: string, opts: { recursive: boolean }) => void;
     writeFileSync?: (p: string, data: string) => void;
     renameSync?: (from: string, to: string) => void;
+    chmodSync?: (p: string, mode: number) => void;
   } = {},
 ): void {
   const _mkdir = inject.mkdirSync ?? mkdirSync;
   const _write = inject.writeFileSync ?? writeFileSync;
   const _rename = inject.renameSync ?? renameSync;
+  const _chmod = inject.chmodSync ?? chmodSync;
   _mkdir(dirname(path), { recursive: true });
   const finalContent = content.endsWith("\n") ? content : `${content}\n`;
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   _write(tmp, finalContent);
+  // Tighten the temp file's permissions BEFORE the rename. The renamed
+  // target inherits the temp's mode on POSIX, so the chmod has to happen
+  // here — after the rename, the target is no longer reachable as `tmp`
+  // and chmod(tmp) would touch the wrong path.
+  _chmod(tmp, 0o600);
   _rename(tmp, path);
 }
 

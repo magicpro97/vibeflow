@@ -45,11 +45,14 @@ describe("core.readVersion (test seam)", () => {
 });
 
 import {
+  chmodSync,
+  existsSync,
   writeFileSync as fsWriteFileSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -128,6 +131,47 @@ describe("core.writeFileSafe (atomic writeFileSafe)", () => {
     ).toThrow("SIGKILL");
     // The previous target is preserved — NOT truncated to 0 bytes (the original bug).
     expect(readFileSync(target, "utf8")).toBe('{"previous":true}\n');
+  });
+
+  test("writeFileSafe: created file has 0o600 permissions (CWE-732, POSIX only)", () => {
+    // SECURITY: writeFileSafe writes to a temp file then renames. The
+    // temp file is created with the process umask (typically 0o644,
+    // world-readable). The renamed target inherits the temp's mode.
+    // For files that may contain secrets (settings, evidence, API
+    // tokens) the file MUST be 0o600 (owner read/write only) to
+    // prevent other local users on a multi-user system from reading
+    // them. POSIX-only assertion; on Windows the chmod call is a
+    // best-effort no-op so we skip.
+    if (process.platform === "win32") return;
+    const target = join(dir, "settings.json");
+    writeFileSafe(target, '{"apiKey":"secret"}');
+    const mode = statSync(target).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  test("writeFileSafe: 0o600 applies to NESTED target too (no inheritance from parent dir)", () => {
+    // The CWE-732 fix must chmod the temp file BEFORE the rename
+    // regardless of how deep the target lives in the tree. A
+    // regression that only chmods the parent dir (or skips on
+    // nested paths) would fail this test.
+    if (process.platform === "win32") return;
+    const target = join(dir, "a", "b", "c", "secret.json");
+    writeFileSafe(target, '{"x":1}');
+    const mode = statSync(target).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  test("writeFileSafe: 0o600 applies even when previous file had looser permissions (overwrite)", () => {
+    // A pre-existing target file may have been created with default
+    // permissions before this fix landed. The new write must tighten
+    // the mode to 0o600, not leave it at 0o644.
+    if (process.platform === "win32") return;
+    const target = join(dir, "settings.json");
+    fsWriteFileSync(target, '{"old":true}\n');
+    chmodSync(target, 0o644);
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    writeFileSafe(target, '{"new":true}');
+    expect(statSync(target).mode & 0o777).toBe(0o600);
   });
 
   test("writeFileSafe: renameSync failure throws but tmp is left for inspection", () => {
