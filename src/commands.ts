@@ -135,16 +135,17 @@ import type {
   WorkflowPhase,
   WorkflowState,
 } from "./commands/_shared.js";
+// === Re-export test seams (issue #80, phase 2/14) ===
+// `tipState` + `resetTipStateForTests` live in src/commands/seams.ts.
+// The facade re-exports them so existing callers
+// (`import { tipState, resetTipStateForTests } from "../commands.js"`) keep
+// working. The body also imports `tipState` directly because the
+// `orchestrate` function (still in this file) uses it.
+export { tipState, resetTipStateForTests } from "./commands/seams.js";
+import { tipState } from "./commands/seams.js";
 export * from "./commands/_shared.js";
 
 /** Global state: the "watch live" tip prints at most once per process. */
-// Test seam: exported so unit tests can reset the once-only tip
-// flag (line 1052) before exercising it. Production callers never
-// call this — the tip is genuinely once-only per process.
-const tipState = { shown: false };
-export function resetTipStateForTests(): void {
-  tipState.shown = false;
-}
 
 /** Color a readiness level for the doctor table. */
 function readinessMark(level: EngineReadiness["level"]): string {
