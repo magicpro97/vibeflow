@@ -364,6 +364,35 @@ export function needsShellForCommand(cmd: string): boolean {
   return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(cmd);
 }
 
+/**
+ * Variant suffixes tried, in order, when the bare name is absent on PATH.
+ * Windows only — POSIX shells don't auto-resolve extensions the way
+ * `CreateProcess` does, and synthesizing a `.cmd` path that doesn't exist
+ * would mask the real "not installed" condition. Issue #87.
+ */
+const WINDOWS_SHIM_VARIANTS = [".cmd", ".bat", ".ps1"] as const;
+
+/**
+ * Resolve an engine binary, falling back to Windows shim variants
+ * (`.cmd` / `.bat` / `.ps1`) when the bare name is absent on PATH. On
+ * POSIX, behaves identically to `resolveCommand` (no extensions
+ * synthesized). Returns the first variant that resolves, or undefined.
+ *
+ * Issue #87: previously `hasCommand("claude")` / `hasCommand("codex")` /
+ * `hasCommand("copilot")` returned false on Windows when npm installed the
+ * engine as a shim (e.g. `claude.cmd`), so preflight reported a false
+ * "no-binary". Use this helper for the engine-under-test presence check.
+ */
+export function resolveEngineBinary(engine: string): string | undefined {
+  const direct = resolveCommand(engine);
+  if (direct !== undefined) return engine;
+  if (process.platform !== "win32") return undefined;
+  for (const ext of WINDOWS_SHIM_VARIANTS) {
+    if (resolveCommand(`${engine}${ext}`) !== undefined) return `${engine}${ext}`;
+  }
+  return undefined;
+}
+
 /** Detect whether a command exists on PATH. */
 export function hasCommand(cmd: string): boolean {
   return resolveCommand(cmd) !== undefined;

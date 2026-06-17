@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { ENGINES, type Engine, hasCommand, needsShellForCommand, resolveCommand } from "./core.js";
+import {
+  ENGINES,
+  type Engine,
+  hasCommand,
+  needsShellForCommand,
+  resolveCommand,
+  resolveEngineBinary,
+} from "./core.js";
 
 /**
  * Engine readiness levels (most-actionable first):
@@ -107,6 +114,15 @@ function engineBinary(engine: Engine): string {
   return engine === "copilot" ? "copilot" : probeInvocation(engine).cmd;
 }
 
+/**
+ * Engine-binary name actually used at runtime: prefers the bare name, but
+ * falls back to the Windows shim variant (`.cmd` / `.bat` / `.ps1`) when
+ * the bare name is missing. Issue #87.
+ */
+function engineBinaryResolved(engine: Engine): string {
+  return resolveEngineBinary(engineBinary(engine)) ?? engineBinary(engine);
+}
+
 function ghAuthInvocation(): ProbeInvocation {
   return { cmd: "gh", args: ["auth", "status"], input: "" };
 }
@@ -207,12 +223,29 @@ function containsToken(s: string): boolean {
 function checkCopilotAuth(
   has: (cmd: string) => boolean,
   spawner: ProbeSpawner,
+  usesDefaultHas: boolean,
 ): { level: ReadinessLevel; detail: string } {
-  if (!has("gh")) return { level: "no-binary", detail: ghInstallHint() };
-  const { cmd, args, input } = ghAuthInvocation();
-  const result = spawner(cmd, args, input);
+  if (!hasGh(has, usesDefaultHas)) return { level: "no-binary", detail: ghInstallHint() };
+  // Issue #87: use the shim-resolved gh binary name on Windows when the
+  // default `has` is in use. Test-injected `has` skips the shim resolver
+  // to keep the test seam's contract.
+  const ghCmd = usesDefaultHas ? (resolveEngineBinary("gh") ?? "gh") : "gh";
+  const { args, input } = ghAuthInvocation();
+  const result = spawner(ghCmd, args, input);
   if (result.status === 0) return { level: "ready", detail: "copilot: GitHub auth OK" };
   return failedAuth("copilot", result);
+}
+
+/**
+ * Shim-aware gh presence check. When the default `has` is in use, fall
+ * back to the Windows shim resolver so a `gh.cmd` install is recognized
+ * (issue #87). When `has` is test-injected, honor its answer verbatim —
+ * `has: () => false` really means "not present".
+ */
+function hasGh(has: (cmd: string) => boolean, usesDefaultHas: boolean): boolean {
+  if (has("gh")) return true;
+  if (!usesDefaultHas) return false;
+  return resolveEngineBinary("gh") !== undefined;
 }
 
 /** Run the live probe attempts; caller wraps thrown errors into probe-failed. */
@@ -269,16 +302,25 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
   }
 
   const cmd = engineBinary(engine);
+  // Issue #87: bare-name `has` is insufficient on Windows (npm shims).
+  const usesDefaultHas = opts.has === undefined;
   if (!has(cmd)) {
-    const r = stamp("no-binary", installHint(engine));
-    writeToCache(engine, opts, r);
-    return r;
+    const shimCheck = usesDefaultHas ? resolveEngineBinary(cmd) : undefined;
+    if (shimCheck === undefined) {
+      const r = stamp("no-binary", installHint(engine));
+      writeToCache(engine, opts, r);
+      return r;
+    }
   }
-  const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
+  // Issue #87: resolve shim-aware name so the probe spawner is invoked
+  // with the actual executable on Windows.
+  const effectiveCmd = engineBinaryResolved(engine);
+  const resolvedCmd =
+    opts.spawner !== undefined ? effectiveCmd : (resolveCommand(effectiveCmd) ?? effectiveCmd);
 
   if (engine === "copilot") {
     try {
-      const auth = checkCopilotAuth(has, spawner);
+      const auth = checkCopilotAuth(has, spawner, usesDefaultHas);
       const r = stamp(auth.level, auth.detail);
       writeToCache(engine, opts, r);
       return r;
@@ -386,18 +428,23 @@ export async function checkEngineAsync(
   });
 
   const cmd = engineBinary(engine);
-  if (!has(cmd)) return Promise.resolve(stamp("no-binary", installHint(engine)));
+  // Issue #87: bare-name `has` is insufficient on Windows (npm shims).
+  const usesDefaultHasAsync = opts.has === undefined;
+  if (!has(cmd)) {
+    const shimCheck = usesDefaultHasAsync ? resolveEngineBinary(cmd) : undefined;
+    if (shimCheck === undefined) return Promise.resolve(stamp("no-binary", installHint(engine)));
+  }
   const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
 
   const spawner = opts.spawner;
 
-  if (engine === "copilot" && !has("gh")) {
+  if (engine === "copilot" && !hasGh(has, usesDefaultHasAsync)) {
     return Promise.resolve(stamp("no-binary", ghInstallHint()));
   }
 
   if (engine === "copilot" && spawner !== undefined) {
     try {
-      const auth = checkCopilotAuth(has, spawner);
+      const auth = checkCopilotAuth(has, spawner, usesDefaultHasAsync);
       return Promise.resolve(stamp(auth.level, auth.detail));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -406,8 +453,10 @@ export async function checkEngineAsync(
   }
 
   // copilot with no inject spawner → use defaultSpawner for gh auth
-  if (engine === "copilot" && has("gh")) {
-    const ghResult = defaultSpawner("gh", ["auth", "status"], "", GH_AUTH_TIMEOUT_MS);
+  if (engine === "copilot" && hasGh(has, usesDefaultHasAsync)) {
+    // Issue #87: use the shim-resolved gh binary name on Windows.
+    const ghCmd = usesDefaultHasAsync ? (resolveEngineBinary("gh") ?? "gh") : "gh";
+    const ghResult = defaultSpawner(ghCmd, ["auth", "status"], "", GH_AUTH_TIMEOUT_MS);
     if (ghResult.status === 0) {
       return Promise.resolve(stamp("ready", "copilot: GitHub auth OK"));
     }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolveEngineBinary } from "../src/core.js";
 import {
   type ProbeSpawner,
   anyReady,
@@ -921,5 +922,138 @@ describe("runAttempts (extracted helper)", () => {
     );
     expect(captured.level).toBe("no-auth");
     expect(captured.detail).toContain("not authenticated");
+  });
+});
+
+describe("preflight: engine-binary resolution (issue #87: shim variants for all engines)", () => {
+  // Issue #87: the engine-version probe was hard-coded to the bare binary
+  // name. On Windows, npm installs `claude`/`codex`/`copilot` as `.cmd`/`.bat`
+  // shims, so `Bun.which("claude")` returns undefined and preflight reports
+  // a false "no-binary". The fix: preflight must consult the shared
+  // `resolveEngineBinary(engine)` helper for the engine under test.
+  function withPlatform<T>(plat: NodeJS.Platform, fn: () => T): T {
+    const orig = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: plat, configurable: true });
+    try {
+      return fn();
+    } finally {
+      if (orig) Object.defineProperty(process, "platform", orig);
+    }
+  }
+
+  test("resolveEngineBinary falls back to .cmd for every engine, not just copilot", () => {
+    const claude = resolveEngineBinary("claude");
+    if (claude !== undefined) expect(claude).toBe("claude");
+    const codex = resolveEngineBinary("codex");
+    if (codex !== undefined) expect(codex).toBe("codex");
+  });
+
+  test("resolveEngineBinary returns undefined when bare name AND all shim variants miss on Windows", () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    (Bun as unknown as { which: typeof Bun.which }).which = (() =>
+      null) as unknown as typeof Bun.which;
+    try {
+      expect(resolveEngineBinary("claude")).toBeUndefined();
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+    }
+  });
+
+  test("checkEngine(claude) on Windows resolves through .cmd shim (no false no-binary)", () => {
+    const origWhich = Bun.which;
+    (Bun as unknown as { which: typeof Bun.which }).which = ((name: string) => {
+      if (name === "claude") return undefined;
+      if (name === "claude.cmd") return "C:\\shims\\claude.cmd";
+      return origWhich(name);
+    }) as typeof Bun.which;
+    try {
+      withPlatform("win32", () => {
+        const { spawn, calls } = recordingSpawner((cmd) => {
+          if (cmd === "claude.cmd") {
+            return { status: 0, stdout: JSON.stringify({ result: "READY" }) };
+          }
+          return { status: 1, stdout: "", code: "ENOENT", stderr: "spawn ENOENT" };
+        });
+        const r = checkEngine("claude", opts({ spawner: spawn }));
+        expect(r.level).toBe("ready");
+        expect(calls.some((c) => c.cmd === "claude.cmd")).toBe(true);
+      });
+    } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+    }
+  });
+
+  test("checkEngine resolves through .ps1 shim (covers the .ps1 variant in WINDOWS_SHIM_VARIANTS)", () => {
+    const origWhich = Bun.which;
+    (Bun as unknown as { which: typeof Bun.which }).which = ((name: string) => {
+      if (name === "claude") return undefined;
+      if (name === "claude.cmd") return undefined;
+      if (name === "claude.bat") return undefined;
+      if (name === "claude.ps1") return "C:\\shims\\claude.ps1";
+      return origWhich(name);
+    }) as typeof Bun.which;
+    try {
+      withPlatform("win32", () => {
+        const { spawn, calls } = recordingSpawner((cmd) => {
+          if (cmd === "claude.ps1")
+            return { status: 0, stdout: JSON.stringify({ result: "READY" }) };
+          return { status: 1, stdout: "", code: "ENOENT", stderr: "spawn ENOENT" };
+        });
+        const r = checkEngine("claude", opts({ spawner: spawn }));
+        expect(r.level).toBe("ready");
+        expect(calls.some((c) => c.cmd === "claude.ps1")).toBe(true);
+      });
+    } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+    }
+  });
+
+  test("checkEngine(codex) on Windows resolves through .bat shim (no false no-binary)", () => {
+    const origWhich = Bun.which;
+    (Bun as unknown as { which: typeof Bun.which }).which = ((name: string) => {
+      if (name === "codex") return undefined;
+      if (name === "codex.cmd") return undefined;
+      if (name === "codex.bat") return "C:\\shims\\codex.bat";
+      return origWhich(name);
+    }) as typeof Bun.which;
+    try {
+      withPlatform("win32", () => {
+        const { spawn, calls } = recordingSpawner((cmd) => {
+          if (cmd === "codex.bat") return { status: 0, stdout: "17 ok · 1 idle · 0 fail ok" };
+          return { status: 1, stdout: "", code: "ENOENT", stderr: "spawn ENOENT" };
+        });
+        const r = checkEngine("codex", opts({ spawner: spawn }));
+        expect(r.level).toBe("ready");
+        expect(calls.some((c) => c.cmd === "codex.bat")).toBe(true);
+      });
+    } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+    }
+  });
+
+  test("checkEngine(copilot) on Windows resolves gh through .cmd shim (no false no-binary)", () => {
+    const origWhich = Bun.which;
+    (Bun as unknown as { which: typeof Bun.which }).which = ((name: string) => {
+      if (name === "copilot") return "C:\\node\\copilot";
+      if (name === "gh") return undefined;
+      if (name === "gh.cmd") return "C:\\shims\\gh.cmd";
+      return origWhich(name);
+    }) as typeof Bun.which;
+    try {
+      withPlatform("win32", () => {
+        const { spawn, calls } = recordingSpawner((cmd) => {
+          if (cmd === "gh.cmd") return { status: 0, stdout: "Logged in" };
+          return { status: 1, stdout: "", code: "ENOENT", stderr: "spawn ENOENT" };
+        });
+        const r = checkEngine("copilot", opts({ spawner: spawn }));
+        expect(r.level).toBe("ready");
+        expect(calls.some((c) => c.cmd === "gh.cmd")).toBe(true);
+      });
+    } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+    }
   });
 });
