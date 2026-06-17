@@ -160,13 +160,22 @@ describe("copySkillCreator", () => {
 
 describe("generateWorkflowArtifacts", () => {
   test("empty phases returns empty written list and does not touch disk", () => {
-    const written = generateWorkflowArtifacts({
-      phases: [],
-      engines: ["claude"],
-      projectName: "p",
-      base: dir,
-    });
+    const warnings: string[] = [];
+    const written = generateWorkflowArtifacts(
+      {
+        phases: [],
+        engines: ["claude"],
+        projectName: "p",
+        base: dir,
+      },
+      { onWarn: (msg) => warnings.push(msg) },
+    );
     expect(written).toEqual([]);
+    // Issue #83: silent no-op on empty phases was a defect. Now warns
+    // so the caller knows the function was called with no work to do.
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("generateWorkflowArtifacts");
+    expect(warnings[0]).toMatch(/no\s+phases/i);
   });
 
   test("writes orchestrator agent file for each engine", () => {

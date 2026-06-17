@@ -63,6 +63,17 @@ export interface WorkflowArtifactOpts {
   base: string;
 }
 
+/**
+ * Dependency-injection slot for the warn callback used by
+ * `generateWorkflowArtifacts`. Default is `console.warn` in production;
+ * tests pass a capturing function to assert warnings without polluting
+ * stdout. Matches the `copySkillCreator` pattern at the top of this
+ * file.
+ */
+export interface GenerateArtifactsInject {
+  onWarn?: (msg: string) => void;
+}
+
 // ── Phase helpers ──────────────────────────────────────────────────────────
 
 function phaseSlug(phase: WorkflowPhase): string {
@@ -440,9 +451,18 @@ export function buildEnrichmentPrompt(
 
 // ── Main entry point ───────────────────────────────────────────────────────
 
-export function generateWorkflowArtifacts(opts: WorkflowArtifactOpts): string[] {
+export function generateWorkflowArtifacts(
+  opts: WorkflowArtifactOpts,
+  inject: GenerateArtifactsInject = {},
+): string[] {
   const { phases, engines, projectName, base } = opts;
-  if (!phases.length) return [];
+  const onWarn = inject.onWarn ?? ((msg) => console.warn(msg));
+  if (!phases.length) {
+    // Issue #83: silent no-op was a defect. Surface a warning so the
+    // caller (and the user) knows nothing was generated.
+    onWarn("vibeflow: generateWorkflowArtifacts called with no phases — nothing to generate.");
+    return [];
+  }
 
   const written: string[] = [];
 
