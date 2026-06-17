@@ -72,25 +72,64 @@ is downgraded, `downgradeBannerText` is surfaced before the run starts.
 }
 ```
 
-## Universal hook output
+## Per-event output shape
 
+`vf hook` emits JSON to stdout and exits 0. The shape depends on the
+input event (see `src/hooks/runner.ts:presentDecision`):
+
+### PreToolUse (Claude native)
 ```json
 {
-  "decision": "require_approval",
-  "severity": "high",
-  "reason": "Installing a new dependency modifies the project and may run install scripts.",
-  "requiresApproval": true
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow" | "ask" | "deny",
+    "permissionDecisionReason": "<reasons joined with '; '>"
+  }
 }
 ```
 
-Allowed decisions:
+Mapping: `block` → `deny`, `require_approval` → `ask`, `allow`/`warn` → `allow`.
 
-```text
-allow
-warn
-require_approval
-block
+### Stop
+- Block: top-level `decision:block`
+  ```json
+  { "decision": "block", "reason": "<reasons joined with '; '>" }
+  ```
+- Risks but no block: feedback via `additionalContext`
+  ```json
+  {
+    "hookSpecificOutput": {
+      "hookEventName": "Stop",
+      "additionalContext": "<reasons joined with '; '>"
+    }
+  }
+  ```
+- Clean (no risks): `{}` (silent approval; `suppressOutput` is not valid
+  for Stop per the 2026 spec).
+
+### PostToolUse
+- No feedback: `{}` (allow to proceed; `suppressOutput` is NOT a no-op
+  substitute — Claude still parses it as a meaningful payload).
+- Feedback:
+  ```json
+  {
+    "hookSpecificOutput": {
+      "hookEventName": "PostToolUse",
+      "additionalContext": "<reasons joined with '; '>"
+    }
+  }
+  ```
+
+### Other events
+Top-level fields from the `HookResult` shape (`{decision, risk, reasons}`):
+```json
+{ "decision": "allow", "risk": "none", "reasons": [] }
 ```
+
+Allowed `decision` values: `allow | warn | require_approval | block`.
+There is **no** `severity` field and **no** `requiresApproval` field;
+Claude reads `permissionDecision` for PreToolUse, and `decision` (top-level
+or in `hookSpecificOutput`) for other events.
 
 ## Recommended hooks
 
