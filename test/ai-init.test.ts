@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -130,7 +138,13 @@ describe("buildAiInitPrompt", () => {
     // The bulky body lives on disk, not in argv. The engine reads it
     // via its own read_file tool.
     const dir = mkdtempSync(join(tmpdir(), "vf-instr-"));
-    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    mkdirSync(join(dir, ".vibeflow", "ai-context"), { recursive: true });
+    // Copy the runtime template into the test fixture so loadInstructionsBody
+    // finds it (post-#74 the body is read from disk, not inlined in src).
+    copyFileSync(
+      join(".vibeflow", "ai-context", "INSTRUCTIONS_TEMPLATE.md"),
+      join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS_TEMPLATE.md"),
+    );
     try {
       buildAiInitPrompt(profile, dir);
       const p = join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md");
@@ -146,7 +160,11 @@ describe("buildAiInitPrompt", () => {
 
   test("INSTRUCTIONS.md contains all task sections (moved out of prompt)", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-instr-sections-"));
-    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    mkdirSync(join(dir, ".vibeflow", "ai-context"), { recursive: true });
+    copyFileSync(
+      join(".vibeflow", "ai-context", "INSTRUCTIONS_TEMPLATE.md"),
+      join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS_TEMPLATE.md"),
+    );
     try {
       buildAiInitPrompt(profile, dir);
       const body = readFileSync(join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md"), "utf8");
