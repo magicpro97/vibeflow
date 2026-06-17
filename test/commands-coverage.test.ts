@@ -110,6 +110,37 @@ describe("commands.doctor branches", () => {
     expect(code).toBe(1);
   });
 
+  test("copilot and gh are independent checks (C6)", async () => {
+    // Pre-fix: doctor required both copilot AND gh to mark copilot as
+    // ready. The 4-CLI audit (2026-06-17) flagged this. Now copilot is
+    // checked independently of gh.
+    //
+    // Inject: node=ok, git=ok, copilot=ok, gh=missing, all others=ok.
+    // Expected: copilot shows as ok (green), gh shows as missing.
+    const hasCommand = (cmd: string): boolean => cmd !== "gh";
+    const readiness: EngineReadiness[] = [
+      { engine: "claude", level: "ready", detail: "r", checkedAt: "" },
+      { engine: "codex", level: "ready", detail: "r", checkedAt: "" },
+      { engine: "copilot", level: "ready", detail: "r", checkedAt: "" },
+    ];
+    const origLog = console.log;
+    const stdoutLines: string[] = [];
+    console.log = (...args: unknown[]) => stdoutLines.push(args.join(" "));
+    let code: number;
+    try {
+      code = await doctor({ refresh: true }, { hasCommand, readiness });
+    } finally {
+      console.log = origLog;
+    }
+    expect(code).toBe(0);
+    const stdout = stdoutLines.join("\n");
+    expect(stdout).toContain("copilot");
+    expect(stdout).toContain("gh");
+    // Both copilot and gh should be in the tool table as distinct rows.
+    expect(stdout).toMatch(/copilot/);
+    expect(stdout).toMatch(/gh/);
+  });
+
   test("probe with no inject: skipped when engines all not-ready is unreachable; reach the path", async () => {
     // Default path runs the preflight sync (probe=false) which can be slow but always
     // returns a numeric exit code.

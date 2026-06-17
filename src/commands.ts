@@ -176,7 +176,8 @@ export async function doctor(
     ["bun", _hasCommand("bun"), "optional"],
     ["claude", _hasCommand("claude"), "optional"],
     ["codex", _hasCommand("codex"), "optional"],
-    ["copilot", _hasCommand("copilot") && _hasCommand("gh"), "optional"],
+    ["copilot", _hasCommand("copilot"), "optional"],
+    ["gh", _hasCommand("gh"), "optional"],
     ["docker", _hasCommand("docker"), "optional"],
   ];
   out("vf", panel("VibeFlow", c.bold("environment check")));
