@@ -1224,6 +1224,7 @@ describe("commands.hookSelftest branches", () => {
             decision: "block",
             risk: "critical",
             pass: false,
+            provenance: "fixture",
           },
         ],
       }),
