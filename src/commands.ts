@@ -494,7 +494,10 @@ export function applyDispatch(
   // symptom of init not having collected a real goal.
   const goal = state.goal?.trim();
   if (!goal) return null;
-  const baseCtx = defaultContext();
+  // Runtime guard (issue #92): assert the base has been initialized. The early
+  // returns above already proved `state` exists, so this is a belt-and-braces
+  // safety net for any future refactor that drops the explicit state check.
+  const baseCtx = defaultContext({ base });
   const ctx: ProjectContext = {
     ...baseCtx,
     goal,
@@ -1150,7 +1153,9 @@ export async function orchestrate(
   // code-navigation tools (codegraph > lsp > native) are configured — otherwise dispatches run
   // tool-blind even when .mcp.json wired the servers.
   const ctx: ProjectContext = {
-    ...defaultContext(),
+    // Runtime guard (issue #92): pass `base` so defaultContext throws a clear
+    // "run vf init" message instead of silently seeding a placeholder goal.
+    ...defaultContext({ base }),
     goal: state.goal,
     settings: readSettings(base),
   };
@@ -1665,7 +1670,11 @@ export async function run(
     });
     return 1;
   }
-  const baseCtx = defaultContext();
+  // Runtime guard (issue #92): assert the base has been initialized. The
+  // explicit `!state` / `!goal` checks above already cover the obvious cases;
+  // the strict defaultContext is a defense-in-depth safety net that surfaces
+  // a clear error if any of those checks is ever removed by refactor.
+  const baseCtx = defaultContext({ base });
   const ctx: ProjectContext = { ...baseCtx, goal };
   const units = state.work_units.map((u) => u.name);
   const prompt = dispatchPrompt(engine, ctx, units);

@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
 import { type RoleName, getRoleSpec, roleContextFromProfile } from "./agents/role-templates.js";
 import type { RoleSpec } from "./agents/role.js";
-import { CTX_DIR, ENGINES, type Engine, VERSION, cwd } from "./core.js";
+import { CTX_DIR, ENGINES, type Engine, VERSION, cwd, statePath } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
 
 /** Banner shown in every generated instruction file so agents know VibeFlow is present. */
@@ -98,7 +99,37 @@ Drive every task through this loop instead of free-handing it:
 
 **Tools.** \`vf tools enable codegraph|lsp\` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.`;
 
-export function defaultContext(): ProjectContext {
+/**
+ * Options for {@link defaultContext}.
+ *
+ * `base` opts the caller into a runtime guard: when a `base` repo is supplied,
+ * the function asserts that `vf init` has actually run there (a
+ * `.vibeflow/WORKFLOW_STATE.json` exists at `base`) and throws a descriptive
+ * error otherwise. Without `base`, the call stays permissive and returns the
+ * placeholder context used to seed the init flow itself.
+ *
+ * The permissive default is preserved intentionally: `contextFrom(answers)`
+ * inside `applyIntake` runs BEFORE the state file is written, so a strict
+ * default would make the init path self-referentially throw. Post-init
+ * callers (applyDispatch / orchestrate / launchEngine) opt in by passing
+ * `base` and surface a clear "run vf init" message instead of silently
+ * propagating the placeholder goal.
+ */
+export interface DefaultContextOpts {
+  /** Repo base directory to assert initialization against. */
+  base?: string;
+}
+
+export function defaultContext(opts: DefaultContextOpts = {}): ProjectContext {
+  if (opts.base !== undefined) {
+    const stateFile = statePath(opts.base);
+    if (!existsSync(stateFile)) {
+      throw new Error(
+        `defaultContext: vf init has not been run in ${opts.base} ` +
+          `(missing ${stateFile}). Run \`vf init\` before dispatching an engine.`,
+      );
+    }
+  }
   return {
     name: basename(cwd()),
     goal: `Describe the task in ${CTX_DIR}/TASK_CONTEXT.md before dispatching an engine.`,
