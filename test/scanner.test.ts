@@ -312,3 +312,50 @@ describe("scanner: edge branches", () => {
     }
   });
 });
+
+describe("scanner truncation signal (issue #86)", () => {
+  test("does not signal truncation on a small repo", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-"));
+    try {
+      writeFileSync(join(dir, "package.json"), "{}");
+      writeFileSync(join(dir, "index.ts"), "export {};");
+      const p = scanRepo(dir);
+      expect(p.walkTruncated).toBe(false);
+      expect(p.walkTruncationReason).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("signals truncation when file-count cap is hit", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-"));
+    try {
+      // Generate > 4000 source files to trip the seen cap. Files share
+      // a single flat directory so depth stays well under 6.
+      for (let i = 0; i < 4001; i++) {
+        writeFileSync(join(dir, `f${i}.ts`), "export {};");
+      }
+      const p = scanRepo(dir);
+      expect(p.walkTruncated).toBe(true);
+      expect(p.walkTruncationReason).toBe("files");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("signals truncation when depth cap is hit", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-"));
+    try {
+      // Build a directory 8 levels deep so the depth>6 cap fires.
+      let p = dir;
+      for (let i = 0; i < 8; i++) p = join(p, `d${i}`);
+      mkdirSync(p, { recursive: true });
+      writeFileSync(join(p, "deep.ts"), "export {};");
+      const profile = scanRepo(dir);
+      expect(profile.walkTruncated).toBe(true);
+      expect(profile.walkTruncationReason).toBe("depth");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

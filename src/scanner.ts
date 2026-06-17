@@ -22,6 +22,13 @@ export interface ProjectProfile {
   frameworks: string[];
   hasCI: boolean;
   manifests: string[];
+  /**
+   * True when the depth-capped extension walk hit its limits (depth > 6 or
+   * > 4000 files seen). The detected language list may be incomplete; see
+   * `walkTruncationReason`. Issue #86.
+   */
+  walkTruncated?: boolean;
+  walkTruncationReason?: "depth" | "files";
   /** Per-component evidence-backed stack findings. Use for PROJECT_CONTEXT.md. */
   findings: StackFinding[];
 }
@@ -148,16 +155,25 @@ function readmeSummary(repo: string): string | undefined {
 }
 
 /** Infer languages from build markers (depth-independent) + a capped extension walk. */
-function detectLanguages(repo: string): string[] {
+function detectLanguages(repo: string): {
+  languages: string[];
+  truncated: boolean;
+  reason?: "depth" | "files";
+} {
   const counts = new Map<string, number>();
   let seen = 0;
+  let depthHit = false;
+  let filesHit = false;
   // Marker files at the repo root win regardless of how deep the source lives (KMP, monorepos).
   const markers = new Set<string>();
   for (const [file, lang] of MARKER_LANG) {
     if (existsSync(join(repo, file))) markers.add(lang);
   }
   const walk = (dir: string, depth: number) => {
-    if (depth > 6 || seen > 4000) return;
+    if (depth > 6) {
+      depthHit = true;
+      return;
+    }
     const entries = readdirSync(dir);
     for (const entry of entries) {
       if (entry.startsWith(".") || SKIP_DIRS.has(entry)) continue;
@@ -181,6 +197,10 @@ function detectLanguages(repo: string): string[] {
       if (st.isDirectory()) {
         walk(full, depth + 1);
       } else {
+        if (seen >= 4000) {
+          filesHit = true;
+          return;
+        }
         seen++;
         const lang = EXT_LANG[extname(entry).toLowerCase()];
         if (lang) counts.set(lang, (counts.get(lang) ?? 0) + 1);
@@ -191,7 +211,13 @@ function detectLanguages(repo: string): string[] {
   // Marker-detected languages first (they signal the project's primary stack), then by file count.
   const byCount = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
   const ordered = [...markers, ...byCount.filter((l) => !markers.has(l))];
-  return ordered;
+  const truncated = depthHit || filesHit;
+  let reason: "depth" | "files" | undefined;
+  if (depthHit && filesHit)
+    reason = undefined; // both → caller can detect "both" via flags
+  else if (depthHit) reason = "depth";
+  else if (filesHit) reason = "files";
+  return { languages: ordered, truncated, reason };
 }
 
 function detectPackageManager(repo: string): string | undefined {
@@ -304,9 +330,10 @@ export function scanRepo(repo: string): ProjectProfile {
     }
   }
 
+  const langDetect = detectLanguages(repo);
   const findings = buildFindings({
     repo,
-    languages: detectLanguages(repo),
+    languages: langDetect.languages,
     packageManager,
     frameworks: [...frameworks],
     manifests,
@@ -316,7 +343,7 @@ export function scanRepo(repo: string): ProjectProfile {
   return {
     name,
     summary: readmeSummary(repo),
-    languages: detectLanguages(repo),
+    languages: langDetect.languages,
     packageManager,
     buildCommand,
     testCommand,
@@ -324,6 +351,8 @@ export function scanRepo(repo: string): ProjectProfile {
     frameworks: [...frameworks],
     hasCI: hasCI(repo),
     manifests,
+    walkTruncated: langDetect.truncated,
+    walkTruncationReason: langDetect.reason,
     findings,
   };
 }
