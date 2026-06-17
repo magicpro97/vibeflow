@@ -38,7 +38,8 @@ export function parseQuotaOutput(engine: string, out: string): QuotaStatus {
   const text = out.trim();
   if (!text) return { level: "exhausted", error: "empty output" };
 
-  // JSON variants (claude, copilot, gh api)
+  // JSON variants (claude; `gh api user/copilot_billing` for individual copilot quota;
+  // `gh api copilot` is the Copilot Business admin endpoint and is NOT per-user quota)
   if (text.startsWith("{")) {
     try {
       const j = JSON.parse(text) as Record<string, unknown>;

@@ -97,3 +97,21 @@ describe("role-templates", () => {
     expect(ctx.testCommand).toBeDefined();
   });
 });
+
+describe("preflight-engine role — copilot quota endpoint (issue #89)", () => {
+  // GitHub Copilot Business admin endpoint `gh api copilot` returns org/seat
+  // data, not individual user quota. For per-user quota the right call is
+  // `gh api user/copilot_billing` (or `copilot --help status` per the
+  // copilot CLI's own status command). Documenting the wrong endpoint makes
+  // sub-agents probe the wrong product.
+  test("preflight-engine body documents the individual-quota endpoint, not the Business admin one", () => {
+    const spec = getRoleSpec("preflight-engine");
+    expect(spec).toBeDefined();
+    // The wrong, broad form: `gh api copilot` (Business admin) — must be gone
+    // from the guidance text. Match the literal substring (with a word/paren
+    // boundary) so a future "copilot_billing" mention is not flagged.
+    expect(spec?.body).not.toMatch(/\bgh api copilot\)?\b/);
+    // The right form for per-user quota must be present.
+    expect(spec?.body).toContain("gh api user/copilot_billing");
+  });
+});

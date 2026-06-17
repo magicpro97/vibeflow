@@ -167,7 +167,7 @@ readiness gate that runs before any work unit dispatches.
 - \`vf doctor\` is the user-facing surface; \`vf doctor --probe\` is live.
 - \`vf doctor --refresh\` invalidates the probe cache.
 - Quota detection: parse engine-specific output (claude usage --json,
-  codex doctor --usage, gh api copilot).
+  codex doctor --usage, gh api user/copilot_billing).
 - Never block dispatch on a soft signal — only on hard failures.
 
 ## When Invoked
