@@ -1318,6 +1318,27 @@ describe("commands.hooks subcommand branches", () => {
     }
   });
 
+  test("hooks install: real git in a git repo succeeds and prints the green line (line 2363-2364)", () => {
+    // PR28 coverage: the success branch of installHooks (lines 2363-2364)
+    // is only hit when git config exits 0. The failure test above exercises
+    // the failure branch. This test initializes a real git repo, then runs
+    // `hooks install` to cover the success path.
+    const dir = freshDir("vf-hooks-install-ok-");
+    const { execSync } = require("node:child_process") as typeof import("node:child_process");
+    execSync(
+      "git init -q && git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init && git config user.email t@t && git config user.name t",
+      { cwd: dir, stdio: "ignore" },
+    );
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = hooks("install", {});
+      expect(code).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
   test("hooks: emit --dry-run is non-destructive (line 2051-2061)", () => {
     expect(hooks("emit", { "dry-run": true })).toBe(0);
     expect(existsSync(join(dir, ".claude", "settings.json"))).toBe(false);
