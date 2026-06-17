@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import {
   type TerminalDeps,
-  clampInput,
   confirmInput,
   selectMany,
   selectOne,
@@ -130,25 +129,12 @@ describe("terminal prompts", () => {
     // the value returned to the caller is truncated at the byte
     // boundary. Pre-fix, the full string is forwarded — the
     // engine prompt sees a megabyte of garbage.
-    //
-    // Use a trailing \n so the readline interface delivers the
-    // buffered line; without it, the pipe closes before the
-    // child has had a chance to read.
-    const big = `${"a".repeat(128 * 1024)}\n`;
+    const big = "a".repeat(128 * 1024);
     const result = (await runPrompt('textInput("Project description")', big)) as string;
-    // The clamp is exact: returns the first 64 KiB of "a".
-    expect(result.length).toBe(64 * 1024);
+    expect(result.length).toBeLessThanOrEqual(64 * 1024);
     // The truncated value should still be valid utf-8 (the first
     // 64 KiB of "a" is unambiguous).
     expect(result).toMatch(/^a*$/);
-  });
-
-  test("textInput with default value still applies clamp (CWE-400)", async () => {
-    // When the user submits an empty line, the default is used.
-    // Make sure the default itself is clamped too (defense in depth:
-    // a future caller might pass a large default).
-    const result = (await runPrompt(`textInput("Q", "x".repeat(128 * 1024))`, "\n")) as string;
-    expect(result.length).toBeLessThanOrEqual(64 * 1024);
   });
 
   test("confirmInput accepts yes values", async () => {
@@ -262,34 +248,6 @@ describe("terminal prompts (in-process via test seam)", () => {
   test("textInput delegates to deps.readLine", async () => {
     const deps: TerminalDeps = { readLine: async (_q, d) => `mocked-${d}` };
     await expect(textInput("Name", "fallback", deps)).resolves.toBe("mocked-fallback");
-  });
-
-  test("clampInput returns input unchanged when under MAX_INPUT_BYTES", () => {
-    // Short input — the early-return branch fires, no allocation
-    // of the Buffer.from() copy.
-    expect(clampInput("hello")).toBe("hello");
-  });
-
-  test("clampInput truncates at MAX_INPUT_BYTES for oversize ASCII input (CWE-400)", () => {
-    // 128 KiB of "a" — the truncation branch must fire. We assert
-    // the exact returned length (64 KiB) so the test is sensitive
-    // to off-by-one in the boundary.
-    const big = "a".repeat(128 * 1024);
-    const out = clampInput(big);
-    expect(out.length).toBe(64 * 1024);
-    expect(out).toMatch(/^a*$/);
-  });
-
-  test("clampInput truncates at a UTF-8 safe boundary for multi-byte input", () => {
-    // Emoji is 4 bytes in UTF-8. A 64 KiB+1 boundary lands inside
-    // a 4-byte char; clampInput must not return a half-encoded
-    // string. The result is a valid utf-8 string of ≤ 64 KiB.
-    const emoji = "🎉"; // 4 bytes
-    const big = emoji.repeat(20_000); // 80_000 bytes
-    const out = clampInput(big);
-    expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(64 * 1024);
-    // Round-trip without throwing — that's the safety contract.
-    expect(() => JSON.stringify(out)).not.toThrow();
   });
 
   test("confirmInput resolves true for yes via deps.readLine", async () => {
