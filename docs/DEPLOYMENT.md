@@ -1,13 +1,13 @@
 # VibeFlow — Deploy Plan (git + npm)
 
 Status of the package as verified by `npm pack --dry-run`:
-- `@magicpro97/vibeflow@0.1.0`, tarball **77 kB** / unpacked 252 kB.
+- `@magicpro97/vibeflow@0.7.0`, tarball **77 kB** / unpacked 252 kB.
 - Ships only: `dist/cli.js` (built), `README.md`, `LICENSE`, `docs/**`, `package.json`.
 - **No** `src/`, `test/`, `.vibeflow/`, `.env`, or secrets in the tarball (the `files` allow-list +
   `.gitignore` keep them out). Verified.
 - `bin: { vf: ./dist/cli.js }`, `prepublishOnly: bun run build`, `publishConfig.access: public`,
   `engines.node >=18`, MIT license, `repository`/`homepage`/`bugs` fields present.
-- `bun run check` (typecheck+lint+test) green: **266 tests**. `bun run test:e2e`: **8 passed**.
+- `bun run check` (typecheck+lint+test) green: **1285 tests, 100% line coverage**.
 
 ## ⚠️ MUST CONFIRM before publishing
 1. **Repository URL** — I set `repository.url` to `git+https://github.com/magicpro97/vibeflow.git`
@@ -17,8 +17,7 @@ Status of the package as verified by `npm pack --dry-run`:
    exists on npm and you're a member, OR rename to an unscoped/owned name. Confirm you own the
    scope (`npm org ls vibeflow` / check npmjs.com). `publishConfig.access:"public"` is already set
    for a scoped public publish.
-3. **Version** — `0.1.0` is unpublished/first release. Fine as an initial publish; bump per semver
-   afterward.
+3. **Version** — `0.7.0` is the current pre-1.0 release. `release-please` is wired (PR #51 follow-up); the next version bump will be done by the release-please bot on merge to `main`. Manual: bump `package.json:version`, run `release-please-config.json` generation, tag.
 
 ## Git deploy (do first)
 1. **Create the GitHub repo** (manual or `gh repo create <owner>/vibeflow --public --source=. --remote=origin`).
@@ -40,19 +39,19 @@ Status of the package as verified by `npm pack --dry-run`:
    NOT gitignored away from the publish (it's in `files`; npm builds it fresh via prepublishOnly,
    so a missing committed `dist/` is fine).
 4. **Publish**: `npm publish` (scope access already public). 
-5. **Smoke-test the published bin**: in a throwaway dir, `npx @magicpro97/vibeflow@0.1.0 doctor` →
+5. **Smoke-test the published bin**: in a throwaway dir, `npx @magicpro97/vibeflow@0.7.0 doctor` →
    should print the environment check. Also `npx @magicpro97/vibeflow doctor --probe` if engines installed.
 
 ## Pre-publish checklist (gate — all must hold)
 - [ ] `repository`/`homepage`/`bugs` URLs corrected to the real repo (item ⚠️1).
 - [ ] `@vibeflow` npm scope owned/confirmed (item ⚠️2), or package renamed.
-- [ ] `bun run check` green + `bun run test:e2e` green (currently true: 266 + 8).
+- [ ] `bun run check` green (currently true: 1285 tests, 100% line coverage).
 - [ ] `npm pack --dry-run` shows no src/test/secret files (currently true).
 - [ ] `git push -u origin main` succeeded + `vX.Y.Z` tag pushed.
 - [ ] `LICENSE` present (true) and README install line matches the final package name.
 
 ## Verification (post-deploy)
-- `npx @magicpro97/vibeflow@0.1.0 doctor` exits 0 and prints the tool check.
+- `npx @magicpro97/vibeflow@0.7.0 doctor` exits 0 and prints the tool check.
 - The GitHub repo shows the 8-commit history; the npm page renders README + the docs links resolve.
 - `git clone <repo> && cd vibeflow && bun install && bun run check` reproduces green from a fresh
   clone (proves the repo is self-contained, zero-runtime-deps).
