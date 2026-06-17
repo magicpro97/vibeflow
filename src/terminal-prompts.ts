@@ -17,8 +17,15 @@ const MAX_INPUT_BYTES = 64 * 1024;
 
 /** Clamp user text input to MAX_INPUT_BYTES. Pastes longer than
  * this are truncated at the byte boundary and the caller is
- * expected to retry or accept the truncated value. */
-function clampInput(s: string): string {
+ * expected to retry or accept the truncated value.
+ *
+ * Exported for direct unit testing — the readline-level
+ * `textInput` tests run in a child process (via `runPrompt`) and
+ * the child's coverage is not merged into the parent's lcov,
+ * so the truncation branch in the child is invisible to the
+ * coverage gate. Unit-testing clampInput directly here keeps
+ * the per-file 100% gate green. */
+export function clampInput(s: string): string {
   if (Buffer.byteLength(s, "utf8") <= MAX_INPUT_BYTES) return s;
   // Truncate at a safe UTF-8 boundary by walking byte-by-byte.
   const buf = Buffer.from(s, "utf8");

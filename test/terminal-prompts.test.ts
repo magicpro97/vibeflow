@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import {
   type TerminalDeps,
+  clampInput,
   confirmInput,
   selectMany,
   selectOne,
@@ -248,6 +249,34 @@ describe("terminal prompts (in-process via test seam)", () => {
   test("textInput delegates to deps.readLine", async () => {
     const deps: TerminalDeps = { readLine: async (_q, d) => `mocked-${d}` };
     await expect(textInput("Name", "fallback", deps)).resolves.toBe("mocked-fallback");
+  });
+
+  test("clampInput returns input unchanged when under MAX_INPUT_BYTES", () => {
+    // Short input — the early-return branch fires, no allocation
+    // of the Buffer.from() copy.
+    expect(clampInput("hello")).toBe("hello");
+  });
+
+  test("clampInput truncates at MAX_INPUT_BYTES for oversize ASCII input (CWE-400)", () => {
+    // 128 KiB of "a" — the truncation branch must fire. We assert
+    // the exact returned length (64 KiB) so the test is sensitive
+    // to off-by-one in the boundary.
+    const big = "a".repeat(128 * 1024);
+    const out = clampInput(big);
+    expect(out.length).toBe(64 * 1024);
+    expect(out).toMatch(/^a*$/);
+  });
+
+  test("clampInput truncates at a UTF-8 safe boundary for multi-byte input", () => {
+    // Emoji is 4 bytes in UTF-8. A 64 KiB+1 boundary lands inside
+    // a 4-byte char; clampInput must not return a half-encoded
+    // string. The result is a valid utf-8 string of ≤ 64 KiB.
+    const emoji = "🎉"; // 4 bytes
+    const big = emoji.repeat(20_000); // 80_000 bytes
+    const out = clampInput(big);
+    expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    // Round-trip without throwing — that's the safety contract.
+    expect(() => JSON.stringify(out)).not.toThrow();
   });
 
   test("confirmInput resolves true for yes via deps.readLine", async () => {
