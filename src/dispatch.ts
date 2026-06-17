@@ -11,7 +11,6 @@ import { type Engine, hasCommand, resolveCommand, writeFileSafe } from "./core.j
 // binding once would freeze the reference and bypass the mock. Production callers
 // never see the seam.
 const bunSpawn = ((...args: unknown[]) =>
-  // biome-ignore lint/suspicious/noExplicitAny: dynamic dispatch on Bun.spawn's overloads
   (Bun.spawn as (...a: any[]) => any)(...args)) as unknown as typeof Bun.spawn;
 
 // Confidence fallback for engine runs with no JSON summary block
@@ -528,6 +527,14 @@ interface DispatchOpts {
   bridgeCmd?: string;
   /** Injectable PATH-presence probe so tests can force absent without spawning a real engine. */
   has?: (cmd: string) => boolean;
+  /**
+   * Bridge-mode stderr sink. The async path streams stderr
+   * per-chunk via the spawner's onStderrChunk; the bridge path
+   * uses Bun.spawnSync and can only emit the full stderr after
+   * the process exits. Callers wire this to the same logbus
+   * channel so both paths are visible.
+   */
+  onStderrChunk?: (text: string) => void;
 }
 
 /** Resolve the CLI command for an engine, honouring an injected spawner (test mode). */
@@ -571,7 +578,7 @@ export function materializePrompt(
 
 function buildResult(
   opts: DispatchOpts,
-  r: { status: number; stdout: string; timedOut?: boolean },
+  r: { status: number; stdout: string; stderr?: string; timedOut?: boolean },
   failReason: string,
   warning?: string,
 ): DispatchResult {
@@ -612,7 +619,12 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
           stdout: "pipe",
           stderr: "pipe",
         });
-        return { status: r.exitCode, stdout: r.stdout.toString(), stderr: r.stderr.toString() };
+        // Bridge path can't stream stderr per-chunk; emit the full
+        // content through the same sink the async path uses (PR28
+        // audit Task 7 / M5).
+        const stderrText = r.stderr.toString();
+        if (stderrText) opts.onStderrChunk?.(stderrText);
+        return { status: r.exitCode, stdout: r.stdout.toString(), stderr: stderrText };
       });
     return buildResult(opts, bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }
