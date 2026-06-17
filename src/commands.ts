@@ -1646,20 +1646,16 @@ export async function run(
   if (!state) {
     out(
       "vf",
-      c.red(
-        "no workflow state — run `vf init` to set the goal and work units before `vf run`.",
-      ),
+      c.red("no workflow state — run `vf init` to set the goal and work units before `vf run`."),
       { level: "error" },
     );
     return 1;
   }
   const goal = state.goal?.trim();
   if (!goal) {
-    out(
-      "vf",
-      c.red("workflow state has no goal — run `vf init` to set one before `vf run`."),
-      { level: "error" },
-    );
+    out("vf", c.red("workflow state has no goal — run `vf init` to set one before `vf run`."), {
+      level: "error",
+    });
     return 1;
   }
   const baseCtx = defaultContext();

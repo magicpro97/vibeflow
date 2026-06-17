@@ -171,7 +171,14 @@ interface AsyncResult {
 // tests without spawning real subprocesses. `onStderrChunk` and `onChunk` are kept on
 // opts for back-compat; M2 fanout goes through these callbacks.
 export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
-  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, idleTimeoutMs, shell, onChunk, onStderrChunk } = opts;
+  const {
+    timeoutMs,
+    graceMs = DEFAULT_GRACE_MS,
+    idleTimeoutMs,
+    shell,
+    onChunk,
+    onStderrChunk,
+  } = opts;
   const _spawn = opts.spawn ?? bunSpawn;
   return async (cmd, args, input): Promise<AsyncResult> => {
     // On Windows, .cmd/.bat shims (e.g. copilot.cmd installed by npm)
@@ -197,7 +204,25 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       detached: process.platform !== "win32",
       env: { ...process.env },
     });
-    proc.stdin?.write(input);
+    try {
+      proc.stdin?.write(input);
+    } catch (err) {
+      // B3: if stdin.write throws (EPIPE / child already exited), kill the
+      // child and wait for it to actually exit before re-throwing, otherwise
+      // the orphan process keeps running with a closed pipe.
+      try {
+        proc.kill();
+      } catch {
+        // Process may have already exited — nothing to kill.
+      }
+      try {
+        await proc.exited;
+      } catch {
+        // proc.exited can reject if the kill itself fails; swallow so the
+        // original stdin error is what the caller sees.
+      }
+      throw err;
+    }
     proc.stdin?.end();
 
     const stdoutReader = proc.stdout?.getReader();
@@ -580,7 +605,8 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
     const bridgeSpawn =
       opts.spawner ??
       ((c: string, a: string[], input: string): SyncResult => {
-        const shell = process.platform === "win32" ? ["cmd.exe", "/c", c, ...a] : ["/bin/sh", "-c", c];
+        const shell =
+          process.platform === "win32" ? ["cmd.exe", "/c", c, ...a] : ["/bin/sh", "-c", c];
         const r = Bun.spawnSync(shell, {
           stdin: Buffer.from(input, "utf8"),
           stdout: "pipe",

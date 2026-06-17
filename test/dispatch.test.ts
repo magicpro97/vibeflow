@@ -293,26 +293,24 @@ describe("makeAsyncSpawner — configurable timeout group-kills a hung engine (d
   // which meant the kill killed only the direct child, leaving engine-internal tool
   // subprocesses (Claude / Codex / Copilot all spawn `node` or `bash` children) orphaned.
   // This is the regression test: assert the grandchild is REALLY killed.
-  test(
-    "group-kill: grandchild is ACTUALLY killed (no orphan) — PR28 audit fix (H1/H2)",
-    async () => {
-      if (process.platform === "win32") {
-        // process.kill(-pid, ...) is POSIX-only. Skip on Windows.
-        return;
-      }
-      // Parent spawns a grandchild (no detached: child stays in parent's group) and writes
-      // both pids to disk, then hangs. The grandchild writes a marker file every 50ms then
-      // hangs. We check the grandchild is dead after the parent is killed.
-      const tmpDir = mkdtempSync(join(tmpdir(), "vf-gk-"));
-      try {
-        const marker = join(tmpDir, "alive");
-        const pidFile = join(tmpDir, "pids.json");
-        const grandchildCode = `
+  test("group-kill: grandchild is ACTUALLY killed (no orphan) — PR28 audit fix (H1/H2)", async () => {
+    if (process.platform === "win32") {
+      // process.kill(-pid, ...) is POSIX-only. Skip on Windows.
+      return;
+    }
+    // Parent spawns a grandchild (no detached: child stays in parent's group) and writes
+    // both pids to disk, then hangs. The grandchild writes a marker file every 50ms then
+    // hangs. We check the grandchild is dead after the parent is killed.
+    const tmpDir = mkdtempSync(join(tmpdir(), "vf-gk-"));
+    try {
+      const marker = join(tmpDir, "alive");
+      const pidFile = join(tmpDir, "pids.json");
+      const grandchildCode = `
           const fs = require("node:fs");
           setInterval(() => fs.writeFileSync(${JSON.stringify(marker)}, "alive"), 50);
           setInterval(() => {}, 1e9);
         `;
-        const parentCode = `
+      const parentCode = `
           const cp = require("node:child_process");
           const fs = require("node:fs");
           const child = cp.spawn(process.execPath, ["-e", ${JSON.stringify(grandchildCode)}], {
@@ -321,30 +319,30 @@ describe("makeAsyncSpawner — configurable timeout group-kills a hung engine (d
           fs.writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ parent: process.pid, child: child.pid }));
           setInterval(() => {}, 1e9);
         `;
-        const spawn = makeAsyncSpawner({ timeoutMs: 500, graceMs: 100 });
-        const r = await spawn(process.execPath, ["-e", parentCode], "");
-        // Allow some buffer for the pids file to be written.
-        await new Promise((res) => setTimeout(res, 100));
-        const pids = JSON.parse(
-          (await import("node:fs")).readFileSync(pidFile, "utf8"),
-        ) as { parent: number; child: number };
-        const grandchildPid = pids.child;
-        // Assert: the grandchild is no longer alive. process.kill(pid, 0) is the standard
-        // "does this process exist?" check; ESRCH = dead.
-        let alive = true;
-        try {
-          process.kill(grandchildPid, 0);
-        } catch (_e) {
-          alive = false;
-        }
-        expect(r.timedOut).toBe(true);
-        expect(r.status).toBe(124);
-        expect(alive).toBe(false);
-      } finally {
-        rmSync(tmpDir, { recursive: true, force: true });
+      const spawn = makeAsyncSpawner({ timeoutMs: 500, graceMs: 100 });
+      const r = await spawn(process.execPath, ["-e", parentCode], "");
+      // Allow some buffer for the pids file to be written.
+      await new Promise((res) => setTimeout(res, 100));
+      const pids = JSON.parse((await import("node:fs")).readFileSync(pidFile, "utf8")) as {
+        parent: number;
+        child: number;
+      };
+      const grandchildPid = pids.child;
+      // Assert: the grandchild is no longer alive. process.kill(pid, 0) is the standard
+      // "does this process exist?" check; ESRCH = dead.
+      let alive = true;
+      try {
+        process.kill(grandchildPid, 0);
+      } catch (_e) {
+        alive = false;
       }
-    },
-  );
+      expect(r.timedOut).toBe(true);
+      expect(r.status).toBe(124);
+      expect(alive).toBe(false);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("makeAsyncSpawner — idle timeout", () => {
@@ -356,6 +354,161 @@ describe("makeAsyncSpawner — idle timeout", () => {
     expect(r.timedOut).toBe(true);
     expect(r.status).toBe(124);
     expect(Date.now() - start).toBeLessThan(3000);
+  });
+
+  test("POSIX group-kill catch path: process.kill(-pid) throws → falls back to direct proc.kill", async () => {
+    // PR28 coverage: lines 245, 247, 248 are the group-kill catch fallback
+    // (when process.kill(-pid, ...) throws ESRCH but the direct child is
+    // still alive). We mock process.kill to throw, then verify the
+    // fallback path executes and the child is killed.
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const origProcessKill = process.kill.bind(process);
+    const killedSignals: NodeJS.Signals[] = [];
+    let processKillCount = 0;
+    Object.assign(process, {
+      kill: (...args: unknown[]) => {
+        const pid = args[0] as number;
+        const signal = args[1] as NodeJS.Signals | undefined;
+        processKillCount += 1;
+        // First call (group kill via negative pid) throws ESRCH.
+        // Subsequent calls (direct proc.kill) succeed.
+        if (pid < 0) {
+          throw new Error("ESRCH: no such process group");
+        }
+        killedSignals.push((signal ?? "SIGTERM") as NodeJS.Signals);
+        return true;
+      },
+    });
+    let resolveExited: (v: number) => void = () => {};
+    const exitedPromise = new Promise<number>((res) => {
+      resolveExited = res;
+    });
+    let killed = false;
+    const makeStream = () => {
+      let pendingResolve: ((v: { done: boolean; value?: undefined }) => void) | null = null;
+      const stream = {
+        getReader: () => ({
+          read: () => {
+            if (killed) return Promise.resolve({ done: true, value: undefined });
+            return new Promise<{ done: boolean; value?: undefined }>((res) => {
+              pendingResolve = res;
+            });
+          },
+        }),
+      };
+      return {
+        stream,
+        close: () => {
+          killed = true;
+          pendingResolve?.({ done: true, value: undefined });
+        },
+      };
+    };
+    const stdoutStream = makeStream();
+    const stderrStream = makeStream();
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: stdoutStream.stream,
+      stderr: stderrStream.stream,
+      exited: exitedPromise,
+      pid: 12345,
+      kill: (signal?: NodeJS.Signals) => {
+        killedSignals.push((signal ?? "SIGTERM") as NodeJS.Signals);
+        stdoutStream.close();
+        stderrStream.close();
+        resolveExited(0);
+        return true;
+      },
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (() => fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const spawn = makeAsyncSpawner({
+        timeoutMs: 50,
+        graceMs: 20,
+        spawn: fakeSpawn,
+      });
+      const r = await spawn("node", ["-e", "x"], "");
+      expect(r.timedOut).toBe(true);
+      // Group kill (negative pid) was attempted and threw → fell back to
+      // direct proc.kill → at least one signal recorded.
+      expect(processKillCount).toBeGreaterThanOrEqual(1);
+      expect(killedSignals.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      (process as unknown as { kill: typeof process.kill }).kill =
+        origProcessKill as typeof process.kill;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("Windows platform: killGroup falls back to direct proc.kill (no -pid group kill)", async () => {
+    // PR28 coverage: when process.platform === "win32", killGroup takes the
+    // non-POSIX branch (proc.kill(signal) directly, no process.kill(-pid, ...)).
+    // The test mocks the platform to exercise this branch on POSIX hosts.
+    // We use a fake child via opts.spawn so the timeout path calls killGroup,
+    // and we observe proc.kill was called (with what signal).
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const killedSignals: NodeJS.Signals[] = [];
+    let resolveExited: (v: number) => void = () => {};
+    const exitedPromise = new Promise<number>((res) => {
+      resolveExited = res;
+    });
+    // Streams that close when the child is killed (mirroring real subprocess
+    // behavior). Each stream emits done after kill is invoked.
+    let killed = false;
+    const makeStream = () => {
+      let pendingResolve: ((v: { done: boolean; value?: undefined }) => void) | null = null;
+      const stream = {
+        getReader: () => ({
+          read: () => {
+            if (killed) return Promise.resolve({ done: true, value: undefined });
+            return new Promise<{ done: boolean; value?: undefined }>((res) => {
+              pendingResolve = res;
+            });
+          },
+        }),
+      };
+      return {
+        stream,
+        close: () => {
+          killed = true;
+          pendingResolve?.({ done: true, value: undefined });
+        },
+      };
+    };
+    const stdoutStream = makeStream();
+    const stderrStream = makeStream();
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: stdoutStream.stream,
+      stderr: stderrStream.stream,
+      exited: exitedPromise,
+      pid: 12345,
+      kill: (signal?: NodeJS.Signals) => {
+        killedSignals.push((signal ?? "SIGTERM") as NodeJS.Signals);
+        stdoutStream.close();
+        stderrStream.close();
+        resolveExited(0);
+        return true;
+      },
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (() => fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const spawn = makeAsyncSpawner({
+        timeoutMs: 50,
+        graceMs: 20,
+        spawn: fakeSpawn,
+      });
+      const r = await spawn("node", ["-e", "x"], "");
+      expect(r.timedOut).toBe(true);
+      // Windows path: proc.kill was called directly (at least once for SIGTERM
+      // and possibly once for SIGKILL after the grace period).
+      expect(killedSignals.length).toBeGreaterThanOrEqual(1);
+      expect(killedSignals[0]).toBe("SIGTERM");
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
   });
 
   test("active output resets idle timer", async () => {
@@ -530,6 +683,37 @@ describe("defaultSpawner (test seam)", () => {
       expect(capturedOpts?.stderr).toBe("pipe");
     } finally {
       (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = orig;
+    }
+  });
+
+  // PR28 coverage: the Windows branch of defaultSyncSpawner's needsShell
+  // ternary (lines 106-107) is only reachable when process.platform is
+  // "win32". On POSIX hosts we mock the platform to exercise it. Without
+  // this test, lines 106-107 stay at DA:0 in the lcov report.
+  test("defaultSyncSpawner: Windows platform mock exercises the cmd.exe branch (line 106-107)", () => {
+    const { defaultSyncSpawner } = require("../src/dispatch.js");
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    const fakeWhich = (cmd: string) =>
+      cmd === "copilot" ? "C:\\Program Files\\nodejs\\copilot" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    let captured: { cmd: string[] } | undefined;
+    const origSpawnSync = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = ((
+      cmd: string | string[],
+    ) => {
+      captured = { cmd: Array.isArray(cmd) ? cmd : [cmd] };
+      return { exitCode: 0, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    }) as unknown as typeof Bun.spawnSync;
+    try {
+      defaultSyncSpawner("copilot", ["-p", "x"], "");
+      expect(captured?.cmd[0]).toBe("cmd.exe");
+      expect(captured?.cmd[1]).toBe("/c");
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = origSpawnSync;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
     }
   });
 
@@ -895,5 +1079,39 @@ describe("makeAsyncSpawner — stdin error (defect #B3)", () => {
     } finally {
       // no global mock to restore — spawner is closed over its injected `spawn`
     }
+  });
+
+  test("B3: tolerates kill throw + exited reject — re-throws original EPIPE", async () => {
+    // Both the kill() and proc.exited reject — the fix must swallow both
+    // and re-throw the ORIGINAL stdin error (EPIPE), not the secondary
+    // failures. This exercises the inner try/catch in the B3 fix.
+    const fakeChild = {
+      stdin: {
+        write: () => {
+          throw new Error("EPIPE: child stdin closed");
+        },
+        end: () => {},
+      },
+      stdout: new Readable({
+        read() {
+          this.push(null);
+        },
+      }),
+      stderr: new Readable({
+        read() {
+          this.push(null);
+        },
+      }),
+      pid: 99999,
+      exited: Promise.reject(new Error("exited-rejected")),
+      kill: () => {
+        throw new Error("kill-failed");
+      },
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const fakeSpawn = (() => fakeChild) as unknown as typeof Bun.spawn;
+    const spawner = makeAsyncSpawner({ spawn: fakeSpawn });
+    await expect(spawner(process.execPath, ["-e", "process.exit(0)"], "x")).rejects.toThrow(
+      "EPIPE",
+    );
   });
 });
