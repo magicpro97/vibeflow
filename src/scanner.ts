@@ -115,10 +115,16 @@ function readmeSummary(repo: string): string | undefined {
           continue;
         return line.replace(/^[*_>-]+\s*/, "").slice(0, 240);
       }
+      // The current README variant had no usable content (every line
+      // was empty / a heading / a badge / an HTML tag). Fall through
+      // to the next variant instead of bailing out — the original
+      // `return undefined` here silently killed the outer loop and
+      // broke the README.MD / readme.md / README fallbacks, leaving
+      // summary=undefined on repos whose primary README opens with
+      // a title image + ## sections.
     } catch {
-      /* ignore */
+      /* try the next variant */
     }
-    return undefined;
   }
   return undefined;
 }

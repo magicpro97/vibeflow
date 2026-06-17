@@ -105,6 +105,47 @@ describe("scanner: edge branches", () => {
     if (summary) expect(summary.value).toBe("");
   });
 
+  test("readmeSummary: falls through to next variant when README.md has only headings (line 121)", () => {
+    // REGRESSION GUARD: previously the inner-loop "no usable line"
+    // exit used `return undefined` which silently killed the outer
+    // README-variant loop. A repo whose primary README.md opens
+    // with a title image / # Heading / ## Section and whose only
+    // real prose lives in README.MD (or readme.md / README) lost
+    // its summary entirely. The fix falls through to the next
+    // variant when the current one has no usable content.
+    //
+    // macOS HFS+/APFS is case-insensitive by default, so README.md,
+    // README.MD and readme.md all resolve to the same file and the
+    // fallthrough is invisible on this platform. The fourth variant
+    // `README` (no extension) is distinct on macOS, so we use it
+    // as the fallback target to exercise the bug on this platform.
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-readme-fallthrough-"));
+    // First variant: README.md with only headings and badge lines.
+    // The inner for-loop finds no usable line → falls through to L121.
+    writeFileSync(
+      join(dir, "README.md"),
+      "# Project Title\n\n![banner](banner.png)\n\n## Subtitle\n",
+    );
+    // Fourth variant: README (no extension) with real content.
+    // Distinct from README.md on every filesystem (case-insensitive
+    // or not) because the filename has no extension.
+    writeFileSync(
+      join(dir, "README"),
+      "Real project description lives here.\n\nMore details below.\n",
+    );
+    try {
+      const profile = scanRepo(dir);
+      // Pre-fix: README.md's inner loop finds only headings → exits
+      //   → L121 returns undefined → outer loop dies → summary = undefined.
+      // Post-fix: README.md has no usable line → fall through to
+      //   the next variant → README → returns prose.
+      expect(profile.summary).toBeDefined();
+      expect(profile.summary).toContain("Real project description");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("readJson is null when JSON is malformed (line 140 catch)", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-scanner-bad-json-"));
     writeFileSync(join(dir, "package.json"), "not valid json {{{");
