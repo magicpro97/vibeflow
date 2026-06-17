@@ -269,19 +269,35 @@ function appendToManagedBlock(filePath: string, addendum: string): void {
 
 // ── Skill-creator copy ─────────────────────────────────────────────────────
 
-export function copySkillCreator(base: string, engines: AgentEngine[]): string[] {
+/**
+ * Copy the bundled `skill-creator` skill from the package's own
+ * `.agents/skills/skill-creator/` into each engine's skill root in `base`.
+ *
+ * Dependency-injected `exists` and `onWarn` make the missing-source path
+ * testable without renaming real files. Default `exists` is `existsSync`
+ * and default `onWarn` is `console.warn` — production callers don't pass
+ * them.
+ */
+export function copySkillCreator(
+  base: string,
+  engines: AgentEngine[],
+  inject: { exists?: (p: string) => boolean; onWarn?: (msg: string) => void } = {},
+): string[] {
+  const exists = inject.exists ?? existsSync;
+  const onWarn = inject.onWarn ?? ((msg) => console.warn(msg));
   const written: string[] = [];
-  try {
-    const srcUrl = new URL("../.agents/skills/skill-creator", import.meta.url);
-    const srcPath = srcUrl.pathname;
-    if (!existsSync(srcPath)) return written;
-    for (const engine of engines) {
-      const dstDir = join(base, skillDirPath(engine, "skill-creator"));
-      copyRecursiveSync(srcPath, dstDir);
-      written.push(skillDirPath(engine, "skill-creator"));
-    }
-  } catch {
-    /* best effort */
+  const srcUrl = new URL("../.agents/skills/skill-creator", import.meta.url);
+  const srcPath = srcUrl.pathname;
+  if (!exists(srcPath)) {
+    onWarn(
+      `vibeflow: skill-creator source not found at ${srcPath} — AI enrichment will be degraded. Check package.json files[] includes ".agents/skills/skill-creator".`,
+    );
+    return written;
+  }
+  for (const engine of engines) {
+    const dstDir = join(base, skillDirPath(engine, "skill-creator"));
+    copyRecursiveSync(srcPath, dstDir);
+    written.push(skillDirPath(engine, "skill-creator"));
   }
   return written;
 }

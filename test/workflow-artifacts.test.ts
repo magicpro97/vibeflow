@@ -140,6 +140,20 @@ describe("copySkillCreator", () => {
     expect(existsSync(join(dir, ".claude/skills/skill-creator"))).toBe(true);
     expect(existsSync(join(dir, ".github/skills/skill-creator"))).toBe(true);
   });
+
+  test("emits visible warning when skill-creator source is missing (C4)", () => {
+    // Inject a fake exists() that always returns false, simulating
+    // the post-npm-install scenario where the .agents/ dir is absent.
+    const warnings: string[] = [];
+    const written = copySkillCreator(dir, ["claude"], {
+      exists: () => false,
+      onWarn: (msg) => warnings.push(msg),
+    });
+    expect(written).toEqual([]);
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("skill-creator source not found");
+    expect(warnings[0]).toContain("package.json files");
+  });
 });
 
 // ── generateWorkflowArtifacts (fs) ────────────────────────────────────────

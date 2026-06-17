@@ -10,7 +10,8 @@
     "dist",
     "docs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    ".agents/skills/skill-creator"
   ],
   "engines": {
     "node": ">=18"
