@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.7.1](https://github.com/magicpro97/vibeflow/compare/v0.7.0...v0.7.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **adapters:** defaultContext runtime guard against pre-init calls (issue [#92](https://github.com/magicpro97/vibeflow/issues/92)) ([#119](https://github.com/magicpro97/vibeflow/issues/119)) ([a14ab22](https://github.com/magicpro97/vibeflow/commit/a14ab22aeabbd7994f9552e4e55070292f823314))
+* **adapters:** trim ctx.goal before appending Powered-by footer (issue [#91](https://github.com/magicpro97/vibeflow/issues/91)) ([#118](https://github.com/magicpro97/vibeflow/issues/118)) ([6dcc6a2](https://github.com/magicpro97/vibeflow/commit/6dcc6a29d9d055bff2a57d7f458f8957b3729247))
+* **cli:** align init + orchestrate default engine to "claude" (issue [#78](https://github.com/magicpro97/vibeflow/issues/78)) ([#106](https://github.com/magicpro97/vibeflow/issues/106)) ([058ad95](https://github.com/magicpro97/vibeflow/commit/058ad952abb5f52982c6feaf8c0d634efb65b601))
+* **core:** centralize engine priority in core.ts ENGINES (C3) ([#99](https://github.com/magicpro97/vibeflow/issues/99)) ([874f750](https://github.com/magicpro97/vibeflow/commit/874f7501391b5e8a773fddc9f1b731a0bbea53d8))
+* **dispatch:** shell-wrap copilotVersion() to handle Windows .cmd shim (issue [#88](https://github.com/magicpro97/vibeflow/issues/88)) ([#111](https://github.com/magicpro97/vibeflow/issues/111)) ([59b667e](https://github.com/magicpro97/vibeflow/commit/59b667e2536aed409155fe8d9f94dfb3ebe34d85))
+* **doctor:** copilot readiness should be copilot OR gh, not AND (C6) ([#98](https://github.com/magicpro97/vibeflow/issues/98)) ([36643b0](https://github.com/magicpro97/vibeflow/commit/36643b023e654122fc4ad13b7adf40f24984146e))
+* **hooks:** copilot CLI gets native preToolUse enforcement (issue [#79](https://github.com/magicpro97/vibeflow/issues/79)) ([#107](https://github.com/magicpro97/vibeflow/issues/107)) ([96664cf](https://github.com/magicpro97/vibeflow/commit/96664cfcb3610e97c684414bfda9a97e8249aa88))
+* **hooks:** derive selftest confidence from a property test, not a fixed corpus (issue [#85](https://github.com/magicpro97/vibeflow/issues/85)) ([#115](https://github.com/magicpro97/vibeflow/issues/115)) ([1b126bb](https://github.com/magicpro97/vibeflow/commit/1b126bbc2444b221e8363b707e81d43c7b10a53e))
+* **hooks:** PROTECTED_PATH regex uniformly case-insensitive (issue [#84](https://github.com/magicpro97/vibeflow/issues/84)) ([#109](https://github.com/magicpro97/vibeflow/issues/109)) ([68b8f3e](https://github.com/magicpro97/vibeflow/commit/68b8f3e1aa909a9f0b31b5774fea6849dddede2b))
+* **orchestrator:** use spec risk-class threshold in goalEval, not 1.0 (issue [#90](https://github.com/magicpro97/vibeflow/issues/90)) ([#117](https://github.com/magicpro97/vibeflow/issues/117)) ([3261b1a](https://github.com/magicpro97/vibeflow/commit/3261b1a487d02dd626e19ee7891b50257438d64c))
+* **packaging:** include .agents/skills/skill-creator in npm tarball (C4) ([#96](https://github.com/magicpro97/vibeflow/issues/96)) ([ccc4d60](https://github.com/magicpro97/vibeflow/commit/ccc4d601ca90546bfd5913c8a991286fc80797d0))
+* **parser:** honor quoted commas in inline frontmatter lists (issue [#81](https://github.com/magicpro97/vibeflow/issues/81)) ([#110](https://github.com/magicpro97/vibeflow/issues/110)) ([72c0c07](https://github.com/magicpro97/vibeflow/commit/72c0c07b6688d054e6e66dac85b298adec70b553))
+* **preflight:** engine-binary probe falls back to .cmd/.bat/.ps1 shims (issue [#87](https://github.com/magicpro97/vibeflow/issues/87)) ([#112](https://github.com/magicpro97/vibeflow/issues/112)) ([4e3e5e3](https://github.com/magicpro97/vibeflow/commit/4e3e5e311796b8150ebcb44ca0b71c5724ab34b7))
+* **quota:** copilot endpoint is user/copilot_billing, not bare 'gh api copilot' (issue [#89](https://github.com/magicpro97/vibeflow/issues/89)) ([#114](https://github.com/magicpro97/vibeflow/issues/114)) ([479b619](https://github.com/magicpro97/vibeflow/commit/479b619dda420e67b014868308d55e331a44adec))
+* **scanner:** surface walk-truncation signal on ProjectProfile (issue [#86](https://github.com/magicpro97/vibeflow/issues/86)) ([#113](https://github.com/magicpro97/vibeflow/issues/113)) ([8bb9c40](https://github.com/magicpro97/vibeflow/commit/8bb9c40c4d8dbab28fe7ce4476298dc4f0e9afef))
+* **security:** expand prototype-pollution deny list to Object.prototype methods (issue [#82](https://github.com/magicpro97/vibeflow/issues/82)) ([#108](https://github.com/magicpro97/vibeflow/issues/108)) ([10d1c91](https://github.com/magicpro97/vibeflow/commit/10d1c91eda520a542d5d6c9fe5b912520b0a9769))
+* **security:** splitOperators handles \\n (issue [#73](https://github.com/magicpro97/vibeflow/issues/73)) ([#103](https://github.com/magicpro97/vibeflow/issues/103)) ([576a387](https://github.com/magicpro97/vibeflow/commit/576a387614779f2135b4a032b93567fa1028d6df))
+* **security:** symlink-safe readState + engine-instruction read ([#46](https://github.com/magicpro97/vibeflow/issues/46)) ([#101](https://github.com/magicpro97/vibeflow/issues/101)) ([3a52b4b](https://github.com/magicpro97/vibeflow/commit/3a52b4b67d5218f84a6b1e15a4e15db52bd2d6ff))
+* **skills:** centralize skill mirror roots in workflow-artifacts.ts (C2) ([#100](https://github.com/magicpro97/vibeflow/issues/100)) ([4f91d40](https://github.com/magicpro97/vibeflow/commit/4f91d40b86f227899556550b07815578c3906554))
+* **skills:** normalize parseSkill name + dedup case-insensitively (issue [#93](https://github.com/magicpro97/vibeflow/issues/93)) ([#120](https://github.com/magicpro97/vibeflow/issues/120)) ([57970df](https://github.com/magicpro97/vibeflow/commit/57970df3168ecd57982a6ea577fb31400ca0ab22))
+* **workflow-artifacts:** codex engine opts into AGENTS.md (issue [#75](https://github.com/magicpro97/vibeflow/issues/75)) ([#105](https://github.com/magicpro97/vibeflow/issues/105)) ([4b9ab39](https://github.com/magicpro97/vibeflow/commit/4b9ab39a0541565458d6a3b885b3ea7eadccce4f))
+* **workflow-artifacts:** warn when generateWorkflowArtifacts called with no phases (issue [#83](https://github.com/magicpro97/vibeflow/issues/83)) ([#116](https://github.com/magicpro97/vibeflow/issues/116)) ([132804c](https://github.com/magicpro97/vibeflow/commit/132804c5ef5367f2732782d4f5da76621d69546e))
+
+
+### Refactors
+
+* **ai-init:** move 8KB INSTRUCTIONS_BODY template to .vibeflow/ai-context/ ([#104](https://github.com/magicpro97/vibeflow/issues/104)) ([85fe5d6](https://github.com/magicpro97/vibeflow/commit/85fe5d6264bf60d0dfcff7cb155686ebc3b5ee46))
+
+
+### Documentation
+
+* correct .viteflow -&gt; .vibeflow references in docs (C1) ([#94](https://github.com/magicpro97/vibeflow/issues/94)) ([68c6322](https://github.com/magicpro97/vibeflow/commit/68c6322368e42738d30488c261714a7007dbc7ce))
+* **deployment:** update version 0.1.0 → 0.7.0 + current test count ([#102](https://github.com/magicpro97/vibeflow/issues/102)) ([c84a8c6](https://github.com/magicpro97/vibeflow/commit/c84a8c673d608fccb6964b5a5ba43554ad17e8da))
+* **hooks:** correct output JSON shape to match actual runner (C5) ([#97](https://github.com/magicpro97/vibeflow/issues/97)) ([0ee64e7](https://github.com/magicpro97/vibeflow/commit/0ee64e76031285c99358fd6371d865b89e80aafb))
+
 ## [0.7.0](https://github.com/magicpro97/vibeflow/compare/v0.6.0...v0.7.0) (2026-06-17)
 
 
