@@ -2465,9 +2465,10 @@ describe("commands.hook (test seam)", () => {
     // returns a non-null HookInput → hook() reaches evaluateHook +
     // presentDecision + out(json) + return exitCode (line 2040-2045).
     // The valid event is "pre-tool-use" (kebab-case, see HOOK_EVENTS).
+    // Post-fix the hook uses `on("data", …)`, so we wire the `on` listener
+    // to deliver the chunk.
     const fakeStdin = {
-      on: () => fakeStdin,
-      once: (event: string, cb: (chunk: Buffer) => void) => {
+      on: (event: string, cb: (chunk: Buffer) => void) => {
         if (event === "data") {
           setImmediate(() =>
             cb(
@@ -2483,6 +2484,7 @@ describe("commands.hook (test seam)", () => {
         }
         return fakeStdin;
       },
+      once: () => fakeStdin,
       resume: () => {},
       pause: () => {},
     };
@@ -2495,16 +2497,16 @@ describe("commands.hook (test seam)", () => {
 
   test("hook: with data on stdin returns exitCode from presentDecision (line 2023-2026)", async () => {
     // A simple readable stream that fires 'data' once with a JSON
-    // payload. No actual filesystem or process.
+    // payload. No actual filesystem or process. Post-fix uses `on`.
     const enc = new TextEncoder();
     const fakeStdin = {
-      on: () => fakeStdin,
-      once: (event: string, cb: (chunk: Buffer) => void) => {
+      on: (event: string, cb: (chunk: Buffer) => void) => {
         if (event === "data") {
           setImmediate(() => cb(Buffer.from(JSON.stringify({ tool_name: "Bash" }))));
         }
         return fakeStdin;
       },
+      once: () => fakeStdin,
       resume: () => {},
       pause: () => {},
     };
@@ -2517,9 +2519,9 @@ describe("commands.hook (test seam)", () => {
     expect([0, 2]).toContain(code);
   });
 
-  test("hook: with no stdin data within timeout returns 0 (fail-open, line 2006-2018)", async () => {
-    // The fakeStdin never fires 'data' → timeout fires → raw stays "" →
-    // input is null → fail-open path → returns 0.
+  test("hook: with no stdin data within timeout returns 0 (fallback session)", async () => {
+    // The fakeStdin never fires 'data' (neither `on` nor `once`) → timeout
+    // fires → raw stays "" → fallback session fail-OPEN path → returns 0.
     const fakeStdin = {
       on: () => fakeStdin,
       once: () => fakeStdin,
@@ -2533,23 +2535,162 @@ describe("commands.hook (test seam)", () => {
     expect(code).toBe(0);
   });
 
-  test("hook: with invalid JSON stdin returns 0 (fail-open, line 2006-2018)", async () => {
+  test("hook: with invalid JSON stdin returns 2 (fail-closed on live tool gate)", async () => {
+    // SECURITY: hostile or malformed input on a live tool gate MUST be
+    // blocked, not silently allowed. The hook reads via `on("data", …)`
+    // (post-fix) so we wire the `on` listener to actually deliver the
+    // chunk. Pre-fix the hook used `once`; here we deliver via `on` to
+    // exercise the new accumulation path.
     const fakeStdin = {
-      on: () => fakeStdin,
-      once: (event: string, cb: (chunk: Buffer) => void) => {
+      on: (event: string, cb: (chunk: Buffer) => void) => {
         if (event === "data") {
           setImmediate(() => cb(Buffer.from("not json")));
         }
         return fakeStdin;
       },
+      once: () => fakeStdin,
       resume: () => {},
       pause: () => {},
     };
     const code = await hook({
       stdin: fakeStdin as never,
-      stdinTimeoutMs: 50,
+      stdinTimeoutMs: 200,
     });
-    expect(code).toBe(0);
+    // Fail-CLOSED: the gate must block unrecognized input.
+    expect(code).toBe(2);
+  });
+
+  test("hook: multi-chunk JSON stdin is accumulated and reaches presentDecision (was: fail-open)", async () => {
+    // REGRESSION GUARD: previously the hook used stdin.once("data", ...) which only
+    // read the FIRST chunk. A Claude-Code hook payload that the kernel split across
+    // two TCP/pipe chunks (e.g. > 64 KiB) was truncated, parseHookInput failed on
+    // the partial JSON, and the live tool gate fail-opened — letting any
+    // unrecognized hook input through. The fix accumulates via on("data", ...).
+    //
+    // The mock below uses a real Readable so that the production code's actual
+    // listener registration (once or on) is what receives the chunks. Pre-fix:
+    // production registers `once` → only the first chunk is read. Post-fix:
+    // production registers `on` → all chunks are accumulated.
+    //
+    // We capture console.log to inspect the emitted hook decision. The fail-open
+    // branch emits a JSON with reason "unrecognized hook input — allowing
+    // (fail-open on live tool gate)". A real presentDecision output uses a
+    // different reason shape (e.g. "tool allowed", "approval required", etc.).
+    const { Readable } = await import("node:stream");
+    const validPayload = JSON.stringify({
+      event: "pre-tool-use",
+      tool: "Bash",
+      command: "ls -la",
+    });
+    // Split the JSON at the midpoint so neither half is valid JSON.
+    const splitAt = Math.floor(validPayload.length / 2);
+    const chunkA = Buffer.from(validPayload.slice(0, splitAt));
+    const chunkB = Buffer.from(validPayload.slice(splitAt));
+    // Sanity: neither half parses on its own.
+    expect(() => JSON.parse(chunkA.toString("utf8"))).toThrow();
+    expect(() => JSON.parse(chunkB.toString("utf8"))).toThrow();
+    expect(() => JSON.parse(validPayload)).not.toThrow();
+
+    const stdin = Readable.from(
+      (async function* () {
+        yield chunkA;
+        yield chunkB;
+      })(),
+    );
+    const captured: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map((a) => String(a)).join(" "));
+    };
+    let code = -1;
+    try {
+      code = await hook({
+        stdin: stdin as never,
+        stdinTimeoutMs: 200,
+      });
+    } finally {
+      console.log = origLog;
+    }
+    // Pre-fix: first chunk only → partial JSON → parseHookInput fails
+    //   → fail-open → emits JSON with reason "unrecognized hook input".
+    // Post-fix: chunks accumulated → valid JSON → presentDecision emits
+    //   a real decision JSON. The crucial assertion is that the emitted
+    //   decision is a REAL presentDecision, not the fail-open sentinel.
+    const emitted = captured.join("\n");
+    expect(emitted).not.toContain("unrecognized hook input");
+    expect(emitted).not.toContain("fail-open");
+    // Also assert exit code is in the presentDecision contract shape.
+    expect([0, 2]).toContain(code);
+  });
+
+  test("hook: large stdin payload (exceeds single-chunk buffer) is accumulated", async () => {
+    // Build a payload that crosses the typical 64 KiB pipe chunk boundary.
+    // A long `command` field forces multi-chunk delivery in real life.
+    const { Readable } = await import("node:stream");
+    const longCommand = `echo ${"A".repeat(100_000)}`;
+    const validPayload = JSON.stringify({
+      event: "pre-tool-use",
+      tool: "Bash",
+      command: longCommand,
+    });
+    expect(validPayload.length).toBeGreaterThan(65536);
+
+    const stdin = Readable.from(
+      (async function* () {
+        // Stream 16 KiB chunks to simulate kernel pipe chunking.
+        const CHUNK = 16 * 1024;
+        for (let i = 0; i < validPayload.length; i += CHUNK) {
+          yield Buffer.from(validPayload.slice(i, i + CHUNK));
+        }
+      })(),
+    );
+    const captured: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map((a) => String(a)).join(" "));
+    };
+    let code = -1;
+    try {
+      code = await hook({
+        stdin: stdin as never,
+        stdinTimeoutMs: 500,
+      });
+    } finally {
+      console.log = origLog;
+    }
+    // Pre-fix: only the first 16 KiB → partial JSON → parseHookInput fails
+    //   → fail-open → emits "unrecognized hook input".
+    // Post-fix: accumulated → valid JSON → presentDecision → real decision.
+    const emitted = captured.join("\n");
+    expect(emitted).not.toContain("unrecognized hook input");
+    expect(emitted).not.toContain("fail-open");
+    expect([0, 2]).toContain(code);
+  });
+
+  test("hook: caps stdin at 1 MiB to prevent OOM (CWE-400)", async () => {
+    // SECURITY (CWE-400): a hostile or buggy peer can stream an unbounded
+    // amount of data on stdin. The hook MUST cap reads to prevent OOM.
+    // We deliver a 2 MiB payload of "AAAA…" — the cap kicks in at 1 MiB
+    // and the hook returns (fail-closed, since the cap truncates JSON
+    // mid-stream).
+    const { Readable } = await import("node:stream");
+    const huge = "A".repeat(2 * 1024 * 1024);
+    const stdin = Readable.from(
+      (async function* () {
+        // 64 KiB chunks to be safe.
+        const CHUNK = 64 * 1024;
+        for (let i = 0; i < huge.length; i += CHUNK) {
+          yield Buffer.from(huge.slice(i, i + CHUNK));
+        }
+      })(),
+    );
+    const code = await hook({
+      stdin: stdin as never,
+      stdinTimeoutMs: 5000,
+    });
+    // The 1 MiB cap truncates the stream; the truncated payload is not
+    // valid JSON; the gate must fail-CLOSED with exit code 2.
+    expect(code).toBe(2);
   });
 });
 

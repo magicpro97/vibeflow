@@ -2239,39 +2239,95 @@ export async function hook(
   } = {},
 ): Promise<number> {
   // Claude Code spawns the hook with a JSON payload on stdin but does NOT
-  // close the pipe. Use the "data" event (flowing mode) which fires as soon
-  // as the data arrives — this works on both closed and open pipes. A 5 s
-  // timeout guards against a hook that receives no input at all (fallback
-  // session where the hook pipe is /dev/null or similar).
+  // close the pipe. The kernel/pipe can split the payload across multiple
+  // "data" events (e.g. > 64 KiB crosses the typical pipe chunk boundary),
+  // so we MUST accumulate chunks until the stream ends (or times out) and
+  // only then try to parse. Using `once("data", …)` (the old shape) read
+  // only the first chunk, truncating multi-chunk JSON; parseHookInput then
+  // failed on the partial prefix and the live tool gate fail-opened —
+  // letting any unrecognized input through. The fix uses `on("data", …)`
+  // with a balanced-brace check to detect a complete JSON object, falling
+  // back to the timeout if the stream never produces a complete payload.
+  // A 5 s timeout guards against a hook that receives no input at all
+  // (fallback session where the hook pipe is /dev/null or similar).
   const stdin = inject.stdin ?? process.stdin;
   const timeoutMs = inject.stdinTimeoutMs ?? 5000;
+  const MAX_STDIN_BYTES = 1 * 1024 * 1024; // 1 MiB hard cap (security: CWE-400)
   let raw = "";
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    stdin.pause();
+  };
+  const finish = (resolve: () => void) => {
+    clearTimeout(timer);
+    settle();
+    resolve();
+  };
+  let timer: ReturnType<typeof setTimeout>;
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      stdin.pause();
-      resolve();
+    timer = setTimeout(() => {
+      if (settled) return;
+      // Timeout: either no data at all (fallback session, fail-open) or
+      // partial data (truncated stream, fail-CLOSED on the live gate).
+      finish(resolve);
     }, timeoutMs);
-    stdin.once("data", (chunk: Buffer) => {
-      clearTimeout(timer);
-      raw = chunk.toString("utf8").trim();
-      stdin.pause();
-      resolve();
+    stdin.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      const text = chunk.toString("utf8");
+      // Cap total bytes read to avoid OOM from a hostile/greedy peer.
+      if (raw.length + text.length > MAX_STDIN_BYTES) {
+        raw = raw + text.slice(0, MAX_STDIN_BYTES - raw.length);
+        finish(resolve);
+        return;
+      }
+      raw += text;
+      // Try to detect a complete JSON object. If parseHookInput succeeds
+      // and yields a non-null HookInput, the payload is complete. This
+      // handles multi-chunk JSON without waiting for `end` (which may
+      // never come — Claude Code keeps the pipe open).
+      if (raw.trim()) {
+        try {
+          const parsed = parseHookInput(raw);
+          if (parsed !== null) {
+            finish(resolve);
+            return;
+          }
+        } catch {
+          // Not yet a complete JSON; keep accumulating until timeout.
+        }
+      }
     });
     stdin.resume();
   });
-  const input = raw ? parseHookInput(raw) : null;
-  if (!input) {
-    // FAIL OPEN on the live tool gate: a parser gap must never brick a running agent.
-    // (The git pre-commit path is independently fail-closed in shell — see adapters.gitPreCommit.)
+  // Decide the gate outcome.
+  // - raw is empty (no input ever arrived): fallback session, fail-OPEN.
+  // - raw is non-empty but parseHookInput fails: hostile/truncated input,
+  //   fail-CLOSED on the live tool gate (was: fail-open, security bug).
+  const trimmed = raw.trim();
+  if (!trimmed) {
     out(
       "vf",
       JSON.stringify({
         decision: "allow",
         risk: "none",
-        reasons: ["unrecognized hook input — allowing (fail-open on live tool gate)"],
+        reasons: ["no hook input — allowing (fallback session)"],
       }),
     );
     return 0;
+  }
+  const input = parseHookInput(trimmed);
+  if (!input) {
+    out(
+      "vf",
+      JSON.stringify({
+        decision: "block",
+        risk: "high",
+        reasons: ["unrecognized hook input — blocking (fail-closed on live tool gate)"],
+      }),
+    );
+    return 2;
   }
   const result = evaluateHook(input);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
