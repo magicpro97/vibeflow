@@ -141,10 +141,10 @@ exposes write actions, it is hardened as follows (implemented in `src/server.ts`
   removed on overflow; malformed or oversized bodies are rejected
 - attachment filenames are reduced to a single safe path segment (basename; no separators,
   traversal, control/null bytes, dotfiles, or over-long names) and confined to
-  <repo>/.viteflow/attachments/ — verified by a resolve()/startsWith() check
+  <repo>/.vibeflow/attachments/ — verified by a resolve()/startsWith() check
 - no remote scripts: the page ships zero third-party JS, so a compromised CDN cannot
   reach the same-origin write API (Content-Security-Policy restricts to 'self')
-- user input is never used as a filesystem path; canonical writes target fixed .viteflow/*
+- user input is never used as a filesystem path; canonical writes target fixed .vibeflow/*
   paths and engine names validated against the ENGINES allowlist. The repo path the user
   picks is resolved to an existing directory; writes to it require the per-process token
 - web-initiated init never shells out to $VIBEFLOW_AI (useAi:false); only the CLI may

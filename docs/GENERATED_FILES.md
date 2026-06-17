@@ -14,7 +14,7 @@ orchestrator must:
 - generate only the files the selected engine and current task actually require
 - skip optional/empty artifacts instead of creating placeholder files
 - compose every file from canonical context with the AI at runtime (no static templates)
-- keep generated files disposable and reproducible from the canonical .viteflow/* source
+- keep generated files disposable and reproducible from the canonical .vibeflow/* source
 ```
 
 ## Root files
@@ -107,7 +107,7 @@ context7-docs/SKILL.md
 
 ```text
 .codex/config.toml
-.viteflow/dispatch/codex.md
+.vibeflow/dispatch/codex.md
 ```
 
 Purpose:
@@ -117,22 +117,22 @@ Purpose:
 - prompt template generated from canonical context
 ```
 
-## .viteflow files
+## .vibeflow files
 
 ```text
-.viteflow/PROJECT_CONTEXT.md
-.viteflow/REQUIREMENTS.md
-.viteflow/TASK_CONTEXT.md
-.viteflow/WORKFLOW_POLICY.md
-.viteflow/SKILL_INDEX.md
-.viteflow/SETTINGS.json
-.viteflow/WORKFLOW_STATE.json
-.viteflow/workunits/<name>/CONTEXT.md
-.viteflow/workunits/<name>/evidence/
-.viteflow/attachments/                              # uploaded sample files (web UI)
-.viteflow/ai-context/ANTHROPIC_SKILL_STANDARD.md   # copied from src/skills/ on init
-.viteflow/ai-context/SKILL_TAXONOMY.md             # copied from src/skills/ on init
-.viteflow/skills/<name>/                           # canonical skill store (mirrored to engines)
+.vibeflow/PROJECT_CONTEXT.md
+.vibeflow/REQUIREMENTS.md
+.vibeflow/TASK_CONTEXT.md
+.vibeflow/WORKFLOW_POLICY.md
+.vibeflow/SKILL_INDEX.md
+.vibeflow/SETTINGS.json
+.vibeflow/WORKFLOW_STATE.json
+.vibeflow/workunits/<name>/CONTEXT.md
+.vibeflow/workunits/<name>/evidence/
+.vibeflow/attachments/                              # uploaded sample files (web UI)
+.vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md   # copied from src/skills/ on init
+.vibeflow/ai-context/SKILL_TAXONOMY.md             # copied from src/skills/ on init
+.vibeflow/skills/<name>/                           # canonical skill store (mirrored to engines)
   SKILL.md                                         # required
   references/                                      # optional
   scripts/                                         # optional
@@ -163,9 +163,9 @@ decomposed (3+ files across multiple modules, or delegated agents). See
 ## Dispatch files
 
 ```text
-.viteflow/dispatch/claude.md
-.viteflow/dispatch/codex.md
-.viteflow/dispatch/copilot.md
+.vibeflow/dispatch/claude.md
+.vibeflow/dispatch/codex.md
+.vibeflow/dispatch/copilot.md
 ```
 
 Each dispatch file should include:
@@ -183,7 +183,7 @@ Each dispatch file should include:
 ## Hook files
 
 `vf hooks emit` writes per-engine native hook configs into the target repo. There are no
-per-event `.viteflow/hooks/*.ts` scripts; instead every config delegates to the single
+per-event `.vibeflow/hooks/*.ts` scripts; instead every config delegates to the single
 `vf hook` entrypoint (reads a JSON event on stdin, returns a decision):
 
 ```text

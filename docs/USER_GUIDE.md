@@ -46,7 +46,7 @@ intake + scan  →  resolve skill NEEDS  →  plan work units  →  dispatch (pa
 ```
 
 - **Orchestrator** — the main agent. Plans, splits, judges. Never writes code itself.
-- **Work unit** — a scoped slice of the task (`.viteflow/workunits/<name>/`) with its own
+- **Work unit** — a scoped slice of the task (`.vibeflow/workunits/<name>/`) with its own
   gates, evidence, and resource counters. Scopes must not overlap so units run in parallel.
 - **Skill** — an Anthropic skill-creator folder (`SKILL.md` + optional `scripts/`,
   `references/`). VibeFlow **discovers, validates, and matches** skills; the engine runs
@@ -113,14 +113,14 @@ fallbacks; never retries the same engine twice. Off by default — the
 single-shot failure mode is preserved unless you opt in. See
 `docs/COVERAGE.md` for the full reference.
 
-`init` scans the repo (README, manifests, lockfiles, CI) and writes `.viteflow/*` plus the
+`init` scans the repo (README, manifests, lockfiles, CI) and writes `.vibeflow/*` plus the
 engine files (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`). It runs a live
 readiness probe first and **refuses to create a workflow when no engine is ready** —
 engines that fail the probe are skipped, files are written only for ready ones (`--dry-run`
 skips the gate). Verify:
 
 ```bash
-cat .viteflow/PROJECT_CONTEXT.md     # contains a "## Detected stack" section
+cat .vibeflow/PROJECT_CONTEXT.md     # contains a "## Detected stack" section
 ```
 
 ### Resolve which skills a task needs (demand-driven)
@@ -163,7 +163,7 @@ vf tools disable lsp             # turn off + remove its MCP servers
 
 Two opt-in tools (both off by default) give engines better code navigation: **codegraph**
 (a local code-graph MCP server) and **lsp** (an MCP↔language-server bridge, one server per
-detected language). Enabling a tool flips it in `.viteflow/SETTINGS.json` and wires MCP
+detected language). Enabling a tool flips it in `.vibeflow/SETTINGS.json` and wires MCP
 config per engine — it merges `.mcp.json` for Claude, writes `.codex/config.toml` (with
 `disabled_tools` gating) for Codex, and prints `copilot mcp add` commands for you to run.
 The preference order **codegraph > lsp > native** is injected into the engine instruction
@@ -172,7 +172,7 @@ files. Re-run `vf init` after changing tools to regenerate them.
 ### Dispatch and orchestrate
 
 ```bash
-vf run claude                 # write .viteflow/dispatch/claude.md (dry)
+vf run claude                 # write .vibeflow/dispatch/claude.md (dry)
 vf run claude --yes           # launch the Claude Code CLI
 
 vf orchestrate                # plan + dispatch work units (dry: prompts only)
@@ -240,12 +240,12 @@ Every step prints evidence you can check. The goal only reaches `met` when each 
 
 ```text
 CLAUDE.md AGENTS.md .github/copilot-instructions.md   # engine instruction files
-.viteflow/PROJECT_CONTEXT.md REQUIREMENTS.md TASK_CONTEXT.md
-.viteflow/WORKFLOW_POLICY.md SKILL_INDEX.md WORKFLOW_STATE.json
-.viteflow/SETTINGS.json                                 # per-repo tool settings
-.viteflow/dispatch/<engine>.md                          # vf run
-.viteflow/workunits/<name>/CONTEXT.md + <engine>.result.json   # vf orchestrate
-.viteflow/attachments/                                  # uploaded sample files
+.vibeflow/PROJECT_CONTEXT.md REQUIREMENTS.md TASK_CONTEXT.md
+.vibeflow/WORKFLOW_POLICY.md SKILL_INDEX.md WORKFLOW_STATE.json
+.vibeflow/SETTINGS.json                                 # per-repo tool settings
+.vibeflow/dispatch/<engine>.md                          # vf run
+.vibeflow/workunits/<name>/CONTEXT.md + <engine>.result.json   # vf orchestrate
+.vibeflow/attachments/                                  # uploaded sample files
 ```
 
 Minimal-footprint principle: VibeFlow generates the fewest files needed, composed from

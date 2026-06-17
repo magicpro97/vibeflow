@@ -3,7 +3,7 @@
 Status of the package as verified by `npm pack --dry-run`:
 - `@magicpro97/vibeflow@0.1.0`, tarball **77 kB** / unpacked 252 kB.
 - Ships only: `dist/cli.js` (built), `README.md`, `LICENSE`, `docs/**`, `package.json`.
-- **No** `src/`, `test/`, `.viteflow/`, `.env`, or secrets in the tarball (the `files` allow-list +
+- **No** `src/`, `test/`, `.vibeflow/`, `.env`, or secrets in the tarball (the `files` allow-list +
   `.gitignore` keep them out). Verified.
 - `bin: { vf: ./dist/cli.js }`, `prepublishOnly: bun run build`, `publishConfig.access: public`,
   `engines.node >=18`, MIT license, `repository`/`homepage`/`bugs` fields present.
@@ -79,5 +79,5 @@ behave identically on `win32` and `posix`.
 - **Never auto-publish**: git push + npm publish are out-of-this-tool actions with external blast
   radius — they require explicit user go-ahead and interactive auth (gh/npm login). This plan
   prepares everything; the user triggers the two publish commands.
-- The `.viteflow/` runtime dir, `.kiro/`-tool config, and the tool-generated `AGENTS.md`/`.claude/`
+- The `.vibeflow/` runtime dir, `.kiro/`-tool config, and the tool-generated `AGENTS.md`/`.claude/`
   are gitignored or intentionally committed per earlier decisions — none leak into the npm tarball.

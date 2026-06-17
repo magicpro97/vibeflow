@@ -145,7 +145,7 @@ Shows:
 ```
 
 The Run screen includes a live **orchestration dashboard** that renders the work-unit
-ledger from `.viteflow/WORKFLOW_STATE.json` (see `WORK_UNIT_ORCHESTRATION.md`) so quality
+ledger from `.vibeflow/WORKFLOW_STATE.json` (see `WORK_UNIT_ORCHESTRATION.md`) so quality
 and resource use are visible without reading raw logs:
 
 ```text

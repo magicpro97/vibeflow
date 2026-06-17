@@ -40,7 +40,7 @@ vf init --dry-run        # print what would be written
 ```
 
 Scans the repo and generates the minimal set: `CLAUDE.md`, `AGENTS.md`,
-`.github/copilot-instructions.md`, and `.viteflow/*` (including a seeded
+`.github/copilot-instructions.md`, and `.vibeflow/*` (including a seeded
 `WORKFLOW_STATE.json`). `PROJECT_CONTEXT.md` includes a `## Detected stack` section.
 
 **Readiness gate:** a real `init` runs a live preflight (the same probe as
@@ -51,7 +51,7 @@ ready ones. `--dry-run` skips the gate (nothing is written), as does the web int
 ## Dispatch
 
 ```bash
-vf run <claude|codex|copilot>   # write .viteflow/dispatch/<engine>.md (dry)
+vf run <claude|codex|copilot>   # write .vibeflow/dispatch/<engine>.md (dry)
 vf run <engine> --yes           # launch the engine CLI
 ```
 
@@ -119,7 +119,7 @@ Two opt-in tools give engines better code navigation, both off by default:
 - **lsp** — an MCP↔language-server bridge (`mcp-language-server`), one server per
   detected language (TypeScript, Python, Go, Rust).
 
-`enable`/`disable` flip the flag in `.viteflow/SETTINGS.json` **and** wire MCP config per
+`enable`/`disable` flip the flag in `.vibeflow/SETTINGS.json` **and** wire MCP config per
 engine: merge `.mcp.json` (Claude), write `.codex/config.toml` with `disabled_tools`
 gating (Codex), and print the exact `copilot mcp add` commands for you to run (VibeFlow
 never touches Copilot's secret config). The priority ladder **codegraph > lsp > native**
