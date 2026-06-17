@@ -124,6 +124,19 @@ describe("terminal prompts", () => {
     await expect(runPrompt('textInput("Name", "Default")', "")).resolves.toBe("Default");
   });
 
+  test("textInput clamps oversize input to MAX_INPUT_BYTES (CWE-400)", async () => {
+    // Build a paste larger than MAX_INPUT_BYTES (64 KiB). Post-fix,
+    // the value returned to the caller is truncated at the byte
+    // boundary. Pre-fix, the full string is forwarded — the
+    // engine prompt sees a megabyte of garbage.
+    const big = "a".repeat(128 * 1024);
+    const result = await runPrompt('textInput("Project description")', big);
+    expect(result.length).toBeLessThanOrEqual(64 * 1024);
+    // The truncated value should still be valid utf-8 (the first
+    // 64 KiB of "a" is unambiguous).
+    expect(result).toMatch(/^a*$/);
+  });
+
   test("confirmInput accepts yes values", async () => {
     await expect(runPrompt('confirmInput("Continue?", false)', "yes\n")).resolves.toBe(true);
   });
