@@ -84,7 +84,11 @@ describe("coverage anti-patterns (test/ only)", () => {
     .filter((p) => !p.endsWith("coverage-anti-patterns.test.ts"))
     // Terminal prompt tests intentionally spawn a subprocess to exercise
     // real stdin/stdout behavior across the process boundary.
-    .filter((p) => !p.endsWith("terminal-prompts.test.ts"));
+    .filter((p) => !p.endsWith("terminal-prompts.test.ts"))
+    // tryLock TOCTOU test intentionally spawns child bun processes to
+    // exercise real cross-process lock contention — using a fakeSpawner
+    // would defeat the test's purpose (CWE-367 is a real-process race).
+    .filter((p) => !p.endsWith("orchestrator/marker.test.ts"));
 
   test("no test uses raw Bun.spawn or spawnSync without fakeSpawner", () => {
     for (const f of testFiles) {

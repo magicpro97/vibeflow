@@ -344,4 +344,124 @@ describe("tryLock / releaseLock", () => {
     expect(tryLock(u)).toBe(true);
     releaseLock(u);
   });
+
+  test("tryLock is atomic against concurrent processes (TOCTOU CWE-367)", async () => {
+    // CWE-367: the pre-fix tryLock used `existsSync` + `writeFileSync`,
+    // which is a classic TOCTOU race. Two concurrent processes could
+    // both see `existsSync === false` and both proceed to write the
+    // lock, ending up with two "owners".
+    //
+    // The fix: lead every acquisition attempt with `openSync(lock, "wx")`
+    // (atomic exclusive create) so only one process can ever observe
+    // itself as the creator. If the file already exists, openSync
+    // throws EEXIST and we treat it as "lock held".
+    //
+    // The "check then unlink" path for stale locks is also subject to
+    // a TOCTOU race: two processes could both see a stale lock, both
+    // unlink it, and both think they own the freshly-created one. The
+    // retry-after-unlink uses the same `openSync("wx")` atomic create
+    // so the second-to-arrive gets EEXIST and is rejected.
+    //
+    // Test strategy: spawn N child processes that all tryLock the
+    // SAME unit simultaneously. With a CORRECT fix, the number of
+    // children that observe themselves as "owner of the lock file
+    // they wrote" equals the number of times the lock was acquired
+    // (which may be >1 with sequential children, but never >1 for
+    // children that were RUNNING CONCURRENTLY in the critical
+    // section).
+    //
+    // We use a stronger invariant: each winning child holds the
+    // lock for 100ms (simulating a critical section). A child that
+    // gets a "stale" lock from a dead winner will see no PID alive
+    // and steal — that's fine. But a child that gets a "live" lock
+    // from a CONCURRENT winner would also try to enter the critical
+    // section. The post-condition: at the moment a child's 100ms
+    // sleep ends, the lock file's PID should be either:
+    //  (a) the child's own PID, or
+    //  (b) a dead PID (the next child will steal it).
+    // If two children are both in their 100ms sleep with the lock
+    // file's PID = their own PID, the lock is broken.
+    const { tryLock, releaseLock } = await loadMarker();
+    const u = unit("lock-race");
+    const N = 8;
+
+    // The child script:
+    //  1. tryLock(u) → either true (we own it) or false (someone else does)
+    //  2. If true, write our PID to a "critical section" file,
+    //     sleep 100ms, then exit (releasing our lock by exiting).
+    //     The lock file is NOT explicitly released — the next
+    //     child will see our PID as dead and steal.
+    //  3. If false, return immediately (we didn't get in).
+    const script = `
+      import { tryLock } from ${JSON.stringify(join(process.cwd(), "src/orchestrator/marker.ts"))};
+      import { writeFileSync, readFileSync, unlinkSync, existsSync } from "node:fs";
+      const u = ${JSON.stringify(u)};
+      const result = tryLock(u);
+      process.stdout.write("__RESULT__" + JSON.stringify(result) + "\\n");
+      if (result) {
+        // Critical section begins here.
+        // Write our PID to a per-PID file so the parent can audit
+        // which children THINK they're in the critical section.
+        writeFileSync("/tmp/.vf-critical-" + process.pid, String(Date.now()));
+        await new Promise(r => setTimeout(r, 100));
+        try { unlinkSync("/tmp/.vf-critical-" + process.pid); } catch {}
+      }
+    `;
+
+    const procs = Array.from({ length: N }, () =>
+      Bun.spawn(["bun", "--input-type=module", "-e", script], {
+        cwd: process.cwd(),
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
+
+    // Audit loop: poll for critical-section marker files. If two
+    // markers exist at the same time, two children are in the
+    // critical section simultaneously — the lock is broken.
+    const seenOverlaps: number[][] = [];
+    const seenPids = new Set<number>();
+    let prevCount = 0;
+    const auditStop = Date.now() + 4000;
+    while (Date.now() < auditStop) {
+      // Find all critical-section marker files
+      const { readdirSync } = await import("node:fs");
+      const files = readdirSync("/tmp").filter((f) => f.startsWith(".vf-critical-"));
+      const livePids = files
+        .map((f) => Number(f.replace(".vf-critical-", "")))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (livePids.length > 1) {
+        seenOverlaps.push([...livePids]);
+      }
+      for (const pid of livePids) seenPids.add(pid);
+      prevCount = livePids.length;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+
+    const outputs = await Promise.all(
+      procs.map(async (p) => {
+        const [stdout, _stderr, _exit] = await Promise.all([
+          new Response(p.stdout).text(),
+          new Response(p.stderr).text(),
+          p.exited,
+        ]);
+        return stdout;
+      }),
+    );
+
+    // CRITICAL ASSERTION: at no point should two children have
+    // been in their critical section simultaneously. If the
+    // audit loop observed any overlap, the lock is broken.
+    expect(seenOverlaps).toEqual([]);
+    // Sanity: at least one child should have won (else the test
+    // isn't actually exercising anything).
+    const wins = outputs.filter((o) => /__RESULT__true/.test(o)).length;
+    expect(wins).toBeGreaterThan(0);
+    // The distinct PIDs we saw in critical section should match
+    // the number of distinct winners (each winner is in CS once).
+    expect(seenPids.size).toBe(wins);
+
+    // Cleanup.
+    releaseLock(u);
+  });
 });
