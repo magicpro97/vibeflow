@@ -294,7 +294,7 @@ describe("commands.init", () => {
     expect(units("resources", [])).toBe(0);
   });
 
-  test("init defaults --engine to copilot", async () => {
+  test("init defaults --engine to claude (issue #78: aligned with orchestrate)", async () => {
     let requested: Engine[] = [];
     const code = await init(
       { "no-ai": true },
@@ -306,7 +306,7 @@ describe("commands.init", () => {
       },
     );
     expect(code).toBe(0);
-    expect(requested).toEqual(["copilot"]);
+    expect(requested).toEqual(["claude"]);
   });
 
   test("init with --no-ai skips AI enrichment but still writes context files", async () => {

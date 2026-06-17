@@ -1813,6 +1813,22 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     expect(resolveEngine({ engine: 42 as unknown as string })).toBe("claude");
     expect(resolveEngine({})).toBe("claude");
   });
+
+  test("issue #78: DEFAULT_ENGINE parity across init and orchestrate", () => {
+    // Both `vf init` and `vf orchestrate` must share the same default
+    // engine. The fix introduced a single `DEFAULT_ENGINE` constant
+    // consumed by both code paths.
+    // import.meta.resolve is intentionally avoided — the source file
+    // is the canonical source.
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const src = readFileSync("src/commands.ts", "utf8");
+    // Single declaration of `const DEFAULT_ENGINE`.
+    const decls = src.match(/^const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
+    expect(decls.length).toBe(1);
+    expect(decls[0]).toContain('"claude"');
+    // resolveEngine uses it (no hardcoded "claude" string literal anymore).
+    expect(src).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
+  });
 });
 
 describe("commands.announceLaunch (test seam)", () => {

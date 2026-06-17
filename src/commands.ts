@@ -249,7 +249,7 @@ function chosenEngines(engines?: string[]): Engine[] {
   return valid.length ? valid : [...ENGINES];
 }
 
-const INIT_DEFAULT_ENGINE: Engine = "copilot";
+const DEFAULT_ENGINE: Engine = "claude";
 
 /** Validate and resolve a user-supplied repo path to an absolute existing directory. */
 export function resolveRepo(path?: string): string {
@@ -593,12 +593,12 @@ export function resolveMode(flags: Record<string, string | boolean>): "cli" | "b
   return process.env.VIBEFLOW_AI ? "bridge" : "dry";
 }
 
-/** Resolve which engine to dispatch: --engine flag, else "claude". */
+/** Resolve which engine to dispatch: --engine flag, else DEFAULT_ENGINE. */
 // Test seam: exported so the unknown-engine fallback can be unit-tested.
 export function resolveEngine(flags: Record<string, string | boolean>): Engine {
   return typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
     ? (flags.engine as Engine)
-    : "claude";
+    : DEFAULT_ENGINE;
 }
 
 function resolveRisk(flags: Record<string, string | boolean>): RiskClass {
@@ -1345,7 +1345,7 @@ export async function init(
   const initEngine: Engine =
     typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
       ? (flags.engine as Engine)
-      : INIT_DEFAULT_ENGINE;
+      : DEFAULT_ENGINE;
   const engines = [initEngine];
   const dry = Boolean(flags["dry-run"]);
   const ai = !flags["no-ai"];
@@ -3205,11 +3205,12 @@ ${c.bold("Examples:")}
   init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--no-ask] [--no-ai] [--dry-run]")}
 Generate the canonical context + engine instruction files and a workflow ledger.
 By default a hard creation gate refuses when no engine is ready; --dry-run previews
-offline (writes nothing). When --engine is omitted, init targets copilot.
+offline (writes nothing). When --engine is omitted, init targets the centralized
+DEFAULT_ENGINE (currently "claude"; both init and orchestrate share this default).
 AI enrichment is ON by default — pass --no-ai to skip the headless engine dispatch.
 
 ${c.bold("Options:")}
-  --engine <e>   generate for a single engine (default: copilot)
+  --engine <e>   generate for a single engine (default: claude)
   --no-ask       skip the intake questionnaire in TTY mode
   --no-ai        skip AI enrichment (deterministic context files only)
   --dry-run      read-only preview — print what would be written, change nothing
