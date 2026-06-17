@@ -25,11 +25,16 @@ const SECRET_CRITICAL = [/(^|[\s/])\.env(\.[\w-]+)?($|[\s/])/, /\bid_rsa\b/, /\b
 const SECRET_HIGH = [/\.pem\b/, /(^|\/)\.ssh\//, /\bsecrets?\b/i, /\bcredentials?\b/i];
 
 /** Paths that should never be edited without explicit approval (file-based events). */
+// All entries use the `i` flag for uniform case-insensitive matching: hooks
+// must catch `.ENV`, `.GIT/HEAD`, `ID_RSA`, `.SSH/...` the same as their
+// lowercase canonical forms (issue #84 — pre-fix only `secrets?` and
+// `credentials?` were case-insensitive, so the dotfile/key patterns were
+// trivially bypassed with a single uppercase letter).
 const PROTECTED_PATH = [
-  /(^|\/)\.env(\.|$)/,
-  /(^|\/)\.git\//,
-  /(^|\/)(id_rsa|id_ed25519|.*\.pem)$/,
-  /(^|\/)\.ssh\//,
+  /(^|\/)\.env(\.|$)/i,
+  /(^|\/)\.git\//i,
+  /(^|\/)(id_rsa|id_ed25519|.*\.pem)$/i,
+  /(^|\/)\.ssh\//i,
   /(^|\/)secrets?\b/i,
   /(^|\/)credentials?\b/i,
 ];

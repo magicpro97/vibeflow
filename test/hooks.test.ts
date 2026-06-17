@@ -628,3 +628,42 @@ describe("splitOperators: newline handling (issue #73)", () => {
     expect(["none", "low"]).toContain(r.risk);
   });
 });
+
+// --- ISSUE #84: PROTECTED_PATH regex case-sensitivity inconsistency ---
+// All PROTECTED_PATH entries must use the `i` flag uniformly. Pre-fix: only
+// the `secrets?` / `credentials?` entries were case-insensitive; `.env`,
+// `.git/`, `id_rsa|id_ed25519|*.pem`, and `.ssh/` were case-sensitive, so
+// `.ENV`, `.GIT/HEAD`, `ID_RSA`, `.SSH/id_rsa` slipped past the file-based
+// guard. Mixed behavior = a P2 security defect (audit-2026-06-17).
+describe("risk: PROTECTED_PATH case-insensitive matching (issue #84)", () => {
+  const cases: Array<{ file: string; why: string }> = [
+    { file: ".ENV", why: "uppercase dotenv" },
+    { file: "src/.Env", why: "mixed case dotenv in subdir" },
+    { file: "config/.ENV.production", why: "uppercase dotenv variant" },
+    { file: ".GIT/HEAD", why: "uppercase git dir" },
+    { file: "repo/.Git/config", why: "mixed case git dir" },
+    { file: "ID_RSA", why: "uppercase rsa key basename" },
+    { file: "home/ID_Ed25519", why: "mixed case ed25519 key" },
+    { file: "Server.PEM", why: "uppercase pem extension" },
+    { file: ".SSH/id_rsa", why: "uppercase ssh dir" },
+    { file: "Home/.Ssh/Config", why: "mixed case ssh dir" },
+    { file: "SECRETS/db.json", why: "uppercase secrets" },
+    { file: "Config/CREDENTIALS.json", why: "uppercase credentials" },
+  ];
+  for (const c of cases) {
+    test(`flags protected file regardless of case: ${c.file} (${c.why})`, () => {
+      const r = scoreRisk({ event: "pre-write", files: [c.file] });
+      expect(["high", "critical"]).toContain(r.risk);
+    });
+  }
+
+  // Regression: lowercase canonical forms must still match (the original
+  // behavior must not break).
+  const lowerCases = [".env", ".git/HEAD", "id_rsa", "server.pem", ".ssh/id_rsa"];
+  for (const f of lowerCases) {
+    test(`regression: still blocks lowercase canonical: ${f}`, () => {
+      const r = scoreRisk({ event: "pre-write", files: [f] });
+      expect(["high", "critical"]).toContain(r.risk);
+    });
+  }
+});
