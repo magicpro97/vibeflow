@@ -168,4 +168,74 @@ describe("scanner: edge branches", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("scanRepo: symlink loop (a → b → a) does not infinite-recurse or OOM", () => {
+    // REGRESSION GUARD: previously the walk() used statSync (which follows
+    // symlinks) and recursed into symlinked directories. A symlink loop
+    // a → b → a would infinite-recurse until the 4000-file cap or
+    // stack overflow. The fix uses lstatSync and skips symlinks.
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-symloop-"));
+    const a = join(dir, "a");
+    const b = join(dir, "b");
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    // Create a self-referential loop: a/loop → b/loop → a/loop
+    // But symlinkSync can't make true cycles on most systems (ELOOP).
+    // Instead: a/loop → b, b/loop → a — both valid targets but recursive
+    // walk would loop.
+    symlinkSync(b, join(a, "loop"));
+    symlinkSync(a, join(b, "loop"));
+    try {
+      // Pre-fix: walk() recurses a → a/loop (resolves to b) → b/loop
+      //   (resolves to a) → ... until depth>6 OR seen>4000. The cap
+      //   stops the recursion but the walk spends a lot of time and
+      //   eventually times out OR consumes a lot of stack.
+      // Post-fix: lstatSync on a/loop reveals isSymbolicLink() → skip
+      //   the entry entirely. No recursion into the symlink target.
+      const start = Date.now();
+      const p = scanRepo(dir);
+      const elapsed = Date.now() - start;
+      expect(p).toBeDefined();
+      // Should complete in well under 5 seconds; pre-fix would either
+      // OOM/timeout or take much longer due to recursion.
+      expect(elapsed).toBeLessThan(5000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("scanRepo: symlink to a deep path outside repo is NOT followed (CWE-22)", () => {
+    // SECURITY: walk() previously followed symlinks. A symlink
+    // `external → /tmp` (or any path outside the repo) would be
+    // recursed into and its .ts/.js/.py files would be counted in
+    // `languages` — leaking detection of unrelated code and
+    // performing unnecessary I/O on attacker-chosen paths.
+    // Post-fix: lstatSync + skip-if-symlink means we never leave
+    // the repo boundary.
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-sym-escape-"));
+    const sub = join(dir, "sub");
+    mkdirSync(sub, { recursive: true });
+    // Build a sandbox with a few .ts files in it so the post-fix walk
+    // has something to find. Then point a symlink at a directory
+    // CONTAINING a totally different stack (Python files). Pre-fix:
+    // walk follows the symlink → Python ends up in `languages`.
+    const sandbox = mkdtempSync(join(tmpdir(), "vf-sandbox-"));
+    mkdirSync(join(sandbox, "py"), { recursive: true });
+    writeFileSync(join(sandbox, "py", "x.py"), "x = 1");
+    writeFileSync(join(sandbox, "py", "y.py"), "y = 2");
+    symlinkSync(sandbox, join(sub, "external"));
+    // Repo-side: just one ts file, no Python.
+    writeFileSync(join(sub, "app.ts"), "export const x = 1;");
+    try {
+      const p = scanRepo(dir) as { languages: string[] };
+      // Repo has TypeScript only. Pre-fix would have included Python
+      // (from the symlinked sandbox). Post-fix: Python must NOT
+      // appear in the languages list.
+      expect(p.languages).toContain("TypeScript");
+      expect(p.languages).not.toContain("Python");
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

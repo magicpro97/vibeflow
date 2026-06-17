@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 export type Confidence = "high" | "medium" | "low";
@@ -138,10 +138,20 @@ function detectLanguages(repo: string): string[] {
     for (const entry of entries) {
       if (entry.startsWith(".") || SKIP_DIRS.has(entry)) continue;
       const full = join(dir, entry);
-      let st: ReturnType<typeof statSync>;
-      try {
-        st = statSync(full);
-      } catch {
+      // lstatSync (not statSync) so we can detect symlinks WITHOUT
+      // following them. Following symlinks opens three security holes:
+      //   1) Symlink loops (a → b → a) blow the depth/seen caps.
+      //   2) A symlink to `..` walks out of the repo and reads the
+      //      user's home directory (CWE-22, path traversal).
+      //   3) A symlink to /etc reads system files (CWE-200).
+      // No try/catch: lstatSync on a path returned by readdirSync is
+      // reliable (readdir gave us a snapshot). Broken symlinks resolve
+      // to a valid lstat result (the symlink itself, not its target).
+      // Race-condition delete-between-readdir-and-lstat is not a real
+      // concern in a single-process scan of a user-owned repo.
+      const st = lstatSync(full);
+      if (st.isSymbolicLink()) {
+        // Hard skip: never follow symlinks during the language walk.
         continue;
       }
       if (st.isDirectory()) {
