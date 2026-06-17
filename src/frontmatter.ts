@@ -44,8 +44,31 @@ function indentOf(line: string): number {
  * A SKILL.md is attacker-controllable, so a `__proto__:` block must never be
  * able to inject an inherited `status` (or anything else) — that would defeat
  * the "external/unknown skills are never auto-verified" invariant.
+ *
+ * The list is the full set of `Object.prototype` own properties that can be
+ * safely assigned to a plain object. Anything in here is silently dropped
+ * (and any child block is consumed) so downstream code keeps using the real
+ * inherited method. The set mirrors the OWASP prototype-pollution cheat
+ * sheet: __proto__, constructor, prototype, and every method inherited from
+ * Object.prototype (valueOf, hasOwnProperty, toString, isPrototypeOf,
+ * propertyIsEnumerable, toLocaleString, __defineGetter__, __defineSetter__,
+ * __lookupGetter__, __lookupSetter__).
  */
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const FORBIDDEN_KEYS = new Set<string>([
+  "__proto__",
+  "constructor",
+  "prototype",
+  "valueOf",
+  "hasOwnProperty",
+  "toString",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "toLocaleString",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
+]);
 
 /** Create a prototype-less object so inherited keys can never leak through. */
 function emptyMap(): Record<string, unknown> {

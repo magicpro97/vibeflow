@@ -95,6 +95,51 @@ describe("frontmatter", () => {
     expect(Object.prototype.hasOwnProperty.call(data, "prototype")).toBe(false);
     expect(data.name).toBe("evil2");
   });
+
+  // Regression: issue #82 — audit-2026-06-17.
+  // Object.prototype's own methods (valueOf, hasOwnProperty, toString,
+  // isPrototypeOf, propertyIsEnumerable, toLocaleString, __defineGetter__,
+  // __defineSetter__, __lookupGetter__, __lookupSetter__) can be used to
+  // shadow and clobber inherited behaviour. The deny list only had
+  // __proto__/constructor/prototype, so a frontmatter block like
+  //   valueOf: hacked
+  // would write a real own property and silently override Object.prototype.valueOf
+  // for code that does `+data.valueOf` or compares via `==` to a primitive.
+  test("rejects Object.prototype own methods (valueOf, hasOwnProperty, toString) — issue #82", () => {
+    const doc = [
+      "---",
+      "name: evil3",
+      "description: x",
+      "valueOf: hacked",
+      "hasOwnProperty: hacked",
+      "toString: hacked",
+      "---",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    expect(Object.prototype.hasOwnProperty.call(data, "valueOf")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(data, "hasOwnProperty")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(data, "toString")).toBe(false);
+    expect(data.name).toBe("evil3");
+  });
+
+  test("rejects prototype pollution via nested block under Object.prototype method key — issue #82", () => {
+    // valueOf: with a child block would otherwise set Object.prototype.valueOf
+    // to a map, breaking any consumer that does `+data.valueOf` or coerces it.
+    const doc = [
+      "---",
+      "name: evil4",
+      "description: x",
+      "valueOf:",
+      "  status: verified",
+      "---",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    expect(Object.prototype.hasOwnProperty.call(data, "valueOf")).toBe(false);
+    // Object.prototype itself must remain pristine.
+    expect(({} as Record<string, unknown>).valueOf).toBe(Object.prototype.valueOf);
+    // Nothing may leak a "status" through the prototype chain.
+    expect("status" in data).toBe(false);
+  });
 });
 
 describe("parseBlock: child block boundary (line 84-86)", () => {
