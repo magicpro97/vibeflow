@@ -1,132 +1,141 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, isAbsolute, join, resolve } from "node:path";
-import {
-  type ProjectContext,
-  agentFiles,
-  canonicalFiles,
-  defaultContext,
-  dispatchPrompt,
-  engineFiles,
-} from "./adapters.js";
-import { detectRolesForRepo } from "./agents/detect-roles.js";
-import type { AgentEngine } from "./agents/render.js";
-import {
-  CTX_DIR,
-  ENGINES,
-  type Engine,
-  VERSION,
-  type WorkUnit,
-  type WorkflowState,
-  appendFileSafe,
-  assertInsideBase,
-  c,
-  ctxPathIn,
-  cwd,
-  hasCommand,
-  isGitRepo,
-  readState,
-  recomputeTotals,
-  writeFileSafe,
-  writeState,
-} from "./core.js";
-import {
-  type AsyncSpawner,
-  type DispatchResult,
-  type EngineProbe,
-  buildEnginePrompt,
-  engineCommand,
-  isUnavailable,
-  makeAsyncSpawner,
-  persistDispatch,
-  runDispatchAsync,
-} from "./dispatch.js";
-import {
-  e2eEvaluateDynamicImportWarning,
-  e2eUnicodeSelectorWarning,
-  findScopeConflicts,
-  policyGates,
-} from "./gates.js";
-import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
-import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
-import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
-import {
-  collectInitAskQuestionnaireData,
-  initAskQuestionnaireToIntakeAnswers,
-} from "./init-intake.js";
-import { appendJournal, ensureIndex } from "./journal.js";
-import {
-  type AsyncResearcher,
-  DEFAULT_MAX_ROUNDS,
-  type RiskClass,
-  type UnitInvestigationOutcome,
-  investigateUnit,
-  thresholdFor,
-} from "./orchestrator/investigate.js";
-import {
-  DEFAULT_CONCURRENCY,
-  type Reviewer,
-  type UnitDispatcher,
-  type UnitOutcome,
-  goalEval,
-  orchestrateUnits,
-} from "./orchestrator/run.js";
-import {
-  type EngineReadiness,
-  anyReady,
-  preflightAll,
-  preflightAllAsync,
-  readyEngines,
-} from "./preflight.js";
+// === Subcommand refactor (issue #80, phase 1/14) ===
+// All imports + re-exports now live in src/commands/_shared.ts (the barrel).
+// Function bodies stay in this file until each is extracted to its own
+// per-subcommand module. PR1 only sets up the barrel.
 import {
   BACKUP_SUBDIR,
-  type Checkpoint,
-  type GitRunner,
-  createCheckpoint,
-  gitState,
-  recoveryHint,
-  restoreIgnored,
-} from "./safety/checkpoint.js";
-import { type QuotaSignal, detectQuota } from "./safety/quota.js";
-import { scanRepo, summarizeProfile } from "./scanner.js";
-import {
-  type FailureProtection,
-  type ToolTier,
-  type VibeSettings,
-  priorityRank,
-  readSettings,
-  settingsPath,
-  writeSettings,
-} from "./settings.js";
-import { importSkillFromDir, importSkillsFromParent } from "./skills/importer.js";
-import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/registry.js";
-import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
-import { syncSkillMirrors, verifySkillSync } from "./skills/sync.js";
-import { validateSkillRoots } from "./skills/validator.js";
-import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
-import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
-import { Spinner, panel, table } from "./ui.js";
-import {
-  type WorkflowPhase,
-  buildEnrichmentPrompt,
-  copySkillCreator,
-  generateWorkflowArtifacts,
-} from "./workflow-artifacts.js";
-import {
-  type CollisionPolicy,
-  type DeletePlan,
-  type MergeResult,
+  CTX_DIR,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_MAX_ROUNDS,
+  ENGINES,
+  ENGINE_INSTRUCTION_FILES,
+  Spinner,
+  TOOLS,
+  VERSION,
+  agentFiles,
+  anyReady,
+  appendFileSafe,
+  appendJournal,
   applyDelete,
+  assertInsideBase,
+  basename,
+  buildEnginePrompt,
+  buildEnrichmentPrompt,
+  c,
+  canonicalFiles,
+  chmodSync,
+  collectInitAskQuestionnaireData,
+  copySkillCreator,
+  createCheckpoint,
+  ctxPathIn,
+  cwd,
+  defaultContext,
   deleteUnit,
+  detectQuota,
+  detectRolesForRepo,
+  discoverSkills,
+  dispatchPrompt,
+  downgradeBannerText,
+  e2eEvaluateDynamicImportWarning,
+  e2eUnicodeSelectorWarning,
+  engineCommand,
+  engineFiles,
+  engineHookFiles,
+  ensureIndex,
+  evaluateHook,
+  existsSync,
+  findScopeConflicts,
+  generateWorkflowArtifacts,
+  gitState,
+  goalEval,
+  hasCommand,
+  importSkillFromDir,
+  importSkillsFromParent,
   importWorkflow,
+  initAskQuestionnaireToIntakeAnswers,
+  installLogbus,
+  investigateUnit,
+  isAbsolute,
+  isGitRepo,
+  isUnavailable,
+  join,
+  makeAsyncSpawner,
+  matchSkillsForTask,
+  mergeManagedBlock,
+  orchestrateUnits,
+  out,
+  panel,
+  parseHookInput,
+  persistDispatch,
   planDelete,
-} from "./workflow/lifecycle.js";
-import { ENGINE_INSTRUCTION_FILES, mergeManagedBlock } from "./workflow/merge.js";
-
-import { out } from "./logbus.js";
-import { installLogbus } from "./logbus.js";
-
-export { skillForFile };
+  policyGates,
+  preflightAll,
+  preflightAllAsync,
+  presentDecision,
+  priorityRank,
+  readFileSync,
+  readSettings,
+  readState,
+  readyEngines,
+  recomputeTotals,
+  recoveryHint,
+  renderSkillIndex,
+  renderSkillNeeds,
+  resolve,
+  resolveSkillNeeds,
+  resolveTools,
+  restoreIgnored,
+  rmSync,
+  runDispatchAsync,
+  runSelftest,
+  scanRepo,
+  settingsPath,
+  skillForFile,
+  spawnSync,
+  statSync,
+  summarizeProfile,
+  syncSkillMirrors,
+  table,
+  thresholdFor,
+  validateSkillRoots,
+  verifySkillSync,
+  writeFileSafe,
+  writeSettings,
+  writeState,
+} from "./commands/_shared.js";
+import type {
+  AgentEngine,
+  AsyncResearcher,
+  AsyncSpawner,
+  Checkpoint,
+  CollisionPolicy,
+  DeletePlan,
+  DispatchResult,
+  Engine,
+  EngineProbe,
+  EngineReadiness,
+  FailureProtection,
+  GitRunner,
+  JsonMcpEntry,
+  MergeResult,
+  ProjectContext,
+  QuotaSignal,
+  Reviewer,
+  RiskClass,
+  SelftestReport,
+  StdioServer,
+  TomlMcpEntry,
+  ToolName,
+  ToolTier,
+  UnitDispatcher,
+  UnitInvestigationOutcome,
+  UnitOutcome,
+  VibeSettings,
+  WorkUnit,
+  WorkflowPhase,
+  WorkflowState,
+} from "./commands/_shared.js";
+export * from "./commands/_shared.js";
 
 /** Global state: the "watch live" tip prints at most once per process. */
 // Test seam: exported so unit tests can reset the once-only tip
