@@ -343,12 +343,17 @@ export function isUnavailable(r: EngineCommandResult): r is EngineUnavailable {
   return "unavailable" in r;
 }
 
-/** Best-effort read of `copilot --version` (lightweight; used only for the version guard). */
+/** Best-effort read of `copilot --version` (lightweight; used only for the version guard).
+ *  Issue #88: on Windows copilot is an npm binstub installed as `copilot.cmd` (or `.bat`).
+ *  `Bun.which` returns the .cmd path and CreateProcess cannot execute .cmd shims
+ *  directly — direct `Bun.spawnSync([resolved, "--version"])` fails with ENOENT
+ *  "uv_spawn 'copilot.cmd'". Route through `defaultSyncSpawner` so we get the
+ *  same `cmd.exe /c copilot --version` wrapping the dispatch path already uses
+ *  (M2 parity; fix mirrors the auto-shell added in PR28 audit Task 4). */
 function copilotVersion(cmd = "copilot"): string | undefined {
   try {
-    const resolved = resolveCommand(cmd) ?? cmd;
-    const r = Bun.spawnSync([resolved, "--version"], { stdout: "pipe", stderr: "pipe" });
-    if (r.exitCode === 0 && r.stdout.toString().trim()) return r.stdout.toString().trim();
+    const r = defaultSyncSpawner(cmd, ["--version"], "");
+    if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
   } catch {
     /* fall through to undefined */
   }

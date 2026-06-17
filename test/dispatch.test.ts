@@ -827,6 +827,85 @@ describe("defaultSpawner (test seam)", () => {
     }
   });
 
+  // Issue #88: copilotVersion used to call `Bun.spawnSync([resolved, "--version"])` directly
+  // with no Windows shim auto-shell. On Windows, copilot is installed as `copilot.cmd`
+  // (npm binstub); `Bun.which` returns the .cmd path, and CreateProcess cannot execute
+  // .cmd shims directly — it fails with ENOENT "uv_spawn 'copilot.cmd'". The version
+  // guard then always returns undefined, and every Copilot dispatch gets a spurious
+  // "could not determine `copilot --version`" warning even when copilot is installed.
+  // Fix: route copilotVersion through the same defaultSyncSpawner (or apply the same
+  // shim detection) that already auto-wraps with `cmd.exe /c copilot ...` on Windows.
+  test("copilotVersion: shell-wraps the --version probe on Windows .cmd shim (issue #88)", () => {
+    const { engineCommand } = require("../src/dispatch.js");
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    // Simulate `Bun.which("copilot")` returning the .cmd shim path that npm installs.
+    const fakeWhich = (cmd: string) =>
+      cmd === "copilot" ? "C:\\Program Files\\nodejs\\copilot.cmd" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    let captured: { cmd: string[]; opts: { stderr?: string } } | undefined;
+    const origSpawnSync = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = ((
+      cmd: string | string[],
+      opts: { stderr?: string },
+    ) => {
+      captured = { cmd: Array.isArray(cmd) ? cmd : [cmd], opts };
+      return { exitCode: 0, stdout: Buffer.from("copilot 0.3.4"), stderr: Buffer.from("") };
+    }) as unknown as typeof Bun.spawnSync;
+    try {
+      const probe = { has: (cmd: string) => cmd === "copilot" };
+      const r = engineCommand("copilot", probe);
+      // The probe must have shell-wrapped the spawn (cmd.exe /c copilot --version),
+      // NOT spawned `C:\Program Files\nodejs\copilot.cmd` directly. On Windows the
+      // direct path would fail with ENOENT — that's the defect.
+      expect(captured).toBeDefined();
+      expect(captured?.cmd[0]).toBe("cmd.exe");
+      expect(captured?.cmd[1]).toBe("/c");
+      expect(captured?.cmd.slice(2)).toEqual(["copilot", "--version"]);
+      // The version string flowed back through, so the warning is NOT set.
+      expect(isUnavailable(r)).toBe(false);
+      if (!isUnavailable(r)) {
+        expect(r.warning).toBeUndefined();
+      }
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = origSpawnSync;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  // Issue #88: same defect, but the resolved path has no extension and `Bun.which`
+  // reports the extensionless path (some Windows install layouts do this); the
+  // shim auto-detection must ALSO fire when the original cmd is "copilot".
+  test("copilotVersion: shell-wraps when resolved path has no extension (issue #88)", () => {
+    const { engineCommand } = require("../src/dispatch.js");
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    const fakeWhich = (cmd: string) =>
+      cmd === "copilot" ? "C:\\Program Files\\nodejs\\copilot" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    let captured: { cmd: string[] } | undefined;
+    const origSpawnSync = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = ((
+      cmd: string | string[],
+    ) => {
+      captured = { cmd: Array.isArray(cmd) ? cmd : [cmd] };
+      return { exitCode: 0, stdout: Buffer.from("copilot 0.3.4"), stderr: Buffer.from("") };
+    }) as unknown as typeof Bun.spawnSync;
+    try {
+      const probe = { has: (cmd: string) => cmd === "copilot" };
+      engineCommand("copilot", probe);
+      expect(captured?.cmd[0]).toBe("cmd.exe");
+      expect(captured?.cmd[1]).toBe("/c");
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = origSpawnSync;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
   test("runDispatch: claude with has(claude)=false returns 'claude CLI not found' (line 402)", () => {
     // For non-copilot engines, engineCommand returns a successful
     // command object. Then runDispatch checks `!hasSpawner && !has(cmd)`.
