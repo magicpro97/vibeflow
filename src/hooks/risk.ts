@@ -129,7 +129,7 @@ function splitOperators(cmd: string): string[] {
       buf += ch;
       continue;
     }
-    if (ch === ";" || ch === "|" || ch === "&") {
+    if (ch === ";" || ch === "|" || ch === "&" || ch === "\n") {
       segments.push(buf);
       buf = "";
       if (cmd[i + 1] === ch) i++; // collapse doubled operators (&& / ||)

