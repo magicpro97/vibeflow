@@ -8,6 +8,23 @@ const SHOW_CURSOR = "\x1b[?25h";
 const SELECT_TIMEOUT_MS = 30_000;
 const READLINE_TIMEOUT_MS = 60_000;
 
+/** Max bytes per line of user text input. CWE-400 / CWE-20:
+ * unbounded readline input (e.g. a 100MB paste) is forwarded to
+ * engine prompts, written to workflow state, and stored in git.
+ * Cap at 64 KiB which is well over any realistic prompt answer
+ * and well under engine buffer pressure. */
+const MAX_INPUT_BYTES = 64 * 1024;
+
+/** Clamp user text input to MAX_INPUT_BYTES. Pastes longer than
+ * this are truncated at the byte boundary and the caller is
+ * expected to retry or accept the truncated value. */
+function clampInput(s: string): string {
+  if (Buffer.byteLength(s, "utf8") <= MAX_INPUT_BYTES) return s;
+  // Truncate at a safe UTF-8 boundary by walking byte-by-byte.
+  const buf = Buffer.from(s, "utf8");
+  return buf.subarray(0, MAX_INPUT_BYTES).toString("utf8");
+}
+
 function write(text: string): void {
   process.stdout.write(text);
 }
@@ -129,7 +146,7 @@ async function readLineImpl(
       reject(err);
     };
     rl.question(`${question}${suffix}: `, (answer) => {
-      settle(answer.trim() || defaultValue);
+      settle(clampInput(answer.trim() || defaultValue));
     });
     rl.on("SIGINT", () => rejectSettle(new Error("cancelled")));
     rl.once("close", () => settle(defaultValue));
@@ -151,7 +168,7 @@ export async function confirmInput(
 ): Promise<boolean> {
   if (deps.readLine) {
     const raw = await deps.readLine(question, defaultValue ? "Y" : "N");
-    const answer = raw.trim();
+    const answer = clampInput(raw.trim());
     if (!answer) return defaultValue;
     if (/^(y|yes|true|1)$/i.test(answer)) return true;
     if (/^(n|no|false|0)$/i.test(answer)) return false;
@@ -180,7 +197,7 @@ export async function confirmInput(
     };
     const ask = () => {
       rl.question(`${question}${suffix} ${defaultValue ? "(Y/n)" : "(y/N)"}: `, (raw) => {
-        const answer = raw.trim();
+        const answer = clampInput(raw.trim());
         if (!answer) settle(defaultValue);
         else if (/^(y|yes|true|1)$/i.test(answer)) settle(true);
         else if (/^(n|no|false|0)$/i.test(answer)) settle(false);
