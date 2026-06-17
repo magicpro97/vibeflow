@@ -32,7 +32,33 @@ function coerce(raw: string): unknown {
 function parseInlineList(s: string): unknown[] {
   const inner = s.slice(1, -1).trim();
   if (!inner) return [];
-  return inner.split(",").map((x) => coerce(x));
+  // Quote-aware split: commas inside "..." or '...' are separators, not data.
+  // Without this, `["foo, bar", "baz"]` would be split into 3 chunks by the
+  // naive split(",") (issue #81).
+  const out: string[] = [];
+  let buf = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i] as string;
+    if (quote !== null) {
+      buf += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (ch === ",") {
+      out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  out.push(buf);
+  return out.map((x) => coerce(x));
 }
 
 function indentOf(line: string): number {

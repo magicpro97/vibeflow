@@ -222,4 +222,32 @@ describe("parseBlock: child block boundary (line 84-86)", () => {
     const { data } = parseFrontmatter(doc);
     expect(data.items).toEqual(["a", "b"]);
   });
+
+  test("inline list keeps items that contain quoted commas (issue #81)", () => {
+    // The naive split(",") would yield 3 items: ['"foo', ' bar"', '"baz"'].
+    // After coerce() that becomes ['"foo', ' bar"', 'baz'] — wrong.
+    const { data } = parseFrontmatter(
+      ["---", 'tags: ["foo, bar", "baz"]', "---", "body"].join("\n"),
+    );
+    expect(data.tags).toEqual(["foo, bar", "baz"]);
+  });
+
+  test("inline list handles single-quoted commas (issue #81)", () => {
+    const { data } = parseFrontmatter(["---", "tags: ['a, b, c', d]", "---", "body"].join("\n"));
+    expect(data.tags).toEqual(["a, b, c", "d"]);
+  });
+
+  test("inline list handles unquoted commas between quoted items (issue #81)", () => {
+    // Realistic SKILL.md frontmatter pattern: comma-separated trigger list
+    // where some items themselves contain a comma inside quotes.
+    const { data } = parseFrontmatter(
+      ["---", 'triggers: ["foo, bar", baz, "qux, quux"]', "---", "body"].join("\n"),
+    );
+    expect(data.triggers).toEqual(["foo, bar", "baz", "qux, quux"]);
+  });
+
+  test("inline list with only quoted-comma items yields a single element (issue #81)", () => {
+    const { data } = parseFrontmatter(["---", 'tags: ["foo, bar, baz"]', "---", "body"].join("\n"));
+    expect(data.tags).toEqual(["foo, bar, baz"]);
+  });
 });
