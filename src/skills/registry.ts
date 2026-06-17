@@ -92,7 +92,13 @@ export function parseSkill(
   // `data` has a null prototype (see frontmatter.ts) — reading `data.status` can only
   // ever return an OWN key, never an inherited one. Read it via hasOwnProperty to be safe.
   const ownStatus = Object.prototype.hasOwnProperty.call(data, "status") ? data.status : undefined;
-  const name = typeof data.name === "string" ? data.name.trim() : "";
+  // Issue #93: normalize the declared name to lowercase BEFORE regex
+  // validation. Earlier this code only `.trim()`-ed, then the regex
+  // `^[a-z0-9]+(?:-[a-z0-9]+)*$` rejected any uppercase letter — so a
+  // mixed-case `name: Shared-Tool` was silently dropped. Lowercasing
+  // first makes the skill survive under its canonical `shared-tool`
+  // form, which is also what `discoverSkills` now uses as its dedup key.
+  const name = typeof data.name === "string" ? data.name.trim().toLowerCase() : "";
   const description = typeof data.description === "string" ? data.description.trim() : "";
   // Required by the spec: lowercase-hyphen name, non-empty description (<=1024 chars).
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) return null;
@@ -137,8 +143,15 @@ export function discoverSkills(repo: string): Skill[] {
       const skillMd = join(dir, "SKILL.md");
       if (!existsSync(skillMd)) continue;
       const skill = parseSkill(skillMd, dir);
-      // First root wins (.vibeflow/ over .kiro/ over .claude/) — closest to the project.
-      if (skill && !byName.has(skill.name)) byName.set(skill.name, skill);
+      if (!skill) continue;
+      // Issue #93: dedup on the lowercased name as a defense-in-depth —
+      // parseSkill now lowercases incoming names, so this is a no-op for
+      // well-formed frontmatter, but it guarantees the registry stays
+      // consistent if a future change ever lets a non-canonical name
+      // through parseSkill (e.g. a relaxed regex). First root wins
+      // (.vibeflow/ over .kiro/ over .claude/) — closest to the project.
+      const key = skill.name.toLowerCase();
+      if (!byName.has(key)) byName.set(key, skill);
     }
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));

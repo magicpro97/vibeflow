@@ -126,6 +126,69 @@ describe("registry provenance (never auto-verify external skills)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // Issue #93: parseSkill normalized names per-root by REJECTING any
+  // mixed-case `name:` (the lowercase regex), and discoverSkills deduped
+  // by raw string equality. The combined effect: a skill whose frontmatter
+  // used any uppercase letter (e.g. `name: Shared-Tool`) was silently
+  // dropped instead of being recognized as the canonical `shared-tool`.
+  //
+  // Fix: parseSkill lowercases the declared name before regex validation
+  // (so a mixed-case `name:` normalizes to its canonical form), and
+  // discoverSkills dedups on the lowercased key as a defense-in-depth.
+  // Net effect: the same skill surfaces exactly once regardless of
+  // casing differences between roots, and a slightly-mistyped name no
+  // longer disappears.
+  test("parseSkill normalizes mixed-case names to canonical lowercase form (issue #93)", () => {
+    const dir = tmpRepo();
+    try {
+      const sk = join(dir, "SKILL.md");
+      writeFileSync(
+        sk,
+        ["---", "name: Shared-Tool", "description: mixed case should normalize", "---"].join("\n"),
+      );
+      const parsed = parseSkill(sk, dir);
+      // Pre-fix: parseSkill returned null (the regex `^[a-z0-9]+…$`
+      // rejected any uppercase letter). Post-fix: the name is lowercased
+      // before the regex check, so the skill is accepted under its
+      // canonical form.
+      expect(parsed).not.toBeNull();
+      expect(parsed?.name).toBe("shared-tool");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("discoverSkills dedupes case-insensitively across roots (issue #93)", () => {
+    const dir = tmpRepo();
+    try {
+      // Root 1 (.vibeflow/skills) declares the canonical name.
+      const local = join(dir, CTX_DIR, "skills", "shared-tool");
+      mkdirSync(local, { recursive: true });
+      writeFileSync(
+        join(local, "SKILL.md"),
+        ["---", "name: shared-tool", "description: first mirror", "---"].join("\n"),
+      );
+      // Root 2 (.claude/skills) declares the same skill in mixed case.
+      // The folder name is distinct from `shared-tool` on every
+      // filesystem (digit suffix), so dedup MUST come from frontmatter
+      // name comparison — not from the folder name.
+      const mirror = join(dir, ".claude", "skills", "shared-tool-2");
+      mkdirSync(mirror, { recursive: true });
+      writeFileSync(
+        join(mirror, "SKILL.md"),
+        ["---", "name: Shared-Tool", "description: second mirror", "---"].join("\n"),
+      );
+      const found = discoverSkills(dir);
+      const shared = found.filter((s) => s.name === "shared-tool");
+      // Both roots declare the same skill (case-insensitively); the
+      // registry must collapse them into one entry, not two.
+      expect(shared.length).toBe(1);
+      expect(shared[0]?.description).toBe("first mirror");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("resolver status-aware matching", () => {
