@@ -250,8 +250,10 @@ describe("generateWorkflowArtifacts", () => {
   });
 
   test("skips unknown engine in the snippet loop (no throw)", () => {
-    // Use codex (no instruction files in ENGINE_CONFIGS.codex) to
-    // exercise the "no instructionFiles to update" path.
+    // Use codex (AGENTS.md in ENGINE_CONFIGS.codex post-#75) to
+    // exercise the "no instructionFiles to update" path... actually
+    // the assertion is just that no exception is thrown, not that no
+    // files are written.
     const written = generateWorkflowArtifacts({
       phases: [PHASE_PLAN],
       engines: ["codex"],
@@ -259,5 +261,29 @@ describe("generateWorkflowArtifacts", () => {
       base: dir,
     });
     expect(written.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("ENGINE_CONFIGS parity (issue #75)", () => {
+  test("every engine has at least 1 entry in instructionFiles", async () => {
+    const { ENGINE_CONFIGS } = await import("../src/workflow-artifacts.js");
+    for (const [engine, cfg] of Object.entries(ENGINE_CONFIGS)) {
+      expect(cfg.instructionFiles.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  test("codex explicitly opts into AGENTS.md", async () => {
+    const { ENGINE_CONFIGS } = await import("../src/workflow-artifacts.js");
+    expect(ENGINE_CONFIGS.codex.instructionFiles).toEqual(["AGENTS.md"]);
+  });
+
+  test("claude and copilot are unchanged", async () => {
+    const { ENGINE_CONFIGS } = await import("../src/workflow-artifacts.js");
+    expect(ENGINE_CONFIGS.claude.instructionFiles).toEqual([
+      "CLAUDE.md",
+      "AGENTS.md",
+      ".agents/instructions.md",
+    ]);
+    expect(ENGINE_CONFIGS.copilot.instructionFiles).toEqual([".github/copilot-instructions.md"]);
   });
 });

@@ -23,12 +23,12 @@ interface EngineConfig {
   skillRoot: string;
 }
 
-const ENGINE_CONFIGS: Record<AgentEngine, EngineConfig> = {
+export const ENGINE_CONFIGS: Record<AgentEngine, EngineConfig> = {
   claude: {
     instructionFiles: ["CLAUDE.md", "AGENTS.md", ".agents/instructions.md"],
     skillRoot: ".claude/skills",
   },
-  codex: { instructionFiles: [], skillRoot: ".agents/skills" },
+  codex: { instructionFiles: ["AGENTS.md"], skillRoot: ".agents/skills" },
   copilot: { instructionFiles: [".github/copilot-instructions.md"], skillRoot: ".github/skills" },
 };
 
