@@ -179,28 +179,64 @@ describe("parallel runner + goal-eval", () => {
     expect(reviews.length).toBe(2);
   });
 
-  test("goalEval is met only when every unit is done at confidence 1 with evidence", () => {
-    const base: WorkflowState = {
+  test("goalEval uses the per-unit risk-class threshold, not 1.0 (issue #90)", () => {
+    // Spec band: docs=0.70, simple-code=0.80, feature=0.85, architecture=0.90, security/deploy=0.95
+    // Default risk class when a unit doesn't declare one is "feature" (0.85).
+    const stateFor = (u: WorkUnit): WorkflowState => ({
       task_id: "T",
       goal: "g",
       success_criteria: [],
-      work_units: [
-        {
-          ...unit("a", ["src/a/"]),
-          status: "done",
-          confidence: 1,
-          evidence: ["e.log"],
-        },
-      ],
+      work_units: [u],
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+
+    // 1) docs unit at confidence 0.70 (threshold met) → met
+    const docsMet: WorkUnit = {
+      ...unit("a", ["src/a/"]),
+      status: "done",
+      confidence: 0.7,
+      riskClass: "docs",
+      evidence: ["e.log"],
     };
-    expect(goalEval(base).verdict).toBe("met");
-    const u0 = base.work_units[0];
-    expect(u0).toBeDefined();
-    if (u0) u0.confidence = 0.9;
-    expect(goalEval(base).verdict).toBe("partial");
-    if (u0) u0.status = "blocked";
-    expect(goalEval(base).verdict).toBe("blocked");
+    expect(goalEval(stateFor(docsMet)).verdict).toBe("met");
+
+    // 2) docs unit at confidence 0.69 (below threshold) → partial
+    const docsBelow: WorkUnit = { ...docsMet, confidence: 0.69 };
+    expect(goalEval(stateFor(docsBelow)).verdict).toBe("partial");
+
+    // 3) security unit at confidence 0.94 → partial (threshold 0.95)
+    const secBelow: WorkUnit = {
+      ...unit("a", ["src/a/"]),
+      status: "done",
+      confidence: 0.94,
+      riskClass: "security",
+      evidence: ["e.log"],
+    };
+    expect(goalEval(stateFor(secBelow)).verdict).toBe("partial");
+
+    // 4) security unit at confidence 0.95 → met
+    const secMet: WorkUnit = { ...secBelow, confidence: 0.95 };
+    expect(goalEval(stateFor(secMet)).verdict).toBe("met");
+
+    // 5) default risk class (no riskClass field) is "feature" (threshold 0.85)
+    const defaultBelow: WorkUnit = {
+      ...unit("a", ["src/a/"]),
+      status: "done",
+      confidence: 0.84,
+      evidence: ["e.log"],
+    };
+    expect(goalEval(stateFor(defaultBelow)).verdict).toBe("partial");
+    const defaultMet: WorkUnit = { ...defaultBelow, confidence: 0.85 };
+    expect(goalEval(stateFor(defaultMet)).verdict).toBe("met");
+
+    // 6) blocked unit always blocks regardless of confidence
+    const blockedUnit: WorkUnit = { ...docsMet, status: "blocked" };
+    expect(goalEval(stateFor(blockedUnit)).verdict).toBe("blocked");
+
+    // 7) reason text cites the actual per-unit threshold, not 1.0
+    const v = goalEval(stateFor(secBelow));
+    expect(v.reasons.join(" ")).toContain("0.95");
+    expect(v.reasons.join(" ")).not.toContain("1.0");
   });
 });
 

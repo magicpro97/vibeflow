@@ -520,6 +520,8 @@ function normalizeUnit(input: Partial<WorkUnit> & { name: string }): WorkUnit {
       ? (input.status as WorkUnit["status"])
       : "pending",
     confidence: typeof input.confidence === "number" ? input.confidence : 0,
+    // issue #90: round-trip the per-unit risk class so goalEval applies the correct threshold
+    riskClass: input.riskClass,
     owner_agent: input.owner_agent,
     skills_used: input.skills_used,
     knowledge_heavy: typeof input.knowledge_heavy === "boolean" ? input.knowledge_heavy : undefined,
@@ -1181,6 +1183,10 @@ export async function orchestrate(
   // without launching the engine (a no-op dispatch would only re-review finished work).
   if (units.length === 0) {
     out("vf", c.green("\nAll work units already complete — nothing to dispatch."));
+    // issue #90: apply the spec band threshold (per-unit riskClass) to the verdict, not 1.0.
+    for (const u of state.work_units) {
+      if (!u.riskClass) u.riskClass = riskClass;
+    }
     const verdict = goalEval(state);
     const color = verdict.verdict === "met" ? c.green : c.yellow;
     out("vf", color(`goal: ${verdict.verdict}`));
@@ -1267,6 +1273,11 @@ export async function orchestrate(
   // Merge dispatched results back with the skipped (already-complete) units so the ledger and
   // goal eval see the full set — not just the ones we re-ran this pass.
   state.work_units = done.length ? [...done, ...ran] : ran;
+  // issue #90: stamp the resolved risk class onto every unit that didn't declare one, so
+  // goalEval applies the spec band (0.7-0.95) instead of the legacy hardcoded 1.0.
+  for (const u of state.work_units) {
+    if (!u.riskClass) u.riskClass = riskClass;
+  }
   recomputeTotals(state);
   // Dry is read-only: keep the persisted ledger byte-identical (only the CONTEXT.md prompt
   // previews under workunits/* are written). Real runs (cli/bridge) persist the outcome.

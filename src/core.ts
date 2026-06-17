@@ -66,6 +66,13 @@ export interface WorkUnit {
   name: string;
   status: "pending" | "running" | "verifying" | "done" | "blocked";
   confidence: number;
+  /**
+   * Per-unit risk class — drives the confidence threshold required for `goalEval` to mark the
+   * unit as "met" (issue #90). Maps to a threshold via `thresholdFor()` in
+   * `src/orchestrator/investigate.ts` (docs=0.70 → deploy/security=0.95). Optional; units
+   * without a value default to `"feature"` (threshold 0.85).
+   */
+  riskClass?: "docs" | "simple-code" | "feature" | "architecture" | "security" | "deploy";
   owner_agent?: string;
   skills_used?: string[];
   knowledge_heavy?: boolean;

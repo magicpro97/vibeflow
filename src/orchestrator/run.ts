@@ -1,4 +1,5 @@
 import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
+import { thresholdFor } from "./investigate.js";
 import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
@@ -168,8 +169,15 @@ export type GoalVerdict = "met" | "partial" | "blocked";
 
 /**
  * Orchestrator-only goal evaluation (never a sub-agent). The goal is met when every unit is
- * `done` at confidence 1.0 with recorded evidence; blocked when any unit is blocked; partial
- * otherwise (return to Plan for the gaps — never silently close).
+ * `done` with evidence at or above its **per-unit confidence threshold** (issue #90). The
+ * threshold comes from the unit's `riskClass` (defaults to `"feature"`, threshold 0.85) and
+ * matches the spec band documented in `AGENT_ORCHESTRATION_POLICY.md`:
+ *
+ *   docs=0.70, simple-code=0.80, feature=0.85, architecture=0.90, security/deploy=0.95
+ *
+ * We do not require `confidence === 1.0` — perfect certainty is rare and the spec explicitly
+ * allows 0.7-0.95. Blocked when any unit is blocked; partial otherwise (return to Plan for
+ * the gaps — never silently close).
  */
 export function goalEval(state: WorkflowState): { verdict: GoalVerdict; reasons: string[] } {
   const units = state.work_units ?? [];
@@ -181,17 +189,22 @@ export function goalEval(state: WorkflowState): { verdict: GoalVerdict; reasons:
     for (const u of blocked) reasons.push(`blocked: ${u.name}`);
     return { verdict: "blocked", reasons };
   }
-  const incomplete = units.filter(
-    (u) => u.status !== "done" || u.confidence < 1 || !u.evidence?.length,
-  );
+  const incomplete = units.filter((u) => {
+    if (u.status !== "done" || !u.evidence?.length) return true;
+    const threshold = thresholdFor(u.riskClass ?? "feature");
+    return u.confidence < threshold;
+  });
   if (incomplete.length) {
     for (const u of incomplete) {
+      const threshold = thresholdFor(u.riskClass ?? "feature");
       reasons.push(
-        `incomplete: ${u.name} (status=${u.status}, conf=${u.confidence}, evidence=${u.evidence?.length ?? 0})`,
+        `incomplete: ${u.name} (status=${u.status}, conf=${u.confidence}, threshold=${threshold}, evidence=${u.evidence?.length ?? 0})`,
       );
     }
     return { verdict: "partial", reasons };
   }
-  reasons.push("all units done at confidence 1.0 with evidence");
+  reasons.push(
+    `all units done at per-unit confidence threshold (${units.map((u) => thresholdFor(u.riskClass ?? "feature")).join(", ")}) with evidence`,
+  );
   return { verdict: "met", reasons };
 }
