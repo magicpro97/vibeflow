@@ -19,6 +19,7 @@ import {
   type WorkUnit,
   type WorkflowState,
   appendFileSafe,
+  assertInsideBase,
   c,
   ctxPathIn,
   cwd,
@@ -433,6 +434,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     // under .vibeflow/ — VibeFlow's own namespace — and keeps the simple write.
     if (engineFileSet.has(rel)) {
       const existing = existsSync(abs) ? readFileSync(abs, "utf8") : null;
+      if (existing != null) assertInsideBase(abs, base);
       const merged = mergeManagedBlock(existing, content);
       if (!opts.dry) {
         if (merged.backup && existing != null) {

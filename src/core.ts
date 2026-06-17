@@ -2,12 +2,14 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Read the package version from the nearest package.json (walking up from this module),
@@ -203,6 +205,11 @@ export function statePath(base: string = cwd()): string {
 export function readState(base: string = cwd()): WorkflowState | null {
   const p = statePath(base);
   if (!existsSync(p)) return null;
+  // Symlink-safe: if `p` is a symlink, the resolved target must still
+  // be inside `base`. Prevents an attacker (or accidental `ln -sf`) from
+  // pointing WORKFLOW_STATE.json at /etc/passwd or a user's SSH key, then
+  // having the merged content land in the default-goal pre-fill.
+  assertInsideBase(p, base);
   try {
     return JSON.parse(readFileSync(p, "utf8")) as WorkflowState;
   } catch {
@@ -258,6 +265,49 @@ export function writeFileSafe(
  * malformed shapes can't crash the skill gate / `vf verify`. */
 export function strArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/**
+ * Symlink-safe path check: if `p` is a symlink, follow it and assert the
+ * resolved target is still inside `base` (the project root). Throws on
+ * symlink escape. Prevents CWE-59 (Improper Link Resolution Before File
+ * Access) when reading engine instruction files or WORKFLOW_STATE.json.
+ *
+ * On Windows, `lstatSync` and `realpathSync` work on junction points and
+ * `\\?\` paths the same way; on macOS they cover `ln -s` and `ln -sf`.
+ *
+ * Test seam: callers can inject `lstatSync` and `realpathSync` to
+ * simulate a symlink-swap race or a non-POSIX path handling.
+ */
+export function assertInsideBase(
+  p: string,
+  base: string,
+  inject: {
+    lstatSync?: (path: string) => { isSymbolicLink(): boolean };
+    realpathSync?: (path: string) => string;
+  } = {},
+): void {
+  const _lstat = inject.lstatSync ?? lstatSync;
+  const _realpath = inject.realpathSync ?? realpathSync;
+  let isLink = false;
+  try {
+    isLink = _lstat(p).isSymbolicLink();
+  } catch {
+    // ENOENT or permission error: the subsequent read will surface a
+    // proper error. Don't double-throw here.
+    return;
+  }
+  if (!isLink) return;
+  const resolved = _realpath(p);
+  const baseResolved = resolve(base);
+  // Use trailing-separator trick: `/foo/bar` does NOT contain `/foo/ba`,
+  // so we must add a separator to `baseResolved` for a strict prefix
+  // check. The exception is when the resolved path equals base (the
+  // project root itself, which is fine).
+  const baseWithSep = baseResolved.endsWith(sep) ? baseResolved : baseResolved + sep;
+  if (resolved !== baseResolved && !resolved.startsWith(baseWithSep)) {
+    throw new Error(`symlink escape: ${p} → ${resolved} is outside ${base}`);
+  }
 }
 
 /** Append content to a file, creating the parent dir if absent. Unlike writeFileSafe this never
