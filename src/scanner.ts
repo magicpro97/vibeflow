@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 export type Confidence = "high" | "medium" | "low";
@@ -94,8 +94,21 @@ const SKIP_DIRS = new Set([
   "coverage",
 ]);
 
+/** Per-file size cap for repo scans. CWE-400: an unbounded
+ * readFileSync on an attacker-supplied or accidentally-huge file
+ * (e.g. a vendored 2GB package.json, a binary mistakenly named
+ * README.md) blows the scanner's memory and stalls the whole
+ * `vf` command. 4 MiB is well over any real package.json or
+ * README, and well under the per-call stack pressure. */
+const MAX_SCAN_FILE_BYTES = 4 * 1024 * 1024;
+
 function readJson(path: string): Record<string, unknown> | null {
   try {
+    // Size-cap the read so a 2GB package.json doesn't OOM the
+    // scanner. We check statSync.size BEFORE readFileSync — no
+    // partial read, no allocation of the buffer.
+    const st = statSync(path);
+    if (st.size > MAX_SCAN_FILE_BYTES) return null;
     return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   } catch {
     return null;
@@ -108,6 +121,11 @@ function readmeSummary(repo: string): string | undefined {
     const p = join(repo, n);
     if (!existsSync(p)) continue;
     try {
+      // Size-cap: a binary mistakenly named README.md would
+      // otherwise be loaded as utf8 (corrupting the buffer) and
+      // split into megabytes of lines.
+      const st = statSync(p);
+      if (st.size > MAX_SCAN_FILE_BYTES) continue;
       const lines = readFileSync(p, "utf8").split("\n");
       for (const raw of lines) {
         const line = raw.trim();

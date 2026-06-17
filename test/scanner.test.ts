@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { scanRepo } from "../src/scanner.js";
 
 describe("scanner language detection", () => {
@@ -152,6 +152,38 @@ describe("scanner: edge branches", () => {
     // scanRepo doesn't crash, profile fields are empty/default
     const profile = scanRepo(dir);
     expect(profile.languages).toBeDefined();
+  });
+
+  test("readJson returns null for files larger than MAX_SCAN_FILE_BYTES (CWE-400)", () => {
+    // Pre-fix: a 5MB package.json is read fully into memory and
+    // fed to JSON.parse — for a legitimate JSON, the parse would
+    // succeed but the buffer would be 5MB. For a binary, JSON.parse
+    // would throw (caught) but the buffer is still allocated.
+    // Post-fix: statSync().size is checked before readFileSync, so
+    // the buffer is never allocated.
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-oversize-"));
+    // 5 MiB of valid-but-oversize JSON: a single string field
+    // whose value is ~5MB of "x" characters.
+    const big = "x".repeat(5 * 1024 * 1024);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: big }));
+    const profile = scanRepo(dir);
+    // profile.name should fall back to the directory basename
+    // because readJson returned null for the oversize file.
+    expect(profile.name).toBe(basename(dir));
+  });
+
+  test("readmeSummary skips README files larger than MAX_SCAN_FILE_BYTES (CWE-400)", () => {
+    // A 5MB README.md would otherwise be loaded as utf8, split
+    // into lines, and walked. The split is O(n) in size; for a
+    // pathological file it's megabytes of garbage. With the cap,
+    // we never allocate the buffer.
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-oversize-readme-"));
+    const big = "x".repeat(5 * 1024 * 1024);
+    writeFileSync(join(dir, "README.md"), big);
+    const profile = scanRepo(dir);
+    // summary stays undefined because all README variants were
+    // skipped for being oversize.
+    expect(profile.summary).toBeUndefined();
   });
 
   test("detects KMP frameworks from version catalog (line 259-265)", () => {
