@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runAiInitWorkflow } from "../src/ai-init.js";
+import type { AiInitUnit } from "../src/ai-init-workflow.js";
+import { defaultAiInitDispatcher, runAiInitWorkflow } from "../src/ai-init.js";
 import type { Engine } from "../src/core.js";
+import type { EngineCommandResult } from "../src/dispatch.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
 import type { EngineReadiness } from "../src/preflight.js";
 
@@ -35,6 +37,7 @@ describe("runAiInitWorkflow", () => {
     writeFileSync(join(repo, ".vibeflow/SETTINGS.json"), "{}");
     writeFileSync(join(repo, ".vibeflow/WORKFLOW_POLICY.md"), "# policy\n");
     writeFileSync(join(repo, ".vibeflow/WORKFLOW_STATE.json"), "{}");
+    writeFileSync(join(repo, "QUICKSTART.md"), "# quickstart\n");
   });
 
   afterEach(() => {
@@ -65,7 +68,7 @@ describe("runAiInitWorkflow", () => {
     expect(result.reason).toContain("claude is not ready");
   });
 
-  test("dispatches 7 units, returns per-unit reviews + ok=true when reviewer passes", async () => {
+  test("dispatches 8 units, returns per-unit reviews + ok=true when reviewer passes", async () => {
     // MINOR-2/3/4: cite each adapter's required acceptance file
     // (pre-created in beforeEach) so the reviewer's evidence + file-exists
     // checks pass.
@@ -77,11 +80,12 @@ describe("runAiInitWorkflow", () => {
       "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
       "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
       "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
+      "ai-init-quickstart-writer": "QUICKSTART.md",
     };
     const dispatcher: UnitDispatcher = async (unit) => ({
       status: "done",
       confidence: 1,
-      evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+      evidence: [SCOPE_BY_NAME[unit.name] ?? unit.scope?.[0] ?? "src/cli.ts"],
       gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
     });
     const result = await runAiInitWorkflow({
@@ -93,8 +97,8 @@ describe("runAiInitWorkflow", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.goalMet).toBe(true);
-    expect(result.units).toHaveLength(7);
-    expect(result.reviews).toHaveLength(7);
+    expect(result.units).toHaveLength(8);
+    expect(result.reviews).toHaveLength(8);
     expect(result.reviews.every((r) => r.pass)).toBe(true);
     expect(result.units.every((u) => u.status === "done")).toBe(true);
     expect(result.units.every((u) => u.confidence === 1)).toBe(true);
@@ -109,6 +113,7 @@ describe("runAiInitWorkflow", () => {
       "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
       "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
       "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
+      "ai-init-quickstart-writer": "QUICKSTART.md",
     };
     const scopes: Record<string, string[]> = {};
     const dispatcher: UnitDispatcher = async (unit) => {
@@ -134,22 +139,16 @@ describe("runAiInitWorkflow", () => {
     ]);
   });
 
-  test("includes phase units in the dispatch set when intake.workflowPhases is set", async () => {
-    // MINOR-3: phase units now go through file-exists review. Cite a
-    // real file (pre-created in beforeEach) so the reviewer passes.
-    const SCOPE_BY_NAME: Record<string, string> = {
-      "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
-      "ai-init-instruction-writer": "CLAUDE.md",
-      "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
-      "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
-      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
-      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
-      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
-    };
+  test("phase units from intake.workflowPhases are not dispatched (filtered out before review)", async () => {
+    // The runner filters out phase units (`ai-init-phase-*`) from the
+    // dispatch set because the workflow-state-writer adapter already
+    // encodes the phases into WORKFLOW_STATE.json. This test pins the
+    // contract so a regression that starts dispatching phase units is
+    // caught immediately.
     const dispatcher: UnitDispatcher = async (unit) => ({
       status: "done",
       confidence: 1,
-      evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+      evidence: [".vibeflow/ai-context/stack-evidence.md"],
       gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
     });
     const result = await runAiInitWorkflow({
@@ -164,11 +163,8 @@ describe("runAiInitWorkflow", () => {
       preflight: () => [readiness("claude", "ready")],
       dispatcher,
     });
-    expect(result.units).toHaveLength(9);
-    expect(result.units.map((u) => u.name).slice(7)).toEqual([
-      "ai-init-phase-analyze-1",
-      "ai-init-phase-ship-2",
-    ]);
+    const phaseNames = result.units.filter((u) => u.name.startsWith("ai-init-phase-"));
+    expect(phaseNames).toEqual([]);
   });
 
   test("returns ok=false when reviewer rejects one unit (instruction-writer with no evidence)", async () => {
@@ -180,6 +176,7 @@ describe("runAiInitWorkflow", () => {
       "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
       "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
       "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
+      "ai-init-quickstart-writer": "QUICKSTART.md",
     };
     const dispatcher: UnitDispatcher = async (unit) => {
       if (unit.name === "ai-init-instruction-writer") {
@@ -232,5 +229,144 @@ describe("runAiInitWorkflow", () => {
     expect(result.ok).toBe(false);
     const analyzerReview = result.reviews.find((r) => r.unit === "ai-init-analyzer");
     expect(analyzerReview?.pass).toBe(false);
+  });
+
+  test("preflight is called with [forceEngine] only (not all engines) when forceEngine is set", async () => {
+    // Issue 3: previously `runAiInitWorkflow` probed all 3 engines just to look
+    // up the forced one in the readiness array — ~2 wasted CLI calls per init.
+    // Now the array is narrowed to [forceEngine].
+    let probed: Engine[] = [];
+    const dispatcher: UnitDispatcher = async (unit) => ({
+      status: "done",
+      confidence: 1,
+      evidence: [".vibeflow/ai-context/stack-evidence.md"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+    });
+    await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "x" },
+      forceEngine: "copilot",
+      preflight: (engines) => {
+        probed = engines;
+        return [readiness("copilot", "ready")];
+      },
+      dispatcher,
+    });
+    expect(probed).toEqual(["copilot"]);
+  });
+
+  test("preflight still probes all engines when forceEngine is unset (best-engine selection)", async () => {
+    // Counterpart: without forceEngine, the planner must still see all engines
+    // so `selectBestEngine` can pick. Don't over-narrow this path.
+    let probed: Engine[] = [];
+    const dispatcher: UnitDispatcher = async (unit) => ({
+      status: "done",
+      confidence: 1,
+      evidence: [".vibeflow/ai-context/stack-evidence.md"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+    });
+    await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "x" },
+      preflight: (engines) => {
+        probed = engines;
+        return [readiness("claude", "ready"), readiness("copilot", "ready")];
+      },
+      dispatcher,
+    });
+    expect(probed.length).toBeGreaterThan(1);
+  });
+});
+
+describe("defaultAiInitDispatcher — engine warning surfacing", () => {
+  test("writes the copilot --version warning to stderr (was previously swallowed in the agent-team path)", async () => {
+    // Issue 1: `engineCommand("copilot")` returns `warning` when the CLI's
+    // version can't be detected (the github/copilot-cli#1606 silent-breaking-
+    // update class). The legacy `runAiInit` path surfaces this via
+    // `announceLaunch`; the agent-team path (defaultAiInitDispatcher) used
+    // to drop it. Now the dispatcher probes the invocation once at
+    // construction and writes the warning to stderr on first unit dispatch.
+    const stderrChunks: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      stderrChunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const WARNING = "could not determine `copilot --version`; verify `copilot -p` still works";
+      const engineCommandFn = (): EngineCommandResult => ({
+        cmd: "copilot",
+        args: ["-p", "--allow-all"],
+        promptMode: "arg",
+        warning: WARNING,
+      });
+      const dispatcher = defaultAiInitDispatcher("copilot", {
+        engineCommandFn,
+        // The warning fires before the spawner call (after `isUnavailable`
+        // check, before `materializePrompt` + `asyncSpawn`), so any
+        // sensible success-style spawner proves the ordering without
+        // coupling to it.
+        spawner: async () => ({ status: 0, stdout: "" }),
+      });
+      const unit: AiInitUnit = {
+        name: "ai-init-analyzer",
+        status: "pending",
+        confidence: 0,
+        scope: [".vibeflow/ai-context/stack-evidence.md"],
+        acceptance: "stack-evidence.md written",
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      };
+      const outcome = await dispatcher(unit);
+      expect(outcome.status).toBe("verifying");
+      expect(outcome.confidence).toBe(1);
+      const stderr = stderrChunks.join("");
+      expect(stderr).toContain("[ai-init-dispatcher]");
+      expect(stderr).toContain("copilot");
+      expect(stderr).toContain(WARNING);
+    } finally {
+      process.stderr.write = origWrite;
+    }
+  });
+
+  test("emits the warning once even when the dispatcher handles many units (warn-once)", async () => {
+    // The warning is per-installation, not per-unit — emitting it 7 times
+    // (once per adapter in the agent-team run) would be stderr noise.
+    // Probe-once-at-construction + warnedDegraded flag handles this.
+    const stderrChunks: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      stderrChunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const WARNING = "synthetic warning";
+      const dispatcher = defaultAiInitDispatcher("copilot", {
+        engineCommandFn: (): EngineCommandResult => ({
+          cmd: "copilot",
+          args: ["-p"],
+          promptMode: "arg",
+          warning: WARNING,
+        }),
+        spawner: async () => ({ status: 0, stdout: "" }),
+      });
+      const unit: AiInitUnit = {
+        name: "ai-init-analyzer",
+        status: "pending",
+        confidence: 0,
+        scope: [".vibeflow/ai-context/stack-evidence.md"],
+        acceptance: "stack-evidence.md written",
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      };
+      await dispatcher(unit);
+      await dispatcher(unit);
+      await dispatcher(unit);
+      const stderr = stderrChunks.join("");
+      const occurrences = stderr.split(WARNING).length - 1;
+      expect(occurrences).toBe(1);
+    } finally {
+      process.stderr.write = origWrite;
+    }
   });
 });

@@ -240,8 +240,13 @@ export async function collectInitAskQuestionnaireData(
 
   try {
     write("vf", paint("Init ask", c.bold("workflow questionnaire")));
-    const description = await askText(INIT_ASK_PROMPTS.projectOverview);
-    const useAiSourceAnalysis = await askConfirm(INIT_ASK_PROMPTS.useAiSourceAnalysis, false);
+    const useAiSourceAnalysis = await askConfirm(INIT_ASK_PROMPTS.useAiSourceAnalysis, true);
+
+    let description = "";
+    if (!useAiSourceAnalysis) {
+      description = await askText(INIT_ASK_PROMPTS.projectOverview);
+    }
+
     const normalizedPhases = normalizePhases(
       await askSelectMany(
         INIT_ASK_PROMPTS.phases,
@@ -255,8 +260,6 @@ export async function collectInitAskQuestionnaireData(
       phaseDetails[phase] = {
         input: await askText("  Input"),
         output: await askText("  Output"),
-        template: await askText("  Template"),
-        notes: await askText("  Notes"),
       };
     }
     const documentLocation = await askSelectOne(

@@ -209,17 +209,20 @@ export function engineFiles(
     useAi ? aiGenerate(prompt, fallback) : fallback();
   const prompt = `Compose the ${engine} instruction file for project "${ctx.name}" from this context:\n${JSON.stringify(ctx)}`;
   const body = compose(prompt, () => engineBody(engine, ctx));
-  // .agents/instructions.md is the standard agent instruction file (Claude Code convention).
-  // Generate it alongside every engine so all 3 platforms have up-to-date instructions.
-  const agentInstructionsBody = compose(
-    `Compose .agents/instructions.md for "${ctx.name}".`,
-    () => `# Agent Instructions\n\n${engineBody(engine, ctx)}`,
-  );
+  // Note: `.agents/instructions.md` was historically generated for every engine (with a
+  // comment claiming it was a "Claude Code convention"), but no supported engine actually
+  // reads it: Claude Code reads `CLAUDE.md` (and `~/.claude/CLAUDE.md`), Codex reads
+  // `AGENTS.md`, Copilot reads `.github/copilot-instructions.md` (+ path-scoped rules in
+  // `.github/instructions/`), and opencode reads `AGENTS.md` (with `CLAUDE.md` fallback).
+  // Generating it for every engine created an unused `.agents/` directory when running
+  // `vf init` with a single engine (e.g. the copilot default). For users who hand-curated
+  // `.agents/instructions.md` historically, `ENGINE_INSTRUCTION_FILES` in workflow/merge.ts
+  // still merges any existing file on re-init (data-loss safety).
   switch (engine) {
     case "claude":
-      return { "CLAUDE.md": body, ".agents/instructions.md": agentInstructionsBody };
+      return { "CLAUDE.md": body };
     case "codex":
-      return { "AGENTS.md": body, ".agents/instructions.md": agentInstructionsBody };
+      return { "AGENTS.md": body };
     case "copilot":
       return {
         "AGENTS.md": body,
@@ -228,7 +231,6 @@ export function engineFiles(
           () =>
             `# Copilot Instructions\n\n${engineBody("copilot", ctx)}\nPath-specific rules live in .github/instructions/*.instructions.md.\n`,
         ),
-        ".agents/instructions.md": agentInstructionsBody,
       };
   }
 }

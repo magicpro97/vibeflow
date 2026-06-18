@@ -6,11 +6,12 @@
  * disjoint file scopes, run an independent reviewer over each, and gate
  * close on goalEval (confidence = 1.0 with recorded evidence per unit).
  *
- *   Tier 1 (always 7 adapter units): analyzer, instruction-writer,
+ *   Tier 1 (always 8 adapter units): analyzer, instruction-writer,
  *     skill-curator, context-updater, tool-configurator,
- *     workflow-policy-writer, workflow-state-writer. They cover the
- *     canonical baseline (instruction files, skills, project context,
- *     tool config, workflow policy, workflow state).
+ *     workflow-policy-writer, workflow-state-writer, quickstart-writer.
+ *     They cover the canonical baseline (instruction files, skills,
+ *     project context, tool config, workflow policy, workflow state,
+ *     and the on-boarding quickstart).
  *
  *   Tier 2 (0..N phase units): one unit per `WorkflowPhase` in the
  *     intake, named `ai-init-phase-<slug>-<n>`. Each phase unit carries
@@ -22,10 +23,9 @@
  * tests can pin the decomposition.
  */
 
-import { mkdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { ROLE_NAMES, type RoleName } from "./agents/role-templates.js";
-import { CTX_DIR } from "./core.js";
 import { ENGINES, type Engine, type WorkUnit } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
 
@@ -53,6 +53,10 @@ export interface AiInitIntake {
    *  (`.claude/agents/<role>.md` × N roles) alongside the rest. Default
    *  true — matches the legacy `agentFiles()` behaviour. */
   generateAgentTeam?: boolean;
+  /** CLI-side ctx7 auth status collected before Phase 2. false means the
+   *  user declined/failed login or init is non-interactive, so specs must
+   *  use the documented fallback path without prompting again. */
+  ctx7Authenticated?: boolean;
 }
 
 /** A single user-declared workflow phase. Mirrors the structure the
@@ -108,11 +112,12 @@ export const AI_INIT_ADAPTER_NAMES = [
   "ai-init-tool-configurator",
   "ai-init-workflow-policy-writer",
   "ai-init-workflow-state-writer",
+  "ai-init-quickstart-writer",
 ] as const;
 export type AiInitAdapterName = (typeof AI_INIT_ADAPTER_NAMES)[number];
 
 /** Back-compat export: a flat list of the original 4 unit names. New
- *  code should reference `AI_INIT_ADAPTER_NAMES` (7 entries). Kept so
+ *  code should reference `AI_INIT_ADAPTER_NAMES` (8 entries). Kept so
  *  external callers and the existing test suite still resolve. */
 export const AI_INIT_UNIT_NAMES = [
   "ai-init-analyzer",
@@ -127,7 +132,8 @@ export type AiInitUnitName = (typeof AI_INIT_UNIT_NAMES)[number];
  *  output paths. The 3 newly-added adapters (tool-configurator,
  *  workflow-policy-writer, workflow-state-writer) all map to
  *  `dispatch-runner` or `doc-writer` — they wire the orchestrator's
- *  runtime state. */
+ *  runtime state. The quickstart-writer maps to `doc-writer` (it owns
+ *  a single root-level doc, same family as the instruction-writer). */
 const ADAPTER_OWNER: Record<AiInitAdapterName, RoleName> = {
   "ai-init-analyzer": "cli-engine",
   "ai-init-instruction-writer": "doc-writer",
@@ -136,6 +142,7 @@ const ADAPTER_OWNER: Record<AiInitAdapterName, RoleName> = {
   "ai-init-tool-configurator": "dispatch-runner",
   "ai-init-workflow-policy-writer": "doc-writer",
   "ai-init-workflow-state-writer": "dispatch-runner",
+  "ai-init-quickstart-writer": "doc-writer",
 };
 
 /** Per-adapter file scope. Disjoint by design so the orchestrator's
@@ -144,30 +151,34 @@ const ADAPTER_OWNER: Record<AiInitAdapterName, RoleName> = {
  *  artifact so two units never try to write the same path. */
 const ADAPTER_SCOPE: Record<AiInitAdapterName, string[]> = {
   "ai-init-analyzer": [".vibeflow/ai-context/stack-evidence.md"],
-  "ai-init-instruction-writer": [
-    "CLAUDE.md",
-    "AGENTS.md",
-    ".github/copilot-instructions.md",
-    ".agents/instructions.md",
-  ],
+  "ai-init-instruction-writer": ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md"],
   "ai-init-skill-curator": [".vibeflow/skills/", ".vibeflow/SKILL_INDEX.md"],
   "ai-init-context-updater": [".vibeflow/PROJECT_CONTEXT.md"],
   "ai-init-tool-configurator": [".vibeflow/SETTINGS.json"],
   "ai-init-workflow-policy-writer": [".vibeflow/WORKFLOW_POLICY.md"],
   "ai-init-workflow-state-writer": [".vibeflow/WORKFLOW_STATE.json"],
+  "ai-init-quickstart-writer": ["QUICKSTART.md"],
 };
 
-const ENGINE_INSTRUCTION_SCOPE: Record<Engine, string[]> = {
+export const ENGINE_INSTRUCTION_SCOPE: Record<Engine, string[]> = {
   claude: ["CLAUDE.md"],
   codex: ["AGENTS.md"],
   copilot: ["AGENTS.md", ".github/copilot-instructions.md"],
 };
 
+export const ENGINE_SKILL_DIR: Record<Engine, string> = {
+  claude: ".claude/skills/",
+  codex: ".agents/skills/",
+  copilot: ".github/skills/",
+};
+
+const INIT_DEFAULT_ENGINE: Engine = "copilot";
+
 function selectedInstructionScope(intake: AiInitIntake): string[] {
   const selected = (intake.engines ?? []).filter((engine): engine is Engine =>
     (ENGINES as readonly string[]).includes(engine),
   );
-  if (selected.length === 0) return ADAPTER_SCOPE["ai-init-instruction-writer"];
+  if (selected.length === 0) return ENGINE_INSTRUCTION_SCOPE[INIT_DEFAULT_ENGINE];
   return [...new Set(selected.flatMap((engine) => ENGINE_INSTRUCTION_SCOPE[engine]))];
 }
 
@@ -180,6 +191,36 @@ function instructionAcceptance(scope: string[]): string {
   return `instruction file scope (${scope.join(", ")}) carries a fresh vibeflow:start block`;
 }
 
+function selectedEngines(intake: AiInitIntake): Engine[] {
+  const selected = (intake.engines ?? []).filter((engine): engine is Engine =>
+    (ENGINES as readonly string[]).includes(engine),
+  );
+  return selected.length ? selected : [INIT_DEFAULT_ENGINE];
+}
+
+function skillCuratorDescription(intake: AiInitIntake): string {
+  const engines = selectedEngines(intake);
+  const skillDirs = engines.map((engine) => ENGINE_SKILL_DIR[engine]);
+  const syncCmd =
+    engines.length === 1
+      ? `vf skills sync --mode pointer --engine ${engines[0]}`
+      : "vf skills sync --mode pointer";
+  const verifyCmd =
+    engines.length === 1 ? `vf skills verify-sync --engine ${engines[0]}` : "vf skills verify-sync";
+  const authInstruction =
+    intake.ctx7Authenticated === true
+      ? "ctx7 is already authenticated from the CLI pre-check. Use `npx ctx7 library`, `npx ctx7 docs`, and headless `npx ctx7 skills install --yes --all --claude` when useful."
+      : "ctx7 is NOT authenticated or the user chose not to login. Do not run `npx ctx7 login` inside the engine. Use fallback discovery from `.vibeflow/ai-context/stack-evidence.md`, bundled skill standards, and any available docs; author fallback skills with `status: experimental` and cite the fallback source.";
+
+  return [
+    authInstruction,
+    "Discover and install skills for the detected stack. Project-fit skills live under `.vibeflow/skills/<name>/SKILL.md` and must follow `.vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md`.",
+    `After validating canonical skills, run \`${syncCmd}\` and \`${verifyCmd}\`.`,
+    `Only these selected engine skill mirror(s) are in scope: ${skillDirs.join(", ")}. Do not create or sync skill directories for unselected engines.`,
+    "Verify with `vf skills validate` and regenerate `.vibeflow/SKILL_INDEX.md`.",
+  ].join(" ");
+}
+
 /** Per-adapter acceptance signal the reviewer uses to decide pass/fail.
  *  The strings are evidence patterns: the unit's recorded evidence must
  *  cite at least one of these (file path) for the reviewer to pass it. */
@@ -187,7 +228,7 @@ const ADAPTER_ACCEPTANCE: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "stack-evidence.md written, ProjectProfile summary backed by >=3 manifest/dependency citations",
   "ai-init-instruction-writer":
-    "all 4 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md, .agents/instructions.md) carry a fresh vibeflow:start block",
+    "all 3 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) carry a fresh vibeflow:start block",
   "ai-init-skill-curator":
     ">=1 skill installed under .vibeflow/skills/, SKILL_INDEX.md regenerated, ctx7 (or fallback) cited as source",
   "ai-init-context-updater":
@@ -198,6 +239,8 @@ const ADAPTER_ACCEPTANCE: Record<AiInitAdapterName, string> = {
     ".vibeflow/WORKFLOW_POLICY.md updated with the active workflow, agent-team roster, and the code-navigation decision tree (only when tools are enabled)",
   "ai-init-workflow-state-writer":
     ".vibeflow/WORKFLOW_STATE.json carries a `work_units` block with one unit per declared WorkflowPhase (name, status=pending, confidence=0, scope, owner_agent, skills_injected, skills_required, gates, resources), and `success_criteria` folds in each phase's `dod`",
+  "ai-init-quickstart-writer":
+    "QUICKSTART.md rendered from src/templates/QUICKSTART.skeleton.md with placeholders filled from stack-evidence.md, all human-curated sections outside the BEGIN/END markers preserved",
 };
 
 /** Per-adapter description (the spec the engine receives when dispatched). */
@@ -205,7 +248,7 @@ const ADAPTER_DESCRIPTION: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "Investigate the project until confidence = 1.0 on every finding (build/test/lint commands, package manager, language + framework versions, CI). Read package.json, tsconfig/biome config, source tree, sample source files (>=5 across modules), and >=2 test files. Review and update .vibeflow/ai-context/stack-evidence.md with file/manifest evidence per component. Do not guess.",
   "ai-init-instruction-writer":
-    "Update all 4 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md, .agents/instructions.md) for this project. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.",
+    "Update all 3 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) for this project. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.",
   "ai-init-skill-curator":
     "Discover and install skills for the detected stack via `npx ctx7 skills install --yes --all --claude` (headless), or fall back to manual SKILL.md authored from `ctx7 docs`. Follow the SKILL.md format from .vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md. Copy to .claude/skills/, .agents/skills/, .github/skills/. Verify with `vf skills validate` and regenerate .vibeflow/SKILL_INDEX.md. Project-fit skills live under .vibeflow/skills/.",
   "ai-init-context-updater":
@@ -216,6 +259,8 @@ const ADAPTER_DESCRIPTION: Record<AiInitAdapterName, string> = {
     "Update .vibeflow/WORKFLOW_POLICY.md with: the active workflow, the agent-team roster (per detected role), the code-navigation decision tree (only when codegraph or lsp is enabled in SETTINGS.json), and the Skills-first + Knowledge-first operating loop. Preserve any human-authored sections outside the generated block.",
   "ai-init-workflow-state-writer":
     "Update .vibeflow/WORKFLOW_STATE.json to declare one work unit per user-supplied WorkflowPhase (or omit `work_units` when the user supplied no phases). Each phase unit has: name (matching the phase), status=pending, confidence=0, scope (one entry per declared output), owner_agent (resolved from phase.ownerHint via fuzzy match against detected roles, defaulting to dispatch-runner), skills_injected + skills_required (resolved from the role's known skill list), gates=pending, resources=zero. Fold each phase.dod into `success_criteria` (dedup, preserve order).",
+  "ai-init-quickstart-writer":
+    "Render QUICKSTART.md at the project root from the engine-agnostic skeleton at src/templates/QUICKSTART.skeleton.md (relative to the vibeflow repo, or the installed package's templates dir). Steps: (1) read the skeleton; (2) fill every `{{PLACEHOLDER}}` using evidence from .vibeflow/ai-context/stack-evidence.md and the live project (build/test/lint commands, package manager, key file paths, detected stack); (3) preserve any existing QUICKSTART.md content outside the `<!-- BEGIN/END -->` machine-managed regions verbatim; (4) write the rendered file. Do NOT hardcode engine-specific or stack-specific content into the skeleton — placeholders are filled at render time. Verify the result has no unfilled `{{...}}` tokens before closing.",
 };
 
 /** Skills wiring per role. A small built-in catalogue that the planner
@@ -302,7 +347,7 @@ function buildAdapterSpec(
   detectedRoles: RoleName[],
 ): string {
   const goal = intake.goal?.trim() || "Set up VibeFlow AI guidance for this repository";
-  const engines = (intake.engines ?? []).join(", ") || "(default: claude, codex, copilot)";
+  const engines = (intake.engines ?? []).join(", ") || "(default: copilot)";
   const roleList = detectedRoles.length ? detectedRoles.join(", ") : ROLE_NAMES.join(", ");
   return [
     `## ${name}`,
@@ -314,7 +359,9 @@ function buildAdapterSpec(
     "",
     name === "ai-init-instruction-writer"
       ? instructionDescription(selectedInstructionScope(intake))
-      : ADAPTER_DESCRIPTION[name],
+      : name === "ai-init-skill-curator"
+        ? skillCuratorDescription(intake)
+        : ADAPTER_DESCRIPTION[name],
   ].join("\n");
 }
 
@@ -618,6 +665,23 @@ export function aiInitReviewer(
     // T3: file-exists check on the single scope file.
     for (const e of outcome.evidence) {
       const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-analyzer"] ?? []);
+      if (!r.ok) return { pass: false, reason: r.reason };
+    }
+  }
+  if (name === "ai-init-quickstart-writer") {
+    const REQUIRED = unit.scope?.length
+      ? unit.scope
+      : (ADAPTER_SCOPE["ai-init-quickstart-writer"] ?? []);
+    const hit = outcome.evidence.some((e) => REQUIRED.some((p) => e.includes(p)));
+    if (!hit) {
+      return {
+        pass: false,
+        reason: `no evidence cites one of: ${REQUIRED.join(", ")}`,
+      };
+    }
+    // T3: file-exists check on the cited path.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, REQUIRED);
       if (!r.ok) return { pass: false, reason: r.reason };
     }
   }

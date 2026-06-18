@@ -2,6 +2,8 @@
 // All imports + re-exports now live in src/commands/_shared.ts (the barrel).
 // Function bodies stay in this file until each is extracted to its own
 // per-subcommand module. PR1 only sets up the barrel.
+import { mkdirSync } from "node:fs";
+import { createInterface } from "node:readline";
 import {
   BACKUP_SUBDIR,
   CTX_DIR,
@@ -180,6 +182,7 @@ import {
 import type { ProtectionRuntime } from "./commands/protection.js";
 import { guardrailOffNote, liveGuardrailArmed, tipState } from "./commands/seams.js";
 import { units } from "./commands/units.js";
+import { type DiscoveryResult, searchSkillsHttp } from "./discovery/context7.js";
 // === Re-export the doctor subcommand + repo detection helpers ===
 // (issue #80, phase 3/14) `doctor`, `detectRepo`, `RepoDetection`,
 // `resolveRepo` now live in src/commands/doctor.ts. The facade
@@ -424,6 +427,56 @@ export async function init(
     }
   }
 
+  // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
+  // enable in settings, write MCP config, and build index.
+  if (!dry) {
+    const syncSpawner: StepSpawner = (cmd, args) => {
+      const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
+      return { status: result.status ?? 1 };
+    };
+    if (hasCommand("codegraph")) {
+      const curSettings = readSettings(cwd());
+      if (!curSettings.tools?.codegraph) {
+        writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
+        out("vf", c.green("+ enabled codegraph"));
+      }
+      writeToolConfigs(cwd(), readSettings(cwd()), engines);
+      ensureToolIndex(cwd(), "codegraph", syncSpawner);
+    } else {
+      out("vf", c.cyan("▶ Installing codegraph globally via npm..."));
+      const rc = provisionTool(cwd(), "codegraph", syncSpawner);
+      if (rc === 0) {
+        writeSettings(cwd(), { tools: { ...readSettings(cwd()).tools, codegraph: true } });
+        out("vf", c.green("+ enabled codegraph"));
+        writeToolConfigs(cwd(), readSettings(cwd()), engines);
+      } else {
+        out(
+          "vf",
+          c.yellow(
+            "! codegraph install failed — skipping. Run `vf tools install codegraph` manually.",
+          ),
+        );
+      }
+    }
+  }
+
+  // Phase 1.7: ctx7 auth check — prompt user to login before AI enrichment
+  // so the skill-curator unit can use ctx7 CLI directly if authenticated.
+  let ctx7Auth: Ctx7AuthResult = { authenticated: false, fallback: true };
+  if (ai && !dry && !result.refused && process.stdin.isTTY) {
+    out("vf");
+    out("vf", c.bold("ctx7 Auth"));
+    ctx7Auth = await ensureCtx7Auth();
+  }
+
+  // Phase 1.8: find-skills fallback — when ctx7 not authenticated, search
+  // Context7 HTTP API for matching skills (zero-install, no auth needed).
+  if (ai && !dry && !result.refused && ctx7Auth.fallback) {
+    out("vf");
+    out("vf", c.bold("Find-Skills"));
+    await runFindSkillsFallback(cwd());
+  }
+
   // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded)
   if (ai && !dry && !result.refused) {
     out("vf");
@@ -435,11 +488,12 @@ export async function init(
       const aiSpinner = new Spinner();
       aiSpinner.start(" ");
       // B1/T5: --ai defaults to the agent-team workflow shape. The workflow
-      // runs 7 adapter units in parallel (analyzer, instruction-writer,
+      // runs 8 adapter units in parallel (analyzer, instruction-writer,
       // skill-curator, tool-configurator, workflow-policy-writer,
-      // workflow-state-writer, context-updater) and a reviewer per unit.
-      // When the user supplied workflow phases, they are passed so the
-      // planner generates Tier 2 units alongside the Tier 1 baseline.
+      // workflow-state-writer, context-updater, quickstart-writer) and a
+      // reviewer per unit. When the user supplied workflow phases, they
+      // are passed so the planner generates Tier 2 units alongside the
+      // Tier 1 baseline.
       const { runAiInitWorkflow } = await import("./ai-init.js");
       const workflowResult = await runAiInitWorkflow({
         base: cwd(),
@@ -449,6 +503,7 @@ export async function init(
           ...(hasPhases ? { workflowPhases: answers.workflowPhases as WorkflowPhase[] } : {}),
         },
         forceEngine: aiEngine,
+        ctx7Auth: ctx7Auth.authenticated,
         preflight: inject.aiPreflight,
         dispatcher: inject.dispatcher,
         spawner:
@@ -537,6 +592,7 @@ export async function init(
             },
           }),
         forceEngine: aiEngine,
+        ctx7Auth: ctx7Auth.authenticated,
         // --autopilot: opt-in auto-fallback when the chosen engine is
         // unavailable or returns a permission error. Default false to
         // preserve single-shot behavior (any failure is the user's
@@ -602,6 +658,229 @@ export async function init(
   }
 
   return 0;
+}
+
+/**
+ * Check ctx7 auth status. If not logged in, prompt the user to login via
+ * device OAuth flow. Returns the auth result so the caller can decide
+ * whether to use ctx7 CLI or the find-skills HTTP fallback.
+ *
+ * Timeout / non-TTY / skip → fallback mode.
+ */
+export interface Ctx7AuthResult {
+  authenticated: boolean;
+  /** true when ctx7 login was skipped or failed (use find-skills fallback). */
+  fallback: boolean;
+}
+
+export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
+  if (!process.stdin.isTTY) {
+    return { authenticated: false, fallback: true };
+  }
+
+  // Step 1: quick check
+  const whoami = spawnSync("npx", ["ctx7", "whoami"], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const alreadyAuth =
+    whoami.status === 0 && whoami.stdout != null && !whoami.stdout.includes("Not logged in");
+
+  if (alreadyAuth) {
+    return { authenticated: true, fallback: false };
+  }
+
+  // Step 2: prompt user
+  out("vf", c.yellow("⚠ ctx7 not logged in"));
+  out("vf", c.dim("  ctx7 provides up-to-date library docs for automatic skill discovery."));
+
+  const answer = await new Promise<boolean | null>((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const timer = setTimeout(() => {
+      rl.close();
+      resolve(null);
+    }, 15_000);
+    rl.question("  Login now via device OAuth? (Y/n) ", (a) => {
+      clearTimeout(timer);
+      rl.close();
+      resolve(a.trim().toLowerCase() === "y" || a.trim() === "");
+    });
+  });
+
+  if (answer === false || answer === null) {
+    out("vf", c.yellow("! ctx7 login skipped — using find-skills (HTTP) fallback"));
+    return { authenticated: false, fallback: true };
+  }
+
+  // Step 3: run device OAuth login
+  out("vf", c.cyan("▶ Starting ctx7 device login..."));
+  out("vf", c.dim("  Open the URL below in any browser and enter the code to approve."));
+
+  const login = spawnSync("npx", ["ctx7", "login", "--no-browser"], {
+    stdio: "inherit",
+    timeout: 120_000,
+  });
+
+  if (login.status === 0) {
+    out("vf", c.green("✔ ctx7 authenticated"));
+    return { authenticated: true, fallback: false };
+  }
+
+  out("vf", c.yellow("! ctx7 login failed or timed out — using find-skills (HTTP) fallback"));
+  return { authenticated: false, fallback: true };
+}
+
+/**
+ * Find-skills fallback: use Context7 HTTP API (zero-install, no auth needed)
+ * to discover skills for the detected stack. Writes results to
+ * `.vibeflow/ai-context/find-skills-results.md` so the AI engine can
+ * use them during Phase 2 instead of relying on ctx7 CLI.
+ */
+async function runFindSkillsFallback(base: string): Promise<void> {
+  const profile = scanRepo(base);
+
+  // Build search queries from the detected stack
+  const queries = new Set<string>();
+
+  // Filter out noisy/placeholder values
+  function isNoise(v: string): boolean {
+    const lower = v.toLowerCase();
+    return (
+      lower === "" ||
+      lower.length < 3 ||
+      lower.includes("none") ||
+      lower.includes("not found") ||
+      lower.includes("see ") ||
+      lower === "configured" ||
+      lower === "present" ||
+      lower === "yes" ||
+      lower === "no" ||
+      lower.includes("(see")
+    );
+  }
+
+  for (const fw of profile.frameworks) {
+    if (!isNoise(fw)) queries.add(fw.toLowerCase());
+  }
+
+  const majorLangs = new Set([
+    "typescript",
+    "javascript",
+    "java",
+    "python",
+    "go",
+    "rust",
+    "kotlin",
+    "ruby",
+    "php",
+    "c#",
+    "c++",
+    "swift",
+    "scala",
+  ]);
+  for (const lang of profile.languages) {
+    const lower = lang.toLowerCase();
+    if (majorLangs.has(lower)) queries.add(lower);
+  }
+
+  // Add findings that describe real stack components
+  for (const f of profile.findings) {
+    const val = f.value.toLowerCase();
+    if (isNoise(val)) continue;
+    const comp = f.component.toLowerCase();
+    if (
+      comp.includes("framework") ||
+      comp.includes("database") ||
+      comp.includes("cache") ||
+      comp.includes("build") ||
+      comp.includes("test") ||
+      comp.includes("ui") ||
+      comp.includes("orm") ||
+      comp.includes("package") ||
+      comp.includes("language")
+    ) {
+      queries.add(val);
+    }
+  }
+
+  // Add package manager and manifest-specific technology hints
+  if (profile.packageManager && !isNoise(profile.packageManager)) {
+    queries.add(profile.packageManager.toLowerCase());
+  }
+  // Derive technology hints from manifest filenames
+  for (const m of profile.manifests) {
+    const mq = m
+      .replace(/\.json$/i, "")
+      .replace(/\.yaml$/i, "")
+      .replace(/\.yml$/i, "")
+      .toLowerCase();
+    if (!isNoise(mq)) queries.add(mq);
+  }
+
+  // Search Context7 HTTP API in parallel (no auth needed, bounded 8s per call)
+  const allResults: DiscoveryResult[] = [];
+  const seen = new Set<string>();
+
+  const outcomes = await Promise.allSettled(
+    [...queries].map((q) => searchSkillsHttp(q, { approved: true, timeoutMs: 8000 })),
+  );
+
+  for (const o of outcomes) {
+    if (o.status === "fulfilled" && o.value.ok) {
+      for (const r of o.value.results) {
+        const key = r.name ?? r.title;
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          allResults.push(r);
+        }
+      }
+    }
+  }
+
+  // Write results as markdown for the AI engine
+  const ctxDir = join(base, CTX_DIR, "ai-context");
+  try {
+    mkdirSync(ctxDir, { recursive: true });
+  } catch {
+    /* best effort */
+  }
+
+  if (allResults.length > 0) {
+    const lines: string[] = [
+      "# Find-Skills Results (Context7 HTTP API)",
+      "",
+      `Discovered ${allResults.length} library/skill candidates for the detected stack.`,
+      `Search queries used: ${[...queries].join(", ")}`,
+      "",
+      "| Library | Description | Source |",
+      "|---------|-------------|--------|",
+    ];
+    for (const r of allResults) {
+      const name = r.name ?? r.title;
+      const desc = r.snippet.replace(/\n/g, " ").slice(0, 120);
+      lines.push(`| ${name} | ${desc} | ${r.source} |`);
+    }
+    lines.push("");
+    lines.push(
+      "Each entry above is a known Context7 library. Use `npx ctx7 docs <name>`",
+      "to fetch full documentation, then author the corresponding SKILL.md",
+      "following ANTHROPIC_SKILL_STANDARD.md.",
+    );
+
+    writeFileSafe(join(ctxDir, "find-skills-results.md"), lines.join("\n"));
+    out("vf", c.green(`✔ find-skills: ${allResults.length} library/skill candidate(s) discovered`));
+  } else {
+    const fallbackNote = [
+      "# Find-Skills Results (Context7 HTTP API)",
+      "",
+      "No results from Context7 HTTP API for the detected stack.",
+      `Search queries tried: ${[...queries].join(", ")}`,
+      "",
+      "Fall back to web search and manual skill authoring as described in step 3c.",
+    ];
+    writeFileSafe(join(ctxDir, "find-skills-results.md"), fallbackNote.join("\n"));
+    out("vf", c.yellow("! find-skills: no candidates discovered"));
+  }
 }
 
 // `vf run` was extracted to src/commands/run.ts (issue #80, phase 6.5/14).
@@ -672,11 +951,11 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 0;
   }
   if (sub === "sync") {
-    // Parse `--mode pointer|full` (or `--mode=pointer|full`) from `rest`.
-    // Default is "pointer"; explicit non-"full" value (e.g. "pointer") is
-    // preserved instead of being silently dropped to default.
-    // Unknown values produce a clear error.
+    // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
+    // `--engine claude|codex|copilot` from `rest`.
+    // Default mode is "pointer". When --engine is omitted, sync to all 3 mirrors.
     let mode: "pointer" | "full" = "pointer";
+    const engines: Engine[] = [];
     for (let i = 0; i < rest.length; i++) {
       const tok = rest[i];
       if (tok === "--mode") {
@@ -699,8 +978,32 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
         }
         mode = v;
       }
+      if (tok === "--engine") {
+        const v = rest[i + 1] as Engine;
+        if (!(ENGINES as string[]).includes(v)) {
+          out(
+            "vf",
+            c.red(`✗ --engine must be one of: ${ENGINES.join(", ")}, got '${v ?? "(missing)"}'`),
+            {
+              level: "error",
+            },
+          );
+          return 2;
+        }
+        engines.push(v);
+      }
+      if (typeof tok === "string" && tok.startsWith("--engine=")) {
+        const v = tok.slice("--engine=".length) as Engine;
+        if (!(ENGINES as string[]).includes(v)) {
+          out("vf", c.red(`✗ --engine must be one of: ${ENGINES.join(", ")}, got '${v}'`), {
+            level: "error",
+          });
+          return 2;
+        }
+        engines.push(v);
+      }
     }
-    const result = syncSkillMirrors(repo, { mode });
+    const result = syncSkillMirrors(repo, { mode, engines: engines.length ? engines : undefined });
     for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
     for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
     if (result.ok) {
@@ -716,7 +1019,20 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 1;
   }
   if (sub === "verify-sync") {
-    const result = verifySkillSync(repo);
+    // Parse --engine flag to filter which mirrors to verify (defaults to all 3).
+    const engines: Engine[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const tok = rest[i];
+      if (tok === "--engine") {
+        const v = rest[i + 1] as Engine;
+        if ((ENGINES as string[]).includes(v)) engines.push(v);
+      }
+      if (typeof tok === "string" && tok.startsWith("--engine=")) {
+        const v = tok.slice("--engine=".length) as Engine;
+        if ((ENGINES as string[]).includes(v)) engines.push(v);
+      }
+    }
+    const result = verifySkillSync(repo, engines.length ? engines : undefined);
     for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
     if (result.ok) {
       out("vf", c.green(`✔ all ${result.synced.length} mirror(s) in sync`));
@@ -1279,7 +1595,17 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
     const installed = (detectFn ?? tool.detect.bind(tool))(name);
     const en = enabled ? c.green("enabled") : c.dim("disabled");
     const inst = installed ? c.green("installed") : c.yellow("not installed");
-    out("vf", `  ${c.bold(tool.title)} [${en}, ${inst}]`);
+    let tag = `[${en}, ${inst}`;
+    if (tool.indexPresent) {
+      const present = tool.indexPresent;
+      const healthy = tool.indexHealthy ?? ((b: string) => present(b));
+      const probed = installed ? probeIndexHealth(name, base, healthy) : null;
+      if (probed === true) tag += `, ${c.green("indexed")}`;
+      else if (probed === "unhealthy") tag += `, ${c.red("index unhealthy")}`;
+      else if (probed === false) tag += `, ${c.yellow("not indexed")}`;
+    }
+    tag += "]";
+    out("vf", `  ${c.bold(tool.title)} ${tag}`);
     out("vf", `    ${c.dim(tool.description)}`);
     if (enabled && !installed) {
       out(
@@ -1288,12 +1614,61 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
           `    ! enabled but binary not on PATH — MCP server won't start. Run \`vf tools install ${name}\`.`,
         ),
       );
+    } else if (enabled && installed && tool.indexPresent) {
+      const present = tool.indexPresent;
+      const healthy = tool.indexHealthy ?? ((b: string) => present(b));
+      const probed = probeIndexHealth(name, base, healthy);
+      if (probed === false) {
+        out(
+          "vf",
+          c.yellow(
+            `    ! enabled but index missing — MCP server will announce inactive. Run \`vf tools enable ${name} --yes\` to build it.`,
+          ),
+        );
+      } else if (probed === "unhealthy") {
+        out(
+          "vf",
+          c.yellow(
+            `    ! enabled but index reports unhealthy (mismatched/corrupt db). Run \`vf tools enable ${name} --yes\` to rebuild.`,
+          ),
+        );
+      }
     }
   }
   out("vf", `\n  priority: ${c.cyan(renderPriority(settings))}`);
   if (languages.length) out("vf", `  detected languages: ${c.dim(languages.join(", "))}`);
   out("vf", c.dim("\n  Re-run `vf init` after changing tools to regenerate instructions."));
   return 0;
+}
+
+/** Run a tool's optional `indexHealthy` check with a short-lived spawner that captures
+ * stdout. Returns `true` (healthy), `false` (marker missing), `"unhealthy"` (marker
+ * present but tool reports it unusable), or `null` (tool has no health check). */
+function probeIndexHealth(
+  _name: ToolName,
+  base: string,
+  healthy: (base: string, spawner: (cmd: string, args: string[]) => { status: number }) => boolean,
+): true | false | "unhealthy" | null {
+  const tool = TOOLS[_name];
+  if (!tool.indexPresent) return null;
+  const present = tool.indexPresent(base);
+  if (!present) return false;
+  let captured = "";
+  const capture: (cmd: string, args: string[]) => { status: number } = (cmd, args) => {
+    try {
+      const proc = spawnSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      captured = proc.stdout ?? "";
+      return { status: proc.status ?? 1 };
+    } catch {
+      captured = "";
+      return { status: 1 };
+    }
+  };
+  const ok = healthy(base, capture);
+  if (ok) return true;
+  // marker present but health check said no — distinguish "we couldn't verify" (no
+  // health check ran) from "the tool itself reported unhealthy".
+  return captured ? "unhealthy" : false;
 }
 
 /** Repo-relative MCP config files VibeFlow owns and may safely read+rewrite. */
@@ -1419,15 +1794,18 @@ function printCopilotMcp(base: string, settings: VibeSettings, languages: string
 }
 
 /**
- * Wire enabled tools into every engine's MCP config: merge claude's `.mcp.json`, write the
- * repo-local codex `config.toml` (with structural gating), and print copilot's add commands.
+ * Wire enabled tools into selected engines' MCP configs: write `.mcp.json` for claude and
+ * copilot (both read the workspace-level file), `.codex/config.toml` for codex, and print
+ * `copilot mcp add` commands for copilot's global config.
+ * When `engines` is provided, only configs for those engines are written.
  * Pure tool modules build the entries; the WRITING lives here. Languages drive LSP entries.
  */
-function writeToolConfigs(base: string, settings: VibeSettings): void {
+function writeToolConfigs(base: string, settings: VibeSettings, engines?: readonly Engine[]): void {
   const languages = repoLanguages(base);
-  writeClaudeMcp(base, settings, languages);
-  writeCodexMcp(base, settings, languages);
-  printCopilotMcp(base, settings, languages);
+  const needsMcpJson = !engines || engines.includes("claude") || engines.includes("copilot");
+  if (needsMcpJson) writeClaudeMcp(base, settings, languages);
+  if (!engines || engines.includes("codex")) writeCodexMcp(base, settings, languages);
+  if (!engines || engines.includes("copilot")) printCopilotMcp(base, settings, languages);
 }
 
 /** `vf tools enable|disable <tool>` — flip the flag in SETTINGS.json and report. When enabling
@@ -1914,7 +2292,7 @@ ${c.bold("Subcommands:")}
   search <term>              rank skills matching a task description
   resolve                    report which skill needs are satisfied locally vs. on demand
   validate                   validate skill format per Anthropic standard (errors, warnings)
-  sync [--mode pointer|full] sync .vibeflow/skills → engine mirrors
+  sync [--mode pointer|full] [--engine <name>] sync .vibeflow/skills → engine mirrors (--engine can repeat for multiple engines; default all 3)
   verify-sync                verify each engine mirror has every canonical skill
   import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
 

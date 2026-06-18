@@ -18,7 +18,6 @@
 // as vacuous for re-export-only files; this test gives the barrel real
 // coverage by importing every re-exported symbol once.
 //
-// biome-ignore lint/performance/noBarrelFile: barrel is the whole point
 
 import { describe, expect, test } from "bun:test";
 import * as Shared from "../src/commands/_shared.js";

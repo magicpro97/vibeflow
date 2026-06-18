@@ -93,8 +93,8 @@ describe("buildEnrichmentPrompt", () => {
   });
 
   test("deduplicates instruction files across engines", () => {
-    // claude + copilot: claude=CLAUDE.md/AGENTS.md/.agents/instructions.md;
-    // copilot=.github/copilot-instructions.md. All 4 unique.
+    // claude + copilot: claude=CLAUDE.md/AGENTS.md; copilot=.github/copilot-instructions.md.
+    // All 3 unique (.agents/instructions.md is no longer generated — see adapters.ts).
     const out = buildEnrichmentPrompt([], ["claude", "copilot"], PROFILE, dir);
     expect(out).toContain("CLAUDE.md");
     expect(out).toContain("AGENTS.md");
@@ -220,7 +220,8 @@ describe("generateWorkflowArtifacts", () => {
   test("appends orchestrator snippet to existing instruction files in the managed block", () => {
     // Pre-create the claude instruction file with a managed block so
     // the append path runs. The instruction files for claude are
-    // CLAUDE.md, AGENTS.md, .agents/instructions.md.
+    // CLAUDE.md and AGENTS.md (.agents/instructions.md was removed in
+    // adapters.ts because no supported engine reads it).
     const claudeMd = join(dir, "CLAUDE.md");
     writeFileSync(
       claudeMd,
@@ -288,11 +289,7 @@ describe("ENGINE_CONFIGS parity (issue #75)", () => {
 
   test("claude and copilot are unchanged", async () => {
     const { ENGINE_CONFIGS } = await import("../src/workflow-artifacts.js");
-    expect(ENGINE_CONFIGS.claude.instructionFiles).toEqual([
-      "CLAUDE.md",
-      "AGENTS.md",
-      ".agents/instructions.md",
-    ]);
+    expect(ENGINE_CONFIGS.claude.instructionFiles).toEqual(["CLAUDE.md", "AGENTS.md"]);
     expect(ENGINE_CONFIGS.copilot.instructionFiles).toEqual([".github/copilot-instructions.md"]);
   });
 });

@@ -1752,10 +1752,12 @@ describe("commands.help branches", () => {
 // ---------------------------------------------------------------------------
 
 describe("commands.ensureToolIndex edge branches", () => {
-  test("ensureToolIndex returns 0 when index is already present (line 2478-2480)", () => {
+  test("ensureToolIndex returns 0 when the codegraph.db marker is present (line 2478-2480)", () => {
     const dir = freshDir("vf-idx-");
-    // Pre-create the codegraph index dir so indexPresent() returns true.
+    // Pre-create BOTH the .codegraph/ folder AND the codegraph.db marker so the new
+    // marker-based indexPresent() returns true.
     mkdirSync(join(dir, ".codegraph"), { recursive: true });
+    writeFileSync(join(dir, ".codegraph", "codegraph.db"), "");
     let spawned = false;
     const code = ensureToolIndex(dir, "codegraph", () => {
       spawned = true;
@@ -1763,6 +1765,19 @@ describe("commands.ensureToolIndex edge branches", () => {
     });
     expect(code).toBe(0);
     expect(spawned).toBe(false);
+  });
+
+  test("ensureToolIndex rebuilds when .codegraph/ exists but the codegraph.db marker is missing", () => {
+    const dir = freshDir("vf-idx-empty-");
+    mkdirSync(join(dir, ".codegraph"), { recursive: true });
+    writeFileSync(join(dir, ".codegraph", ".gitignore"), "");
+    let spawned = false;
+    const code = ensureToolIndex(dir, "codegraph", () => {
+      spawned = true;
+      return { status: 0 };
+    });
+    expect(code).toBe(0);
+    expect(spawned).toBe(true);
   });
 });
 

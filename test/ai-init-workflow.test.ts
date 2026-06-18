@@ -26,9 +26,9 @@ const profile: ProjectProfile = {
 };
 
 describe("planAiInitUnits", () => {
-  test("emits 7 Tier-1 adapter units in canonical order (no phase units without intake)", () => {
+  test("emits 8 Tier-1 adapter units in canonical order (no phase units without intake)", () => {
     const units = planAiInitUnits(profile, { goal: "ship it" });
-    expect(units).toHaveLength(7);
+    expect(units).toHaveLength(8);
     expect(units.map((u) => u.name)).toEqual([
       "ai-init-analyzer",
       "ai-init-instruction-writer",
@@ -37,6 +37,7 @@ describe("planAiInitUnits", () => {
       "ai-init-tool-configurator",
       "ai-init-workflow-policy-writer",
       "ai-init-workflow-state-writer",
+      "ai-init-quickstart-writer",
     ]);
     expect(AI_INIT_UNIT_NAMES).toHaveLength(4);
   });
@@ -77,6 +78,21 @@ describe("planAiInitUnits", () => {
     const units = planAiInitUnits(profile, {});
     const conflicts = findScopeConflicts(units);
     expect(conflicts).toEqual([]);
+  });
+
+  test("quickstart-writer scope is exactly ['QUICKSTART.md'] regardless of engines", () => {
+    const copilot = planAiInitUnits(profile, { engines: ["copilot"] }).find(
+      (u) => u.name === "ai-init-quickstart-writer",
+    );
+    expect(copilot?.scope).toEqual(["QUICKSTART.md"]);
+
+    const claude = planAiInitUnits(profile, { engines: ["claude"] }).find(
+      (u) => u.name === "ai-init-quickstart-writer",
+    );
+    expect(claude?.scope).toEqual(["QUICKSTART.md"]);
+
+    // Owner is doc-writer, same family as instruction-writer.
+    expect(copilot?.owner_agent).toBe("doc-writer");
   });
 
   test("instruction-writer scope follows the selected engine", () => {
@@ -127,26 +143,26 @@ describe("planAiInitUnits", () => {
       expect(u.acceptance.length).toBeGreaterThan(0);
       seen.add(u.acceptance);
     }
-    expect(seen.size).toBe(7);
+    expect(seen.size).toBe(8);
   });
 
-  test("emits one Tier-2 unit per WorkflowPhase, after the 7 adapters", () => {
+  test("emits one Tier-2 unit per WorkflowPhase, after the 8 adapters", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [
         { name: "analyze", description: "Read the repo", dod: "stack table written" },
         { name: "ship", description: "Open a PR", dod: "PR opened" },
       ],
     });
-    expect(units).toHaveLength(9);
-    expect(units[7]?.name).toMatch(/^ai-init-phase-analyze-1$/);
-    expect(units[8]?.name).toMatch(/^ai-init-phase-ship-2$/);
+    expect(units).toHaveLength(10);
+    expect(units[8]?.name).toMatch(/^ai-init-phase-analyze-1$/);
+    expect(units[9]?.name).toMatch(/^ai-init-phase-ship-2$/);
   });
 
   test("phase unit scope falls back to a sentinel when outputs are missing", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "noop", description: "no outputs", dod: "noop" }],
     });
-    const phase = units[7];
+    const phase = units[8];
     expect(phase).toBeDefined();
     expect(phase?.scope).toEqual([".vibeflow/phase-outputs/noop.md"]);
   });
@@ -155,7 +171,7 @@ describe("planAiInitUnits", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "../../../etc/passwd", description: "x", dod: "x" }],
     });
-    const phase = units[7];
+    const phase = units[8];
     expect(phase).toBeDefined();
     expect(phase?.name).not.toContain("..");
     expect(phase?.name).not.toContain("/");
@@ -199,9 +215,9 @@ describe("planAiInitUnits", () => {
         { name: "docs-update", description: "readme", ownerHint: "doc", dod: "ok" },
       ],
     });
-    expect(units[7]?.owner_agent).toBe("cli-engine");
-    expect(units[8]?.owner_agent).toBe("web-ui");
-    expect(units[9]?.owner_agent).toBe("doc-writer");
+    expect(units[8]?.owner_agent).toBe("cli-engine");
+    expect(units[9]?.owner_agent).toBe("web-ui");
+    expect(units[10]?.owner_agent).toBe("doc-writer");
   });
 
   // Branch coverage for resolveOwner: every regex branch in src/ai-init-workflow.ts:243-248
@@ -210,7 +226,7 @@ describe("planAiInitUnits", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "sk", description: "add new skill", ownerHint: "skill", dod: "ok" }],
     });
-    expect(units[7]?.owner_agent).toBe("skill-author");
+    expect(units[8]?.owner_agent).toBe("skill-author");
   });
 
   test("resolveOwner fuzzy-matches preflight/probe/quota keywords to preflight-engine", () => {
@@ -219,7 +235,7 @@ describe("planAiInitUnits", () => {
         { name: "pf", description: "add preflight probe", ownerHint: "preflight", dod: "ok" },
       ],
     });
-    expect(units[7]?.owner_agent).toBe("preflight-engine");
+    expect(units[8]?.owner_agent).toBe("preflight-engine");
   });
 
   test("resolveOwner fuzzy-matches dispatch/orchestrat/runner/workflow keywords to dispatch-runner", () => {
@@ -228,7 +244,7 @@ describe("planAiInitUnits", () => {
         { name: "dr", description: "add workflow runner", ownerHint: "dispatch", dod: "ok" },
       ],
     });
-    expect(units[7]?.owner_agent).toBe("dispatch-runner");
+    expect(units[8]?.owner_agent).toBe("dispatch-runner");
   });
 
   test("resolveOwner defaults to dispatch-runner when hint is empty/unknown", () => {
@@ -238,15 +254,15 @@ describe("planAiInitUnits", () => {
         { name: "u2", description: "no hint at all", dod: "ok" },
       ],
     });
-    expect(units[7]?.owner_agent).toBe("dispatch-runner");
     expect(units[8]?.owner_agent).toBe("dispatch-runner");
+    expect(units[9]?.owner_agent).toBe("dispatch-runner");
   });
 
   test("phase unit carries skills_injected and skills_required from the resolved role", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "x", description: "x", ownerHint: "cli-engine", dod: "x" }],
     });
-    const phase = units[7];
+    const phase = units[8];
     expect(phase).toBeDefined();
     expect(phase?.skills_injected).toBeDefined();
     expect(phase?.skills_required).toBeDefined();
@@ -282,14 +298,12 @@ describe("aiInitReviewer", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vf-ai-init-reviewer-"));
     process.chdir(tmpDir);
     mkdirSync(join(tmpDir, ".github"), { recursive: true });
-    mkdirSync(join(tmpDir, ".agents"), { recursive: true });
     mkdirSync(join(tmpDir, ".vibeflow"), { recursive: true });
     mkdirSync(join(tmpDir, ".vibeflow/ai-context"), { recursive: true });
     mkdirSync(join(tmpDir, ".vibeflow/skills/foo"), { recursive: true });
     writeFileSync(join(tmpDir, "CLAUDE.md"), "# fixture\n");
     writeFileSync(join(tmpDir, "AGENTS.md"), "# fixture\n");
     writeFileSync(join(tmpDir, ".github/copilot-instructions.md"), "# fixture\n");
-    writeFileSync(join(tmpDir, ".agents/instructions.md"), "# fixture\n");
     writeFileSync(join(tmpDir, ".vibeflow/ai-context/stack-evidence.md"), "# fixture\n");
     writeFileSync(join(tmpDir, ".vibeflow/skills/foo/SKILL.md"), "# fixture\n");
     writeFileSync(join(tmpDir, ".vibeflow/SKILL_INDEX.md"), "# fixture\n");
@@ -297,6 +311,7 @@ describe("aiInitReviewer", () => {
     writeFileSync(join(tmpDir, ".vibeflow/SETTINGS.json"), "{}\n");
     writeFileSync(join(tmpDir, ".vibeflow/WORKFLOW_POLICY.md"), "# fixture\n");
     writeFileSync(join(tmpDir, ".vibeflow/WORKFLOW_STATE.json"), "{}\n");
+    writeFileSync(join(tmpDir, "QUICKSTART.md"), "# fixture\n");
   });
   afterEach(() => {
     process.chdir(origCwd);
@@ -308,7 +323,7 @@ describe("aiInitReviewer", () => {
     const r = aiInitReviewer(u, {
       status: "done",
       confidence: 1,
-      evidence: ["edited CLAUDE.md", "edited AGENTS.md"],
+      evidence: ["edited AGENTS.md", "edited .github/copilot-instructions.md"],
     });
     expect(r.pass).toBe(true);
   });
@@ -341,7 +356,7 @@ describe("aiInitReviewer", () => {
       evidence: ["edited README.md"],
     });
     expect(r.pass).toBe(false);
-    expect(r.reason).toContain("CLAUDE.md");
+    expect(r.reason).toMatch(/(AGENTS\.md|copilot-instructions)/);
   });
 
   test("passes when status=verifying with confidence=1 and valid evidence (per orchestrateUnits contract)", () => {
@@ -436,12 +451,12 @@ describe("aiInitReviewer", () => {
   });
 
   test("instruction-writer wordStart=-1 branch: evidence starts with the scope path", () => {
-    // "CLAUDE.md content" → idx 0, wordStart -1, candidate "CLAUDE.md"
+    // "AGENTS.md content" → idx 0, wordStart -1, candidate "AGENTS.md"
     const u = unit("ai-init-instruction-writer");
     const r = aiInitReviewer(u, {
       status: "verifying",
       confidence: 1,
-      evidence: ["CLAUDE.md content updated"],
+      evidence: ["AGENTS.md content updated"],
     });
     expect(r.pass).toBe(true);
   });
@@ -552,6 +567,39 @@ describe("aiInitReviewer", () => {
     expect(r.reason).toContain("WORKFLOW_STATE");
   });
 
+  test("passes quickstart-writer when evidence cites QUICKSTART.md", () => {
+    const u = unit("ai-init-quickstart-writer");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["rendered QUICKSTART.md from skeleton"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails quickstart-writer when evidence never cites QUICKSTART.md", () => {
+    const u = unit("ai-init-quickstart-writer");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["updated README"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("QUICKSTART.md");
+  });
+
+  test("quickstart-writer fails when QUICKSTART.md fixture is missing (file-exists red path)", () => {
+    rmSync(join(tmpDir, "QUICKSTART.md"));
+    const u = unit("ai-init-quickstart-writer");
+    const r = aiInitReviewer(u, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["QUICKSTART.md"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/not a regular file/);
+  });
+
   test("passes phase unit when evidence cites one of the declared outputs", () => {
     const phase = planAiInitUnits(profile, {
       workflowPhases: [
@@ -562,7 +610,7 @@ describe("aiInitReviewer", () => {
           dod: "build done",
         },
       ],
-    })[7];
+    })[8];
     expect(phase).toBeDefined();
     if (!phase) return;
     // Create the cited output file on disk so the file-exists check
@@ -587,7 +635,7 @@ describe("aiInitReviewer", () => {
           dod: "build done",
         },
       ],
-    })[7];
+    })[8];
     expect(phase).toBeDefined();
     if (!phase) return;
     const r = aiInitReviewer(phase, {
@@ -610,7 +658,7 @@ describe("aiInitReviewer", () => {
           dod: "ship done",
         },
       ],
-    })[7];
+    })[8];
     expect(phase).toBeDefined();
     if (!phase) return;
     // Do NOT create the cited file on disk. The reviewer must reject.

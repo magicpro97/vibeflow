@@ -25,7 +25,7 @@ interface EngineConfig {
 
 export const ENGINE_CONFIGS: Record<AgentEngine, EngineConfig> = {
   claude: {
-    instructionFiles: ["CLAUDE.md", "AGENTS.md", ".agents/instructions.md"],
+    instructionFiles: ["CLAUDE.md", "AGENTS.md"],
     skillRoot: ".claude/skills",
   },
   codex: { instructionFiles: ["AGENTS.md"], skillRoot: ".agents/skills" },

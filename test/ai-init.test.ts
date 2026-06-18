@@ -355,6 +355,40 @@ describe("runAiInit", () => {
     expect(capturedArgs[2]).toBe("--allow-all");
   });
 
+  test("writes AI context instruction files only for the forced engine", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-ai-engine-scope-"));
+    try {
+      writeFileSync(join(dir, "CLAUDE.md"), "# claude\n");
+      writeFileSync(join(dir, "AGENTS.md"), "# agents\n");
+      mkdirSync(join(dir, ".github"), { recursive: true });
+      writeFileSync(join(dir, ".github", "copilot-instructions.md"), "# copilot\n");
+      mkdirSync(join(dir, ".agents"), { recursive: true });
+      writeFileSync(join(dir, ".agents", "instructions.md"), "# shared agent\n");
+
+      const result = await runAiInit({
+        base: dir,
+        forceEngine: "copilot",
+        preflight: copilotReadyPreflight,
+        spawner: async () => ({ status: 0, stdout: "{}", stderr: "", timedOut: false }),
+      });
+
+      if (!result.ok) {
+        expect(result.reason).toContain("copilot CLI not found");
+        return;
+      }
+      const aiCtx = join(dir, ".vibeflow", "ai-context");
+      expect(existsSync(join(aiCtx, "CLAUDE.md"))).toBe(false);
+      expect(existsSync(join(aiCtx, "AGENTS.md"))).toBe(true);
+      expect(existsSync(join(aiCtx, ".github", "copilot-instructions.md"))).toBe(true);
+      // .agents/instructions.md is shared across engines and only created
+      // when the forced engine needs it. With copilot forced, the writer
+      // does not emit it (copilot uses .github/copilot-instructions.md).
+      expect(existsSync(join(aiCtx, ".agents", "instructions.md"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("returns error when spawner times out", async () => {
     const result = await runAiInit({
       base: process.cwd(),

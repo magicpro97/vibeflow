@@ -8,23 +8,34 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
-import { SKILL_MIRRORS } from "../workflow-artifacts.js";
+import { ENGINES, type Engine } from "../core.js";
 import { validateSkillDir } from "./validator.js";
 
 const CANONICAL = join(".vibeflow", "skills");
-/**
- * Mirror roots for skill sync. The list is imported from
- * `workflow-artifacts.ts:SKILL_MIRRORS` so that the read side
- * (`registry.ts`, `validator.ts`) and the write side never drift.
- * Audit (C2) found the write side had a different list from the
- * read side, hiding synced skills from `vf skills list`.
- */
-const MIRRORS = SKILL_MIRRORS;
+const ALL_MIRRORS = [
+  join(".claude", "skills"),
+  join(".agents", "skills"),
+  join(".github", "skills"),
+];
+
+const ENGINE_MIRROR: Record<Engine, string> = {
+  claude: join(".claude", "skills"),
+  codex: join(".agents", "skills"),
+  copilot: join(".github", "skills"),
+};
+
+function mirrorsFor(engines?: Engine[]): string[] {
+  if (!engines || engines.length === 0) return [...ALL_MIRRORS];
+  return engines
+    .filter((e): e is Engine => (ENGINES as readonly string[]).includes(e))
+    .map((e) => ENGINE_MIRROR[e]);
+}
 
 export type SyncMode = "pointer" | "full";
 
 export interface SyncSkillOptions {
   mode?: SyncMode;
+  engines?: Engine[];
 }
 
 export interface SkillSyncResult {
@@ -90,6 +101,7 @@ export function syncSkillMirrors(
   } = {},
 ): SkillSyncResult {
   const mode: SyncMode = opts.mode ?? "pointer";
+  const mirrors = mirrorsFor(opts.engines);
   const synced: string[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -103,7 +115,7 @@ export function syncSkillMirrors(
     }
     warnings.push(...validation.warnings.map((w) => `${CANONICAL}/${name}: ${w}`));
     try {
-      for (const mirror of MIRRORS) {
+      for (const mirror of mirrors) {
         const dst = join(repo, mirror, name);
         mkdirSync(join(repo, mirror), { recursive: true });
         rmSync(dst, { recursive: true, force: true });
@@ -122,11 +134,12 @@ export function syncSkillMirrors(
   return { ok: errors.length === 0, mode, synced, errors, warnings };
 }
 
-export function verifySkillSync(repo: string): SkillSyncResult {
+export function verifySkillSync(repo: string, engines?: Engine[]): SkillSyncResult {
+  const mirrors = mirrorsFor(engines);
   const errors: string[] = [];
   const synced: string[] = [];
   for (const name of skillNames(repo)) {
-    for (const mirror of MIRRORS) {
+    for (const mirror of mirrors) {
       const dst = join(repo, mirror, name, "SKILL.md");
       if (!existsSync(dst)) {
         errors.push(`${mirror}/${name}/SKILL.md missing`);

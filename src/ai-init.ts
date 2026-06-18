@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { detectRolesForRepo } from "./agents/detect-roles.js";
 import {
   type AiInitIntake,
   type AiInitUnit,
+  ENGINE_INSTRUCTION_SCOPE,
+  ENGINE_SKILL_DIR,
   aiInitReviewer,
   planAiInitUnits,
 } from "./ai-init-workflow.js";
@@ -28,13 +30,26 @@ import { type ProjectProfile, renderFindingsTable, scanRepo } from "./scanner.js
  * constant that disagreed with `core.ts` and with docs/USER_GUIDE.md.
  */
 
-/** Files the AI is asked to inspect and potentially edit. */
-const INSTRUCTION_FILES = [
-  "CLAUDE.md",
-  "AGENTS.md",
-  ".github/copilot-instructions.md",
-  ".agents/instructions.md",
-] as const;
+/** Instruction files by selected engine. */
+const INSTRUCTION_FILES_BY_ENGINE: Record<Engine, readonly string[]> = {
+  claude: ["CLAUDE.md"],
+  codex: ["AGENTS.md"],
+  copilot: ["AGENTS.md", ".github/copilot-instructions.md"],
+};
+const ALL_INSTRUCTION_FILES = [
+  ...new Set(Object.values(INSTRUCTION_FILES_BY_ENGINE).flat()),
+] as readonly string[];
+
+function instructionFilesFor(engine?: Engine): readonly string[] {
+  return engine ? INSTRUCTION_FILES_BY_ENGINE[engine] : ALL_INSTRUCTION_FILES;
+}
+
+function instructionFilesForEngines(engines?: string[]): readonly string[] {
+  const selected = engines?.filter((e): e is Engine => (ENGINES as readonly string[]).includes(e));
+  return selected?.length
+    ? [...new Set(selected.flatMap((e) => INSTRUCTION_FILES_BY_ENGINE[e]))]
+    : ALL_INSTRUCTION_FILES;
+}
 
 /** AI init timeout: 10 minutes for large projects. */
 const AI_INIT_TIMEOUT_MS = 600_000;
@@ -55,25 +70,193 @@ const INSTRUCTIONS_FILE = "INSTRUCTIONS.md";
  * This keeps the argv prompt well under Windows's 32K cmd-line limit
  * (relevant for copilot) regardless of how detailed the tasks become.
  */
-// INSTRUCTIONS_BODY lives in `.vibeflow/ai-context/INSTRUCTIONS_TEMPLATE.md`
-// and is loaded lazily on first use. Cached for the rest of the process to
-// avoid re-reading the 8 KB file on every call. The file path is anchored
-// relative to the project root (the cwd where the user runs `vf`).
-let INSTRUCTIONS_BODY_CACHE: string | null = null;
-function loadInstructionsBody(base?: string): string {
-  if (INSTRUCTIONS_BODY_CACHE !== null && base === undefined) return INSTRUCTIONS_BODY_CACHE;
-  const path = join(base ?? ".", ".vibeflow", "ai-context", "INSTRUCTIONS_TEMPLATE.md");
-  let body = "";
-  try {
-    body = readFileSync(path, "utf8");
-  } catch {
-    // Missing file: fall back to an empty body so `vf` doesn't crash. The
-    // downstream `writeFileSync` will write an empty file, which the
-    // follow-up init regeneration step will overwrite anyway.
-    body = "";
-  }
-  if (base === undefined) INSTRUCTIONS_BODY_CACHE = body;
-  return body;
+function buildInstructionsBody(
+  engines?: string[],
+  ctx7Auth?: boolean,
+  findSkillsResults?: boolean,
+): string {
+  const selectedEngines = engines?.length
+    ? engines.filter((e): e is Engine => (ENGINES as readonly string[]).includes(e))
+    : ([...ENGINES] as Engine[]);
+  const instrScope = [...new Set(selectedEngines.flatMap((e) => ENGINE_INSTRUCTION_SCOPE[e]))];
+  const skillScope = [...new Set(selectedEngines.map((e) => ENGINE_SKILL_DIR[e]))];
+  const instrFiles = instrScope.map((f) => `- \\\`${f}\\\``).join("\n");
+  const engineFlag = selectedEngines[0] ?? "claude";
+  const skillDirList = skillScope.map((d) => `  - \\\`${d}\\\``).join("\n");
+  const skillVerifyList = skillScope.map((d) => `  - \\\`ls ${d}/ | wc -l\\\` ≥ 2`).join("\n");
+  const authPrefix = ctx7Auth
+    ? ""
+    : "  (ctx7 not authenticated — ctx7 CLI commands will fail, use docs-based fallback below)\n  ";
+  const findSkillsRef = findSkillsResults
+    ? "  Read `.vibeflow/ai-context/find-skills-results.md` — it contains pre-discovered library/skill candidates from the Context7 HTTP API. Use those as your starting point instead of searching from scratch.\n  "
+    : "";
+
+  return `## Your Tasks
+
+You are performing VibeFlow project initialization. Read this file fully
+before any action. Then read every other file in \`.vibeflow/ai-context/\`.
+
+### 0. Pre-flight Check
+
+Before ANY work, verify environment:
+- Run \`npx ctx7 whoami\` — if not logged in, WARN the user:
+  "⚠ ctx7 not logged in. Run: npx ctx7 login. Skill discovery will be limited without login."
+- Run \`git rev-parse --git-dir\` — confirm you are in a git repo
+- List existing instruction files at repo root
+
+### 1. Analyze the Project (INVESTIGATE until confidence = 1.0)
+
+**CONFIDENCE GATE: You MUST reach confidence = 1.0 on every finding BEFORE writing anything.**
+Confidence < 1 means you are GUESSING. GUESSING is FORBIDDEN. Investigate instead.
+
+To reach confidence 1.0, read these files exhaustively:
+- package.json (scripts, dependencies, devDependencies, engines)
+- tsconfig.json / jsconfig.json (compiler options, paths, strictness)
+- biome.json / .eslintrc.* / .prettierrc* (lint/format rules)
+- CI config (.github/workflows/*.yml, .gitlab-ci.yml, etc.)
+- Source directory structure (top 3 levels, all directories)
+- Sample source files (pick 5-10 files across different modules, read their imports and patterns)
+- Existing docs (README.md, docs/*.md, ARCHITECTURE.md)
+- Test directory structure and sample test files (test framework, patterns)
+
+**If confidence is still < 1 on any aspect:**
+- Read MORE files — don't stop at the first 2 files
+- Search the internet for the framework/library conventions if unfamiliar
+- Web-search: "<framework> project structure conventions 2026"
+- Web-search: "<library> best practices testing patterns"
+- Cross-reference: does the actual code match what the docs claim?
+- If still unsure after 3 rounds of investigation → note it as "uncertain: <topic>" and move on
+
+**Evidence checklist (all must be checked before confidence reaches 1.0):**
+☐ Build command verified by reading package.json scripts
+☐ Test command verified by reading package.json scripts + test config
+☐ Lint command verified by reading package.json scripts + lint config
+☐ Package manager identified (check lockfile: bun.lockb, package-lock.json, yarn.lock, pnpm-lock.yaml)
+☐ At least 5 source files read across different modules
+☐ At least 2 test files read to understand test patterns
+☐ Framework versions confirmed from package.json dependencies
+☐ CI pipeline understood (if .github/workflows exists)
+
+### 2. Write/Update Instruction Files
+
+These target locations MUST be written (no skipping):
+${instrFiles}
+
+For EACH file:
+- FIND \`<!-- vibeflow:start -->\` / \`<!-- vibeflow:end -->\` markers
+- REPLACE only content BETWEEN markers with project-specific guidance
+- PRESERVE everything OUTSIDE markers exactly as-is
+- If no markers exist, the file may be human-authored → APPEND markers + generated block at end
+
+Inside the generated block, include:
+- **Build/Test/Lint** — exact commands from package.json
+- **Code conventions** — discovered from actual code (not guessed)
+- **Architecture** — key modules and data flow (from reading source files)
+- **Tech stack** — versions, libraries, frameworks with versions
+- **Gotchas** — non-obvious constraints discovered during investigation
+
+### 3. Discover and Install Skills
+
+**Skill sources are verified by ctx7. NEVER invent skills.**
+
+**3a. ctx7 Auth Status + find-skills results (already checked during CLI init):**
+${authPrefix}${findSkillsRef}  If the CLI init output showed "ctx7 authenticated" → use 3b (ctx7 CLI install).
+  If the CLI init output showed "find-skills fallback" → use 3c (find-skills HTTP/docs fallback).
+  If unsure, run \`npx ctx7 whoami\` to double-check.
+
+**3b. Install skills via ctx7 (authenticated path):**
+  These commands work headless (no TUI):
+  - \`npx ctx7 library <tech>\` → resolve library ID
+  - \`npx ctx7 docs <libraryId> <query>\` → fetch documentation
+  - \`npx ctx7 skills install --yes --all --${engineFlag} <repo>\` → install skills to ${skillScope[0]}
+  - \`npx ctx7 skills list\` → verify what's installed
+
+  IMPORTANT: The \`--yes --all\` flags are MANDATORY for headless mode. Without them, ctx7 opens an interactive TUI that will hang forever.
+
+  Skills should be written to these engine-specific dir(s): 
+${skillDirList}
+
+  VERIFY after install:
+${skillVerifyList}
+
+Before creating or editing any skill, read these files in \`.vibeflow/ai-context/\`:
+- \`ANTHROPIC_SKILL_STANDARD.md\` — required skill format
+- \`SKILL_TAXONOMY.md\` — project-fit vs tool/tweak rules
+- \`stack-evidence.md\` — detected stack with file/manifest evidence
+
+**3c. Find-skills fallback (unauthenticated path — use when ctx7 not logged in):**
+  For each technology detected in \`stack-evidence.md\`:
+  1. Resolve library ID: \`npx ctx7 library <tech>\`
+  2. Fetch docs: \`npx ctx7 docs <libraryId> "patterns,conventions,testing,config"\`
+  3. Author a SKILL.md manually following \`ANTHROPIC_SKILL_STANDARD.md\` format
+  4. Set \`status: experimental\` in frontmatter (never claim verified)
+  5. Save to \`.vibeflow/skills/<name>/SKILL.md\`
+
+  For stack technologies where ctx7 library/docs fails, search the web:
+  - \`<technology> best practices 2026\`
+  - \`<technology> build conventions\`
+  - \`<technology> testing patterns\`
+
+**3d. Skills rules (read the standard/taxonomy files first):**
+  - Project-fit skills live in \`.vibeflow/skills/<name>/SKILL.md\`
+  - Tool/tweak skills: prefer Context7/docs; if unavailable, create as \`status: experimental\` and cite evidence
+  - Never invent tool/tweak skills from project guesses
+  - Follow the SKILL.md format from \`ANTHROPIC_SKILL_STANDARD.md\`
+
+**3e. VERIFY every skill:**
+  Run \`vf skills validate\`. Read each SKILL.md. Empty/placeholder = bug, fix or delete.
+
+**3f. Update index:**
+  Run \`vf skills list\` to render the updated \`.vibeflow/SKILL_INDEX.md\`.
+
+### 4. Update Project Context
+- Edit \`.vibeflow/PROJECT_CONTEXT.md\`
+- Update detected stack, architecture insights, conventions
+- Preserve human-authored sections outside generated markers
+
+## Confidence Gate Protocol (MANDATORY)
+
+You are NOT allowed to finish with confidence < 1.0.
+
+If confidence < 1.0 on ANY task:
+1. Identify what you're uncertain about (be specific)
+2. Investigate: read more files, search the internet, run commands
+3. Re-evaluate confidence after each investigation round
+4. Repeat until confidence = 1.0 or you have exhausted all investigative paths
+5. If truly stuck after 5+ rounds → document the uncertainty in the JSON output
+
+  Example investigation round:
+  "Confidence on test framework = 0.6. I see vitest imports but no vitest.config.ts.
+  Investigating: reading package.json scripts → found \`"test": "bun test"\`.
+  Reading sample test file → uses \`from "bun:test"\` imports.
+  Confidence now 1.0: project uses bun test, NOT vitest."
+
+When confidence hits 1.0 on ALL findings, write the JSON summary.
+
+## Critical Constraints
+- NEVER delete or truncate any file
+- NEVER modify content OUTSIDE \`<!-- vibeflow:start -->\`/\`<!-- vibeflow:end -->\` markers
+- Use Edit tool for instruction file modifications — never Write whole files that have human content
+- BE CONCISE in instruction files — AI agents read them, keep them scannable
+- Skills from ctx7: use \`ctx7 skills install --yes --claude\` (headless) or write manually from \`ctx7 docs\`
+- After every action, update your internal confidence score for that finding
+
+## Output (LAST thing — only when ALL tasks done at confidence 1.0)
+
+\`\`\`json
+{
+  "files_edited": [${instrScope.map((f) => `"${f}"`).join(", ")}],
+  "skills_installed": ["<name>"],
+  "skills_source": ["ctx7:<repo>", "manual-from-ctx7-docs"],
+  "key_findings": ["<concrete finding>"],
+  "investigation_rounds": <number of investigation rounds needed>,
+  "project_type": "<type>",
+  "confidence": 1.0
+}
+\`\`\`
+
+REMEMBER: confidence must be EXACTLY 1.0. If it's 0.9, you're not done. Go back and investigate.
+`;
 }
 
 export interface AiInitResult {
@@ -166,7 +349,12 @@ export function dirListing(base: string, maxDepth = 2): string {
  * If `mkdirSync` fails (e.g. permission denied, read-only fs), all subsequent
  * writes are skipped — no orphaned files, no inner writeFileSync errors.
  */
-function writeContextFiles(base: string, profile: ProjectProfile): string[] {
+function writeContextFiles(
+  base: string,
+  profile: ProjectProfile,
+  engines?: string[],
+  ctx7Auth?: boolean,
+): string[] {
   const ctxDir = join(base, AI_CONTEXT_DIR);
   let canWrite = true;
   try {
@@ -179,11 +367,12 @@ function writeContextFiles(base: string, profile: ProjectProfile): string[] {
   if (!canWrite) return written;
 
   // Write existing instruction files (full content)
-  for (const f of INSTRUCTION_FILES) {
+  for (const f of instructionFilesForEngines(engines)) {
     const src = join(base, f);
     const dst = join(ctxDir, f);
     try {
       if (existsSync(src)) {
+        mkdirSync(dirname(dst), { recursive: true });
         writeFileSync(dst, readFileSync(src, "utf8"));
         written.push(`${AI_CONTEXT_DIR}/${f}`);
       }
@@ -223,8 +412,16 @@ function writeContextFiles(base: string, profile: ProjectProfile): string[] {
   // lives here, not in the argv prompt. The engine reads it with its
   // own read_file tool (RAG pattern). This keeps the prompt under
   // Windows's 32K cmd-line limit even if the task list grows.
+  // Write the slim-prompt companion file: the bulky "Your Tasks" body
+  // lives here, not in the argv prompt. The engine reads it with its
+  // own read_file tool (RAG pattern). This keeps the prompt under
+  // Windows's 32K cmd-line limit even if the task list grows.
+  const findSkillsResults = existsSync(join(ctxDir, "find-skills-results.md"));
   try {
-    writeFileSync(join(ctxDir, INSTRUCTIONS_FILE), loadInstructionsBody(base));
+    writeFileSync(
+      join(ctxDir, INSTRUCTIONS_FILE),
+      buildInstructionsBody(engines, ctx7Auth, findSkillsResults),
+    );
     written.push(`${AI_CONTEXT_DIR}/${INSTRUCTIONS_FILE}`);
   } catch {
     /* best effort */
@@ -273,16 +470,16 @@ function writeContextFiles(base: string, profile: ProjectProfile): string[] {
  * fail-fast) BEFORE `writeContextFiles` touches disk — saving ~35K chars
  * of orphaned writes when the call would just abort.
  */
-export function buildAiInitPrompt(profile: ProjectProfile, base: string): string {
+export function buildAiInitPrompt(profile: ProjectProfile, base: string, engine?: Engine): string {
   // First compute the prompt text (no disk writes yet). The slim prompt
   // is short, so this is cheap and lets the caller run length checks
   // (e.g. Windows 32K fail-fast) before writeContextFiles touches disk.
-  const contextFiles = listContextFiles(base, profile);
+  const contextFiles = listContextFiles(base, profile, engine);
   const prompt = renderSlimPrompt(profile, base, contextFiles);
 
   // Only after we know the prompt is shippable, write the bulky context
   // files to disk for the AI to read.
-  writeContextFiles(base, profile);
+  writeContextFiles(base, profile, engine ? [engine] : undefined);
   return prompt;
 }
 
@@ -293,9 +490,9 @@ export function buildAiInitPrompt(profile: ProjectProfile, base: string): string
  *  split is intentional: list = read-only probe, write =
  *  side-effectful I/O. Exported so unit tests can probe the list
  *  without going through runAiInit. */
-export function listContextFiles(base: string, profile: ProjectProfile): string[] {
+export function listContextFiles(base: string, profile: ProjectProfile, engine?: Engine): string[] {
   const written: string[] = [];
-  for (const f of INSTRUCTION_FILES) {
+  for (const f of instructionFilesFor(engine)) {
     if (existsSync(join(base, f))) written.push(`${AI_CONTEXT_DIR}/${f}`);
   }
   if (existsSync(join(base, CTX_DIR, "PROJECT_CONTEXT.md"))) {
@@ -390,6 +587,8 @@ export interface AiInitOpts {
   autopilot?: boolean;
   /** Inject preflight for tests (avoids live engine probes). */
   preflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+  /** CLI-side ctx7 auth state. false means use fallback without prompting login. */
+  ctx7Auth?: boolean;
   /** Streaming callbacks forwarded to internal spawners (shell pipe path). */
   onChunk?: (text: string) => void;
   onStderrChunk?: (text: string) => void;
@@ -476,7 +675,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       return result;
     }
     lastResult = result;
-    prompt = result.prompt;
+    prompt = opts.buildPrompt ? result.prompt : undefined;
     profile = (result as { __profile?: ProjectProfile }).__profile ?? profile;
     // Track which engine we just attempted (or would have attempted,
     // in the engine-selection-failure case). Adding to `tried` is
@@ -610,7 +809,9 @@ async function runAiInitOnce(
   // without depending on the real profile.
   const prompt =
     cachedPrompt ??
-    (opts.buildPrompt ?? ((p, b) => renderSlimPrompt(p, b, listContextFiles(b, p))))(profile, base);
+    (opts.buildPrompt
+      ? opts.buildPrompt(profile, base)
+      : renderSlimPrompt(profile, base, listContextFiles(base, profile, engine)));
 
   // The original promptFile write/read block (Task 7 follow-up) was
   // DEAD CODE: claude and codex read prompts from stdin (no file
@@ -637,7 +838,7 @@ async function runAiInitOnce(
   if (isUnavailable(invocation)) {
     // Write context files before returning — they are still useful
     // diagnostic output for the caller.
-    writeContextFiles(base, profile);
+    writeContextFiles(base, profile, [engine], opts.ctx7Auth);
     return { ok: false, engine, reason: invocation.unavailable, prompt, __profile: profile };
   }
 
@@ -663,7 +864,7 @@ async function runAiInitOnce(
   }
 
   // Prompt is shippable — now write the bulky context files for the AI.
-  writeContextFiles(base, profile);
+  writeContextFiles(base, profile, [engine], opts.ctx7Auth);
 
   // Handle the copilot promptMode: prompt goes as -p value
   const materialized = materializePrompt(
@@ -764,6 +965,8 @@ export interface AiInitWorkflowOpts {
   /** Test seam: per-unit engine-call timeout. Defaults to
    *  `AI_INIT_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /** CLI-side ctx7 auth state. false means generated instructions/specs use fallback. */
+  ctx7Auth?: boolean;
 }
 
 /** Build the default dispatcher: per unit, run a single engine call with
@@ -789,8 +992,18 @@ export function defaultAiInitDispatcher(
   const { engineCommandFn, spawner, timeoutMs = AI_INIT_TIMEOUT_MS } = opts;
   const resolveInvocation = engineCommandFn ?? engineCommand;
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
+  // Probe the engine invocation once at dispatcher construction time so we can
+  // surface the copilot `--version` warning (github/copilot-cli#1606 class —
+  // silent breaking auto-updates that drop `-p --allow-all`). The legacy
+  // `runAiInit` path surfaces this via `announceLaunch`; the agent-team path
+  // never calls that, so we have to do it here. Warn-once is the right call
+  // because the warning is per-installation, not per-unit — but since a single
+  // dispatcher handles all units, emitting on the first invocation is fine
+  // (and avoids per-unit stderr noise on the typical 7-unit agent-team run).
+  const probedInvocation = resolveInvocation(engine);
+  let warnedDegraded = false;
   return async (unit): Promise<UnitOutcome> => {
-    const invocation = resolveInvocation(engine);
+    const invocation = probedInvocation;
     if (isUnavailable(invocation)) {
       // Surface the engine's reason so callers and CI logs can see why
       // the workflow blocked. Stderr (for the user) + evidence marker
@@ -802,6 +1015,10 @@ export function defaultAiInitDispatcher(
         confidence: 0,
         evidence: [`engine-unavailable:${engine}:${reason}`],
       };
+    }
+    if (invocation.warning && !warnedDegraded) {
+      warnedDegraded = true;
+      process.stderr.write(`[ai-init-dispatcher] ${engine}: ${invocation.warning}\n`);
     }
     const materialized = materializePrompt(
       { cmd: invocation.cmd, args: invocation.args, promptMode: invocation.promptMode },
@@ -845,7 +1062,7 @@ export function defaultAiInitDispatcher(
  * legacy `runAiInit` stays for backward compatibility.
  */
 export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiInitWorkflowResult> {
-  const { base, intake, forceEngine, preflight, concurrency } = opts;
+  const { base, intake, forceEngine, preflight, concurrency, ctx7Auth } = opts;
 
   // Scan repo + detect roles so the planner can interpolate them.
   const profile = scanRepo(base);
@@ -855,7 +1072,7 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   // context files (stack-evidence.md, project-profile.json, etc.) so
   // the engine never hits "parent directory does not exist" and the
   // reviewer's file-exists check passes even if the engine is transient.
-  writeContextFiles(base, profile);
+  writeContextFiles(base, profile, intake.engines, ctx7Auth);
   // Also pre-create directory-scope items (e.g. .vibeflow/skills/) so
   // the reviewer's pathIsDir check passes when the engine cites them.
   mkdirSync(join(base, CTX_DIR, "skills"), { recursive: true });
@@ -864,7 +1081,11 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
   let engine: Engine | null = null;
   if (forceEngine) {
-    const readiness = probe(ENGINES, { probe: true });
+    // Probe ONLY the forced engine — probing all 3 engines just to look up a
+    // single entry in the readiness array is wasted work (~2 extra CLI calls
+    // per init, multiplied by every unit in the agent-team run). The
+    // preflight() contract still takes an array, so we hand it [forceEngine].
+    const readiness = probe([forceEngine], { probe: true });
     const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
     engine = match ? forceEngine : null;
   } else {
@@ -887,8 +1108,11 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   const plannerIntake: AiInitIntake = {
     ...intake,
     engines: intake.engines?.length ? intake.engines : [engine],
+    ctx7Authenticated: intake.ctx7Authenticated ?? ctx7Auth,
   };
-  const units = planAiInitUnits(profile, plannerIntake, detectedRoles);
+  const units = planAiInitUnits(profile, plannerIntake, detectedRoles).filter(
+    (e) => !e.name.startsWith("ai-init-phase"),
+  );
 
   // Dispatch through the orchestrator. The injected dispatcher defaults
   // to a placeholder (so unit tests stay deterministic); production

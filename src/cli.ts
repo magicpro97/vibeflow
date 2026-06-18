@@ -179,7 +179,7 @@ async function main(argv: string[]): Promise<number> {
     case "doctor":
       return await doctor(flags);
     case "init":
-      return await init(flags);
+      return await init({ ...flags, "auto-codegraph": !flags["no-codegraph"] });
     case "run":
       return await run(positionals[0], flags);
     case "orchestrate":

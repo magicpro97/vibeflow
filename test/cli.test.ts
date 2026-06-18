@@ -198,12 +198,19 @@ describe("adapters", () => {
     }
   });
 
-  test("each engine produces its canonical instruction file", () => {
+  test("each engine produces its canonical instruction file (and not the unused .agents/instructions.md)", () => {
     const ctx = defaultContext();
     expect(Object.keys(engineFiles("claude", ctx))).toContain("CLAUDE.md");
     expect(Object.keys(engineFiles("codex", ctx))).toContain("AGENTS.md");
     const copilot = engineFiles("copilot", ctx);
     expect(Object.keys(copilot)).toContain(".github/copilot-instructions.md");
+    // No supported engine reads `.agents/instructions.md` (Claude Code reads CLAUDE.md,
+    // Codex reads AGENTS.md, Copilot reads .github/copilot-instructions.md). Asserting
+    // its absence here prevents regressions of the v0.6.x bug where a single-engine
+    // `vf init` would still create the .agents/ directory.
+    for (const engine of ["claude", "codex", "copilot"] as const) {
+      expect(Object.keys(engineFiles(engine, ctx))).not.toContain(".agents/instructions.md");
+    }
   });
 
   test("dispatch prompt names the engine and requests a JSON summary", () => {
@@ -1420,6 +1427,26 @@ describe("commands.applyIntake preserves SETTINGS.json", () => {
     // settings still enabled after init
     expect(readSettings(dir).tools.codegraph).toBe(true);
   });
+
+  test("init writes tool MCP config only for the selected engine", () => {
+    writeSettings(dir, { tools: { codegraph: true, lsp: true } });
+    applyIntake(
+      { goal: "g", engines: ["claude"] },
+      {
+        base: dir,
+        skipPreflight: true,
+        useAi: false,
+      },
+    );
+
+    // applyIntake() does NOT write engine-specific MCP configs directly;
+    // that happens in init() (Phase 1.6 — the auto-codegraph block).
+    // This test now pins the contract that applyIntake does not touch
+    // any engine's MCP file: both .mcp.json (claude's MCP config) and
+    // .codex/config.toml (codex's) must remain absent.
+    expect(existsSync(join(dir, ".mcp.json"))).toBe(false);
+    expect(existsSync(join(dir, ".codex", "config.toml"))).toBe(false);
+  });
 });
 
 describe("commands.tools", () => {
@@ -1671,8 +1698,9 @@ describe("commands.tools", () => {
     expect(out.join("\n")).toContain("binary not found on PATH");
   });
 
-  test("ensureToolIndex skips the build when the .codegraph/ index already exists", () => {
+  test("ensureToolIndex skips the build when the .codegraph/codegraph.db marker already exists", () => {
     mkdirSync(join(dir, ".codegraph"), { recursive: true });
+    writeFileSync(join(dir, ".codegraph", "codegraph.db"), "");
     let spawned = false;
     const code = ensureToolIndex(dir, "codegraph", () => {
       spawned = true;
@@ -1681,6 +1709,19 @@ describe("commands.tools", () => {
     expect(code).toBe(0);
     expect(spawned).toBe(false);
     expect(out.join("\n")).toContain("index present");
+  });
+
+  test("ensureToolIndex builds the index when only an empty .codegraph/ exists (no codegraph.db)", () => {
+    mkdirSync(join(dir, ".codegraph"), { recursive: true });
+    writeFileSync(join(dir, ".codegraph", ".gitignore"), "");
+    const ran: string[] = [];
+    const code = ensureToolIndex(dir, "codegraph", (cmd, args) => {
+      ran.push(`${cmd} ${args.join(" ")}`);
+      return { status: 0 };
+    });
+    expect(code).toBe(0);
+    expect(ran.some((s) => s.includes("init -i"))).toBe(true);
+    expect(out.join("\n")).toContain("built");
   });
 
   test("ensureToolIndex builds the index via the spawner when .codegraph/ is absent", () => {

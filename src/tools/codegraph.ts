@@ -5,6 +5,7 @@
  * and returns the per-engine MCP entry. It never installs anything or hits the network.
  */
 
+import { spawnSync } from "node:child_process";
 import { hasCommand } from "../core.js";
 import type { Engine } from "../core.js";
 import { buildStdioEntry } from "./index.js";
@@ -41,6 +42,11 @@ export function detect(opts?: DetectOpts): boolean {
 /** Relative path of the per-repo index that `codegraph init -i` builds. */
 export const INDEX_DIR = ".codegraph";
 
+/** SQLite database inside INDEX_DIR that signals a real, buildable index. An empty
+ * `INDEX_DIR` (e.g. only `.gitignore`) is NOT a present index — the MCP server would
+ * announce itself inactive and emit no tools. See https://github.com/colbymchenry/codegraph#how-it-works. */
+export const INDEX_FILE = "codegraph.db";
+
 /** The single index-build step (also the 2nd step of installPlan), exposed so `enable`
  * can build the index without re-running the global npm install. */
 export function indexBuildStep(): { cmd: string; args: string[]; description: string } {
@@ -49,6 +55,38 @@ export function indexBuildStep(): { cmd: string; args: string[]; description: st
     args: [...INIT_ARGS],
     description: "Build the per-repo CodeGraph index into .codegraph/.",
   };
+}
+
+/** Spawner shape used by `indexLooksHealthy` — mirrors `StepSpawner` in commands.ts but
+ * inlined to avoid a tools↔commands import cycle. */
+type StatusSpawner = (cmd: string, args: string[]) => { status: number };
+
+/**
+ * Live "is the index actually usable?" check. The marker file may exist (so the cheap
+ * `indexPresent` is true) but the SQLite db can be from a downgraded binary, partially
+ * written, or otherwise unusable — in that case `codegraph status` prints "Not initialized"
+ * and the MCP server announces itself inactive. We run `codegraph status <base>` and
+ * treat the absence of "Not initialized" + exit code 0 as healthy. Falls back to `true`
+ * when the binary is missing (caller's `indexPresent` already gated on the marker file
+ * and binary presence is checked separately in `vf tools status`).
+ */
+export function indexLooksHealthy(base: string, spawner: StatusSpawner): boolean {
+  if (!hasCommand(BINARY)) return true; // nothing to verify; let the binary check fire downstream
+  const { status, stdout } = spawnStatus(base, spawner);
+  if (status !== 0) return false;
+  return !/Not initialized/i.test(stdout);
+}
+
+function spawnStatus(base: string, spawner: StatusSpawner): { status: number; stdout: string } {
+  try {
+    const proc = spawnSync(BINARY, ["status", base], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { status: proc.status ?? 1, stdout: proc.stdout ?? "" };
+  } catch {
+    return { status: 1, stdout: "" };
+  }
 }
 
 /**

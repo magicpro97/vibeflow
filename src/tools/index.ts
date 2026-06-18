@@ -96,6 +96,14 @@ export interface ToolDescriptor {
   /** True when the per-repo artifact (e.g. a code index) the tool needs already exists.
    * Tools with no per-repo artifact (e.g. lsp) omit this — treated as always-present. */
   indexPresent?(base: string): boolean;
+  /** Optional stricter check: marker file exists AND the tool itself reports a healthy
+   * index (e.g. `codegraph status` does not say "Not initialized"). Used to flag a
+   * corrupt or version-mismatched SQLite db that a plain file presence would miss.
+   * The spawner is inlined (matches `runToolSteps`) to avoid a tools↔commands cycle. */
+  indexHealthy?(
+    base: string,
+    spawner: (cmd: string, args: string[]) => { status: number },
+  ): boolean;
   /** Steps to (re)build the per-repo artifact when `indexPresent` is false. Omitted for
    * tools that need none. Lets `enable --yes` provision generically off the registry. */
   indexPlan?(ctx: ToolContext): InstallPlan;
@@ -144,7 +152,11 @@ export const TOOLS: Record<ToolName, ToolDescriptor> = {
     detect: (opts) => codegraph.detect(opts),
     installPlan: () => codegraph.installPlan(),
     mcpEntries: (engine) => [codegraph.mcpConfigFor(engine)],
-    indexPresent: (base) => existsSync(join(base, codegraph.INDEX_DIR)),
+    // Marker must be the SQLite db inside INDEX_DIR, not just the directory: a fresh
+    // `mkdir .codegraph` (or a leftover .gitignore-only folder) would otherwise be
+    // reported as "index present" while the MCP server actually serves zero tools.
+    indexPresent: (base) => existsSync(join(base, codegraph.INDEX_DIR, codegraph.INDEX_FILE)),
+    indexHealthy: (base, spawner) => codegraph.indexLooksHealthy(base, spawner),
     indexPlan: () => ({ steps: [codegraph.indexBuildStep()] }),
   },
   lsp: {
