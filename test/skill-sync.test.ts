@@ -48,6 +48,46 @@ describe("syncSkillMirrors pointer mode (default)", () => {
     expect(result.errors.length).toBeGreaterThan(0);
     expect(existsSync(join(repo, ".claude", "skills", "bad-skill"))).toBe(false);
   });
+
+  test("syncs only the specified engine mirrors when engines= is passed", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-engines-"));
+    dirs.push(repo);
+    const src = join(repo, ".vibeflow", "skills", "picked-engine-skill");
+    mkdirSync(src, { recursive: true });
+    writeFileSync(
+      join(src, "SKILL.md"),
+      "---\nname: picked-engine-skill\ndescription: Only one engine mirror.\n---\n\n# Picked\n\nActionable body content for validation. This is more than fifty characters long.\n",
+    );
+    const result = syncSkillMirrors(repo, {
+      mode: "pointer",
+      engines: ["claude"],
+    });
+    writeFileSync("/tmp/picked-debug.json", JSON.stringify(result, null, 2));
+    expect(result.ok).toBe(true);
+    // Only the claude mirror should exist; the others must be absent.
+    expect(existsSync(join(repo, ".claude", "skills", "picked-engine-skill"))).toBe(true);
+    expect(existsSync(join(repo, ".agents", "skills", "picked-engine-skill"))).toBe(false);
+    expect(existsSync(join(repo, ".github", "skills", "picked-engine-skill"))).toBe(false);
+  });
+
+  test("ignores unknown engine names in the engines= array", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-bad-engine-"));
+    dirs.push(repo);
+    const src = join(repo, ".vibeflow", "skills", "ok-skill");
+    mkdirSync(src, { recursive: true });
+    writeFileSync(
+      join(src, "SKILL.md"),
+      "---\nname: ok-skill\ndescription: An ok skill.\n---\n\n# Ok\n\nActionable body content for validation. This is more than fifty characters long so it passes the body check.\n",
+    );
+    const result = syncSkillMirrors(repo, {
+      mode: "pointer",
+      // Force a non-engine value to exercise the filter branch.
+      engines: ["not-a-real-engine" as unknown as "claude"],
+    });
+    expect(result.ok).toBe(true);
+    // Unknown engine filtered out → no mirrors written.
+    expect(result.synced).toEqual([]);
+  });
 });
 
 describe("syncSkillMirrors full mode", () => {

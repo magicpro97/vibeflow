@@ -1011,6 +1011,11 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("sync", ["--mode=weird"])).toBe(2);
   });
 
+  test("skills: sync rejects bad engine (line 1733-1735)", () => {
+    expect(skills("sync", ["--engine", "bogus"])).toBe(2);
+    expect(skills("sync", ["--engine=bogus"])).toBe(2);
+  });
+
   test("skills: sync --mode=full returns 0 (line 1743-1754)", () => {
     expect(skills("sync", ["--mode", "full"])).toBe(0);
     expect(skills("sync", ["--mode=full"])).toBe(0);
@@ -1069,6 +1074,16 @@ describe("commands.skills subcommand branches", () => {
 
   test("skills: verify-sync on empty repo (line 1758-1766)", () => {
     expect(skills("verify-sync", [])).toBe(0);
+  });
+
+  test("skills: verify-sync with --engine=claude filters to one mirror (line 1026-1029)", () => {
+    expect(skills("verify-sync", ["--engine", "claude"])).toBe(0);
+    expect(skills("verify-sync", ["--engine=claude"])).toBe(0);
+  });
+
+  test("skills: verify-sync with --engine=bogus is silently ignored (line 1028/1032)", () => {
+    // Unknown engine names are filtered out — falls through to "all engines".
+    expect(skills("verify-sync", ["--engine", "bogus"])).toBe(0);
   });
 
   test("skills: verify-sync with missing mirror SKILL.md returns 1 (line 1840-1842)", async () => {
