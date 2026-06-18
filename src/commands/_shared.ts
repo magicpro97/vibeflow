@@ -77,3 +77,49 @@ export { resolveRepo } from "./doctor.js";
 // normalizeUnit stay in the dispatch.ts sibling pair and are
 // imported by the facade only.
 export { mutateUnits } from "./dispatch.js";
+
+// === Protection / rollout helpers ===
+// (issue #80, phase 6/14) The protection cluster lives in
+// src/commands/protection.ts. orchestrate.ts imports it through
+// the facade (../commands.js) — but only for the public seam
+// (`MS_PER_SECOND`, `planProtection`, `repoGit`,
+// `resolveProtection`, `makeReviewer`, `makeDispatcher`,
+// `ProtectionRuntime` type, `computeKnowledgeHeavySource`,
+// `makeResearcher`, `handleUnitFailure`). The barrel
+// intentionally does NOT re-export them: the cycle
+// `commands.ts → _shared.ts → commands.ts` trips
+// verbatimModuleSyntax (TS2303 "Circular definition of import
+// alias"). The cycle is resolved by letting orchestrate.ts
+// import directly from the facade — at call time, after the
+// facade's module init has populated the bindings. This is
+// the standard ESM cycle-tolerance pattern.
+// Note for PR7: when the `run` subcommand moves to
+// src/commands/run.ts, the run body will also need these
+// symbols. Either re-export them through the barrel (after
+// breaking the cycle via a wrapper) or add a sibling-only
+// `import from "../commands/protection.js"`. The latter is
+// the recommended approach for run.ts.
+
+// === init subcommand helpers re-exported from init.ts ===
+// (issue #80, phase 6/14) The orchestrate subcommand uses
+// DEFAULT_ENGINE (the canonical default for resolveEngine) and
+// PreflightFn (the preflight probe type). They live in
+// src/commands/init.ts; the cycle rule forbids orchestrate.ts
+// from importing them directly, so we re-export through the
+// barrel.
+export { DEFAULT_ENGINE } from "./init.js";
+export type { PreflightFn } from "./init.js";
+
+// === dispatch helpers re-exported from dispatch.ts ===
+// (issue #80, phase 6/14) The orchestrate subcommand uses
+// normalizeUnit to shape the "one unit for the whole task"
+// fallback when state.work_units is empty. mutateUnits
+// (re-exported above from dispatch.ts) is the parent operation.
+export { normalizeUnit } from "./dispatch.js";
+
+// === test seams re-exported from seams.ts ===
+// (issue #80, phase 6/14) The orchestrate subcommand uses
+// tipState to gate the "watch live" tip so it prints at most
+// once per process. The cycle rule forbids orchestrate.ts from
+// importing tipState from seams.ts directly.
+export { tipState } from "./seams.js";

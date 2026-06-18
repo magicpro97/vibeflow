@@ -1824,12 +1824,19 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     expect(decls.length).toBe(1);
     expect(decls[0]).toContain('"claude"');
     // resolveEngine uses it (no hardcoded "claude" string literal anymore).
-    // The reference may now live in either src/commands.ts (the body
-    // still has resolveEngine) or via the facade re-export. Check
-    // both: the source file for the body and the init file for the
-    // definition.
+    // After the issue #80 split (phase 6/14), resolveEngine lives in
+    // src/commands/orchestrate.ts (paired with the `orchestrate`
+    // subcommand). It is re-exported by the facade for back-compat
+    // with any caller still importing it from src/commands.ts.
+    // The test asserts that BOTH the source file and the facade
+    // re-export reference DEFAULT_ENGINE — never a hardcoded string.
     const src = readFileSync("src/commands.ts", "utf8");
-    expect(src).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
+    const orchestrateSrc = readFileSync("src/commands/orchestrate.ts", "utf8");
+    // The facade must re-export resolveEngine (for back-compat callers).
+    expect(src).toMatch(/export \{[^}]*resolveEngine[^}]*\}/);
+    // The source-of-truth definition must reference DEFAULT_ENGINE
+    // (not a hardcoded "claude" string literal).
+    expect(orchestrateSrc).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
   });
 });
 
