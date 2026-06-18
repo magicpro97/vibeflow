@@ -11,10 +11,11 @@ describe("help text", () => {
     expect(printHelp()).toBe(0);
   });
 
-  test("src/commands.ts skills help block mentions every skills subcommand", () => {
-    const src = readFileSync(join(import.meta.dir, "..", "src/commands.ts"), "utf8");
-    // The per-command help block starts with the `vf skills` line and
-    // ends before the next command block.
+  test("src/commands/help.ts skills help block mentions every skills subcommand", () => {
+    // Per-command help blocks live in src/commands/help.ts (extracted in
+    // issue #80 phase 8/14). The block still starts with `skills: () =>`
+    // and ends before `tools:`.
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
     const skillsBlock = src.match(/skills: \(\) =>\n([\s\S]*?)\n\n {2}tools:/);
     expect(skillsBlock).not.toBeNull();
     const block = skillsBlock ? skillsBlock[1] : "";
@@ -23,8 +24,11 @@ describe("help text", () => {
     }
   });
 
-  test("src/commands.ts global help line (around line 2630) mentions validate/sync/verify-sync/import", () => {
-    const src = readFileSync(join(import.meta.dir, "..", "src/commands.ts"), "utf8");
+  test("src/commands/help.ts global help line mentions validate/sync/verify-sync/import", () => {
+    // Global help text moved to src/commands/help.ts in issue #80 phase
+    // 8/14. The line still contains the canonical skills subcommand
+    // roster as a one-liner in the usage block.
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
     const line = src.match(/skills \[sub\][^\n]*/);
     expect(line).not.toBeNull();
     for (const sub of ["list", "search", "resolve", "validate", "sync", "verify-sync", "import"]) {

@@ -17,15 +17,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const lcovPath = path.join(
-  process.cwd(),
-  "coverage",
-  "lcov.info",
-);
+const lcovPath = path.join(process.cwd(), "coverage", "lcov.info");
 if (!fs.existsSync(lcovPath)) {
-  console.error(
-    `::error file=${lcovPath},line=1,col=1::lcov.info not found at ${lcovPath}`,
-  );
+  console.error(`::error file=${lcovPath},line=1,col=1::lcov.info not found at ${lcovPath}`);
   console.error("Run `bun test --coverage --coverage-reporter=lcov` first.");
   process.exit(1);
 }
@@ -43,22 +37,10 @@ for (const r of records) {
   if (!sf) continue;
   // Only enforce per-file for src/ — test/ and scripts/ can be partial.
   if (!sf.includes("/src/") && !sf.startsWith("src/")) continue;
-  const lf = (r.match(/^LF:(\d+)$/gm) ?? []).reduce(
-    (a, m) => a + Number(m.split(":")[1]),
-    0,
-  );
-  const lh = (r.match(/^LH:(\d+)$/gm) ?? []).reduce(
-    (a, m) => a + Number(m.split(":")[1]),
-    0,
-  );
-  const brf = (r.match(/^BRF:(\d+)$/gm) ?? []).reduce(
-    (a, m) => a + Number(m.split(":")[1]),
-    0,
-  );
-  const brh = (r.match(/^BRH:(\d+)$/gm) ?? []).reduce(
-    (a, m) => a + Number(m.split(":")[1]),
-    0,
-  );
+  const lf = (r.match(/^LF:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
+  const lh = (r.match(/^LH:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
+  const brf = (r.match(/^BRF:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
+  const brh = (r.match(/^BRH:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
   totalLines += lf;
   hitLines += lh;
   totalBranches += brf;
@@ -72,12 +54,8 @@ for (const r of records) {
 const overallLine = totalLines > 0 ? (100 * hitLines) / totalLines : 100;
 const overallBranch = totalBranches > 0 ? (100 * hitBranches) / totalBranches : 100;
 
-console.log(
-  `lcov line coverage: ${overallLine.toFixed(2)}% (${hitLines}/${totalLines})`,
-);
-console.log(
-  `lcov branch coverage: ${overallBranch.toFixed(2)}% (${hitBranches}/${totalBranches})`,
-);
+console.log(`lcov line coverage: ${overallLine.toFixed(2)}% (${hitLines}/${totalLines})`);
+console.log(`lcov branch coverage: ${overallBranch.toFixed(2)}% (${hitBranches}/${totalBranches})`);
 
 // 0/0 branch notice: see top-of-file limitation comment. This is NOT
 // a coverage regression — bun:coverage emits no BRDA records.

@@ -3675,3 +3675,157 @@ describe("commands facade re-exports (PR7 sentinel, issue #80 phase 7/14)", () =
     expect(commands).not.toMatch(/^export\s+function\s+hooks\s*\(/m);
   });
 });
+
+// ---------------------------------------------------------------------------
+//  PR8 sentinels — issue #80 phase 8/14
+//
+//  After PR8, three more subcommand clusters (tools, workflow, help) are
+//  extracted from src/commands.ts into per-subcommand files. Pattern
+//  mirrors the PR6 + PR7 sentinels above:
+//  - facade must re-export the public symbol
+//  - source-of-truth file must contain the body definition
+//  - facade must NOT contain the body definition
+//  - PRIVATE helpers must NOT re-appear in the facade (deny-list)
+//
+//  The deny-list catches the failure mode a body-only sentinel would
+//  miss: someone re-merges the cluster back into commands.ts and only
+//  keeps the public re-exports thin. The deny-list forces them to
+//  clean up the private helpers too.
+// ---------------------------------------------------------------------------
+
+describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () => {
+  test("src/commands.ts re-exports the tools cluster from src/commands/tools.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\btools\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\btoolsSync\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bverify\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\brepoLanguages\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bensureToolIndex\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bdetectToolchain\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bwriteToolConfigs\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports the StepSpawner + ToolchainPlan types from tools.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s+type\s+\{[^}]*\bStepSpawner\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s+type\s+\{[^}]*\bToolchainPlan\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports the workflow cluster from src/commands/workflow.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bworkflow\b[^}]*\}\s*from\s*["']\.\/commands\/workflow\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bprintVersion\b[^}]*\}\s*from\s*["']\.\/commands\/workflow\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports the help cluster from src/commands/help.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bprintHelp\b[^}]*\}\s*from\s*["']\.\/commands\/help\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bhasCommandHelp\b[^}]*\}\s*from\s*["']\.\/commands\/help\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bprintCommandHelp\b[^}]*\}\s*from\s*["']\.\/commands\/help\.js["']/,
+    );
+  });
+
+  test("source-of-truth: tools + workflow + help bodies live in their per-subcommand files", () => {
+    const commands = readFileSync("src/commands.ts", "utf8");
+    const tools = readFileSync("src/commands/tools.ts", "utf8");
+    const workflow = readFileSync("src/commands/workflow.ts", "utf8");
+    const help = readFileSync("src/commands/help.ts", "utf8");
+
+    // Public body definitions must be in the per-subcommand files. The `m`
+    // flag anchors the regex to start-of-line so it does NOT match the
+    // facade `export { tools } from "./commands/tools.js"` re-export.
+    expect(tools).toMatch(/^export\s+function\s+tools\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+toolsSync\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+verify\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+repoLanguages\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+ensureToolIndex\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+detectToolchain\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+writeToolConfigs\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+probeIndexHealth\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+toolsStatus\s*\(/m);
+    expect(tools).toMatch(/^export\s+function\s+provisionTool\s*\(/m);
+    expect(workflow).toMatch(/^export\s+function\s+workflow\s*\(/m);
+    expect(workflow).toMatch(/^export\s+function\s+printVersion\s*\(/m);
+    expect(help).toMatch(/^export\s+function\s+printHelp\s*\(/m);
+    expect(help).toMatch(/^export\s+function\s+hasCommandHelp\s*\(/m);
+    expect(help).toMatch(/^export\s+function\s+printCommandHelp\s*\(/m);
+
+    // Negative assertions: the facade must NOT contain the public body
+    // definitions. Catches a regression where someone moves the body
+    // back into commands.ts and leaves a thin re-export.
+    expect(commands).not.toMatch(/^export\s+function\s+tools\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+toolsSync\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+verify\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+repoLanguages\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+ensureToolIndex\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+detectToolchain\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+writeToolConfigs\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+probeIndexHealth\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+toolsStatus\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+provisionTool\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+workflow\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+printVersion\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+printHelp\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+hasCommandHelp\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+printCommandHelp\s*\(/m);
+
+    // Deny-list: the facade must NOT contain the private helpers from
+    // the tools cluster. Catches the failure mode where someone
+    // re-merges the cluster back into commands.ts and only the public
+    // re-exports stay thin.
+    const privateHelperNames = [
+      "managedClaudeServerNames",
+      "readClaudeMcp",
+      "writeClaudeMcp",
+      "tomlSection",
+      "gateCodexEntries",
+      "writeCodexMcp",
+      "printCopilotMcp",
+      "renderPriority",
+      "runToolSteps",
+      "toolsInstall",
+      "isToolName",
+    ];
+    for (const name of privateHelperNames) {
+      const re = new RegExp(`^function\\s+${name}\\b`, "m");
+      expect(commands).not.toMatch(re);
+    }
+  });
+
+  test("wiring smoke: public symbols return their documented exit codes", () => {
+    // printVersion() returns 0; printHelp() returns 0; hasCommandHelp(undefined) returns false.
+    // These are smoke checks that the public symbols are wired through
+    // the facade re-exports and actually run, not just parse.
+    const { printVersion, printHelp, hasCommandHelp } = require("../src/commands.js");
+    expect(printVersion()).toBe(0);
+    expect(printHelp()).toBe(0);
+    expect(hasCommandHelp(undefined)).toBe(false);
+  });
+});
