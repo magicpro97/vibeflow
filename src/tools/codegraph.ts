@@ -5,7 +5,6 @@
  * and returns the per-engine MCP entry. It never installs anything or hits the network.
  */
 
-import { spawnSync } from "node:child_process";
 import { hasCommand } from "../core.js";
 import type { Engine } from "../core.js";
 import { buildStdioEntry } from "./index.js";
@@ -59,7 +58,13 @@ export function indexBuildStep(): { cmd: string; args: string[]; description: st
 
 /** Spawner shape used by `indexLooksHealthy` — mirrors `StepSpawner` in commands.ts but
  * inlined to avoid a tools↔commands import cycle. */
-type StatusSpawner = (cmd: string, args: string[]) => { status: number };
+type StatusSpawner = (
+  cmd: string,
+  args: string[],
+) => {
+  status: number;
+  stdout?: string;
+};
 
 /**
  * Live "is the index actually usable?" check. The marker file may exist (so the cheap
@@ -70,8 +75,12 @@ type StatusSpawner = (cmd: string, args: string[]) => { status: number };
  * when the binary is missing (caller's `indexPresent` already gated on the marker file
  * and binary presence is checked separately in `vf tools status`).
  */
-export function indexLooksHealthy(base: string, spawner: StatusSpawner): boolean {
-  if (!hasCommand(BINARY)) return true; // nothing to verify; let the binary check fire downstream
+export function indexLooksHealthy(
+  base: string,
+  spawner: StatusSpawner,
+  hasCommandFn: (cmd: string) => boolean = hasCommand,
+): boolean {
+  if (!hasCommandFn(BINARY)) return true; // nothing to verify; let the binary check fire downstream
   const { status, stdout } = spawnStatus(base, spawner);
   if (status !== 0) return false;
   return !/Not initialized/i.test(stdout);
@@ -79,11 +88,8 @@ export function indexLooksHealthy(base: string, spawner: StatusSpawner): boolean
 
 function spawnStatus(base: string, spawner: StatusSpawner): { status: number; stdout: string } {
   try {
-    const proc = spawnSync(BINARY, ["status", base], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return { status: proc.status ?? 1, stdout: proc.stdout ?? "" };
+    const result = spawner(BINARY, ["status", base]);
+    return { status: result.status, stdout: result.stdout ?? "" };
   } catch {
     return { status: 1, stdout: "" };
   }

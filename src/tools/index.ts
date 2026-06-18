@@ -102,7 +102,7 @@ export interface ToolDescriptor {
    * The spawner is inlined (matches `runToolSteps`) to avoid a tools↔commands cycle. */
   indexHealthy?(
     base: string,
-    spawner: (cmd: string, args: string[]) => { status: number },
+    spawner: (cmd: string, args: string[]) => { status: number; stdout?: string },
   ): boolean;
   /** Steps to (re)build the per-repo artifact when `indexPresent` is false. Omitted for
    * tools that need none. Lets `enable --yes` provision generically off the registry. */

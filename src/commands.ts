@@ -323,6 +323,24 @@ export async function init(
     // (commands.ts L1341-1371) without depending on TTY + stdin.
     // Production callers leave this undefined.
     answers?: IntakeAnswers;
+    // Test seam: override the `hasCommand` lookup used by the codegraph
+    // provisioning block (commands.ts L437). Lets unit tests force the
+    // `codegraph` binary to look missing so the else-branch (L445-460)
+    // runs. Production callers leave this undefined.
+    hasCommandFn?: (cmd: string) => boolean;
+    // Test seam: forwarded to the bare `ensureCtx7Auth()` call at
+    // L469. Lets unit tests stub the whoami spawner / askConfirm so
+    // the ctx7 path (L466-470) executes without blocking on stdin.
+    // Production callers leave this undefined.
+    ctx7Inject?: {
+      spawner?: typeof spawnSync;
+      askConfirm?: (q: string) => Promise<boolean | null>;
+    };
+    // Test seam: replace the real `spawnSync` used by the codegraph
+    // install + index blocks (commands.ts L433-436). Lets unit tests
+    // drive the install path with a stub spawner. Production callers
+    // leave this undefined.
+    syncSpawner?: StepSpawner;
   } = {},
 ): Promise<number> {
   const initEngine: Engine =
@@ -430,11 +448,14 @@ export async function init(
   // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
   // enable in settings, write MCP config, and build index.
   if (!dry) {
-    const syncSpawner: StepSpawner = (cmd, args) => {
-      const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
-      return { status: result.status ?? 1 };
-    };
-    if (hasCommand("codegraph")) {
+    const syncSpawner: StepSpawner =
+      inject.syncSpawner ??
+      ((cmd, args) => {
+        const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
+        return { status: result.status ?? 1 };
+      });
+    const hasCodegraph = (inject.hasCommandFn ?? hasCommand)("codegraph");
+    if (hasCodegraph) {
       const curSettings = readSettings(cwd());
       if (!curSettings.tools?.codegraph) {
         writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
@@ -466,7 +487,7 @@ export async function init(
   if (ai && !dry && !result.refused && process.stdin.isTTY) {
     out("vf");
     out("vf", c.bold("ctx7 Auth"));
-    ctx7Auth = await ensureCtx7Auth();
+    ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject ?? {});
   }
 
   // Phase 1.8: find-skills fallback — when ctx7 not authenticated, search
@@ -673,13 +694,20 @@ export interface Ctx7AuthResult {
   fallback: boolean;
 }
 
-export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
+export async function ensureCtx7Auth(
+  inject: {
+    spawner?: typeof spawnSync;
+    askConfirm?: (q: string) => Promise<boolean | null>;
+  } = {},
+): Promise<Ctx7AuthResult> {
+  const spawn = inject.spawner ?? spawnSync;
+  const ask = inject.askConfirm ?? defaultAskConfirm;
   if (!process.stdin.isTTY) {
     return { authenticated: false, fallback: true };
   }
 
   // Step 1: quick check
-  const whoami = spawnSync("npx", ["ctx7", "whoami"], {
+  const whoami = spawn("npx", ["ctx7", "whoami"], {
     encoding: "utf8",
     timeout: 10_000,
   });
@@ -694,18 +722,7 @@ export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
   out("vf", c.yellow("⚠ ctx7 not logged in"));
   out("vf", c.dim("  ctx7 provides up-to-date library docs for automatic skill discovery."));
 
-  const answer = await new Promise<boolean | null>((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const timer = setTimeout(() => {
-      rl.close();
-      resolve(null);
-    }, 15_000);
-    rl.question("  Login now via device OAuth? (Y/n) ", (a) => {
-      clearTimeout(timer);
-      rl.close();
-      resolve(a.trim().toLowerCase() === "y" || a.trim() === "");
-    });
-  });
+  const answer = await ask("  Login now via device OAuth? (Y/n) ");
 
   if (answer === false || answer === null) {
     out("vf", c.yellow("! ctx7 login skipped — using find-skills (HTTP) fallback"));
@@ -716,7 +733,7 @@ export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
   out("vf", c.cyan("▶ Starting ctx7 device login..."));
   out("vf", c.dim("  Open the URL below in any browser and enter the code to approve."));
 
-  const login = spawnSync("npx", ["ctx7", "login", "--no-browser"], {
+  const login = spawn("npx", ["ctx7", "login", "--no-browser"], {
     stdio: "inherit",
     timeout: 120_000,
   });
@@ -731,12 +748,42 @@ export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
 }
 
 /**
+ * Prompt the user a Y/n question on stdin. Returns true for "y"/""/"Y",
+ * false for "n", or null on timeout. Exported for direct unit-test
+ * coverage of the PR129 default-ask-confirm path (issue #80 rebase;
+ * previously a private function). The `createInterface` parameter is
+ * an optional test seam: production callers leave it undefined and
+ * the real `node:readline` is used.
+ */
+export function defaultAskConfirm(
+  q: string,
+  deps: { createInterface?: typeof createInterface } = {},
+): Promise<boolean | null> {
+  const mkRl = deps.createInterface ?? createInterface;
+  return new Promise((res) => {
+    const rl = mkRl({ input: process.stdin, output: process.stdout });
+    const timer = setTimeout(() => {
+      rl.close();
+      res(null);
+    }, 15_000);
+    rl.question(q, (a) => {
+      clearTimeout(timer);
+      rl.close();
+      res(a.trim().toLowerCase() === "y" || a.trim() === "");
+    });
+  });
+}
+
+/**
  * Find-skills fallback: use Context7 HTTP API (zero-install, no auth needed)
  * to discover skills for the detected stack. Writes results to
  * `.vibeflow/ai-context/find-skills-results.md` so the AI engine can
  * use them during Phase 2 instead of relying on ctx7 CLI.
  */
-async function runFindSkillsFallback(base: string): Promise<void> {
+export async function runFindSkillsFallback(base: string): Promise<void> {
+  // Exported for test coverage of the PR129 find-skills fallback path
+  // (issue #80 rebase; was a private function on main). Production callers
+  // are only `init()` — exporting does not widen the API surface.
   const profile = scanRepo(base);
 
   // Build search queries from the detected stack
@@ -1059,8 +1106,22 @@ function renderPriority(settings: VibeSettings): string {
   return [...tiers].sort((a, b) => rank[b] - rank[a]).join(" > ");
 }
 
-/** `vf tools status` — show enabled/installed/priority for each optional tool. */
-function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): number {
+/** `vf tools status` — show enabled/installed/priority for each optional tool.
+ * The optional `probeFn` parameter is a test seam: when provided it replaces the
+ * default `probeIndexHealth` so unit tests can drive the "unhealthy" branch
+ * (commands.ts L1148-1155) without a real codegraph binary. */
+export function toolsStatus(
+  base: string,
+  detectFn?: (name: ToolName) => boolean,
+  probeFn?: (
+    name: ToolName,
+    base: string,
+    healthy: (
+      base: string,
+      spawner: (cmd: string, args: string[]) => { status: number },
+    ) => boolean,
+  ) => true | false | "unhealthy" | null,
+): number {
   const settings = readSettings(base);
   const languages = repoLanguages(base);
   out("vf", c.bold("Optional developer tools\n"));
@@ -1074,7 +1135,7 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
     if (tool.indexPresent) {
       const present = tool.indexPresent;
       const healthy = tool.indexHealthy ?? ((b: string) => present(b));
-      const probed = installed ? probeIndexHealth(name, base, healthy) : null;
+      const probed = installed ? (probeFn ?? probeIndexHealth)(name, base, healthy) : null;
       if (probed === true) tag += `, ${c.green("indexed")}`;
       else if (probed === "unhealthy") tag += `, ${c.red("index unhealthy")}`;
       else if (probed === false) tag += `, ${c.yellow("not indexed")}`;
@@ -1092,7 +1153,7 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
     } else if (enabled && installed && tool.indexPresent) {
       const present = tool.indexPresent;
       const healthy = tool.indexHealthy ?? ((b: string) => present(b));
-      const probed = probeIndexHealth(name, base, healthy);
+      const probed = (probeFn ?? probeIndexHealth)(name, base, healthy);
       if (probed === false) {
         out(
           "vf",
@@ -1118,27 +1179,46 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
 
 /** Run a tool's optional `indexHealthy` check with a short-lived spawner that captures
  * stdout. Returns `true` (healthy), `false` (marker missing), `"unhealthy"` (marker
- * present but tool reports it unusable), or `null` (tool has no health check). */
-function probeIndexHealth(
+ * present but tool reports it unusable), or `null` (tool has no health check).
+ * Exported for direct unit-test coverage of the PR129 probeIndexHealth path
+ * (issue #80 rebase; previously a private function). The `deps.capture` parameter
+ * is an optional test seam that overrides the internal spawner. */
+export function probeIndexHealth(
   _name: ToolName,
   base: string,
   healthy: (base: string, spawner: (cmd: string, args: string[]) => { status: number }) => boolean,
+  deps: {
+    capture?: (cmd: string, args: string[]) => { status: number };
+  } = {},
 ): true | false | "unhealthy" | null {
   const tool = TOOLS[_name];
   if (!tool.indexPresent) return null;
   const present = tool.indexPresent(base);
   if (!present) return false;
   let captured = "";
-  const capture: (cmd: string, args: string[]) => { status: number } = (cmd, args) => {
+  type CaptureResult = { status: number; stdout?: string };
+  const defaultCapture = (cmd: string, args: string[]): CaptureResult => {
     try {
       const proc = spawnSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
       captured = proc.stdout ?? "";
-      return { status: proc.status ?? 1 };
+      return { status: proc.status ?? 1, stdout: captured };
     } catch {
       captured = "";
-      return { status: 1 };
+      return { status: 1, stdout: "" };
     }
   };
+  // Test seam: when `deps.capture` is provided, use it instead of the
+  // real `spawnSync` and use the optional `stdout` field on its result
+  // to populate the `captured` closure variable (the same contract the
+  // default capture honors).
+  type CaptureInput = (cmd: string, args: string[]) => { status: number; stdout?: string };
+  const capture: (cmd: string, args: string[]) => { status: number } = deps.capture
+    ? (cmd, args) => {
+        const r: { status: number; stdout?: string } = (deps.capture as CaptureInput)(cmd, args);
+        captured = r.stdout ?? "";
+        return { status: r.status };
+      }
+    : defaultCapture;
   const ok = healthy(base, capture);
   if (ok) return true;
   // marker present but health check said no — distinguish "we couldn't verify" (no
