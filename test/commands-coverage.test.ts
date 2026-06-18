@@ -3610,3 +3610,68 @@ describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", ()
     expect(run).toMatch(/^export\s+async\s+function\s+run\s*\(/m);
   });
 });
+
+// ---------------------------------------------------------------------------
+//  PR7 sentinels — issue #80 phase 7/14
+//
+//  After PR7, three more subcommand clusters (skills, discover, hooks)
+//  must be extracted from src/commands.ts into per-subcommand files.
+//  These tests guard against a future refactor that re-creates the
+//  in-file bodies and leaves the facade re-exports as thin shims,
+//  defeating the extraction. Pattern mirrors the PR6 sentinel above:
+//  - facade must re-export the symbol
+//  - source-of-truth file must contain the body definition
+//  - facade must NOT contain the body definition
+// ---------------------------------------------------------------------------
+
+describe("commands facade re-exports (PR7 sentinel, issue #80 phase 7/14)", () => {
+  test("src/commands.ts re-exports `skills` from src/commands/skills.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bskills\b[^}]*\}\s*from\s*["']\.\/commands\/skills\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports `discover` from src/commands/discover.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bdiscover\b[^}]*\}\s*from\s*["']\.\/commands\/discover\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports the hooks cluster from src/commands/hooks.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(/export\s*\{[^}]*\bhook\b[^}]*\}\s*from\s*["']\.\/commands\/hooks\.js["']/);
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bhookSelftest\b[^}]*\}\s*from\s*["']\.\/commands\/hooks\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bhooks\b[^}]*\}\s*from\s*["']\.\/commands\/hooks\.js["']/,
+    );
+  });
+
+  test("source-of-truth: skills + discover + hooks bodies live in their per-subcommand files", () => {
+    const commands = readFileSync("src/commands.ts", "utf8");
+    const skills = readFileSync("src/commands/skills.ts", "utf8");
+    const discover = readFileSync("src/commands/discover.ts", "utf8");
+    const hooks = readFileSync("src/commands/hooks.ts", "utf8");
+
+    // The body definitions must be in the per-subcommand files. The `m`
+    // flag anchors the regex to start-of-line so it does NOT match the
+    // facade `export { skills } from "./commands/skills.js"` re-export.
+    expect(skills).toMatch(/^export\s+function\s+skills\s*\(/m);
+    expect(discover).toMatch(/^export\s+async\s+function\s+discover\s*\(/m);
+    expect(hooks).toMatch(/^export\s+async\s+function\s+hook\s*\(/m);
+    expect(hooks).toMatch(/^export\s+function\s+hookSelftest\s*\(/m);
+    expect(hooks).toMatch(/^export\s+function\s+hooks\s*\(/m);
+
+    // Negative assertions: the facade must NOT contain the body
+    // definitions. Catches a regression where someone moves the body
+    // back into commands.ts and leaves a thin re-export.
+    expect(commands).not.toMatch(/^export\s+function\s+skills\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+discover\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+hook\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+hookSelftest\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+hooks\s*\(/m);
+  });
+});
