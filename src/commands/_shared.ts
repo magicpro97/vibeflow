@@ -52,3 +52,12 @@ export * from "../workflow-artifacts.js";
 export * from "../workflow/lifecycle.js";
 export * from "../workflow/merge.js";
 export * from "../logbus.js";
+
+// === Test seams + guardrail diagnostics re-exported from seams.ts ===
+// (issue #80, phase 3/14) The doctor subcommand uses liveGuardrailArmed
+// and guardrailOffNote. The cycle rule forbids doctor.ts from importing
+// from a sibling (./seams.js), so we re-export the two names through
+// this barrel. seam.ts is the only sibling allowed to be referenced
+// from here because the facade pattern is the *only* legitimate way to
+// expose a sibling to other subcommand files.
+export { liveGuardrailArmed, guardrailOffNote } from "./seams.js";

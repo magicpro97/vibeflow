@@ -149,105 +149,21 @@ export {
   liveGuardrailArmed,
   guardrailOffNote,
 } from "./commands/seams.js";
+import { resolveRepo } from "./commands/doctor.js";
 import { guardrailOffNote, liveGuardrailArmed, tipState } from "./commands/seams.js";
+// === Re-export the doctor subcommand + repo detection helpers ===
+// (issue #80, phase 3/14) `doctor`, `detectRepo`, `RepoDetection`,
+// `resolveRepo` now live in src/commands/doctor.ts. The facade
+// re-exports them so existing callers
+// (`import { doctor, detectRepo, RepoDetection, resolveRepo } from
+// "../commands.js"`) keep working. The body of src/commands.ts also
+// imports `resolveRepo` directly because the `init`/`run`/etc
+// functions (still in this file) call it.
+export { doctor, detectRepo, resolveRepo } from "./commands/doctor.js";
+export type { RepoDetection } from "./commands/doctor.js";
 export * from "./commands/_shared.js";
 
 /** Global state: the "watch live" tip prints at most once per process. */
-
-/** Color a readiness level for the doctor table. */
-function readinessMark(level: EngineReadiness["level"]): string {
-  if (level === "ready") return c.green("✓");
-  if (level === "no-binary") return c.dim("•");
-  return c.yellow("!");
-}
-
-/**
- * Print per-engine readiness under the presence table. Without --probe this is a fast
- * presence/auth check; with --probe it runs the live round-trip. Informational only —
- * the hard gate lives in applyIntake/run, not here.
- */
-function printReadiness(
-  probe: boolean,
-  list = preflightAll(ENGINES, { probe }),
-): EngineReadiness[] {
-  out("vf", c.bold(`\nEngine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
-  for (const r of list) {
-    out("vf", `  ${readinessMark(r.level)} ${r.engine}: ${c.dim(r.detail)}`);
-  }
-  if (!probe) out("vf", c.dim("  (run `vf doctor --probe` for a live engine round-trip)"));
-  return list;
-}
-
-export async function doctor(
-  flags: Record<string, string | boolean> = {},
-  inject: {
-    readiness?: EngineReadiness[];
-    // Test seam: lets unit tests inject a custom hasCommand to
-    // exercise the "missing required tool" branch (line 203-204).
-    hasCommand?: (cmd: string) => boolean;
-  } = {},
-): Promise<number> {
-  const _hasCommand = inject.hasCommand ?? hasCommand;
-  const checks: Array<[string, boolean, "required" | "optional"]> = [
-    ["node", _hasCommand("node"), "required"],
-    ["git", _hasCommand("git"), "required"],
-    ["bun", _hasCommand("bun"), "optional"],
-    ["claude", _hasCommand("claude"), "optional"],
-    ["codex", _hasCommand("codex"), "optional"],
-    ["copilot", _hasCommand("copilot"), "optional"],
-    ["gh", _hasCommand("gh"), "optional"],
-    ["docker", _hasCommand("docker"), "optional"],
-  ];
-  out("vf", panel("VibeFlow", c.bold("environment check")));
-  let missingRequired = 0;
-  const toolRows: string[][] = [];
-  for (const [name, ok, kind] of checks) {
-    const mark = ok ? c.green("✔") : kind === "required" ? c.red("✗") : c.yellow("•");
-    const status = ok ? c.green("ok") : kind === "required" ? c.red("missing") : c.dim("missing");
-    if (!ok && kind === "required") missingRequired++;
-    toolRows.push([mark, name, status]);
-  }
-  out("vf", table(["", "tool", "status"], toolRows));
-  out("vf", `\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
-  out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
-
-  const probe = Boolean(flags.probe);
-  const refresh = Boolean(flags.refresh);
-  if (refresh) {
-    const { invalidateAllProbes } = await import("./probe-cache.js");
-    invalidateAllProbes();
-    out("vf", c.dim("probe cache cleared"));
-  }
-  let readiness: EngineReadiness[];
-  if (inject.readiness) {
-    readiness = inject.readiness;
-  } else if (probe) {
-    const spinner = new Spinner();
-    spinner.start("Running engine probes (parallel)…");
-    readiness = await preflightAllAsync(ENGINES, { probe: true, skipCache: refresh });
-    spinner.succeed("Engine probes complete");
-  } else {
-    readiness = preflightAll(ENGINES, { probe: false, skipCache: refresh });
-  }
-  printReadiness(probe, readiness);
-
-  if (missingRequired > 0) {
-    out("vf", c.red(`\n${missingRequired} required tool(s) missing.`));
-    return 1;
-  }
-  const probeFailed = probe ? readiness.filter((r) => r.level === "probe-failed") : [];
-  if (probeFailed.length > 0) {
-    out(
-      "vf",
-      c.yellow(
-        `\n${probeFailed.length} engine probe(s) failed: ${probeFailed.map((r) => r.engine).join(", ")}. Other tools are present.`,
-      ),
-    );
-    return 1;
-  }
-  out("vf", c.green("\nReady."));
-  return 0;
-}
 
 export interface IntakeAnswers {
   goal?: string;
@@ -267,48 +183,6 @@ function chosenEngines(engines?: string[]): Engine[] {
 }
 
 const DEFAULT_ENGINE: Engine = "claude";
-
-/** Validate and resolve a user-supplied repo path to an absolute existing directory. */
-export function resolveRepo(path?: string): string {
-  if (!path || !path.trim()) return cwd();
-  const abs = isAbsolute(path) ? path : resolve(cwd(), path);
-  try {
-    if (statSync(abs).isDirectory()) return abs;
-  } catch {
-    /* fall through */
-  }
-  return cwd();
-}
-
-const SKILL_BY_EXT_REMOVED = true;
-void SKILL_BY_EXT_REMOVED;
-
-export interface RepoDetection {
-  repo: string;
-  isGit: boolean;
-  engines: Record<Engine, boolean>;
-  clis: Record<Engine, boolean>;
-}
-
-/** Detect which engines a repo already carries (by marker files) and which CLIs are present. */
-export function detectRepo(path?: string): RepoDetection {
-  const repo = resolveRepo(path);
-  const has = (rel: string) => existsSync(join(repo, rel));
-  return {
-    repo,
-    isGit: has(".git"),
-    engines: {
-      claude: has("CLAUDE.md") || has(".claude"),
-      codex: has("AGENTS.md") || has(".codex"),
-      copilot: has(".github/copilot-instructions.md"),
-    },
-    clis: {
-      claude: hasCommand("claude"),
-      codex: hasCommand("codex"),
-      copilot: hasCommand("copilot") || hasCommand("gh"),
-    },
-  };
-}
 
 function contextFrom(answers: IntakeAnswers): ProjectContext {
   const base = defaultContext();
