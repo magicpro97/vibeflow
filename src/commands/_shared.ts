@@ -68,3 +68,12 @@ export { liveGuardrailArmed, guardrailOffNote } from "./seams.js";
 // init.ts from importing from a sibling (./doctor.js), so we
 // re-export resolveRepo through this barrel.
 export { resolveRepo } from "./doctor.js";
+
+// === dispatch helpers re-exported from dispatch.ts ===
+// (issue #80, phase 6/14) The units subcommand uses mutateUnits
+// to round-trip the workflow ledger. The cycle rule forbids
+// units.ts from importing from a sibling (./dispatch.js), so we
+// re-export mutateUnits through this barrel. applyDispatch /
+// normalizeUnit stay in the dispatch.ts sibling pair and are
+// imported by the facade only.
+export { mutateUnits } from "./dispatch.js";
