@@ -1811,16 +1811,24 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
   test("issue #78: DEFAULT_ENGINE parity across init and orchestrate", () => {
     // Both `vf init` and `vf orchestrate` must share the same default
     // engine. The fix introduced a single `DEFAULT_ENGINE` constant
-    // consumed by both code paths.
+    // consumed by both code paths. After the issue #80 split, the
+    // canonical declaration lives in src/commands/init.ts (where the
+    // intake / orchestrator inputs are), not src/commands.ts.
     // import.meta.resolve is intentionally avoided — the source file
     // is the canonical source.
     const { readFileSync } = require("node:fs") as typeof import("node:fs");
-    const src = readFileSync("src/commands.ts", "utf8");
+    const initSrc = readFileSync("src/commands/init.ts", "utf8");
     // Single declaration of `const DEFAULT_ENGINE`.
-    const decls = src.match(/^const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
+    const decls =
+      initSrc.match(/^(?:export )?const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
     expect(decls.length).toBe(1);
     expect(decls[0]).toContain('"claude"');
     // resolveEngine uses it (no hardcoded "claude" string literal anymore).
+    // The reference may now live in either src/commands.ts (the body
+    // still has resolveEngine) or via the facade re-export. Check
+    // both: the source file for the body and the init file for the
+    // definition.
+    const src = readFileSync("src/commands.ts", "utf8");
     expect(src).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
   });
 });

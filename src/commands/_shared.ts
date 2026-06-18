@@ -61,3 +61,10 @@ export * from "../logbus.js";
 // from here because the facade pattern is the *only* legitimate way to
 // expose a sibling to other subcommand files.
 export { liveGuardrailArmed, guardrailOffNote } from "./seams.js";
+
+// === doctor subcommand helpers re-exported from doctor.ts ===
+// (issue #80, phase 4/14) The init subcommand uses resolveRepo to
+// validate a user-supplied repo path. The cycle rule forbids
+// init.ts from importing from a sibling (./doctor.js), so we
+// re-export resolveRepo through this barrel.
+export { resolveRepo } from "./doctor.js";
