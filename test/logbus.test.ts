@@ -133,8 +133,11 @@ describe("Logbus", () => {
       maxRotations: 2,
     });
     // Each rotation moves current → .1 → .2; with maxRotations=2 the oldest is dropped.
-    // Writing ~5MB in 1KB events triggers several rotations.
-    // Windows: 5000 events takes >5s; reduce to 1500 to stay under default test timeout.
+    // Writing ~5MB in 1KB events triggers several rotations. The per-event
+    // file-lock acquisition is the slow part: on contended CI runners (tmpfs
+    // lock churn) 5000 events can exceed the 5s default, so this test carries
+    // an explicit 20s timeout (see the third arg to `it` below). Windows is
+    // slower still, so it writes fewer events.
     const eventCount = process.platform === "win32" ? 1500 : 5000;
     for (let i = 0; i < eventCount; i++) {
       tiny.write({
@@ -148,7 +151,7 @@ describe("Logbus", () => {
     const rotated = files.filter((f) => /^current\.log\.\d+$/.test(f));
     expect(rotated.length).toBeLessThanOrEqual(2);
     expect(files).toContain("current.log");
-  });
+  }, 20_000);
 
   it("rotate() is async, acquires the lock, and creates a fresh current.log.1", async () => {
     // Exercise the public rotate() path explicitly: write enough bytes to cross the
