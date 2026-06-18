@@ -104,15 +104,20 @@ export {
 } from "./protection.js";
 export type { ProtectionRuntime } from "./protection.js";
 
-// === init subcommand helpers re-exported from init.ts ===
-// (issue #80, phase 6/14) The orchestrate subcommand uses
+// === init subcommand helpers re-exported from init-apply.ts ===
+// (issue #80, phase 6/14 + 9/14) The orchestrate subcommand uses
 // DEFAULT_ENGINE (the canonical default for resolveEngine) and
-// PreflightFn (the preflight probe type). They live in
-// src/commands/init.ts; the cycle rule forbids orchestrate.ts
-// from importing them directly, so we re-export through the
-// barrel.
-export { DEFAULT_ENGINE } from "./init.js";
-export type { PreflightFn } from "./init.js";
+// PreflightFn (the preflight probe type). Phase 9/14 split the intake/
+// apply cluster out of init.ts into init-apply.ts, so these now come from
+// that sibling. init.ts itself also pulls applyIntake + the intake types
+// back through this barrel (cycle rule forbids the direct sibling import).
+export { DEFAULT_ENGINE, applyIntake } from "./init-apply.js";
+export type {
+  ApplyIntakeOpts,
+  ApplyIntakeResult,
+  IntakeAnswers,
+  PreflightFn,
+} from "./init-apply.js";
 
 // === dispatch helpers re-exported from dispatch.ts ===
 // (issue #80, phase 6/14) The orchestrate subcommand uses
@@ -136,3 +141,37 @@ export { tipState } from "./seams.js";
 // rule forbids run.ts from importing directly from
 // ./orchestrate.js, so we re-export through this barrel.
 export { engineReady, readyStub } from "./orchestrate.js";
+
+// === tools subcommand helpers re-exported from tools.ts ===
+// (issue #80, phase 9/14) The `init` subcommand (extracted to
+// src/commands/init.ts in this phase) calls writeToolConfigs /
+// provisionTool / ensureToolIndex in its Phase 1.6 tool-provisioning
+// block, and types its sync spawner with StepSpawner. The cycle rule
+// forbids init.ts from importing directly from ./tools.js, so we
+// re-export the three values + the type through this barrel — the same
+// sibling-to-sibling bridge as resolveRepo / normalizeUnit / the
+// protection cluster above.
+export { ensureToolIndex, provisionTool, writeToolConfigs } from "./tools.js";
+export type { StepSpawner } from "./tools.js";
+
+// === init ctx7/find-skills helpers re-exported from init-ctx7.ts ===
+// (issue #80, phase 9/14) The `init` CLI entry point (in
+// src/commands/init.ts) calls ensureCtx7Auth (Phase 1.7) and
+// runFindSkillsFallback (Phase 1.8). Those helpers were split into the
+// init-ctx7.ts sibling to keep init.ts under the 400-line cap. The cycle
+// rule forbids init.ts from importing the sibling directly, so they come
+// through this barrel (same bridge pattern as resolveRepo above).
+export {
+  ensureCtx7Auth,
+  defaultAskConfirm,
+  runFindSkillsFallback,
+} from "./init-ctx7.js";
+export type { Ctx7AuthResult } from "./init-ctx7.js";
+
+// === init AI-enrichment step re-exported from init-ai.ts ===
+// (issue #80, phase 9/14) The `init` CLI entry point (in
+// src/commands/init.ts) runs the Phase 2 AI enrichment via
+// runInitAiEnrichment, split into the init-ai.ts sibling to keep init.ts
+// under the 400-line cap. The cycle rule routes it through this barrel.
+export { runInitAiEnrichment } from "./init-ai.js";
+export type { InitAiEnrichmentOpts } from "./init-ai.js";

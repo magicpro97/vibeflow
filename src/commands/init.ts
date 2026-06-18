@@ -1,271 +1,299 @@
 // src/commands/init.ts
 //
-// `vf init` subcommand + the applyIntake / contextFrom / gateEngines
-// helpers it owns. Issue #80, phase 4/14.
+// The `vf init` CLI entry point (issue #80, phase 9/14). After the
+// facade split this file holds only the orchestration surface:
 //
-// Contents:
-// - IntakeAnswers: the structured shape of a `vf init` questionnaire
-//   response. Used by the CLI, the web intake wizard, and the API.
-// - PreflightFn / ApplyIntakeOpts / ApplyIntakeResult: types for
-//   applyIntake and its options. The CLI (`init` function in
-//   src/commands.ts) and the `run` function (also in commands.ts)
-//   pass options like `skipPreflight` to opt out of the hard gate.
-// - chosenEngines, DEFAULT_ENGINE, contextFrom: helpers that
-//   transform an IntakeAnswers shape into an Engine[] and a
-//   ProjectContext. They are part of the intake pipeline, not
-//   generic utilities, so they live here.
-// - gateEngines: the "hard creation gate" that runs a preflight and
-//   keeps only ready engines, refusing entirely if none are ready.
-// - applyIntake: the shared workflow generator. The MCP tool config
-//   sync (writeToolConfigs) is injected via ApplyIntakeOpts
-//   .syncToolConfigs to keep init.ts free of any tool-machinery
-//   dependency. The CLI passes the real function; tests skip it.
-
+// - init(): the CLI command. Runs the deterministic Phase 1.x baseline
+//   (via applyIntake), tool provisioning (Phase 1.6), the ctx7 auth +
+//   find-skills fallback (Phases 1.7-1.8), then hands off to the Phase 2
+//   AI enrichment.
+// - reportPreflightRefusal(): the "no engine ready" refusal printer that
+//   init() returns when the preflight gate refuses.
+//
+// The rest of the init cluster lives in sibling files, all reached
+// through the _shared barrel (the no-cycle rule forbids direct sibling
+// imports):
+//   - init-apply.ts: applyIntake + the IntakeAnswers / ApplyIntake* types
+//     + PreflightFn + DEFAULT_ENGINE + chosenEngines / contextFrom /
+//     gateEngines.
+//   - init-ctx7.ts: ensureCtx7Auth + defaultAskConfirm +
+//     runFindSkillsFallback + Ctx7AuthResult.
+//   - init-ai.ts: runInitAiEnrichment (Phase 2) + InitAiEnrichmentOpts.
+import {
+  CTX_DIR,
+  DEFAULT_ENGINE,
+  ENGINES,
+  Spinner,
+  applyIntake,
+  basename,
+  c,
+  collectInitAskQuestionnaireData,
+  copySkillCreator,
+  cwd,
+  ensureCtx7Auth,
+  ensureToolIndex,
+  generateWorkflowArtifacts,
+  hasCommand,
+  initAskQuestionnaireToIntakeAnswers,
+  out,
+  panel,
+  provisionTool,
+  readSettings,
+  runFindSkillsFallback,
+  runInitAiEnrichment,
+  spawnSync,
+  writeSettings,
+  writeToolConfigs,
+} from "./_shared.js";
 import type {
   AgentEngine,
+  AsyncSpawner,
+  Ctx7AuthResult,
   Engine,
   EngineReadiness,
-  ProjectContext,
-  VibeSettings,
+  IntakeAnswers,
+  PreflightFn,
+  StepSpawner,
+  UnitDispatcher,
   WorkflowPhase,
-  WorkflowState,
 } from "./_shared.js";
-import {
-  BACKUP_SUBDIR,
-  CTX_DIR,
-  ENGINES,
-  ENGINE_INSTRUCTION_FILES,
-  agentFiles,
-  anyReady,
-  assertInsideBase,
-  canonicalFiles,
-  defaultContext,
-  detectRolesForRepo,
-  engineFiles,
-  ensureIndex,
-  existsSync,
-  join,
-  mergeManagedBlock,
-  preflightAll,
-  readFileSync,
-  readSettings,
-  readState,
-  readyEngines,
-  recomputeTotals,
-  scanRepo,
-  settingsPath,
-  summarizeProfile,
-  writeFileSafe,
-  writeSettings,
-} from "./_shared.js";
-import { resolveRepo } from "./_shared.js";
 
-export interface IntakeAnswers {
-  goal?: string;
-  engines?: string[];
-  docSource?: string;
-  taskSource?: string;
-  fileTypes?: string[];
-  expectedResult?: string;
-  sample?: string;
-  repoPath?: string;
-  workflowPhases?: WorkflowPhase[];
-}
-
-function chosenEngines(engines?: string[]): Engine[] {
-  const valid = (engines ?? []).filter((e): e is Engine => (ENGINES as string[]).includes(e));
-  return valid.length ? valid : [...ENGINES];
-}
-
-// Exported for callers (the `init` CLI subcommand, run, orchestrate)
-// that pass a single-engine `defaultEngine` to the readiness probe.
-// Kept as `const` rather than `function` to preserve the original
-// shape: callers compare `engine === DEFAULT_ENGINE` or fall through
-// to it via `[...ENGINES]` when `engines` is empty.
-export const DEFAULT_ENGINE: Engine = "claude";
-
-function contextFrom(answers: IntakeAnswers): ProjectContext {
-  const base = defaultContext();
-  const clean = (s?: string) => (s?.trim() ? s.trim() : undefined);
-  return {
-    ...base,
-    goal: clean(answers.goal) ?? base.goal,
-    docSource: clean(answers.docSource),
-    taskSource: clean(answers.taskSource),
-    fileTypes: answers.fileTypes?.map((s) => s.trim()).filter(Boolean),
-    expectedResult: clean(answers.expectedResult),
-    sample: clean(answers.sample),
-  };
-}
-
-/** Injectable readiness check so the creation gate is testable without spawning engines. */
-export type PreflightFn = (engines: Engine[]) => EngineReadiness[];
-
-export interface ApplyIntakeOpts {
-  dry?: boolean;
-  useAi?: boolean;
-  base?: string;
-  /** Opt out of the hard creation gate (web `/api/init` and dry/offline paths). */
-  skipPreflight?: boolean;
-  /** Override the readiness check (tests inject a fake; default is a live probe). */
-  preflight?: PreflightFn;
-  /**
-   * After writing the engine files, sync the per-engine MCP config
-   * (Claude `.mcp.json`, Codex `config.toml`, Copilot add commands)
-   * to mirror the current SETTINGS. Injected so init.ts stays
-   * independent of the tools module. CLI defaults to
-   * `writeToolConfigs`; tests may pass `undefined` to skip.
-   */
-  syncToolConfigs?: (base: string, settings: VibeSettings | undefined) => void;
-}
-
-export interface ApplyIntakeResult {
-  files: string[];
-  state: WorkflowState;
-  /** Per-engine readiness from the gate (present whenever the gate ran). */
-  readiness?: EngineReadiness[];
-  /** True when the gate refused creation because no engine was ready. */
-  refused?: boolean;
-  /** Relative paths of hand-edited engine files archived under .vibeflow/backup before merge. */
-  backedUp?: string[];
-}
-
-/**
- * Resolve which engines to generate for. When the gate is active (not dry, not skipped) it
- * runs a live preflight and keeps only ready engines; refusing entirely if none are ready.
- * The default skip ties the offline/browser path (useAi:false) to "no gate" so a browser
- * request never blocks on a live probe — Wave C may also pass skipPreflight explicitly.
- */
-function gateEngines(
-  answers: IntakeAnswers,
-  opts: ApplyIntakeOpts,
-): { engines: Engine[]; readiness?: EngineReadiness[]; refused: boolean } {
-  const chosen = chosenEngines(answers.engines);
-  const skip = opts.skipPreflight ?? opts.useAi === false;
-  // Bridge mode (VIBEFLOW_AI set) never spawns the named engine CLI — dispatch goes through
-  // the bridge command — so a missing/unauthed named-engine binary must not block init.
-  if (skip || opts.dry || process.env.VIBEFLOW_AI) return { engines: chosen, refused: false };
-  const probe = opts.preflight ?? ((e: Engine[]) => preflightAll(e, { probe: false }));
-  const readiness = probe(chosen);
-  if (!anyReady(readiness)) return { engines: [], readiness, refused: true };
-  return { engines: readyEngines(readiness), readiness, refused: false };
-}
-
-/**
- * Shared workflow generator used by both `vf init` (CLI) and the web intake wizard.
- * `useAi` is false for web-initiated init so a browser request never shells out to
- * $VIBEFLOW_AI; the CLI keeps the AI bridge enabled. When a workflow already exists in
- * `base`, its work units and attachments are preserved so re-submitting acts as an edit.
- *
- * Hard creation gate: for a real CLI init (not dry, not skipped) we preflight the chosen
- * engines and refuse creation when none is ready, generating only for ready engines
- * otherwise. The gate is parameterized via {@link ApplyIntakeOpts} so callers opt out.
- */
-export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}): ApplyIntakeResult {
-  const base = opts.base ?? resolveRepo(answers.repoPath);
-  const ctx = contextFrom(answers);
-  ctx.settings = readSettings(base);
-  // Enrich context with an evidence-based scan of the target repo (PROJECT_CONTEXT.md).
-  try {
-    const profile = scanRepo(base);
-    ctx.stack = summarizeProfile(profile);
-    if (profile.summary && ctx.summary === defaultContext().summary) ctx.summary = profile.summary;
-  } catch {
-    /* scanning is best-effort; never block init */
-  }
-  const gate = gateEngines(answers, opts);
-  const prev = readState(base);
-  const state = recomputeTotals({
-    task_id: prev?.task_id ?? "TASK-1",
-    goal: ctx.goal,
-    success_criteria: ctx.expectedResult ? [ctx.expectedResult] : (prev?.success_criteria ?? []),
-    work_units: prev?.work_units ?? [],
-    totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
-    repo_path: base,
-    attachments: prev?.attachments ?? [],
+/** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
+// Test seam: exported so unit tests can verify the readiness listing
+// format and the "no engine ready" exit code contract.
+export function reportPreflightRefusal(readiness: EngineReadiness[] | undefined): number {
+  out("vf", c.red("\nNo engine is ready — refusing to generate engine files."), {
+    level: "error",
   });
-  if (gate.refused) return { files: [], state, readiness: gate.readiness, refused: true };
+  for (const r of readiness ?? []) {
+    out("vf", `  ${c.yellow("!")} ${r.engine}: ${c.dim(r.detail)}`, {
+      level: "error",
+    });
+  }
+  out("vf", c.dim("Fix an engine above (or use `--dry-run` for an offline preview)."), {
+    level: "error",
+  });
+  return 1;
+}
 
-  const useAi = opts.useAi !== false;
-  const files: Record<string, string> = { ...canonicalFiles(ctx) };
-  for (const engine of gate.engines) {
-    Object.assign(files, engineFiles(engine, ctx, useAi));
+export async function init(
+  flags: Record<string, string | boolean>,
+  inject: {
+    preflight?: PreflightFn;
+    spawner?: AsyncSpawner;
+    // Test seam: when provided, the AI enrichment phase uses this
+    // spawner instead of building its own (which would invoke the
+    // real engine). Production callers leave this undefined.
+    aiSpawner?: AsyncSpawner;
+    // Test seam: when provided, the AI enrichment phase uses this
+    // preflight (overriding its default real-probe). Production
+    // callers leave this undefined.
+    aiPreflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+    // Test seam: forwarded to `runAiInitWorkflow` (B1/T5) when the
+    // --ai path uses the agent-team shape. Ignored on the legacy
+    // `runAiInit` path. Production callers leave this undefined.
+    dispatcher?: UnitDispatcher;
+    // Test seam: when provided, bypass the interactive `init-ask`
+    // questionnaire and use this object as the intake answers.
+    // Lets unit tests drive the workflow-artifacts block
+    // (commands.ts L1341-1371) without depending on TTY + stdin.
+    // Production callers leave this undefined.
+    answers?: IntakeAnswers;
+    // Test seam: override the `hasCommand` lookup used by the codegraph
+    // provisioning block (commands.ts L437). Lets unit tests force the
+    // `codegraph` binary to look missing so the else-branch (L445-460)
+    // runs. Production callers leave this undefined.
+    hasCommandFn?: (cmd: string) => boolean;
+    // Test seam: forwarded to the bare `ensureCtx7Auth()` call at
+    // L469. Lets unit tests stub the whoami spawner / askConfirm so
+    // the ctx7 path (L466-470) executes without blocking on stdin.
+    // Production callers leave this undefined.
+    ctx7Inject?: {
+      spawner?: typeof spawnSync;
+      askConfirm?: (q: string) => Promise<boolean | null>;
+    };
+    // Test seam: replace the real `spawnSync` used by the codegraph
+    // install + index blocks (commands.ts L433-436). Lets unit tests
+    // drive the install path with a stub spawner. Production callers
+    // leave this undefined.
+    syncSpawner?: StepSpawner;
+  } = {},
+): Promise<number> {
+  const initEngine: Engine =
+    typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
+      ? (flags.engine as Engine)
+      : DEFAULT_ENGINE;
+  const engines = [initEngine];
+  const dry = Boolean(flags["dry-run"]);
+  const ai = !flags["no-ai"];
+  // B1/T5 + Task 5b: AI enrichment is on by default; --no-ai opts out.
+  // Without --no-ai, the agent-team workflow shape is used.
+  // (runAiInitWorkflow). The --no-agent-team opt-out restores the
+  // legacy runAiInit path. The default is the workflow because the
+  // agent-team is the forward-looking surface; users on tight CI
+  // budgets can opt out per-run.
+  const useAgentTeam = ai && !flags["no-agent-team"];
+  const ask = ai && !dry && !flags["no-ask"] && process.stdin.isTTY;
+  // Test seam: when `inject.answers` is provided, use it directly and
+  // skip the interactive questionnaire. Lets unit tests drive the
+  // workflow-artifacts block (L1341-1371) without a TTY. Production
+  // callers leave `inject.answers` undefined; the `ask` gate remains
+  // the only path for end users.
+  const injectedAnswers: IntakeAnswers | undefined = inject.answers;
+  const questionnaire = ask && !injectedAnswers ? await collectInitAskQuestionnaireData() : null;
+  const answers = injectedAnswers
+    ? injectedAnswers
+    : ask
+      ? questionnaire && initAskQuestionnaireToIntakeAnswers(questionnaire, engines)
+      : { engines };
+  if (!answers) return process.stdin.isTTY ? 130 : 2;
+  // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
+  // the AI enrichment phase (Phase 2) is the only AI path.
+  const initSpinner = new Spinner();
+  initSpinner.start(dry ? "➥ Preparing init dry run" : "➥ Generating VibeFlow context");
+  let result: ReturnType<typeof applyIntake>;
+  try {
+    result = applyIntake(answers, {
+      dry,
+      skipPreflight: dry,
+      preflight: inject.preflight,
+      useAi: false,
+      // Keep MCP config in lockstep with SETTINGS. writeToolConfigs
+      // comes from the tools.ts sibling via the _shared barrel bridge
+      // (the cycle rule forbids importing it directly).
+      syncToolConfigs: (base, settings) => {
+        if (settings) writeToolConfigs(base, settings);
+      },
+    });
+  } catch (err) {
+    initSpinner.fail("VibeFlow context generation failed");
+    throw err;
   }
-  // Per-role agent files: same body, engine-specific wrappers.
-  // Honour `gate.engines` so `vf init --engine codex` writes only codex
-  // files (not all 3). Default is all engines.
-  const profile = scanRepo(base);
-  const roles = detectRolesForRepo(base, profile);
-  const targetEngines: readonly AgentEngine[] =
-    gate.engines.length > 0
-      ? (gate.engines as readonly AgentEngine[])
-      : (ENGINES as readonly AgentEngine[]);
-  Object.assign(files, agentFiles(profile, roles, useAi, targetEngines));
-  files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
-  // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`
-  // must NOT clobber hand-edited specs. Preserve existing copies like SETTINGS.json and
-  // TASK_CONTEXT.md already do. These files CAN be (re)generated — the write-loop below
-  // checks via `PRESERVED_CONTEXT_FILES`. Only re-write when the file does not exist (first
-  // init) OR the caller supplied an explicit goal (interactive init / `--goal`).
-  const explicitGoal = Boolean(answers.goal?.trim());
-  const PRESERVED_CONTEXT_FILES = new Set([
-    "REQUIREMENTS.md",
-    "PROJECT_CONTEXT.md",
-    "WORKFLOW_POLICY.md",
-    "SKILL_INDEX.md",
-  ]);
-  const written: string[] = [];
-  const backedUp: string[] = [];
-  // One backup run-dir per init so a re-init that rescues several hand-edited files groups them.
-  const backupRun = join(base, BACKUP_SUBDIR, `init-${Date.now()}`);
-  const engineFileSet = new Set(ENGINE_INSTRUCTION_FILES);
-  for (const [rel, content] of Object.entries(files)) {
-    const filename = rel.split("/").pop() ?? "";
-    const isPreserved = rel.endsWith("TASK_CONTEXT.md") || PRESERVED_CONTEXT_FILES.has(filename);
-    if (isPreserved && !explicitGoal && existsSync(join(base, rel))) {
-      // Preserve the user's hand-curated context file; don't claim to write what we skipped.
-      continue;
+  if (result.refused) initSpinner.fail("Engine preflight refused init");
+  else initSpinner.succeed(dry ? "Init dry run prepared" : "VibeFlow context generated");
+
+  if (result.refused) return reportPreflightRefusal(result.readiness);
+  const label = dry ? "dry run" : "init";
+  out("vf", panel("VibeFlow", c.bold(label)));
+  const dropped = (result.readiness ?? []).filter((r) => r.level !== "ready");
+  for (const r of dropped) {
+    out("vf", c.yellow(`• skipped ${r.engine}: ${c.dim(r.detail)}`));
+  }
+  for (const rel of result.files) {
+    out("vf", dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
+  }
+  if (!dry) {
+    out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+    for (const rel of result.backedUp ?? []) {
+      out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
-    const abs = join(base, rel);
-    // Root engine instruction files (CLAUDE.md/AGENTS.md/copilot-instructions.md) can collide
-    // with files a human wrote. Merge into the marked region instead of truncating, and archive
-    // any hand-edited original before we touch it (the data-loss P1 fix). Everything else lives
-    // under .vibeflow/ — VibeFlow's own namespace — and keeps the simple write.
-    if (engineFileSet.has(rel)) {
-      const existing = existsSync(abs) ? readFileSync(abs, "utf8") : null;
-      if (existing != null) assertInsideBase(abs, base);
-      const merged = mergeManagedBlock(existing, content);
-      if (!opts.dry) {
-        if (merged.backup && existing != null) {
-          writeFileSafe(join(backupRun, rel), existing);
-          backedUp.push(rel);
-        }
-        writeFileSafe(abs, merged.content);
+  }
+
+  // Phase 1.5: Deterministic workflow artifacts (from questionnaire phases)
+  const hasPhases = Boolean(answers.workflowPhases?.length);
+  if (!dry && hasPhases) {
+    const targetEngines = (answers.engines ?? ["copilot"]) as AgentEngine[];
+    const projectName = basename(cwd());
+    const phases = answers.workflowPhases as WorkflowPhase[];
+    const artifactFiles = generateWorkflowArtifacts({
+      phases,
+      engines: targetEngines,
+      projectName,
+      base: cwd(),
+    });
+    if (artifactFiles.length) {
+      out("vf");
+      out("vf", panel("Workflow", c.bold("artifacts")));
+      for (const rel of artifactFiles) {
+        out("vf", c.green(`+ ${rel}`));
       }
-      written.push(rel);
-      continue;
+      out("vf", c.bold(`\nGenerated ${artifactFiles.length} workflow artifact(s).`));
     }
-    if (!opts.dry) writeFileSafe(abs, content);
-    written.push(rel);
+    // Only copy the skill-creator into engine folders when at
+    // least one engine is ready. If preflight refused (no engines
+    // ready), the skill files would sit unused; better to skip
+    // the I/O and let the user re-run init when an engine is
+    // installed.
+    if (!result.refused) {
+      for (const rel of copySkillCreator(cwd(), targetEngines)) {
+        out("vf", c.green(`+ ${rel}/SKILL.md`));
+      }
+    }
   }
-  // SETTINGS.json is owned by the settings layer, not the canonical templates: seed it with
-  // the off-by-default baseline ONLY on first init. On every subsequent init the user's file
-  // is left untouched so enabling codegraph/lsp (or tuning failureProtection) survives re-init.
-  if (!opts.dry && !existsSync(settingsPath(base))) {
-    writeSettings(base, {});
-    written.push(`${CTX_DIR}/SETTINGS.json`);
+
+  // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
+  // enable in settings, write MCP config, and build index.
+  if (!dry) {
+    const syncSpawner: StepSpawner =
+      inject.syncSpawner ??
+      ((cmd, args) => {
+        const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
+        return { status: result.status ?? 1 };
+      });
+    const hasCodegraph = (inject.hasCommandFn ?? hasCommand)("codegraph");
+    if (hasCodegraph) {
+      const curSettings = readSettings(cwd());
+      if (!curSettings.tools?.codegraph) {
+        writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
+        out("vf", c.green("+ enabled codegraph"));
+      }
+      writeToolConfigs(cwd(), readSettings(cwd()), engines);
+      ensureToolIndex(cwd(), "codegraph", syncSpawner);
+    } else {
+      out("vf", c.cyan("▶ Installing codegraph globally via npm..."));
+      const rc = provisionTool(cwd(), "codegraph", syncSpawner);
+      if (rc === 0) {
+        writeSettings(cwd(), { tools: { ...readSettings(cwd()).tools, codegraph: true } });
+        out("vf", c.green("+ enabled codegraph"));
+        writeToolConfigs(cwd(), readSettings(cwd()), engines);
+      } else {
+        out(
+          "vf",
+          c.yellow(
+            "! codegraph install failed — skipping. Run `vf tools install codegraph` manually.",
+          ),
+        );
+      }
+    }
   }
-  // Keep MCP config in lockstep with the instructions: if any optional tool is enabled,
-  // (re)write the engine MCP registrations so the injected "prefer codegraph > LSP" block
-  // references servers that are actually registered. Skipped on dry runs.
-  // Always write MCP config to strip managed servers when tools are disabled.
-  // If we skip this, stale .mcp.json entries for absent binaries break engine startup
-  // (Claude Code reads .mcp.json and tries to launch every registered MCP server).
-  if (!opts.dry && opts.syncToolConfigs) {
-    opts.syncToolConfigs(base, ctx.settings);
+
+  // Phase 1.7: ctx7 auth check — prompt user to login before AI enrichment
+  // so the skill-curator unit can use ctx7 CLI directly if authenticated.
+  let ctx7Auth: Ctx7AuthResult = { authenticated: false, fallback: true };
+  if (ai && !dry && !result.refused && process.stdin.isTTY) {
+    out("vf");
+    out("vf", c.bold("ctx7 Auth"));
+    ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject ?? {});
   }
-  // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
-  // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
-  if (!opts.dry) ensureIndex(base);
-  return { files: written, state, readiness: gate.readiness, refused: false, backedUp };
+
+  // Phase 1.8: find-skills fallback — when ctx7 not authenticated, search
+  // Context7 HTTP API for matching skills (zero-install, no auth needed).
+  if (ai && !dry && !result.refused && ctx7Auth.fallback) {
+    out("vf");
+    out("vf", c.bold("Find-Skills"));
+    await runFindSkillsFallback(cwd());
+  }
+
+  // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded).
+  // Extracted to src/commands/init-ai.ts (issue #80, phase 9/14); the
+  // captured closure variables are passed explicitly. The dry-run prompt
+  // previews live inside the same helper.
+  await runInitAiEnrichment({
+    ai,
+    dry,
+    refused: Boolean(result.refused),
+    initEngine,
+    useAgentTeam,
+    hasPhases,
+    answers,
+    ctx7Auth,
+    autopilot: Boolean(flags.autopilot),
+    inject: {
+      aiSpawner: inject.aiSpawner,
+      aiPreflight: inject.aiPreflight,
+      dispatcher: inject.dispatcher,
+    },
+  });
+
+  return 0;
 }

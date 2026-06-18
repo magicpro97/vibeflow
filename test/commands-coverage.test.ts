@@ -1827,12 +1827,12 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     // Both `vf init` and `vf orchestrate` must share the same default
     // engine. The fix introduced a single `DEFAULT_ENGINE` constant
     // consumed by both code paths. After the issue #80 split, the
-    // canonical declaration lives in src/commands/init.ts (where the
-    // intake / orchestrator inputs are), not src/commands.ts.
-    // import.meta.resolve is intentionally avoided — the source file
-    // is the canonical source.
+    // canonical declaration lives in src/commands/init-apply.ts (the
+    // intake / apply cluster split out of init.ts in phase 9/14), not
+    // src/commands.ts. import.meta.resolve is intentionally avoided —
+    // the source file is the canonical source.
     const { readFileSync } = require("node:fs") as typeof import("node:fs");
-    const initSrc = readFileSync("src/commands/init.ts", "utf8");
+    const initSrc = readFileSync("src/commands/init-apply.ts", "utf8");
     // Single declaration of `const DEFAULT_ENGINE`.
     const decls =
       initSrc.match(/^(?:export )?const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
@@ -3827,5 +3827,113 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
     expect(printVersion()).toBe(0);
     expect(printHelp()).toBe(0);
     expect(hasCommandHelp(undefined)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  PR9 sentinels — issue #80 phase 9/14 (final facade-thinning)
+//
+//  The `vf init` cluster is the last body to leave src/commands.ts. After
+//  PR9 the facade is a PURE re-export surface (zero function bodies) and the
+//  cluster is split four ways:
+//    - init.ts: init() + reportPreflightRefusal
+//    - init-apply.ts: applyIntake + DEFAULT_ENGINE + intake types
+//    - init-ctx7.ts: ensureCtx7Auth + defaultAskConfirm + runFindSkillsFallback
+//    - init-ai.ts: runInitAiEnrichment
+//
+//  Same guard pattern as the PR6/PR7/PR8 sentinels above:
+//  - facade must re-export the public symbol from its NEW home
+//  - the source-of-truth file must contain the body definition
+//  - the facade must NOT contain the body definition
+//  - the facade must have ZERO function bodies (the phase-9 invariant)
+// ---------------------------------------------------------------------------
+
+describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () => {
+  test("src/commands.ts re-exports the init entry cluster from src/commands/init.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(/export\s*\{[^}]*\binit\b[^}]*\}\s*from\s*["']\.\/commands\/init\.js["']/);
+    expect(src).toMatch(
+      /export\s*\{[^}]*\breportPreflightRefusal\b[^}]*\}\s*from\s*["']\.\/commands\/init\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports the apply cluster from src/commands/init-apply.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bapplyIntake\b[^}]*\}\s*from\s*["']\.\/commands\/init-apply\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bDEFAULT_ENGINE\b[^}]*\}\s*from\s*["']\.\/commands\/init-apply\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s+type\s*\{[^}]*\bIntakeAnswers\b[^}]*\}\s*from\s*["']\.\/commands\/init-apply\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports the ctx7 cluster from src/commands/init-ctx7.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bensureCtx7Auth\b[^}]*\}\s*from\s*["']\.\/commands\/init-ctx7\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\brunFindSkillsFallback\b[^}]*\}\s*from\s*["']\.\/commands\/init-ctx7\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s+type\s*\{[^}]*\bCtx7AuthResult\b[^}]*\}\s*from\s*["']\.\/commands\/init-ctx7\.js["']/,
+    );
+  });
+
+  test("src/commands.ts re-exports runInitAiEnrichment from src/commands/init-ai.js", () => {
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\brunInitAiEnrichment\b[^}]*\}\s*from\s*["']\.\/commands\/init-ai\.js["']/,
+    );
+  });
+
+  test("source-of-truth: the init cluster bodies live in their per-file modules", () => {
+    const commands = readFileSync("src/commands.ts", "utf8");
+    const init = readFileSync("src/commands/init.ts", "utf8");
+    const apply = readFileSync("src/commands/init-apply.ts", "utf8");
+    const ctx7 = readFileSync("src/commands/init-ctx7.ts", "utf8");
+    const ai = readFileSync("src/commands/init-ai.ts", "utf8");
+
+    // Public bodies live in their per-subcommand files. The `m` flag
+    // anchors to start-of-line so it does NOT match a facade re-export.
+    expect(init).toMatch(/^export\s+async\s+function\s+init\s*\(/m);
+    expect(init).toMatch(/^export\s+function\s+reportPreflightRefusal\s*\(/m);
+    expect(apply).toMatch(/^export\s+function\s+applyIntake\s*\(/m);
+    expect(apply).toMatch(/^export\s+const\s+DEFAULT_ENGINE\b/m);
+    expect(ctx7).toMatch(/^export\s+async\s+function\s+ensureCtx7Auth\s*\(/m);
+    expect(ctx7).toMatch(/^export\s+function\s+defaultAskConfirm\s*\(/m);
+    expect(ctx7).toMatch(/^export\s+async\s+function\s+runFindSkillsFallback\s*\(/m);
+    expect(ai).toMatch(/^export\s+async\s+function\s+runInitAiEnrichment\s*\(/m);
+
+    // Negative: the facade must NOT contain any of these body definitions.
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+init\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+reportPreflightRefusal\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+function\s+applyIntake\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+ensureCtx7Auth\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+runFindSkillsFallback\s*\(/m);
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+runInitAiEnrichment\s*\(/m);
+  });
+
+  test("phase-9 invariant: the facade is a PURE re-export surface (zero function bodies)", () => {
+    const commands = readFileSync("src/commands.ts", "utf8");
+    // No `export function` / `export async function` / bare `function`
+    // definitions may remain in the facade — every command body now lives
+    // in a src/commands/*.ts module.
+    expect(commands).not.toMatch(/^export\s+(async\s+)?function\s+/m);
+    expect(commands).not.toMatch(/^function\s+/m);
+  });
+
+  test("wiring smoke: init-cluster public symbols resolve through the facade", () => {
+    const mod = require("../src/commands.js");
+    expect(typeof mod.init).toBe("function");
+    expect(typeof mod.applyIntake).toBe("function");
+    expect(typeof mod.ensureCtx7Auth).toBe("function");
+    expect(typeof mod.runFindSkillsFallback).toBe("function");
+    expect(typeof mod.runInitAiEnrichment).toBe("function");
+    expect(typeof mod.reportPreflightRefusal).toBe("function");
+    expect(mod.DEFAULT_ENGINE).toBe("claude");
   });
 });
