@@ -3536,3 +3536,62 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
     }
   });
 });
+
+describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", () => {
+  test("src/commands.ts re-exports `run` from src/commands/run.js", () => {
+    // The CLI dispatch (cli.ts → main.ts) imports `run` from
+    // src/commands.ts. After PR6's extraction, the symbol must
+    // be re-exported there so the import path stays stable.
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(/export\s*\{[^}]*\brun\b[^}]*\}\s*from\s*["']\.\/commands\/run\.js["']/);
+  });
+
+  test("src/commands.ts re-exports the public protection cluster from src/commands/protection.js", () => {
+    // Tests (test/commands-coverage.test.ts) still import the
+    // public seam from src/commands.ts. PR6 must NOT remove
+    // these re-exports as part of the run-extraction.
+    const src = readFileSync("src/commands.ts", "utf8");
+    const required = [
+      "MS_PER_SECOND",
+      "planProtection",
+      "repoGit",
+      "resolveProtection",
+      "makeReviewer",
+      "makeDispatcher",
+      "computeKnowledgeHeavySource",
+      "makeResearcher",
+    ];
+    for (const name of required) {
+      const re = new RegExp(`\\b${name}\\b`, "g");
+      // The name must appear in a re-export (not just any line —
+      // this guards against accidental removal of the facade
+      // seam when future phases touch the file).
+      const match = src.match(re);
+      expect(match).not.toBeNull();
+    }
+  });
+
+  test("src/commands.ts re-exports the orchestrate subcommand (PR5 invariant)", () => {
+    // Pre-existing: PR5 added these re-exports. PR6 must NOT
+    // remove them. Catches the failure mode where a refactor
+    // strips the facade re-export block to "clean up".
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\borchestrate\b[^}]*\}\s*from\s*["']\.\/commands\/orchestrate\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bresolveMode\b[^}]*\}\s*from\s*["']\.\/commands\/orchestrate\.js["']/,
+    );
+  });
+
+  test("src/commands/run.ts: source-of-truth definition (not a re-export of the facade)", () => {
+    // After PR6, the `run` body must live in run.ts and NOT
+    // in commands.ts. This guards against a refactor that
+    // re-creates the in-file body and leaves the facade
+    // re-export as a thin re-export, defeating the extraction.
+    const commands = readFileSync("src/commands.ts", "utf8");
+    const run = readFileSync("src/commands/run.ts", "utf8");
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+run\s*\(/m);
+    expect(run).toMatch(/^export\s+async\s+function\s+run\s*\(/m);
+  });
+});

@@ -24,11 +24,11 @@
 //   into the workflow ledger, and reports the goal verdict.
 
 // Protection cluster lives in src/commands/protection.ts and is
-// re-exported by the facade. We import via the facade (not the
-// barrel) to avoid the TS2303 cycle that verbatimModuleSyntax
-// rejects. orchestrate() captures the symbols in a closure, so
-// the facade binding is populated by call time — standard
-// ESM cycle-tolerance.
+// re-exported through the sibling barrel (_shared.js). The facade
+// round-trip we tried earlier in this phase tripped a
+// verbatimModuleSyntax cycle (TS2449 / TS2724) — the
+// sibling-to-sibling re-export dodges that cycle and is the same
+// pattern seams.ts / doctor.ts / dispatch.ts use.
 import {
   MS_PER_SECOND,
   makeDispatcher,
@@ -36,8 +36,8 @@ import {
   planProtection,
   repoGit,
   resolveProtection,
-} from "../commands.js";
-import type { ProtectionRuntime } from "../commands.js";
+} from "./_shared.js";
+import type { ProtectionRuntime } from "./_shared.js";
 import type {
   AsyncSpawner,
   Engine,
@@ -132,12 +132,11 @@ export function announceLaunch(
 }
 
 /** A synthetic "ready" readiness used when a caller injects its own dispatch spawner. */
-// Exported (not just internal) so the `run` subcommand in
-// src/commands.ts (still in the facade, moving to
-// src/commands/run.ts in PR7) can call it to mark an
-// injected-spawner run as ready. Without this export, the run
-// path would have to call `engineReady` with a hand-rolled
-// stub; the export preserves the original wiring 1:1.
+// Exported (not just internal) so the `run` subcommand
+// (src/commands/run.ts, phase 6.5/14) can call it via the barrel
+// (_shared.js) to mark an injected-spawner run as ready. Without
+// this export, the run path would have to call `engineReady` with
+// a hand-rolled stub; the export preserves the original wiring 1:1.
 export function readyStub(engine: Engine): EngineReadiness {
   return { engine, level: "ready", detail: "ready (injected)", checkedAt: "" };
 }
@@ -148,10 +147,9 @@ export function readyStub(engine: Engine): EngineReadiness {
  * false so the caller can refuse to dispatch. Dry/bridge modes skip the probe (nothing launches).
  * Injectable via `preflight` so tests never spawn a real engine.
  */
-// Exported (not just internal) so the `run` subcommand in
-// src/commands.ts (still in the facade, moving to
-// src/commands/run.ts in PR7) can call it. Without the
-// export, the run path would re-implement the same gate.
+// Exported (not just internal) so the `run` subcommand
+// (src/commands/run.ts, phase 6.5/14) can call it via the barrel.
+// Without the export, the run path would re-implement the same gate.
 export function engineReady(
   engine: Engine,
   mode: "cli" | "bridge" | "dry",

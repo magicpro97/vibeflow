@@ -78,27 +78,31 @@ export { resolveRepo } from "./doctor.js";
 // imported by the facade only.
 export { mutateUnits } from "./dispatch.js";
 
-// === Protection / rollout helpers ===
-// (issue #80, phase 6/14) The protection cluster lives in
-// src/commands/protection.ts. orchestrate.ts imports it through
-// the facade (../commands.js) — but only for the public seam
-// (`MS_PER_SECOND`, `planProtection`, `repoGit`,
-// `resolveProtection`, `makeReviewer`, `makeDispatcher`,
-// `ProtectionRuntime` type, `computeKnowledgeHeavySource`,
-// `makeResearcher`, `handleUnitFailure`). The barrel
-// intentionally does NOT re-export them: the cycle
-// `commands.ts → _shared.ts → commands.ts` trips
-// verbatimModuleSyntax (TS2303 "Circular definition of import
-// alias"). The cycle is resolved by letting orchestrate.ts
-// import directly from the facade — at call time, after the
-// facade's module init has populated the bindings. This is
-// the standard ESM cycle-tolerance pattern.
-// Note for PR7: when the `run` subcommand moves to
-// src/commands/run.ts, the run body will also need these
-// symbols. Either re-export them through the barrel (after
-// breaking the cycle via a wrapper) or add a sibling-only
-// `import from "../commands/protection.js"`. The latter is
-// the recommended approach for run.ts.
+// === Protection / rollout helpers re-exported from protection.ts ===
+// (issue #80, phase 6.5/14) The `run` subcommand
+// (src/commands/run.ts) and orchestrate (already in
+// src/commands/orchestrate.ts) share the same protection
+// cluster. Earlier we tried to re-export them through the
+// facade (`../commands.js`) but verbatimModuleSyntax rejects
+// that cycle (TS2449 / TS2724). Now that the protection
+// cluster lives in its own file (./protection.ts), the
+// re-export is sibling-to-sibling via this barrel — the
+// same pattern as seams.ts / doctor.ts / dispatch.ts above.
+// `run.ts` still imports the symbols from this barrel so its
+// sibling-dependency footprint stays at zero (per the
+// test/commands-no-cycle.test.ts guard).
+export {
+  MS_PER_SECOND,
+  computeKnowledgeHeavySource,
+  handleUnitFailure,
+  makeDispatcher,
+  makeResearcher,
+  makeReviewer,
+  planProtection,
+  repoGit,
+  resolveProtection,
+} from "./protection.js";
+export type { ProtectionRuntime } from "./protection.js";
 
 // === init subcommand helpers re-exported from init.ts ===
 // (issue #80, phase 6/14) The orchestrate subcommand uses
@@ -123,3 +127,12 @@ export { normalizeUnit } from "./dispatch.js";
 // once per process. The cycle rule forbids orchestrate.ts from
 // importing tipState from seams.ts directly.
 export { tipState } from "./seams.js";
+
+// === orchestrate subcommand helpers re-exported from orchestrate.ts ===
+// (issue #80, phase 6.5/14) The `run` subcommand (in
+// src/commands/run.ts) shares the engine-readiness test
+// seams with orchestrate (`readyStub` for the injected-spawner
+// path, `engineReady` for the live preflight probe). The cycle
+// rule forbids run.ts from importing directly from
+// ./orchestrate.js, so we re-export through this barrel.
+export { engineReady, readyStub } from "./orchestrate.js";

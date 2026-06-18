@@ -207,10 +207,10 @@ function rollbackCheckpoint(base: string, prot: ProtectionRuntime): void {
 }
 
 /** On a blocked unit in cli mode: print the recovery hint, then roll back when configured. */
-// Exported (not just internal) so the legacy `run` subcommand
-// in src/commands.ts (still in the facade, moving to
-// src/commands/run.ts in PR7) can call it. Without the
-// export, the run path would re-implement the same hook.
+// Exported (not just internal) so the `run` subcommand
+// (src/commands/run.ts, phase 6.5/14) can call it via the barrel
+// (_shared.js). Without the export, the run path would
+// re-implement the same hook.
 export function handleUnitFailure(prot: ProtectionRuntime, base: string): void {
   if (prot.checkpoint) out("vf", c.yellow(recoveryHint(prot.checkpoint)));
   if (prot.fp.rollbackOnFail) rollbackCheckpoint(base, prot);
