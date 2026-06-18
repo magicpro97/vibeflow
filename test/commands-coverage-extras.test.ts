@@ -29,7 +29,11 @@ describe("commands.init — codegraph install path (line 445-459)", () => {
     if (origIsTTY === undefined) Reflect.deleteProperty(process.stdin, "isTTY");
     else Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
     if (origStderrIsTTY === undefined) Reflect.deleteProperty(process.stderr, "isTTY");
-    else Object.defineProperty(process.stderr, "isTTY", { value: origStderrIsTTY, configurable: true });
+    else
+      Object.defineProperty(process.stderr, "isTTY", {
+        value: origStderrIsTTY,
+        configurable: true,
+      });
     mock.restore();
     rmSync(dir, { recursive: true, force: true });
   });

@@ -11,7 +11,8 @@
     "docs",
     "README.md",
     "LICENSE",
-    ".agents/skills/skill-creator"
+    ".agents/skills/skill-creator",
+    "templates/skills"
   ],
   "engines": {
     "node": ">=18"

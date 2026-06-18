@@ -1102,4 +1102,81 @@ describe("defaultAiInitDispatcher", () => {
       expect.stringMatching(/^engine-unavailable:claude:binary not found$/),
     ]);
   });
+
+  test("retries on a rate-limit signal (HTTP 429) and succeeds within budget", async () => {
+    // Issue 1: a transient 429 on the engine should not poison the
+    // whole agent-team wave. The dispatcher detects the signal via
+    // `detectQuota` and calls backoffPlan, then retries with jitter.
+    const calls: number[] = [];
+    const sleepCalls: number[] = [];
+    const dispatcher = defaultAiInitDispatcher("claude", {
+      engineCommandFn: () => fakeInvocation(),
+      spawner: async () => {
+        calls.push(calls.length + 1);
+        if (calls.length === 1) {
+          return {
+            status: 1,
+            stdout: "",
+            stderr: "HTTP 429: rate limit exceeded",
+            timedOut: false,
+          };
+        }
+        return { status: 0, stdout: "ok", stderr: "", timedOut: false };
+      },
+      sleep: async (ms) => {
+        sleepCalls.push(ms);
+      },
+      maxRetries: 2,
+      backoffBaseMs: 10,
+      backoffCapMs: 100,
+    });
+    const outcome = await dispatcher(makeUnit());
+    expect(calls).toEqual([1, 2]);
+    expect(sleepCalls.length).toBe(1);
+    expect(outcome.status).toBe("verifying");
+    expect(outcome.confidence).toBe(1);
+  });
+
+  test("does NOT retry on a non-rate-limit non-zero exit (auth/syntax error)", async () => {
+    // Only rate-limit-class failures are retried. A syntax error
+    // (status=1, stderr about parse) is NOT a rate-limit and must
+    // surface as blocked immediately, not eat into retry budget.
+    const calls: number[] = [];
+    const dispatcher = defaultAiInitDispatcher("claude", {
+      engineCommandFn: () => fakeInvocation(),
+      spawner: async () => {
+        calls.push(calls.length + 1);
+        return { status: 2, stdout: "", stderr: "parse error: unexpected token", timedOut: false };
+      },
+      maxRetries: 3,
+      backoffBaseMs: 10,
+      backoffCapMs: 100,
+    });
+    const outcome = await dispatcher(makeUnit());
+    expect(calls).toEqual([1]);
+    expect(outcome.status).toBe("blocked");
+    expect(outcome.evidence).toEqual([expect.stringMatching(/^dispatcher-nonzero:/)]);
+  });
+
+  test("gives up after maxRetries when the rate limit persists", async () => {
+    // All attempts hit the rate limit; the dispatcher should return
+    // blocked with the original exit-code evidence marker (not a
+    // backoff decision marker).
+    const calls: number[] = [];
+    const dispatcher = defaultAiInitDispatcher("claude", {
+      engineCommandFn: () => fakeInvocation(),
+      spawner: async () => {
+        calls.push(calls.length + 1);
+        return { status: 1, stdout: "", stderr: "HTTP 429 too many requests", timedOut: false };
+      },
+      sleep: async () => {},
+      maxRetries: 2,
+      backoffBaseMs: 10,
+      backoffCapMs: 100,
+    });
+    const outcome = await dispatcher(makeUnit());
+    expect(calls).toHaveLength(3);
+    expect(outcome.status).toBe("blocked");
+    expect(outcome.evidence).toEqual([expect.stringMatching(/^dispatcher-nonzero:.*exit 1$/)]);
+  });
 });

@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AI_INIT_UNIT_NAMES,
+  type AiInitIntake,
   type AiInitUnit,
   aiInitReviewer,
+  buildPhaseSkillEnrichmentUnits,
   planAiInitUnits,
 } from "../src/ai-init-workflow.js";
 import { findScopeConflicts } from "../src/gates.js";
@@ -696,5 +698,310 @@ describe("aiInitReviewer", () => {
     });
     expect(r.pass).toBe(false);
     expect(r.reason).toMatch(/not a regular file/);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 2 engine-scoping invariants: `vf init --engine X` must NOT
+// generate instruction files or skill dirs for unselected engines.
+// The plan, the spec text, and the reviewer fallback must all be
+// engine-scoped. These tests pin the contract against regression.
+// ───────────────────────────────────────────────────────────────────────────
+describe("Phase 2 engine-scoping invariants", () => {
+  test("instruction-writer spec never references 'all 3' instruction files", () => {
+    const units = planAiInitUnits(profile, { engines: ["claude"] });
+    const u = units.find((u) => u.name === "ai-init-instruction-writer");
+    if (!u) throw new Error("instruction-writer not in plan");
+    expect(u.spec).not.toContain("all 3");
+    expect(u.spec).not.toContain("all 3 instruction files");
+    expect(u.spec).toContain("Update only these instruction file(s)");
+  });
+
+  test("skill-curator spec never references unselected engine skill dirs", () => {
+    const units = planAiInitUnits(profile, { engines: ["claude"] });
+    const u = units.find((u) => u.name === "ai-init-skill-curator");
+    if (!u) throw new Error("skill-curator not in plan");
+    // For --engine claude, the spec must NOT mention the unselected
+    // engines' skill dirs (.agents/skills/, .github/skills/).
+    // .agents/skills/ is ALLOWED as a scratch dir name (ctx7 --universal
+    // writes there regardless of the selected engine), but it must NOT
+    // appear as a target engine mirror.
+    expect(u.spec).not.toContain(".github/skills/");
+    // And it must mention the selected engine's skill dir.
+    expect(u.spec).toContain(".claude/skills/");
+    // The sync/verify commands are scoped to the selected engine only.
+    expect(u.spec).toContain("--engine claude");
+    expect(u.spec).not.toMatch(/--mode pointer\b(?!\s*--engine)/);
+  });
+
+  test("instruction-writer acceptance follows the selected engine (not 'all 3')", () => {
+    const claude = planAiInitUnits(profile, { engines: ["claude"] }).find(
+      (u) => u.name === "ai-init-instruction-writer",
+    );
+    if (!claude) throw new Error("instruction-writer not in plan");
+    expect(claude.acceptance).not.toContain("all 3");
+    expect(claude.acceptance).toContain("CLAUDE.md");
+    expect(claude.acceptance).not.toContain("AGENTS.md");
+  });
+
+  test("instruction-writer scope for claude is exactly ['CLAUDE.md']", () => {
+    const u = planAiInitUnits(profile, { engines: ["claude"] }).find(
+      (u) => u.name === "ai-init-instruction-writer",
+    );
+    if (!u) throw new Error("instruction-writer not in plan");
+    expect(u.scope).toEqual(["CLAUDE.md"]);
+  });
+
+  test("instruction-writer scope for codex is exactly ['AGENTS.md']", () => {
+    const u = planAiInitUnits(profile, { engines: ["codex"] }).find(
+      (u) => u.name === "ai-init-instruction-writer",
+    );
+    if (!u) throw new Error("instruction-writer not in plan");
+    expect(u.scope).toEqual(["AGENTS.md"]);
+  });
+
+  test("instruction-writer scope for copilot is ['AGENTS.md', '.github/copilot-instructions.md']", () => {
+    const u = planAiInitUnits(profile, { engines: ["copilot"] }).find(
+      (u) => u.name === "ai-init-instruction-writer",
+    );
+    if (!u) throw new Error("instruction-writer not in plan");
+    expect(u.scope).toEqual(["AGENTS.md", ".github/copilot-instructions.md"]);
+  });
+
+  test("instruction-writer reviewer does NOT pass on an unselected engine's file", () => {
+    // Select copilot only. Evidence cites CLAUDE.md (a claude-only file).
+    // The reviewer must reject — CLAUDE.md is out of scope.
+    const u = planAiInitUnits(profile, { engines: ["copilot"] }).find(
+      (candidate) => candidate.name === "ai-init-instruction-writer",
+    );
+    if (!u) throw new Error("instruction-writer not in plan");
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["edited CLAUDE.md"],
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toMatch(/AGENTS\.md|copilot-instructions/);
+  });
+
+  test("skill-curator reviewer uses unit.scope (not hardcoded strings)", () => {
+    // Default plan (no engines) — skill-curator scope is the static
+    // ADAPTER_SCOPE value. Evidence must cite one of those scope entries.
+    const u = planAiInitUnits(profile, {}).find(
+      (candidate) => candidate.name === "ai-init-skill-curator",
+    );
+    if (!u) throw new Error("skill-curator not in plan");
+    // Evidence cites SKILL_INDEX.md which is in the scope.
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["regenerated .vibeflow/SKILL_INDEX.md"],
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  test("skill-curator reviewer rejects evidence citing an out-of-scope path", () => {
+    // Replace the unit's scope with a narrow list, then verify the
+    // reviewer only accepts evidence matching the scope — not arbitrary
+    // skill paths.
+    const u = planAiInitUnits(profile, { engines: ["claude"] }).find(
+      (candidate) => candidate.name === "ai-init-skill-curator",
+    );
+    if (!u) throw new Error("skill-curator not in plan");
+    // The default skill-curator scope is [".vibeflow/skills/", ".vibeflow/SKILL_INDEX.md"].
+    // Evidence citing a path NOT in scope should fail the substring check.
+    const r = aiInitReviewer(u, {
+      status: "done",
+      confidence: 1,
+      evidence: ["installed .claude/skills/foo/SKILL.md"],
+    });
+    // .claude/skills/ is NOT in the skill-curator's scope (scope is
+    // .vibeflow/skills/). The reviewer must reject.
+    expect(r.pass).toBe(false);
+  });
+
+  test("empty intake.engines falls back to a single engine scope (not all engines)", () => {
+    // When intake.engines is empty/absent, selectedInstructionScope must
+    // fall back to INIT_DEFAULT_ENGINE (copilot), NOT the all-3 union.
+    const u = planAiInitUnits(profile, {}).find(
+      (candidate) => candidate.name === "ai-init-instruction-writer",
+    );
+    if (!u) throw new Error("instruction-writer not in plan");
+    // Copilot scope = AGENTS.md + .github/copilot-instructions.md.
+    // Must NOT include CLAUDE.md (the claude-only file).
+    expect(u.scope).toEqual(["AGENTS.md", ".github/copilot-instructions.md"]);
+    expect(u.scope).not.toContain("CLAUDE.md");
+  });
+});
+
+describe("buildPhaseSkillEnrichmentUnits — batched shape", () => {
+  // Issue 3: the previous shape was N units, one per phase. With a
+  // typical 3-phase workflow that meant 3 separate engine calls on
+  // the same prompt shape — wasteful (rate-limit) and slow (3x wall).
+  // The current shape is ONE unit covering all phases; the engine
+  // processes every phase section in a single turn. The reviewer
+  // must then gate on every per-phase skill file existing on disk.
+
+  const phases: AiInitIntake["workflowPhases"] = [
+    {
+      name: "detail design",
+      description: "frozen spec",
+      inputs: ["brain/docs/basic_designs/x.md"],
+      outputs: ["brain/docs/detail_designs/x.md"],
+    },
+    {
+      name: "implement",
+      description: "code it",
+      inputs: ["brain/docs/detail_designs/x.md"],
+      outputs: ["brain/app/src/main/java/x.java"],
+    },
+    {
+      name: "test",
+      description: "prove it",
+      inputs: ["brain/app/src/main/java/x.java"],
+      outputs: ["brain/app/src/test/java/xTest.java"],
+    },
+  ];
+
+  test("returns a single batched unit when 3 phases qualify", () => {
+    const units = buildPhaseSkillEnrichmentUnits(
+      { goal: "init", workflowPhases: phases },
+      ["copilot"],
+      (_e, slug) => `.vibeflow/skills/${slug}/SKILL.md`,
+    );
+    expect(units).toHaveLength(1);
+    expect(units[0]?.name).toBe("ai-init-skill-enrich-batch");
+  });
+
+  test("the batched unit's scope covers every per-phase skill path", () => {
+    const units = buildPhaseSkillEnrichmentUnits(
+      { goal: "init", workflowPhases: phases },
+      ["copilot"],
+      (_e, slug) => `.vibeflow/skills/${slug}/SKILL.md`,
+    );
+    const u = units[0];
+    if (!u) throw new Error("batched unit missing");
+    expect(u.scope).toEqual([
+      ".vibeflow/skills/detail-design/SKILL.md",
+      ".vibeflow/skills/implement/SKILL.md",
+      ".vibeflow/skills/test/SKILL.md",
+    ]);
+  });
+
+  test("the batched unit's spec includes a section per phase", () => {
+    const units = buildPhaseSkillEnrichmentUnits(
+      { goal: "init", workflowPhases: phases },
+      ["copilot"],
+      (_e, slug) => `.vibeflow/skills/${slug}/SKILL.md`,
+    );
+    const u = units[0];
+    if (!u) throw new Error("batched unit missing");
+    expect(u.spec).toContain("Phase 1: detail design");
+    expect(u.spec).toContain("Phase 2: implement");
+    expect(u.spec).toContain("Phase 3: test");
+  });
+
+  test("phases with no inputs or no outputs are filtered out", () => {
+    const mixed: AiInitIntake["workflowPhases"] = [
+      { name: "good", description: "ok", inputs: ["a.md"], outputs: ["b.md"] },
+      { name: "no-inputs", description: "ok", outputs: ["c.md"] },
+      { name: "no-outputs", description: "ok", inputs: ["d.md"] },
+    ];
+    const units = buildPhaseSkillEnrichmentUnits(
+      { goal: "init", workflowPhases: mixed },
+      ["copilot"],
+      (_e, slug) => `.vibeflow/skills/${slug}/SKILL.md`,
+    );
+    expect(units).toHaveLength(1);
+    const u = units[0];
+    if (!u) throw new Error("batched unit missing");
+    expect(u.scope).toEqual([".vibeflow/skills/good/SKILL.md"]);
+  });
+
+  test("returns [] when no phases qualify (no engine calls)", () => {
+    const units = buildPhaseSkillEnrichmentUnits(
+      { goal: "init", workflowPhases: [] },
+      ["copilot"],
+      (_e, slug) => `.vibeflow/skills/${slug}/SKILL.md`,
+    );
+    expect(units).toEqual([]);
+  });
+
+  test("returns [] when engines is empty", () => {
+    const units = buildPhaseSkillEnrichmentUnits(
+      { goal: "init", workflowPhases: phases },
+      [],
+      (_e, slug) => `.vibeflow/skills/${slug}/SKILL.md`,
+    );
+    expect(units).toEqual([]);
+  });
+});
+
+describe("aiInitReviewer — batched enrichment gate", () => {
+  // The batched unit is reviewed as if it were a single multi-path
+  // scope. Partial batches (some files written, some not) MUST fail
+  // so the user can re-run to retry — we never claim success on a
+  // half-finished enrichment.
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "vf-enrich-"));
+  });
+  afterEach(() => {
+    if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const skillPath = (slug: string): string => join(tmp, `${slug}.md`);
+
+  function makeBatchedUnit(slugs: string[]): AiInitUnit {
+    return {
+      name: "ai-init-skill-enrich-batch",
+      status: "pending",
+      confidence: 1,
+      scope: slugs.map(skillPath),
+      acceptance: "",
+      depends_on: [],
+      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      evidence: [],
+    };
+  }
+
+  test("passes when every per-phase skill file exists on disk", () => {
+    const slugs = ["detail-design", "implement", "test"];
+    for (const s of slugs) {
+      writeFileSync(skillPath(s), "# skill body\n");
+    }
+    const u = makeBatchedUnit(slugs);
+    const r = aiInitReviewer(
+      u,
+      {
+        status: "verifying",
+        confidence: 1,
+        evidence: slugs.map(skillPath),
+      },
+      tmp,
+    );
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails when even one per-phase skill file is missing", () => {
+    // Only write 2 of 3 files — partial batch.
+    writeFileSync(skillPath("detail-design"), "# skill body\n");
+    writeFileSync(skillPath("implement"), "# skill body\n");
+    // test is missing.
+    const slugs = ["detail-design", "implement", "test"];
+    const u = makeBatchedUnit(slugs);
+    const r = aiInitReviewer(
+      u,
+      {
+        status: "verifying",
+        confidence: 1,
+        evidence: slugs.map(skillPath),
+      },
+      tmp,
+    );
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("missing");
+    expect(r.reason).toContain("test");
   });
 });

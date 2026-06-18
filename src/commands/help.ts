@@ -72,11 +72,11 @@ ${c.bold("Examples:")}
 Generate the canonical context + engine instruction files and a workflow ledger.
 By default a hard creation gate refuses when no engine is ready; --dry-run previews
 offline (writes nothing). When --engine is omitted, init targets the centralized
-DEFAULT_ENGINE (currently "claude"; both init and orchestrate share this default).
+DEFAULT_ENGINE (currently "copilot"; both init and orchestrate share this default).
 AI enrichment is ON by default — pass --no-ai to skip the headless engine dispatch.
 
 ${c.bold("Options:")}
-  --engine <e>   generate for a single engine (default: claude)
+  --engine <e>   generate for a single engine (default: copilot)
   --no-ask       skip the intake questionnaire in TTY mode
   --no-ai        skip AI enrichment (deterministic context files only)
   --dry-run      read-only preview — print what would be written, change nothing
@@ -107,7 +107,7 @@ Dispatch every saved work unit (bounded-parallel), run an independent reviewer,
 record evidence, then evaluate the goal. Default mode is a read-only dry run.
 
 ${c.bold("Options:")}
-  --engine <e>        target engine (default: claude)
+  --engine <e>        target engine (default: copilot)
   --yes               real run — launch the engine (otherwise dry preview)
   --concurrency <n>   max units dispatched in parallel
   --risk <class>      docs | simple-code | feature | architecture | security | deploy
@@ -158,8 +158,8 @@ ${c.bold("Subcommands:")}
   search <term>              rank skills matching a task description
   resolve                    report which skill needs are satisfied locally vs. on demand
   validate                   validate skill format per Anthropic standard (errors, warnings)
-  sync [--mode pointer|full] sync .vibeflow/skills → engine mirrors
-  verify-sync                verify each engine mirror has every canonical skill
+  sync [--mode pointer|full] [--engine <name>] sync .vibeflow/skills → engine mirror (--engine can repeat; default copilot)
+  verify-sync                verify engine mirror has every canonical skill (defaults to selected engine)
   import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
 
 ${c.bold("Examples:")}

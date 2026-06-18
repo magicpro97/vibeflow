@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -75,6 +76,59 @@ export interface GenerateArtifactsInject {
   onWarn?: (msg: string) => void;
 }
 
+// ── Common template skill copy ─────────────────────────────────────────────
+
+/**
+ * Resolve the path to the common template skill for a given phase name.
+ * The templates live at `<package>/templates/skills/<phase>/SKILL.md` and
+ * ship with the package (see `package.json` `files[]`).
+ *
+ * The resolution uses `import.meta.url` so it works from both source
+ * (Bun, `dist/` after build) and the published package — Bun builds with
+ * `--target=node` rewrite `import.meta.url` to a `file://` URL, and the
+ * package keeps `templates/skills/` next to `dist/cli.js`.
+ */
+function commonTemplateSkillPath(phaseName: string): string {
+  const url = new URL(`../templates/skills/${phaseName}/SKILL.md`, import.meta.url);
+  return url.pathname;
+}
+
+/**
+ * Copy the bundled common skill for a phase from `templates/skills/<phase>/SKILL.md`
+ * into each engine's skill root. Mirrors `copySkillCreator` (DI for `exists`
+ * + `onWarn` to keep the missing-source path testable). The phase name is
+ * used as the destination skill directory name (matches the phase slug, so
+ * `generateWorkflowArtifacts` writes the same final path whether it
+ * renders a stub or copies a common skill).
+ *
+ * Returns the list of relative paths written (one per engine).
+ */
+export function copyCommonTemplateSkill(
+  phaseName: string,
+  base: string,
+  engines: AgentEngine[],
+  inject: { exists?: (p: string) => boolean; onWarn?: (msg: string) => void } = {},
+): string[] {
+  const exists = inject.exists ?? existsSync;
+  const onWarn = inject.onWarn ?? ((msg) => console.warn(msg));
+  const written: string[] = [];
+  const srcPath = commonTemplateSkillPath(phaseName);
+  if (!exists(srcPath)) {
+    onWarn(
+      `vibeflow: common template skill not found at ${srcPath} — falling back to stub for phase "${phaseName}".`,
+    );
+    return written;
+  }
+  for (const engine of engines) {
+    const dstRelPath = skillFilePath(engine, phaseName);
+    const dstDir = join(base, dirname(dstRelPath));
+    mkdirSync(dstDir, { recursive: true });
+    copyFileSync(srcPath, join(base, dstRelPath));
+    written.push(dstRelPath);
+  }
+  return written;
+}
+
 // ── Phase helpers ──────────────────────────────────────────────────────────
 
 function phaseSlug(phase: WorkflowPhase): string {
@@ -82,6 +136,18 @@ function phaseSlug(phase: WorkflowPhase): string {
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * True when the user supplied concrete input AND output paths for the
+ * phase. When true, the AI enrichment (Phase 2) is expected to read the
+ * declared files and generate a project-specific skill; when false, a
+ * generic common template is copied instead.
+ */
+function hasUserDeclaredIO(phase: WorkflowPhase): boolean {
+  const inputs = phase.inputs?.filter((s) => s.trim().length > 0) ?? [];
+  const outputs = phase.outputs?.filter((s) => s.trim().length > 0) ?? [];
+  return inputs.length > 0 && outputs.length > 0;
 }
 
 function phaseAgentName(phase: WorkflowPhase): string {
@@ -409,13 +475,20 @@ export function buildEnrichmentPrompt(
     `1. Read ${orchestratorFiles.map((f) => `\`${f}\``).join(", ")} to understand the workflow structure.`,
     `2. Read ${engines.map((e) => `\`${skillFilePath(e, "skill-creator")}\``).join(", ")} and apply the skill-creator methodology.`,
     "3. For each phase skill file under the selected engine skill root (excluding skill-creator/):",
-    "   - Add detailed, project-specific execution steps",
-    "   - Include concrete tool commands and file paths",
-    "   - Add evidence-gathering guidance (what output proves completion)",
-    "   - Follow the SKILL.md anatomy from skill-creator (name, description, anatomy, steps)",
+    "   - Treat the phase's declared inputs and outputs as STRUCTURAL EXAMPLES, not as content to copy.",
+    "   - Extract the TRANSFORMATION PATTERN (input structure → output structure).",
+    "   - Rewrite the skill body as a REUSABLE TEMPLATE that the phase agent can",
+    "     apply to ANY task of the same phase type, not just the one being processed now.",
+    "   - Use placeholders (`{{...}}`) for project/task-specific values.",
+    "   - Do NOT embed concrete requirement IDs (BR-001, E-014, AC-032, etc.) from the sample task.",
+    "   - Do NOT hardcode file paths from the current project into the skill body.",
+    "   - Do describe the structural pattern, the transformation rules, and the verification approach.",
+    "   - Include an Anti-Patterns section that lists common mistakes to avoid.",
+    "   - The skill should remain valid for the NEXT task of the same phase type.",
+    "4. Project context (build/test/lint commands, conventions, stack) goes into the instruction files and PROJECT_CONTEXT.md, not into the phase skill body.",
     ...(agentDirs.length === 1
-      ? [`4. For each phase agent file under \`${agentDirs[0]}/\`:`]
-      : ["4. For each phase agent file:"]
+      ? [`5. For each phase agent file under \`${agentDirs[0]}/\`:`]
+      : ["5. For each phase agent file:"]
     ).map(
       (l) =>
         `${l}
@@ -423,9 +496,9 @@ export function buildEnrichmentPrompt(
    - Add relevant tool usage patterns
    - Reference the associated skill file`,
     ),
-    "5. Update the workflow orchestrator agent if needed to reflect project-specific phase details.",
-    "6. Do NOT remove existing content — only enrich and expand.",
-    "7. Record evidence of changes in your output.",
+    "6. Update the workflow orchestrator agent if needed to reflect project-specific phase details.",
+    "7. Do NOT remove existing content — only enrich and expand.",
+    "8. Record evidence of changes in your output.",
     "",
     "## Phases",
     "",
@@ -494,15 +567,68 @@ export function generateWorkflowArtifacts(
     }
   }
 
-  // 3. Per-phase skill files
-  for (const engine of engines) {
-    for (const phase of phases) {
-      const slug = phaseSlug(phase);
-      const content = renderPhaseSkill(phase, projectName);
-      const relPath = skillFilePath(engine, slug);
-      mkdirSync(join(base, skillDirPath(engine, slug)), { recursive: true });
-      writeFileSync(join(base, relPath), content);
-      written.push(relPath);
+  // 3. Per-phase skill files.
+  //    When the user declared concrete input+output paths the skill stub
+  //    carries those paths so Phase 2 AI reads them and enriches with
+  //    actual file content.  When paths are missing a common template
+  //    skill (shipped under `templates/skills/<phase-name>/`) is copied
+  //    instead.  Either way the resulting file sits at the same path.
+  //
+  //    Each phase skill is written in TWO places:
+  //    1. Canonical store: `.vibeflow/skills/<slug>/SKILL.md` — source of
+  //       truth, owned by VibeFlow, validated by `vf skills validate`.
+  //    2. Engine mirror: `<engine-skill-root>/<slug>/SKILL.md` — what the
+  //       engine reads at runtime. For copilot = `.github/skills/`.
+  //
+  //    Writing only to the mirror (legacy behaviour) caused the AI
+  //    skill-curator unit in Phase 2 to mistake the canonical location
+  //    for "stale empty dirs" and delete the phase-skill scaffolding
+  //    from `.vibeflow/skills/`. Both writes are needed so the
+  //    canonical store and the engine mirror stay in lockstep.
+  for (const phase of phases) {
+    const slug = phaseSlug(phase);
+    // Render the content once (stub or common template) and write to
+    // both canonical + each engine mirror.
+    let content: string;
+    if (hasUserDeclaredIO(phase)) {
+      // Phase with concrete paths → render stub for AI enrichment.
+      content = renderPhaseSkill(phase, projectName);
+    } else {
+      // No concrete paths → copy the bundled common template into a
+      // temp buffer (we read it from disk so we can also write to the
+      // canonical store, not just the engine mirror).
+      const templatePath = commonTemplateSkillPath(slug);
+      if (existsSync(templatePath)) {
+        content = readFileSync(templatePath, "utf8");
+      } else {
+        // Template not found (e.g. custom phase name) → fall back to
+        // the generic stub. emit the same warning once per phase.
+        onWarn(
+          `vibeflow: no common template for phase "${phase.name}" (slug: ${slug}) — rendering generic stub.`,
+        );
+        content = renderPhaseSkill(phase, projectName);
+      }
+    }
+
+    // Write to canonical store (single source of truth). This must
+    // happen BEFORE the engine mirror so a single `vf skills sync`
+    // can later pick up the canonical copy and mirror it elsewhere.
+    const canonicalDir = join(base, CTX_DIR, "skills", slug);
+    const canonicalPath = join(canonicalDir, "SKILL.md");
+    mkdirSync(canonicalDir, { recursive: true });
+    writeFileSync(canonicalPath, content);
+    written.push(`${CTX_DIR}/skills/${slug}/SKILL.md`);
+
+    // Mirror to each engine's skill root so the engine reads it at
+    // runtime. Same content — a thin pointer would also work, but a
+    // full copy means the mirror is usable even if the canonical is
+    // temporarily missing (e.g. during re-init).
+    for (const engine of engines) {
+      const mirrorDir = join(base, skillDirPath(engine, slug));
+      const mirrorPath = skillFilePath(engine, slug);
+      mkdirSync(mirrorDir, { recursive: true });
+      writeFileSync(join(base, mirrorPath), content);
+      written.push(mirrorPath);
     }
   }
 
@@ -519,4 +645,51 @@ export function generateWorkflowArtifacts(
   }
 
   return written;
+}
+
+/**
+ * Remove per-engine skill + agent directories that belong to engines the
+ * user did NOT select. Prevents the engine-mirror fan-out bug where:
+ * - Phase 1.5 deterministic code (pre-fix) wrote to all engine mirrors
+ * - Phase 2 AI enrichment runs `ctx7 skills install` which writes to
+ *   `.agents/skills/` (universal) regardless of the selected engine
+ *
+ * Uses `ENGINE_CONFIGS` as the single source of truth for which paths
+ * to prune. Only removes the known engine skillRoot + its sibling
+ * `agents/` subdirectory. Leaves other contents (MCP configs, hook
+ * configs, user-authored files) untouched.
+ *
+ * Idempotent: missing directories are silently skipped.
+ *
+ * @returns relative paths of pruned directories (for logging).
+ */
+export function pruneUnselectedEngineFolders(base: string, selectedEngine: AgentEngine): string[] {
+  const removed: string[] = [];
+  for (const [engine, cfg] of Object.entries(ENGINE_CONFIGS) as Array<
+    [AgentEngine, EngineConfig]
+  >) {
+    if (engine === selectedEngine) continue;
+
+    // Mirror root: e.g. .claude/skills, .agents/skills
+    const skillRoot = join(base, cfg.skillRoot);
+    if (existsSync(skillRoot)) {
+      try {
+        rmSync(skillRoot, { recursive: true, force: true });
+        removed.push(cfg.skillRoot);
+      } catch {
+        // best-effort
+      }
+    }
+    // Agent dir: e.g. .claude/agents, .github/agents
+    const agentDir = join(base, dirname(cfg.skillRoot), "agents");
+    if (existsSync(agentDir)) {
+      try {
+        rmSync(agentDir, { recursive: true, force: true });
+        removed.push(join(dirname(cfg.skillRoot), "agents"));
+      } catch {
+        // best-effort
+      }
+    }
+  }
+  return removed;
 }

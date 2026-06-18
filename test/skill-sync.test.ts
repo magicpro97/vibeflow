@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("syncSkillMirrors pointer mode (default)", () => {
-  test("writes a small pointer SKILL.md to every engine mirror", () => {
+  test("writes a small pointer SKILL.md to the default engine mirror (copilot)", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-"));
     dirs.push(repo);
     const src = join(repo, ".vibeflow", "skills", "project-fit-skill");
@@ -26,14 +26,17 @@ describe("syncSkillMirrors pointer mode (default)", () => {
 
     const result = syncSkillMirrors(repo, { mode: "pointer" });
     expect(result.ok).toBe(true);
-    for (const root of [".claude/skills", ".agents/skills", ".github/skills"]) {
-      const pointer = readFileSync(join(repo, root, "project-fit-skill", "SKILL.md"), "utf8");
-      expect(pointer).toContain(".vibeflow/skills/project-fit-skill/SKILL.md");
-      // Pointer mode must NOT copy references/scripts
-      expect(existsSync(join(repo, root, "project-fit-skill", "references", "domain.md"))).toBe(
-        false,
-      );
-    }
+    // Default is copilot only — must NOT touch .claude/ or .agents/ skill dirs.
+    const pointer = readFileSync(
+      join(repo, ".github", "skills", "project-fit-skill", "SKILL.md"),
+      "utf8",
+    );
+    expect(pointer).toContain(".vibeflow/skills/project-fit-skill/SKILL.md");
+    expect(
+      existsSync(join(repo, ".github", "skills", "project-fit-skill", "references", "domain.md")),
+    ).toBe(false);
+    expect(existsSync(join(repo, ".claude", "skills", "project-fit-skill"))).toBe(false);
+    expect(existsSync(join(repo, ".agents", "skills", "project-fit-skill"))).toBe(false);
   });
 
   test("does not write mirrors if canonical skill fails validation", () => {
@@ -103,9 +106,10 @@ describe("syncSkillMirrors full mode", () => {
     writeFileSync(join(src, "references", "domain.md"), "domain notes");
     const result = syncSkillMirrors(repo, { mode: "full" });
     expect(result.ok).toBe(true);
+    // Default is copilot mirror only
     expect(
       readFileSync(
-        join(repo, ".claude", "skills", "project-fit-skill", "references", "domain.md"),
+        join(repo, ".github", "skills", "project-fit-skill", "references", "domain.md"),
         "utf8",
       ),
     ).toBe("domain notes");

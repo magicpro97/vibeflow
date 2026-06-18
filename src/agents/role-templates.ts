@@ -119,8 +119,8 @@ that keep skills engine-portable.
 - Author a new skill: \`vf skills init <name>\`, then fill SKILL.md.
 - Add triggers so \`vf skills search <task>\` matches the new skill.
 - Validate the skill store: \`vf skills validate\`.
-- Sync canonical skills to engine mirrors: \`vf skills sync --mode pointer|full\`.
-- Verify the mirror: \`vf skills verify-sync\`.
+- Sync canonical skills to engine mirrors: \`vf skills sync --mode pointer|full --engine <name>\` (replace \`<name>\` with your engine name — copilot, claude, or codex).
+- Verify the mirror: \`vf skills verify-sync --engine <name>\`.
 - Import an external skill: \`vf skills import <dir>\`.
 
 ## Conventions

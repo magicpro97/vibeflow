@@ -58,6 +58,13 @@ export interface AiInitIntake {
    *  user declined/failed login or init is non-interactive, so specs must
    *  use the documented fallback path without prompting again. */
   ctx7Authenticated?: boolean;
+  /** P1-10: pre-resolved ctx7 repo list, formatted as a hint block
+   *  (see `formatResolvedReposHint` in `discovery/ctx7-resolve.ts`).
+   *  Injected into the skill-curator spec so the engine never has to
+   *  try-fail candidate repo names one at a time. Empty/undefined
+   *  means the CLI did not run the pre-check; the engine should
+   *  fall back to its existing try-fail behaviour. */
+  ctx7ResolvedReposHint?: string;
 }
 
 /** A single user-declared workflow phase. Mirrors the structure the
@@ -98,6 +105,12 @@ export interface AiInitUnit extends WorkUnit {
   /** Acceptance signal the reviewer checks (e.g. "all 4 instruction files
    *  carry a fresh `vibeflow:start` block"). */
   acceptance: string;
+  /** Names of work units this unit depends on. The orchestrator uses
+   *  `depends_on` to schedule units into parallel waves: units in the
+   *  same wave (no transitive dependencies) run concurrently; waves run
+   *  sequentially. Empty array means this unit has no dependencies and
+   *  belongs to wave 0. */
+  depends_on: string[];
 }
 
 /** Stable IDs for the Tier 1 (adapter) init units. The orchestrator
@@ -116,6 +129,22 @@ export const AI_INIT_ADAPTER_NAMES = [
   "ai-init-quickstart-writer",
 ] as const;
 export type AiInitAdapterName = (typeof AI_INIT_ADAPTER_NAMES)[number];
+
+/**
+ * P0-4: the four "finisher" adapter units produce optional docs/files
+ * (SETTINGS.json tools flag, WORKFLOW_POLICY.md, WORKFLOW_STATE.json,
+ * QUICKSTART.md). When quota is low they are skipped in order of
+ * lowest-value-first to preserve the core skill-curator + analyzer +
+ * instruction-writer + context-updater path. Phase-skill enrichment
+ * is NEVER in this set — those are the reusable templates that
+ * downstream workflows depend on, and skipping them would defeat
+ * the whole point of `vf init`. */
+export const AI_INIT_FINISHER_NAMES: ReadonlySet<AiInitAdapterName> = new Set([
+  "ai-init-tool-configurator",
+  "ai-init-workflow-policy-writer",
+  "ai-init-workflow-state-writer",
+  "ai-init-quickstart-writer",
+] as const);
 
 /** Back-compat export: a flat list of the original 4 unit names. New
  *  code should reference `AI_INIT_ADAPTER_NAMES` (8 entries). Kept so
@@ -152,13 +181,39 @@ const ADAPTER_OWNER: Record<AiInitAdapterName, RoleName> = {
  *  artifact so two units never try to write the same path. */
 const ADAPTER_SCOPE: Record<AiInitAdapterName, string[]> = {
   "ai-init-analyzer": [".vibeflow/ai-context/stack-evidence.md"],
-  "ai-init-instruction-writer": ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md"],
+  "ai-init-instruction-writer": ["AGENTS.md", ".github/copilot-instructions.md"],
   "ai-init-skill-curator": [".vibeflow/skills/", ".vibeflow/SKILL_INDEX.md"],
   "ai-init-context-updater": [".vibeflow/PROJECT_CONTEXT.md"],
   "ai-init-tool-configurator": [".vibeflow/SETTINGS.json"],
   "ai-init-workflow-policy-writer": [".vibeflow/WORKFLOW_POLICY.md"],
   "ai-init-workflow-state-writer": [".vibeflow/WORKFLOW_STATE.json"],
   "ai-init-quickstart-writer": ["QUICKSTART.md"],
+};
+
+/** Per-adapter dependency map for wave scheduling.
+ *
+ *  Wave 0 (no deps): analyzer, instruction-writer, tool-configurator
+ *  Wave 1 (waits for analyzer): skill-curator, context-updater
+ *    — skill-curator needs stack-evidence.md to match whitelist
+ *    — context-updater needs stack-evidence.md + project-profile.json
+ *  Wave 2 (waits for wave 1): policy-writer, state-writer, quickstart-writer
+ *    — policy-writer needs skill list + context to be in sync
+ *    — state-writer needs skill curator's work for the work_units block
+ *    — quickstart-writer needs project context to render
+ */
+const ADAPTER_DEPENDS_ON: Record<AiInitAdapterName, string[]> = {
+  "ai-init-analyzer": [],
+  "ai-init-instruction-writer": [],
+  "ai-init-tool-configurator": [],
+  "ai-init-skill-curator": ["ai-init-analyzer"],
+  "ai-init-context-updater": ["ai-init-analyzer"],
+  "ai-init-workflow-policy-writer": [
+    "ai-init-analyzer",
+    "ai-init-skill-curator",
+    "ai-init-context-updater",
+  ],
+  "ai-init-workflow-state-writer": ["ai-init-analyzer", "ai-init-skill-curator"],
+  "ai-init-quickstart-writer": ["ai-init-analyzer", "ai-init-context-updater"],
 };
 
 export const ENGINE_INSTRUCTION_SCOPE: Record<Engine, string[]> = {
@@ -202,22 +257,38 @@ function selectedEngines(intake: AiInitIntake): Engine[] {
 function skillCuratorDescription(intake: AiInitIntake): string {
   const engines = selectedEngines(intake);
   const skillDirs = engines.map((engine) => ENGINE_SKILL_DIR[engine]);
-  const syncCmd =
-    engines.length === 1
-      ? `vf skills sync --mode pointer --engine ${engines[0]}`
-      : "vf skills sync --mode pointer";
-  const verifyCmd =
-    engines.length === 1 ? `vf skills verify-sync --engine ${engines[0]}` : "vf skills verify-sync";
+  const syncCmd = engines.map((e) => `vf skills sync --mode pointer --engine ${e}`).join(" && ");
+  const verifyCmd = engines.map((e) => `vf skills verify-sync --engine ${e}`).join(" && ");
+  // ctx7 skills install does NOT support a `--copilot` flag (its
+  // location flags are --claude, --universal, --antigravity, --cursor,
+  // --all-agents). Since the user selected engine=copilot, the only
+  // ctx7 location flag that targets codex is `--universal` (.agents/skills/).
+  // Use that as a SCRATCH location, then import to canonical and sync to
+  // the copilot mirror so .github/skills/ is the only engine folder left.
+  const ctx7ScratchFlag = "--universal";
+  const ctx7ScratchDir = ".agents/skills";
+  const importCmd = `vf skills import ${ctx7ScratchDir}/<skill-name>`;
   const authInstruction =
     intake.ctx7Authenticated === true
-      ? "ctx7 is already authenticated from the CLI pre-check. Use `npx ctx7 library`, `npx ctx7 docs`, and headless `npx ctx7 skills install --yes --all --claude` when useful."
+      ? `ctx7 is already authenticated from the CLI pre-check. ` +
+        `Use \`npx ctx7 library\`, \`npx ctx7 docs\`, and \`npx ctx7 skills install --yes --all ${ctx7ScratchFlag} <repo>\` ` +
+        `to populate the scratch mirror at ${ctx7ScratchDir}/. ` +
+        `ctx7 has NO --copilot flag — do not invent one. After ctx7 writes, ` +
+        `run \`${importCmd}\` to canonicalize, then sync to the selected engine mirror.`
       : "ctx7 is NOT authenticated or the user chose not to login. Do not run `npx ctx7 login` inside the engine. Use fallback discovery from `.vibeflow/ai-context/stack-evidence.md`, bundled skill standards, and any available docs; author fallback skills with `status: experimental` and cite the fallback source.";
 
   return [
     authInstruction,
+    intake.ctx7ResolvedReposHint
+      ? `\n\n${intake.ctx7ResolvedReposHint}\n\n` +
+        "When the hint above lists verified repos, USE THOSE and only those. " +
+        "Do NOT spend turns probing other names. The CLI has already filtered them."
+      : "",
     "Discover and install skills for the detected stack. Project-fit skills live under `.vibeflow/skills/<name>/SKILL.md` and must follow `.vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md`.",
     `After validating canonical skills, run \`${syncCmd}\` and \`${verifyCmd}\`.`,
     `Only these selected engine skill mirror(s) are in scope: ${skillDirs.join(", ")}. Do not create or sync skill directories for unselected engines.`,
+    `If ctx7 writes to ${ctx7ScratchDir}/, that is a SCRATCH location for codex. You MUST canonicalize via \`vf skills import\` then sync via \`vf skills sync --engine ${engines[0]}\`. The scratch directory will be pruned after Phase 2 completes.`,
+    "CRITICAL: Always use the --engine flag on `vf skills sync` and `vf skills verify-sync` — without it they default to copilot but the prompt must remain explicit.",
     "Verify with `vf skills validate` and regenerate `.vibeflow/SKILL_INDEX.md`.",
   ].join(" ");
 }
@@ -229,7 +300,7 @@ const ADAPTER_ACCEPTANCE: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "stack-evidence.md written, ProjectProfile summary backed by >=3 manifest/dependency citations",
   "ai-init-instruction-writer":
-    "all 3 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) carry a fresh vibeflow:start block",
+    "engine-scoped instruction file(s) carry a fresh vibeflow:start block (no unselected engine files)",
   "ai-init-skill-curator":
     ">=1 skill installed under .vibeflow/skills/, SKILL_INDEX.md regenerated, ctx7 (or fallback) cited as source",
   "ai-init-context-updater":
@@ -241,7 +312,7 @@ const ADAPTER_ACCEPTANCE: Record<AiInitAdapterName, string> = {
   "ai-init-workflow-state-writer":
     ".vibeflow/WORKFLOW_STATE.json carries a `work_units` block with one unit per declared WorkflowPhase (name, status=pending, confidence=0, scope, owner_agent, skills_injected, skills_required, gates, resources), and `success_criteria` folds in each phase's `dod`",
   "ai-init-quickstart-writer":
-    "QUICKSTART.md rendered from src/templates/QUICKSTART.skeleton.md with placeholders filled from stack-evidence.md, all human-curated sections outside the BEGIN/END markers preserved",
+    "QUICKSTART.md rendered from templates/QUICKSTART.skeleton.md with placeholders filled from stack-evidence.md, all human-curated sections outside the BEGIN/END markers preserved",
 };
 
 /** Per-adapter description (the spec the engine receives when dispatched). */
@@ -249,9 +320,9 @@ const ADAPTER_DESCRIPTION: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "Investigate the project until confidence = 1.0 on every finding (build/test/lint commands, package manager, language + framework versions, CI). Read package.json, tsconfig/biome config, source tree, sample source files (>=5 across modules), and >=2 test files. Review and update .vibeflow/ai-context/stack-evidence.md with file/manifest evidence per component. Do not guess.",
   "ai-init-instruction-writer":
-    "Update all 3 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) for this project. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.",
+    "Update only the engine-scoped instruction file(s) for this project. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.",
   "ai-init-skill-curator":
-    "Discover and install skills for the detected stack via `npx ctx7 skills install --yes --all --claude` (headless), or fall back to manual SKILL.md authored from `ctx7 docs`. Follow the SKILL.md format from .vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md. Copy to .claude/skills/, .agents/skills/, .github/skills/. Verify with `vf skills validate` and regenerate .vibeflow/SKILL_INDEX.md. Project-fit skills live under .vibeflow/skills/.",
+    "Discover and install skills for the detected stack via `npx ctx7 skills install` (headless), or fall back to manual SKILL.md authored from `ctx7 docs`. Follow the SKILL.md format from .vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md. Copy to the engine-scoped skill directory only. Verify with `vf skills validate` and regenerate .vibeflow/SKILL_INDEX.md. Project-fit skills live under .vibeflow/skills/.",
   "ai-init-context-updater":
     "Update .vibeflow/PROJECT_CONTEXT.md with the detected stack (evidence-backed), architecture insights, code conventions, and the active workflow. Preserve any human-authored sections outside the generated block. This is the canonical source of truth for all subsequent `vf init` regenerations.",
   "ai-init-tool-configurator":
@@ -261,7 +332,7 @@ const ADAPTER_DESCRIPTION: Record<AiInitAdapterName, string> = {
   "ai-init-workflow-state-writer":
     "Update .vibeflow/WORKFLOW_STATE.json to declare one work unit per user-supplied WorkflowPhase (or omit `work_units` when the user supplied no phases). Each phase unit has: name (matching the phase), status=pending, confidence=0, scope (one entry per declared output), owner_agent (resolved from phase.ownerHint via fuzzy match against detected roles, defaulting to dispatch-runner), skills_injected + skills_required (resolved from the role's known skill list), gates=pending, resources=zero. Fold each phase.dod into `success_criteria` (dedup, preserve order).",
   "ai-init-quickstart-writer":
-    "Render QUICKSTART.md at the project root from the engine-agnostic skeleton at src/templates/QUICKSTART.skeleton.md (relative to the vibeflow repo, or the installed package's templates dir). Steps: (1) read the skeleton; (2) fill every `{{PLACEHOLDER}}` using evidence from .vibeflow/ai-context/stack-evidence.md and the live project (build/test/lint commands, package manager, key file paths, detected stack); (3) preserve any existing QUICKSTART.md content outside the `<!-- BEGIN/END -->` machine-managed regions verbatim; (4) write the rendered file. Do NOT hardcode engine-specific or stack-specific content into the skeleton — placeholders are filled at render time. Verify the result has no unfilled `{{...}}` tokens before closing.",
+    "Render QUICKSTART.md at the project root from the engine-agnostic skeleton at templates/QUICKSTART.skeleton.md (relative to the vibeflow repo, or the installed package's templates dir). Steps: (1) read the skeleton; (2) fill every `{{PLACEHOLDER}}` using evidence from .vibeflow/ai-context/stack-evidence.md and the live project (build/test/lint commands, package manager, key file paths, detected stack); (3) preserve any existing QUICKSTART.md content outside the `<!-- BEGIN/END -->` machine-managed regions verbatim; (4) write the rendered file. Do NOT hardcode engine-specific or stack-specific content into the skeleton — placeholders are filled at render time. Verify the result has no unfilled `{{...}}` tokens before closing.",
 };
 
 /** Skills wiring per role. A small built-in catalogue that the planner
@@ -425,11 +496,240 @@ function buildPhaseUnits(intake: AiInitIntake, detectedRoles: RoleName[]): AiIni
       acceptance,
       skills_injected: [...roleSkills.injected],
       skills_required: [...roleSkills.required],
+      depends_on: [],
       gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
       resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       evidence: [],
     };
   });
+}
+
+/**
+ * Build Phase-2 phase-skill enrichment units. One unit per phase that
+ * has BOTH concrete inputs AND concrete outputs. Each unit asks the
+ * engine to read the declared input files as STRUCTURAL EXAMPLES,
+ * apply the skill-creator methodology, and enrich the per-phase skill
+ * file (already generated by Phase 1.5) with a REUSABLE TEMPLATE that
+ * captures the transformation pattern (input structure → output
+ * structure), NOT the task-specific content.
+ *
+ * The resulting skill body MUST remain valid for a future task of the
+ * same phase type. It MUST NOT embed concrete requirement IDs (e.g.
+ * BR-001, AC-032, E-014) or hardcode file paths from the current
+ * project. Project/task-specific values are expressed as placeholders
+ * (`{{...}}`) that the dispatch layer fills at execution time.
+ *
+ * These units are dispatched in parallel with the 8 adapter units
+ * inside `runAiInitWorkflow`. They do NOT participate in the long
+ * orchestrator loop — they run a single AI pass per phase.
+ *
+ * Phases without input/output paths are skipped here: Phase 1.5 already
+ * copied the common template skill for them, and there is nothing
+ * project-specific to enrich against.
+ *
+ * One engine call per `vf init` run: previously this returned N
+ * parallel units (one per phase), each spawning its own engine call.
+ * With the typical 3-phase workflow that meant 3 separate engine
+ * invocations on the same prompt shape — burning rate-limit budget and
+ * ballooning wall-clock. The batched unit below packages all phases
+ * into a single spec, the engine processes them in one turn, and the
+ * reviewer gates on every per-phase skill file existing on disk.
+ */
+export function buildPhaseSkillEnrichmentUnits(
+  intake: AiInitIntake,
+  engines: Engine[],
+  skillPathFor: (engine: Engine, slug: string) => string,
+): AiInitUnit[] {
+  const phases = (intake.workflowPhases ?? []).filter((phase) => {
+    const inputs = (phase.inputs ?? []).map((s) => s.trim()).filter(Boolean);
+    const outputs = (phase.outputs ?? []).map((s) => s.trim()).filter(Boolean);
+    return inputs.length > 0 && outputs.length > 0;
+  });
+  if (phases.length === 0 || engines.length === 0) return [];
+  const target = engines[0] as Engine;
+
+  // Build the per-phase spec sections once and stitch them into one
+  // master spec. The engine sees the same per-phase content as before
+  // (it just has to walk more sections in one turn), so the per-phase
+  // output quality is identical.
+  const phaseSections = phases
+    .map((phase, idx) => {
+      const slug = phaseSlug(phase.name);
+      const inputs = (phase.inputs ?? []).map((s) => s.trim()).filter(Boolean);
+      const outputs = (phase.outputs ?? []).map((s) => s.trim()).filter(Boolean);
+      const skillPath = skillPathFor(target, slug);
+      return [
+        `### Phase ${idx + 1}: ${phase.name}`,
+        "",
+        `Slug: ${slug}`,
+        phase.description ? `Description: ${phase.description}` : "",
+        `Skill file to enrich: \`${skillPath}\``,
+        `Inputs (read these to understand the PROJECT STRUCTURE, not to copy): ${inputs.join(", ")}`,
+        `Outputs (do NOT touch — evidence paths for the next phase): ${outputs.join(", ")}`,
+        phase.template ? `Template: ${phase.template}` : "",
+        phase.dod ? `Definition of done: ${phase.dod}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+
+  const skillPaths = phases.map((p) => skillPathFor(target, phaseSlug(p.name)));
+  const unitName = "ai-init-skill-enrich-batch";
+  const spec = [
+    `## ${unitName}`,
+    "",
+    `Enrich ${phases.length} phase skill template(s) in a single pass. ` +
+      `Each section below is one phase — process them sequentially within this turn.`,
+    "",
+    phaseSections,
+    "",
+    "For EACH phase above:",
+    "1. Read every input file to identify the STRUCTURE and CONVENTIONS.",
+    "2. Read the current skill file (the TEMPLATE SKELETON).",
+    "3. Extract the TRANSFORMATION PATTERN from input→output (not the specific content).",
+    "4. Rewrite the skill file in place as a REUSABLE TEMPLATE:",
+    "   - Use placeholders like `{{project.name}}`, `{{task.inputs}}`, `{{task.business_rules}}`",
+    "   - Do NOT embed task-specific requirement IDs (e.g. BR-001, AC-032, E-014)",
+    "   - Do NOT hardcode file paths from the current project",
+    "   - Do NOT copy business rules or specific data shapes from the samples",
+    "   - Do describe the STRUCTURE that the input MUST follow",
+    "   - Do describe what TRANSFORMATIONS to apply",
+    "   - Do describe how to VERIFY the output is correct",
+    "   - Include an Anti-Patterns section listing common mistakes",
+    "5. The skill body MUST be reusable for a DIFFERENT task of the same phase type.",
+    "6. Keep the frontmatter (name, description).",
+    "7. Do NOT touch the output files — they belong to the next phase.",
+    "8. Return JSON: {status: 'verifying'|'blocked', confidence, evidence: [skillPath, ...]}.",
+  ].join("\n");
+
+  return [
+    {
+      name: unitName,
+      status: "pending",
+      confidence: 0,
+      owner_agent: "skill-author",
+      spec,
+      scope: skillPaths,
+      acceptance:
+        `all ${skillPaths.length} phase skill file(s) exist and are non-empty: ` +
+        skillPaths.join(", "),
+      skills_injected: ["vf-skills", "skill-creator"],
+      skills_required: ["ctx7:skill-authoring"],
+      depends_on: ["ai-init-analyzer"],
+      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      evidence: [],
+    },
+  ];
+}
+
+/**
+ * P1-7: build a single batched unit that combines the four optional
+ * finisher adapters (tool-configurator, workflow-policy-writer,
+ * workflow-state-writer, quickstart-writer) into one engine call.
+ *
+ * The four finishers are small (each touches 1-2 short files) and
+ * were the most likely victims of wave-2 rate-limit in production
+ * logs (4 separate engine calls × ~100-200k tokens each = 400-800k
+ * tokens after the core 4 + enrichment are done). Batching them
+ * into one call cuts that to a single ~200-300k token call, with
+ * the engine processing all four sections in one turn (the sections
+ * are short enough to fit comfortably in one context window).
+ *
+ * The unit's scope covers all four finisher output paths, and the
+ * reviewer gates on every one of them existing on disk (same
+ * all-or-nothing pattern as the phase-skill enrichment batch — a
+ * partial batch is still a fail).
+ *
+ * The caller decides whether to use the batched shape or the
+ * original 4 separate units. CLI init uses the batched shape by
+ * default (one engine call is cheaper than four); test fixtures
+ * and ad-hoc callers can opt back into the per-finisher shape.
+ */
+export function buildFinisherBatchUnit(
+  profile: ProjectProfile,
+  intake: AiInitIntake,
+  detectedRoles: RoleName[],
+): AiInitUnit {
+  const goal = intake.goal?.trim() || "Set up VibeFlow AI guidance for this repository";
+  const engines = (intake.engines ?? []).join(", ") || "(default: copilot)";
+  const roleList = detectedRoles.length ? detectedRoles.join(", ") : ROLE_NAMES.join(", ");
+
+  // Each section's spec is the same body the per-finisher adapter
+  // would have received, so the engine produces identical output
+  // (just stitched into a single turn).
+  const sections = [
+    {
+      title: "ai-init-tool-configurator",
+      scope: [".vibeflow/SETTINGS.json"],
+      body: ADAPTER_DESCRIPTION["ai-init-tool-configurator"],
+    },
+    {
+      title: "ai-init-workflow-policy-writer",
+      scope: [".vibeflow/WORKFLOW_POLICY.md"],
+      body: ADAPTER_DESCRIPTION["ai-init-workflow-policy-writer"],
+    },
+    {
+      title: "ai-init-workflow-state-writer",
+      scope: [".vibeflow/WORKFLOW_STATE.json"],
+      body: ADAPTER_DESCRIPTION["ai-init-workflow-state-writer"],
+    },
+    {
+      title: "ai-init-quickstart-writer",
+      scope: ["QUICKSTART.md"],
+      body: ADAPTER_DESCRIPTION["ai-init-quickstart-writer"],
+    },
+  ];
+
+  const sectionText = sections
+    .map(
+      (s, i) =>
+        `### Section ${i + 1}: ${s.title}\n\n` +
+        `**Output file**: \`${s.scope[0]}\`\n\n` +
+        `**Scope** (must exist on disk when you're done): ${s.scope.join(", ")}\n\n` +
+        s.body,
+    )
+    .join("\n\n");
+
+  const allScope = sections.map((s) => s.scope[0] as string);
+  const unitName = "ai-init-finishers-batch";
+  const spec = [
+    `## ${unitName}`,
+    "",
+    `Goal: ${goal}`,
+    `Engines: ${engines}`,
+    `Project: ${profile.name} (${profile.languages.join(", ") || "unknown"})`,
+    `Active roles in this repo: ${roleList}`,
+    "",
+    "This is a BATCHED unit — process the four sections below in a single turn.",
+    "Each section owns exactly ONE file. Do not write to any other path. Read",
+    "existing files before editing; merge generated content into the existing",
+    "file rather than rewriting it whole. Use the incremental-authoring rule",
+    "in AGENTS.md (small first part, then append in follow-up edits if a",
+    "section's output would exceed ~1000 lines).",
+    "",
+    sectionText,
+    "",
+    "Return JSON: {status: 'verifying'|'blocked', confidence, evidence: [scope, ...]}",
+  ].join("\n");
+
+  return {
+    name: unitName,
+    status: "pending",
+    confidence: 0,
+    owner_agent: "dispatch-runner",
+    spec,
+    scope: allScope,
+    acceptance:
+      `all ${allScope.length} finisher file(s) exist and are non-empty: ` + allScope.join(", "),
+    skills_injected: ["vf-skills"],
+    skills_required: [],
+    depends_on: ["ai-init-analyzer", "ai-init-context-updater"],
+    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+    resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    evidence: [],
+  };
 }
 
 /**
@@ -471,6 +771,7 @@ export function planAiInitUnits(
           : ADAPTER_ACCEPTANCE[name],
       skills_injected: [...skills.injected],
       skills_required: [...skills.required],
+      depends_on: [...(ADAPTER_DEPENDS_ON[name] ?? [])],
       gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
       resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       evidence: [],
@@ -587,9 +888,12 @@ export function aiInitReviewer(
     return { ok: true };
   };
   if (name === "ai-init-instruction-writer") {
+    // Fallback uses the INIT_DEFAULT_ENGINE (copilot) scope, NOT the
+    // all-3-engines union, so a unit missing its scope can't be passed
+    // by evidence citing an unselected engine's instruction file.
     const REQUIRED = unit.scope?.length
       ? unit.scope
-      : (ADAPTER_SCOPE["ai-init-instruction-writer"] ?? []);
+      : ENGINE_INSTRUCTION_SCOPE[INIT_DEFAULT_ENGINE];
     const hit = outcome.evidence.some((e) => REQUIRED.some((p) => e.includes(p)));
     if (!hit) {
       return {
@@ -604,15 +908,19 @@ export function aiInitReviewer(
     }
   }
   if (name === "ai-init-skill-curator") {
-    const hit = outcome.evidence.some(
-      (e) => e.includes(".vibeflow/skills/") || e.includes("SKILL_INDEX"),
-    );
+    const REQUIRED = unit.scope?.length
+      ? unit.scope
+      : (ADAPTER_SCOPE["ai-init-skill-curator"] ?? []);
+    const hit = outcome.evidence.some((e) => REQUIRED.some((p) => e.includes(p)));
     if (!hit) {
-      return { pass: false, reason: "no evidence cites a skill file or SKILL_INDEX update" };
+      return {
+        pass: false,
+        reason: `no evidence cites one of: ${REQUIRED.join(", ")}`,
+      };
     }
     // T3: file-exists check.
     for (const e of outcome.evidence) {
-      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-skill-curator"] ?? []);
+      const r = checkFileExists(e, REQUIRED);
       if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
@@ -662,6 +970,29 @@ export function aiInitReviewer(
       if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
+  // P1-7: batched finisher unit. The engine must cite every scope
+  // path in evidence AND every cited file must exist on disk —
+  // partial batches are fails (same all-or-nothing contract as
+  // the phase-skill enrichment batch).
+  if (name === "ai-init-finishers-batch") {
+    const REQUIRED = unit.scope ?? [];
+    if (REQUIRED.length === 0) {
+      return { pass: false, reason: "finisher-batch unit has no scope paths" };
+    }
+    const missing = REQUIRED.filter(
+      (p) => !outcome.evidence.some((e) => e.includes(p) || p.endsWith(e) || e.endsWith(p)),
+    );
+    if (missing.length > 0) {
+      return {
+        pass: false,
+        reason: `finisher-batch evidence missing ${missing.length}/${REQUIRED.length} file(s): ${missing.join(", ")}`,
+      };
+    }
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, REQUIRED);
+      if (!r.ok) return { pass: false, reason: r.reason };
+    }
+  }
   if (name === "ai-init-analyzer") {
     // T3: file-exists check on the single scope file.
     for (const e of outcome.evidence) {
@@ -701,6 +1032,31 @@ export function aiInitReviewer(
     // (consistency with adapter units). Previously a phase could claim
     // to write `.vibeflow/phase-outputs/foo.md` and pass review even
     // when the file wasn't on disk.
+    for (const e of outcome.evidence) {
+      const r = checkFileExists(e, REQUIRED);
+      if (!r.ok) return { pass: false, reason: r.reason };
+    }
+  }
+  // Phase-skill enrichment units: every skill file in scope must be
+  // cited in evidence AND exist on disk. The pre-batch shape had 1
+  // path per unit; the batched shape (`ai-init-skill-enrich-batch`)
+  // carries N paths and requires all of them to be written — a partial
+  // batch is still a fail (the user can re-run to retry, but we don't
+  // claim success on a half-finished enrichment).
+  if (name.startsWith("ai-init-skill-enrich-")) {
+    const REQUIRED = unit.scope ?? [];
+    if (REQUIRED.length === 0) {
+      return { pass: false, reason: "enrichment unit has no scope paths" };
+    }
+    const missing = REQUIRED.filter(
+      (p) => !outcome.evidence.some((e) => e.includes(p) || p.endsWith(e) || e.endsWith(p)),
+    );
+    if (missing.length > 0) {
+      return {
+        pass: false,
+        reason: `enrichment evidence missing ${missing.length}/${REQUIRED.length} skill file(s): ${missing.join(", ")}`,
+      };
+    }
     for (const e of outcome.evidence) {
       const r = checkFileExists(e, REQUIRED);
       if (!r.ok) return { pass: false, reason: r.reason };

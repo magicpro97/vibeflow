@@ -242,3 +242,64 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
   audit-synthesis files in `.vibeflow/knowledge/` and the 6 merged PRs.
 - Deleted `20260613_120449_589ec6` Hermes session export (local, 3.6MB).
 - Working tree now clean apart from committed-knowledge staging.
+
+## [2026-06-17] fix | Phase 2 engine-scoping — stop generating all-engine files
+- **Root cause**: `vf init --engine X` Phase 2 (agent-team) still emitted
+  instruction files / skill dirs for ALL engines, not just X. Five
+  leak points found and patched:
+  1. `ADAPTER_DESCRIPTION["ai-init-instruction-writer"]` hardcoded
+     "Update all 3 instruction files (CLAUDE.md, AGENTS.md,
+     .github/copilot-instructions.md)" — the spec text the engine
+     received. Fixed: now says "engine-scoped instruction file(s)".
+     `buildAdapterSpec` already overrides this via
+     `instructionDescription(scope)`, so runtime was correct, but the
+     dead text was a latent leak if a refactor swapped the dispatch.
+  2. `ADAPTER_ACCEPTANCE["ai-init-instruction-writer"]` hardcoded
+     "all 3 instruction files … carry a fresh vibeflow:start block".
+     Fixed: now says "engine-scoped instruction file(s)".
+     `planAiInitUnits` already overrides via `instructionAcceptance(scope)`,
+     so this was dead-code but a latent leak.
+  3. `ADAPTER_SCOPE["ai-init-instruction-writer"]` hardcoded all 3
+     engine files. Used as the reviewer fallback when `unit.scope` is
+     empty. Fixed: reduced to copilot scope
+     (`["AGENTS.md", ".github/copilot-instructions.md"]`) — the widest
+     single-engine scope — so a missing scope can't be passed by
+     evidence citing an unselected engine's file. Reviewer fallback
+     also switched from `ADAPTER_SCOPE` to
+     `ENGINE_INSTRUCTION_SCOPE[INIT_DEFAULT_ENGINE]` for the same
+     reason.
+  4. `buildInstructionsBody` (ai-init.ts:78-86) fell back to
+     `[...ENGINES]` (all 3 engines) when `intake.engines` was empty.
+     This is the RAG-style `INSTRUCTIONS.md` file the engine reads —
+     so it told the engine to write all 3 instruction files + all 3
+     skill dirs. Fixed: falls back to `[CONTEXT_FALLBACK_ENGINE]`
+     (copilot, matching `INIT_DEFAULT_ENGINE`).
+     `instructionFilesForEngines` and `instructionFilesFor` had the
+     same all-engines fallback; fixed identically. Removed the now-
+     unused `ALL_INSTRUCTION_FILES` constant.
+  5. `ADAPTER_DESCRIPTION["ai-init-skill-curator"]` hardcoded
+     "Copy to .claude/skills/, .agents/skills/, .github/skills/".
+     Fixed: now says "the engine-scoped skill directory only".
+     `skillCuratorDescription(intake)` already overrides this, so
+     runtime was correct, but the dead text was a latent leak.
+  6. Skill-curator reviewer hardcoded the string check
+     `e.includes(".vibeflow/skills/") || e.includes("SKILL_INDEX")`
+     instead of consulting `unit.scope`. Fixed: now uses
+     `unit.scope` (falling back to `ADAPTER_SCOPE`) consistently with
+     the instruction-writer reviewer, so an out-of-scope skill path
+     (e.g. `.claude/skills/` when the engine is copilot) is rejected.
+- **Invariant tests added** (10 new tests in
+  `test/ai-init-workflow.test.ts` → "Phase 2 engine-scoping invariants"):
+  - instruction-writer spec never references "all 3"
+  - skill-curator spec never references unselected engine skill dirs
+  - instruction-writer acceptance follows the selected engine
+  - instruction-writer scope per engine (claude/codex/copilot)
+  - instruction-writer reviewer rejects an unselected engine's file
+  - skill-curator reviewer uses `unit.scope`
+  - skill-curator reviewer rejects an out-of-scope path
+  - empty `intake.engines` falls back to a single engine scope (copilot)
+- **Verification**: 63/63 ai-init-workflow tests pass; 44/44 ai-init
+  tests pass; full suite 1397 pass / 3 flaky (cli help routing —
+  pre-existing, pass when run in isolation). Lint clean on changed
+  files. Typecheck: no new errors (pre-existing unrelated errors in
+  test/commands-coverage-extras.test.ts and test/tools.test.ts).

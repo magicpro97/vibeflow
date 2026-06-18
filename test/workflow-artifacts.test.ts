@@ -185,9 +185,11 @@ describe("generateWorkflowArtifacts", () => {
       projectName: "p",
       base: dir,
     });
-    // orchestrator + 1 phase agent + 1 skill file = 3 files minimum.
-    expect(written.length).toBeGreaterThanOrEqual(3);
+    // orchestrator + 1 phase agent + 1 canonical skill + 1 mirror skill = 4 files minimum.
+    expect(written.length).toBeGreaterThanOrEqual(4);
     expect(written.some((w) => w.includes("workflow-orchestrator"))).toBe(true);
+    expect(written.some((w) => w.includes(".vibeflow/skills/plan/SKILL.md"))).toBe(true);
+    expect(written.some((w) => w.includes(".claude/skills/plan/SKILL.md"))).toBe(true);
   });
 
   test("writes per-phase agent + skill files", () => {
@@ -197,11 +199,14 @@ describe("generateWorkflowArtifacts", () => {
       projectName: "p",
       base: dir,
     });
-    // Each phase produces 1 agent + 1 skill = 2 per phase * 2 phases
-    // = 4, plus 1 orchestrator = 5.
-    expect(written.length).toBe(5);
+    // Each phase produces 1 agent + 1 canonical skill + 1 mirror skill
+    // = 3 per phase * 2 phases = 6, plus 1 orchestrator = 7.
+    expect(written.length).toBe(7);
     expect(written.some((w) => w.includes("phase-plan"))).toBe(true);
     expect(written.some((w) => w.includes("phase-build-feature"))).toBe(true);
+    // Both canonical and mirror for each phase
+    expect(written.some((w) => w.includes(".vibeflow/skills/plan/SKILL.md"))).toBe(true);
+    expect(written.some((w) => w.includes(".vibeflow/skills/build-feature/SKILL.md"))).toBe(true);
   });
 
   test("multi-engine writes to each engine's directory", () => {
@@ -211,10 +216,13 @@ describe("generateWorkflowArtifacts", () => {
       projectName: "p",
       base: dir,
     });
-    // 1 orchestrator * 2 engines + 1 agent * 2 engines + 1 skill * 2 engines = 6
-    expect(written.length).toBe(6);
+    // 1 orchestrator * 2 engines + 1 agent * 2 engines + 1 canonical skill
+    // + 1 mirror * 2 engines = 2 + 2 + 1 + 2 = 7
+    expect(written.length).toBe(7);
     expect(written.some((w) => w.startsWith(".claude/"))).toBe(true);
     expect(written.some((w) => w.startsWith(".github/"))).toBe(true);
+    // Canonical skill lives in .vibeflow/skills/, written once
+    expect(written.filter((w) => w.includes(".vibeflow/skills/")).length).toBe(1);
   });
 
   test("appends orchestrator snippet to existing instruction files in the managed block", () => {

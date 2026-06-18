@@ -3,14 +3,27 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join } from "node:path";
 import { detectRolesForRepo } from "./agents/detect-roles.js";
 import {
+  type AiInitAdapterName,
   type AiInitIntake,
   type AiInitUnit,
+  AI_INIT_FINISHER_NAMES,
   ENGINE_INSTRUCTION_SCOPE,
   ENGINE_SKILL_DIR,
   aiInitReviewer,
+  buildFinisherBatchUnit,
+  buildPhaseSkillEnrichmentUnits,
   planAiInitUnits,
 } from "./ai-init-workflow.js";
-import { CTX_DIR, ENGINES, type Engine, type WorkUnit } from "./core.js";
+import {
+  CTX_DIR,
+  ENGINES,
+  type Engine,
+  type WorkflowState,
+  type WorkUnit,
+  writeState,
+} from "./core.js";
+import { type QuotaStatus } from "./engine-quota.js";
+import { DEFAULT_CONCURRENCY } from "./orchestrator/run.js";
 import {
   type AsyncSpawner,
   type EngineCommandResult,
@@ -22,6 +35,8 @@ import {
 import { type UnitDispatcher, type UnitOutcome, orchestrateUnits } from "./orchestrator/run.js";
 import { type EngineReadiness, preflightAll } from "./preflight.js";
 import { type ProjectProfile, renderFindingsTable, scanRepo } from "./scanner.js";
+import { backoffPlan, detectQuota } from "./safety/quota.js";
+import { curateSkillsFromEvidence } from "./skills/curator.js";
 
 /**
  * Engine priority comes from `ENGINES` in `core.ts` — single source of
@@ -37,19 +52,25 @@ const INSTRUCTION_FILES_BY_ENGINE: Record<Engine, readonly string[]> = {
   codex: ["AGENTS.md"],
   copilot: ["AGENTS.md", ".github/copilot-instructions.md"],
 };
-const ALL_INSTRUCTION_FILES = [
-  ...new Set(Object.values(INSTRUCTION_FILES_BY_ENGINE).flat()),
-] as readonly string[];
+/** When `engines` is empty/absent, default to a single engine's scope
+ *  instead of ALL engines. This prevents the instruction-writer from
+ *  silently targeting unselected engines (Phase 2 engine-scoping
+ *  contract). Copilot matches the INIT_DEFAULT_ENGINE in
+ *  ai-init-workflow.ts — the widest single-engine scope so the
+ *  reviewer can still pass on either AGENTS.md or copilot-instructions. */
+const CONTEXT_FALLBACK_ENGINE: Engine = "copilot";
 
 function instructionFilesFor(engine?: Engine): readonly string[] {
-  return engine ? INSTRUCTION_FILES_BY_ENGINE[engine] : ALL_INSTRUCTION_FILES;
+  return engine
+    ? INSTRUCTION_FILES_BY_ENGINE[engine]
+    : INSTRUCTION_FILES_BY_ENGINE[CONTEXT_FALLBACK_ENGINE];
 }
 
 function instructionFilesForEngines(engines?: string[]): readonly string[] {
   const selected = engines?.filter((e): e is Engine => (ENGINES as readonly string[]).includes(e));
   return selected?.length
     ? [...new Set(selected.flatMap((e) => INSTRUCTION_FILES_BY_ENGINE[e]))]
-    : ALL_INSTRUCTION_FILES;
+    : INSTRUCTION_FILES_BY_ENGINE[CONTEXT_FALLBACK_ENGINE];
 }
 
 /** AI init timeout: 10 minutes for large projects. */
@@ -78,11 +99,11 @@ function buildInstructionsBody(
 ): string {
   const selectedEngines = engines?.length
     ? engines.filter((e): e is Engine => (ENGINES as readonly string[]).includes(e))
-    : ([...ENGINES] as Engine[]);
+    : ([CONTEXT_FALLBACK_ENGINE] as Engine[]);
   const instrScope = [...new Set(selectedEngines.flatMap((e) => ENGINE_INSTRUCTION_SCOPE[e]))];
   const skillScope = [...new Set(selectedEngines.map((e) => ENGINE_SKILL_DIR[e]))];
   const instrFiles = instrScope.map((f) => `- \\\`${f}\\\``).join("\n");
-  const engineFlag = selectedEngines[0] ?? "claude";
+  const engineFlag = selectedEngines[0] ?? "copilot";
   const skillDirList = skillScope.map((d) => `  - \\\`${d}\\\``).join("\n");
   const skillVerifyList = skillScope.map((d) => `  - \\\`ls ${d}/ | wc -l\\\` ≥ 2`).join("\n");
   const authPrefix = ctx7Auth
@@ -239,7 +260,7 @@ When confidence hits 1.0 on ALL findings, write the JSON summary.
 - NEVER modify content OUTSIDE \`<!-- vibeflow:start -->\`/\`<!-- vibeflow:end -->\` markers
 - Use Edit tool for instruction file modifications — never Write whole files that have human content
 - BE CONCISE in instruction files — AI agents read them, keep them scannable
-- Skills from ctx7: use \`ctx7 skills install --yes --claude\` (headless) or write manually from \`ctx7 docs\`
+- Skills from ctx7: use \`ctx7 skills install --yes --${engineFlag}\` (headless) or write manually from \`ctx7 docs\`
 - After every action, update your internal confidence score for that finding
 
 ## Output (LAST thing — only when ALL tasks done at confidence 1.0)
@@ -936,6 +957,21 @@ export interface AiInitWorkflowResult {
   reviews: Array<{ unit: string; pass: boolean; reason: string }>;
   /** True when every unit passed review and reached confidence 1.0. */
   goalMet: boolean;
+  /** How the workflow was blocked (when ok=false). Distinguishes the
+   *  pre-dispatch "no engine" case from the mid-flight "engine failed"
+   *  case so the CLI can pick the right recovery message. */
+  blockKind?: "no-engine" | "engine-failed" | "wave-blocked";
+  /** When the workflow was blocked mid-flight, the units that DID pass
+   *  before the block. Always a subset of `units` (those with status
+   *  "verifying" / "done"). Empty when the block happened at the
+   *  pre-dispatch preflight (no engine ready). */
+  passedUnits?: string[];
+  /** P0-4: units held back because quota was below the skip threshold.
+   *  These were never dispatched (no engine call), so they did not
+   *  consume any rate-limit budget. The user can re-run `vf init`
+   *  after the quota window resets to get them. Empty when the
+   *  quota was healthy enough to dispatch everything. */
+  skippedUnits?: string[];
 }
 
 /** Options for {@link runAiInitWorkflow}. */
@@ -957,6 +993,27 @@ export interface AiInitWorkflowOpts {
   dispatcher?: UnitDispatcher;
   /** Bounded-parallel concurrency. Defaults to DEFAULT_CONCURRENCY (3). */
   concurrency?: number;
+  /**
+   * Force wave-0 (the adapters with no dependencies — analyzer,
+   * instruction-writer, tool-configurator) to run sequentially
+   * (concurrency=1) even when `concurrency` is set higher. Wave 1+
+   * still runs with the configured concurrency. Default true.
+   *
+   * Rationale: Copilot / Claude / Codex treat parallel calls as a
+   * burst and are more likely to rate-limit the wave. The wave-0
+   * units are also the cheapest per-call, so the wall-clock cost
+   * of serializing them is small (~2-4s) compared to the savings
+   * in rate-limit risk. Set to false to restore the old parallel
+   * behavior (e.g. for local engines with no quota). */
+  sequentialWave0?: boolean;
+  /**
+   * Inter-unit delay (ms) inside a single wave. Default 0 (no
+   * delay). When > 0, each unit waits `min + jittered(0..jitter)`
+   * ms before starting, where `jitter` defaults to the same value.
+   * Staggers parallel-ish calls so the engine sees a steadier
+   * request stream instead of bursts. Pair with low `concurrency`
+   * to mimic a sequential call shape while keeping wave structure. */
+  interUnitDelayMs?: number;
   /** Test seam: forwards to `defaultAiInitDispatcher` when the default
    *  dispatcher is constructed. Mirrors `runAiInit`'s option. */
   engineCommandFn?: (engine: Engine) => EngineCommandResult;
@@ -968,6 +1025,39 @@ export interface AiInitWorkflowOpts {
   timeoutMs?: number;
   /** CLI-side ctx7 auth state. false means generated instructions/specs use fallback. */
   ctx7Auth?: boolean;
+  /**
+   * P0-4: optional pre-flight quota state. When supplied and the
+   * remaining quota is below `quotaSkipFinisherBelowPct` (default
+   * 20%), the four optional finisher units (tool-configurator,
+   * workflow-policy-writer, workflow-state-writer, quickstart-writer)
+   * are NOT dispatched. They are reported as `skipped: low-quota`
+   * on the workflow result so the user can see what was held back
+   * and re-run `vf init` after the quota window resets to get the
+   * rest. Phase-skill enrichment and the 4 core adapters
+   * (analyzer / instruction-writer / skill-curator / context-updater)
+   * are NEVER skipped — they produce the reusable artifacts that
+   * the rest of VibeFlow depends on. */
+  quotaStatus?: QuotaStatus;
+  /** Percent remaining (0-100) below which finishers are skipped.
+   *  Default 20. Set to 0 to disable quota-aware skipping. */
+  quotaSkipFinisherBelowPct?: number;
+  /**
+   * P1-4: backoff overrides for the default dispatcher. The CLI
+   * init path sets `maxRetries=3` + `backoffCapMs=120_000` so a
+   * transient 429 has 4 chances to recover with up to 2-minute
+   * waits between tries. Other callers (e.g. `vf orchestrate`)
+   * keep the strict defaults (2 retries, 60s cap) for faster
+   * failure feedback. */
+  dispatcherMaxRetries?: number;
+  dispatcherBackoffBaseMs?: number;
+  dispatcherBackoffCapMs?: number;
+  /**
+   * P1-7: collapse the four optional finisher adapters into a
+   * single `ai-init-finishers-batch` unit (default true). One
+   * engine call instead of four. Set to false to restore the
+   * per-finisher shape (used by tests that assert on individual
+   * unit names). */
+  batchFinishers?: boolean;
 }
 
 /** Build the default dispatcher: per unit, run a single engine call with
@@ -981,16 +1071,42 @@ export interface AiInitWorkflowOpts {
  *  Contract: status="verifying" on success (production never says "done"
  *  — the reviewer must), confidence=1, evidence=unit.scope. status="blocked"
  *  on any engine error (timeout, non-zero exit, unavailable binary), with
- *  evidence=[] so the reviewer rejects the unit deterministically. */
+ *  evidence=[] so the reviewer rejects the unit deterministically.
+ *
+ *  Retry policy: when the engine exits non-zero with a rate-limit signal
+ *  (HTTP 429, "rate limit", "too many requests"), the dispatcher retries
+ *  the same call up to `maxRetries` times with exponential backoff +
+ *  full jitter, honoring a server `retry-after` hint as a floor. This
+ *  prevents one transient Copilot / Claude / Codex rate-limit from
+ *  poisoning an entire agent-team wave (previously a single 429 on the
+ *  workflow-state-writer took out the whole final wave). Other non-zero
+ *  exits (auth, syntax, missing binary) are NOT retried — retrying
+ *  cannot help. */
 export function defaultAiInitDispatcher(
   engine: Engine,
   opts: {
     engineCommandFn?: (engine: Engine) => EngineCommandResult;
     spawner?: AsyncSpawner;
     timeoutMs?: number;
+    /** Max retry attempts on a rate-limit signal. Default 2 (3 total tries). */
+    maxRetries?: number;
+    /** Base delay (ms) for exponential backoff. Default 2000. */
+    backoffBaseMs?: number;
+    /** Cap (ms) on a single backoff delay. Default 60000. */
+    backoffCapMs?: number;
+    /** Test seam: inject a sleep fn to keep the suite deterministic. */
+    sleep?: (ms: number) => Promise<void>;
   } = {},
 ): UnitDispatcher {
-  const { engineCommandFn, spawner, timeoutMs = AI_INIT_TIMEOUT_MS } = opts;
+  const {
+    engineCommandFn,
+    spawner,
+    timeoutMs = AI_INIT_TIMEOUT_MS,
+    maxRetries = 2,
+    backoffBaseMs = 2000,
+    backoffCapMs = 60_000,
+    sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+  } = opts;
   const resolveInvocation = engineCommandFn ?? engineCommand;
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
   // Probe the engine invocation once at dispatcher construction time so we can
@@ -1025,17 +1141,48 @@ export function defaultAiInitDispatcher(
       { cmd: invocation.cmd, args: invocation.args, promptMode: invocation.promptMode },
       unit.spec ?? "",
     );
-    const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input);
-    if (result.timedOut) {
-      const reason = `timed out after ${timeoutMs}ms`;
-      process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
-      return {
-        status: "blocked",
-        confidence: 0,
-        evidence: [`dispatcher-timeout:${unit.name}:${reason}`],
-      };
-    }
-    if (result.status !== 0) {
+    // Retry loop: a transient rate-limit should not poison the whole wave.
+    // We retry only when `detectQuota` flags a retryable signal (HTTP 429,
+    // "rate limit", "too many requests") with high confidence. Other
+    // non-zero exits fall through immediately — no point retrying a
+    // syntax error or auth failure.
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input);
+      if (result.timedOut) {
+        const reason = `timed out after ${timeoutMs}ms`;
+        process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
+        return {
+          status: "blocked",
+          confidence: 0,
+          evidence: [`dispatcher-timeout:${unit.name}:${reason}`],
+        };
+      }
+      if (result.status === 0) {
+        return {
+          status: "verifying",
+          confidence: 1,
+          evidence: [...(unit.scope ?? [])],
+        };
+      }
+      const sig = detectQuota({
+        status: result.status,
+        stdout: result.stdout,
+        stderr: result.stderr ?? "",
+      });
+      const plan = backoffPlan(sig, attempt, {
+        baseMs: backoffBaseMs,
+        capMs: backoffCapMs,
+        maxRetries,
+      });
+      if (plan.retry) {
+        process.stderr.write(
+          `[ai-init-dispatcher] ${unit.name} ${sig.kind ?? "rate-limited"} ` +
+            `(exit ${result.status}); retrying in ${plan.delayMs}ms ` +
+            `(attempt ${attempt + 1}/${maxRetries})\n`,
+        );
+        await sleep(plan.delayMs);
+        continue;
+      }
       const reason = `exit ${result.status}`;
       process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
       return {
@@ -1044,10 +1191,15 @@ export function defaultAiInitDispatcher(
         evidence: [`dispatcher-nonzero:${unit.name}:${reason}`],
       };
     }
+    // Unreachable: the loop returns on every path (last attempt's
+    // plan.retry is false because attempt >= maxRetries). Defensive
+    // fallback so the type checker is happy.
+    const reason = `exit after ${maxRetries + 1} attempts`;
+    process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
     return {
-      status: "verifying",
-      confidence: 1,
-      evidence: [...(unit.scope ?? [])],
+      status: "blocked",
+      confidence: 0,
+      evidence: [`dispatcher-nonzero:${unit.name}:${reason}`],
     };
   };
 }
@@ -1096,6 +1248,7 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   if (!engine) {
     return {
       ok: false,
+      blockKind: "no-engine",
       reason: forceEngine
         ? `forced engine ${forceEngine} is not ready — run \`vf doctor --probe\` to diagnose`
         : "no ready engine found — run `vf doctor --probe` to check engine status",
@@ -1111,9 +1264,80 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
     engines: intake.engines?.length ? intake.engines : [engine],
     ctx7Authenticated: intake.ctx7Authenticated ?? ctx7Auth,
   };
-  const units = planAiInitUnits(profile, plannerIntake, detectedRoles).filter(
+  const adapterUnits = planAiInitUnits(profile, plannerIntake, detectedRoles).filter(
     (e) => !e.name.startsWith("ai-init-phase"),
   );
+
+  // P1-7: by default, collapse the four optional finisher adapters
+  // (tool-configurator, workflow-policy/state-writer, quickstart-writer)
+  // into a single `ai-init-finishers-batch` unit. This replaces 4
+  // separate engine calls (~400-800k tokens total) with one batched
+  // call (~200-300k tokens). Set `batchFinishers: false` in opts to
+  // restore the per-finisher shape (e.g. for tests that assert on
+  // individual unit names).
+  const batchFinishers = opts.batchFinishers !== false;
+  let adapterUnitsFinal: AiInitUnit[] = adapterUnits;
+  if (batchFinishers) {
+    const finisherNames = new Set<string>(AI_INIT_FINISHER_NAMES as ReadonlySet<string>);
+    const kept = adapterUnits.filter((u) => !finisherNames.has(u.name));
+    const batchUnit = buildFinisherBatchUnit(profile, plannerIntake, detectedRoles);
+    adapterUnitsFinal = [...kept, batchUnit];
+  }
+
+  // Build phase-skill enrichment unit(s) for phases with I/O paths.
+  // These read the declared input files and rewrite the canonical
+  // phase skill template into a reusable, project-aware template.
+  // The current shape is a single batched unit covering all phases
+  // (was N units — one per phase). The batched unit's own spec sets
+  // `depends_on: ["ai-init-analyzer"]`, so this loop is now a no-op
+  // but kept for back-compat (in case the builder ever returns >1 unit).
+  const enrichmentTarget: (e: Engine, slug: string) => string = (_e, slug) =>
+    `${CTX_DIR}/skills/${slug}/SKILL.md`;
+  const enrichmentUnits = buildPhaseSkillEnrichmentUnits(plannerIntake, [engine], enrichmentTarget);
+  for (const u of enrichmentUnits) {
+    u.depends_on = ["ai-init-analyzer"];
+  }
+
+  // P0-4: quota-aware finisher skip. When the engine reports low
+  // remaining quota (e.g. <20%) we hold back the optional finisher
+  // unit to preserve the core workflow. With P1-7 the four per-
+  // finisher units are collapsed into a single
+  // `ai-init-finishers-batch`, so we only need to skip that one
+  // unit (it owns the same 4 output paths). The 4 CORE adapters
+  // (analyzer, instruction-writer, skill-curator, context-updater)
+  // and the phase-skill enrichment are NEVER skipped — they are
+  // the load-bearing outputs the rest of VibeFlow consumes.
+  const skipFinisherBelow = opts.quotaSkipFinisherBelowPct ?? 20;
+  const skippedFinisherNames: string[] = [];
+  let dispatchable = [...adapterUnitsFinal, ...enrichmentUnits];
+  if (opts.quotaStatus && skipFinisherBelow > 0) {
+    const remaining = opts.quotaStatus.percentRemaining;
+    if (remaining !== undefined && remaining < skipFinisherBelow) {
+      const kept: AiInitUnit[] = [];
+      for (const u of dispatchable) {
+        if (
+          u.name === "ai-init-finishers-batch" ||
+          AI_INIT_FINISHER_NAMES.has(u.name as AiInitAdapterName)
+        ) {
+          // Hold back the optional finisher batch. status="skipped"
+          // is not in the unit-status union, so we record the name
+          // and drop the unit from the dispatch list — the caller
+          // can re-run after the quota window resets to fill in.
+          skippedFinisherNames.push(u.name);
+          continue;
+        }
+        kept.push(u);
+      }
+      if (skippedFinisherNames.length > 0) {
+        process.stderr.write(
+          `[ai-init] quota at ${remaining?.toFixed(1)}% — skipping ${skippedFinisherNames.length} ` +
+            `optional finisher unit(s) to preserve core workflow: ${skippedFinisherNames.join(", ")}\n`,
+        );
+      }
+      dispatchable = kept;
+    }
+  }
+  const units = dispatchable;
 
   // Dispatch through the orchestrator. The injected dispatcher defaults
   // to a placeholder (so unit tests stay deterministic); production
@@ -1121,24 +1345,140 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   // the test seams (engineCommandFn, spawner, timeoutMs) forwarded so
   // production calls go live and tests stay deterministic. Callers may
   // still inject a custom dispatcher via `opts.dispatcher`.
+  //
+  // P1-4: the CLI init path passes generous backoff defaults
+  // (maxRetries=3, cap=120s) — Copilot free/individual tier has a
+  // tight per-hour quota and one transient 429 should not take out
+  // the whole wave. The legacy defaults (2/60s) are kept for
+  // callers that want strict fail-fast (e.g. CI pipelines).
   const dispatcher =
     opts.dispatcher ??
     defaultAiInitDispatcher(engine, {
       engineCommandFn: opts.engineCommandFn,
       spawner: opts.spawner,
       timeoutMs: opts.timeoutMs,
+      maxRetries: opts.dispatcherMaxRetries,
+      backoffBaseMs: opts.dispatcherBackoffBaseMs,
+      backoffCapMs: opts.dispatcherBackoffCapMs,
     });
 
-  const result = await orchestrateUnits<AiInitUnit>({
-    units,
-    dispatcher,
-    // MINOR-4: pass `base` so the reviewer can resolve cited paths
-    // against the project root (not process.cwd()).
-    reviewer: (u, o) => aiInitReviewer(u, o, base),
-    concurrency,
-    agent: engine,
-  });
+  // Schedule units into parallel waves based on `depends_on`. Units in
+  // the same wave run concurrently; waves run sequentially so the
+  // engine-mirror fan-out is bounded by the selected engine.
+  const waves = scheduleAiInitWaves(units);
 
+  // Run waves sequentially. Inside each wave, units are dispatched in
+  // parallel. This replaces the previous flat-parallel dispatch which
+  // let skill-curator start before stack-evidence.md was written.
+  const allUnits: AiInitUnit[] = [];
+  const allReviews: Array<{ unit: string; pass: boolean; reason: string }> = [];
+  for (const wave of waves) {
+    // Deterministic pre-wave step: run whitelist-based skill curation
+    // BEFORE the AI skill-curator unit fires. This ensures:
+    // 1. stack-evidence.md is already written (analyzer finished in wave 0)
+    // 2. ctx7 installs go to scratch dir deterministically (no AI guesswork)
+    // 3. The AI skill-curator only handles fallback gaps (unmatched tech)
+    if (wave.includes("ai-init-skill-curator") && base && engine) {
+      const result = curateSkillsFromEvidence(base, engine, {
+        ctx7Authenticated: opts.ctx7Auth,
+      });
+      if (result.installed.length > 0) {
+        process.stderr.write(
+          `[curator] whitelist installed ${result.installed.length} skill(s): ${result.installed.join(", ")}\n`,
+        );
+      }
+      if (result.unmatched.length > 0) {
+        process.stderr.write(
+          `[curator] ${result.unmatched.length} tech(s) unmatched — AI skill-curator should handle: ${result.unmatched.join(", ")}\n`,
+        );
+      }
+    }
+    const waveUnits = units.filter((u) => wave.includes(u.name));
+    // P0-2: wave 0 is the first wave in the schedule. By default we
+    // serialize it (concurrency=1) to avoid the burst-call rate-limit
+    // cliff that Copilot/Claude/Codex hit when 3+ adapter calls
+    // land within the same second. Wave 1+ (which only contains
+    // downstream units whose deps are now satisfied) still runs with
+    // the user-requested concurrency — the wins from rate-limit
+    // avoidance outweigh the wall-clock cost on the cheap wave 0.
+    // P0-3: inter-unit delay staggers the start times inside a wave
+    // so the engine never sees a tight burst, even when concurrency=1
+    // is paired with a high `interUnitDelayMs` elsewhere.
+    const isWave0 = waves.indexOf(wave) === 0;
+    const waveConcurrency =
+      isWave0 && opts.sequentialWave0 !== false ? 1 : (concurrency ?? DEFAULT_CONCURRENCY);
+    const waveResult = await orchestrateUnits<AiInitUnit>({
+      units: waveUnits,
+      dispatcher,
+      // MINOR-4: pass `base` so the reviewer can resolve cited paths
+      // against the project root (not process.cwd()).
+      reviewer: (u, o) => aiInitReviewer(u, o, base),
+      concurrency: waveConcurrency,
+      interUnitDelayMs: opts.interUnitDelayMs,
+      agent: engine,
+    });
+    allUnits.push(...waveResult.units);
+    allReviews.push(...waveResult.reviews);
+    // Bail early if any unit in this wave is blocked — no point
+    // dispatching downstream waves whose dependencies failed.
+    const blocked = waveResult.reviews.find((r) => !r.pass);
+    if (blocked) {
+      // Persist what we DID get to .vibeflow/WORKFLOW_STATE.json so the
+      // user can see which units passed (and re-run only the failed
+      // ones) instead of starting from scratch on the next init.
+      // Previously the wave-blocked path returned without writing, so
+      // a transient rate-limit on a single unit threw away the work
+      // of the 5+ units that already succeeded.
+      const passedNames = allReviews.filter((r) => r.pass).map((r) => r.unit);
+      if (base && allUnits.length > 0) {
+        try {
+          const partial: WorkflowState = {
+            task_id: "vf-init",
+            goal: intake.goal?.trim() || "VibeFlow init",
+            success_criteria: [
+              `${allUnits.length} unit(s) initialized`,
+              `${passedNames.length} passed, ${allUnits.length - passedNames.length} blocked at ${blocked.unit}`,
+            ],
+            work_units: allUnits as WorkUnit[],
+            totals: {
+              units: allUnits.length,
+              done: passedNames.length,
+              tokens: 0,
+              cost_usd: 0,
+              wall_seconds: 0,
+            },
+            repo_path: base,
+          };
+          writeState(base, partial);
+          process.stderr.write(
+            `[ai-init] persisted partial state for ${passedNames.length}/${allUnits.length} unit(s) ` +
+              `to ${CTX_DIR}/WORKFLOW_STATE.json\n`,
+          );
+        } catch (err) {
+          // Persistence is best-effort — don't let a state-write failure
+          // hide the original wave-block reason from the user.
+          process.stderr.write(
+            `[ai-init] warning: could not persist partial state: ${(err as Error).message}\n`,
+          );
+        }
+      }
+      return {
+        ok: false,
+        blockKind: "wave-blocked",
+        engine,
+        units: allUnits,
+        reviews: allReviews,
+        goalMet: false,
+        passedUnits: passedNames,
+        // P0-4: include quota-skipped finishers in the failed result
+        // too, so the user can see the full picture on a blocked run.
+        skippedUnits: skippedFinisherNames.length > 0 ? skippedFinisherNames : undefined,
+        reason: `wave blocked at ${blocked.unit}: ${blocked.reason}`,
+      };
+    }
+  }
+
+  const result = { units: allUnits, reviews: allReviews };
   const goalMet =
     result.reviews.every((r) => r.pass) && result.units.every((u) => u.status === "done");
   return {
@@ -1148,5 +1488,45 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
     reviews: result.reviews,
     goalMet,
     reason: goalMet ? undefined : result.reviews.find((r) => !r.pass)?.reason,
+    // P0-4: surface quota-skipped finisher names on the success path
+    // so the CLI message can tell the user "5 done, 2 held back".
+    skippedUnits: skippedFinisherNames.length > 0 ? skippedFinisherNames : undefined,
   };
+}
+
+/**
+ * Group units into parallel waves using `depends_on` as the edge set.
+ * Returns an array of waves, where each wave is a list of unit names
+ * safe to dispatch concurrently. Units with no dependencies are in
+ * wave 0; units that depend on a wave-N unit land in wave N+1.
+ *
+ * Returns waves in execution order. Pure: same input → same output.
+ */
+function scheduleAiInitWaves(units: AiInitUnit[]): string[][] {
+  const byName = new Map(units.map((u) => [u.name, u]));
+  const remaining = new Map(units.map((u) => [u.name, new Set(u.depends_on ?? [])]));
+  const waves: string[][] = [];
+  const done = new Set<string>();
+  while (remaining.size) {
+    const ready: string[] = [];
+    for (const [name, deps] of remaining) {
+      // A unit is ready when every dependency is in `done` (or unknown
+      // — e.g. a name not in our unit set means the dependency was
+      // resolved by a different path; treat it as satisfied).
+      const allMet = [...deps].every((d) => done.has(d) || !byName.has(d));
+      if (allMet) ready.push(name);
+    }
+    if (ready.length === 0) {
+      // Cycle or unresolvable dependency. Surface the survivors as
+      // their own wave so the orchestrator still reports a result.
+      waves.push([...remaining.keys()]);
+      break;
+    }
+    waves.push(ready);
+    for (const name of ready) {
+      remaining.delete(name);
+      done.add(name);
+    }
+  }
+  return waves;
 }
