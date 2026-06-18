@@ -956,10 +956,9 @@ describe("runAiInit: autopilot auto-fallback (--autopilot flag)", () => {
     expect(result.reason).toContain("exhausted");
   });
 
-  test("autopilot=true + timeout is NOT retried (timeout ≠ fallback opportunity)", async () => {
-    // Timeouts indicate an engine issue, not an availability issue.
-    // Autopilot should NOT fall back on timeout — return the timeout
-    // error on the first attempt.
+  test("autopilot=true + timeout falls back to next engine", async () => {
+    // Timeouts are retryable in autopilot — a different engine may
+    // have better throughput or different rate limits.
     let callCount = 0;
     const result = await runAiInit({
       base: process.cwd(),
@@ -975,10 +974,11 @@ describe("runAiInit: autopilot auto-fallback (--autopilot flag)", () => {
         return { status: 124, stdout: "partial", stderr: "", timedOut: true };
       },
     });
-    expect(callCount).toBe(1);
+    expect(callCount).toBe(2);
     expect(result.ok).toBe(false);
-    expect(result.reason).toContain("timed out");
-    // No fallback — autopilot did not retry.
+    // Both engines timed out; autopilot exhausted fallbacks.
+    expect(result.reason).toContain("exhausted");
+    expect(result.reason).toContain("claude");
     expect(result.fallback).toBeUndefined();
   });
 

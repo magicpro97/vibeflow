@@ -84,9 +84,24 @@ export interface WorkUnit {
   scope?: string[];
   /** Free-text build spec injected into the dispatch prompt so the engine knows WHAT to build. */
   spec?: string;
-  gates: Record<"build" | "lint" | "test" | "review", GateState>;
+  gates: Record<"build" | "lint" | "test" | "review", GateState> & {
+    /** Populated by the orchestrator's post-coding security checkpoint. */
+    security?: GateState;
+  };
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
+  /**
+   * Security checkpoint result, populated when the orchestrator runs
+   * the post-coding security skill on this unit. Structural type to
+   * avoid a circular import from core → orchestrator/security-checkpoint.
+   */
+  security?: {
+    consent: "run" | "skip" | "abstain";
+    verdict: "pass" | "fail" | "needs-review" | "skipped" | "error";
+    items_checked?: number;
+    items_failed?: number[];
+    notes?: string;
+  };
 }
 
 export interface Attachment {

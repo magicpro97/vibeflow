@@ -321,6 +321,11 @@ export async function orchestrate(
     concurrency,
     dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot),
     reviewer: makeReviewer(mode, thresholdFor(riskClass)),
+    // Post-coding security checkpoint. Opt-in via `--security-check`. When
+    // on, the user is prompted (y/n/skip) after each unit finishes coding,
+    // BEFORE the independent reviewer is consulted. A `fail` verdict blocks
+    // the unit on `gates.security = "fail"`. Default-skip in non-TTY (CI).
+    security: flags["security-check"] ? { base } : undefined,
   });
 
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);

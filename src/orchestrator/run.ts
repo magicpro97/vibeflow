@@ -1,6 +1,7 @@
 import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
 import { thresholdFor } from "./investigate.js";
 import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
+import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security-checkpoint.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -63,6 +64,12 @@ export interface UnitOutcome {
   skills_injected?: string[];
   skills_required?: string[];
   skills_used?: string[];
+  /**
+   * Security checkpoint verdict, populated when `orchestrateUnits` is
+   * invoked with a `securityCheckpoint` config. The reviewer reads this
+   * field to know whether to block on a `fail` verdict.
+   */
+  security?: SecurityCheckpointResult;
 }
 
 export type UnitDispatcher = (unit: WorkUnit) => Promise<UnitOutcome>;
@@ -98,6 +105,7 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
         : unit.skills_required,
     skills_used:
       outcome.skills_used !== undefined ? strArray(outcome.skills_used) : unit.skills_used,
+    security: outcome.security !== undefined ? outcome.security : unit.security,
   };
 }
 
@@ -119,6 +127,13 @@ export interface OrchestrationResult<U extends WorkUnit = WorkUnit> {
  * `status === "done"` would let a confidence<1 unit slip through. A failed review always
  * sets `status = "blocked"` and `gates.review = "fail"`; a passed review sets
  * `gates.review = "pass"`. Reviews are written by index for deterministic ordering.
+ *
+ * Security checkpoint: when `opts.security` is provided, each unit's coding phase is
+ * followed by a user-prompted security pass. The user is asked (y/n) per unit; on
+ * `run`, the configured `runSkillFn` executes the `checklist-security` skill and
+ * the verdict is attached to the outcome. A `fail` verdict fails the unit
+ * (gates.security = "fail", status = "blocked") before the reviewer is even
+ * consulted — security is a hard gate, not advisory.
  */
 export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   units: U[];
@@ -129,10 +144,24 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   interUnitDelayMs?: number;
   /** Engine/agent identifier written into dispatch markers for observability. */
   agent?: string;
+  /**
+   * Optional post-coding security checkpoint. When set, each unit gets a
+   * user-prompted pass through the `checklist-security` skill between the
+   * dispatcher and the reviewer.
+   */
+  security?: {
+    /** Project root used to resolve the skill path. */
+    base: string;
+    /** Override the default readline y/n prompt. Test seam. */
+    askFn?: () => (q: string) => Promise<import("./security-checkpoint.js").SecurityConsent>;
+    /** Override the default skill runner (which just reads the SKILL.md). */
+    runSkillFn?: (unit: WorkUnit, base: string) => Promise<string>;
+  };
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   // Log initial markers for visibility before the first unit dispatches.
   for (const u of opts.units) createMarker(u.name, opts.agent);
+  const security = opts.security;
   const units = (await runParallel(
     opts.units,
     async (u, i) => {
@@ -147,16 +176,43 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       try {
         outcome = await opts.dispatcher(u);
       } catch (err) {
-        // The throw's reason is surfaced via stderr in the marker and
-        // bubbles up in the dispatcher-throw diagnostic. Don't carry it
-        // on the typed UnitOutcome (which has no `reason` field).
         const msg = (err as Error).message ?? String(err);
+        // Surface via both logbus (CLI / UI see it) and stderr (journal
+        // fallback when logbus is not installed). The eccho init test
+        // (2026-06-18) showed dispatcher-throw messages were invisible
+        // because process.stderr alone doesn't reach the CLI output
+        // stream when the UI server is running.
+        try {
+          const out = (await import("../logbus.js")).out;
+          out("engine-stderr", `[orchestrator] dispatcher for ${u.name} threw: ${msg}`, {
+            level: "error",
+            unit: u.name,
+          });
+        } catch {
+          // logbus not available — stderr is the fallback
+        }
         process.stderr.write(`[orchestrator] dispatcher for ${u.name} threw: ${msg}\n`);
         outcome = {
           status: "blocked" as const,
           confidence: 0,
           evidence: [],
         };
+      }
+      // Post-coding security checkpoint. Runs between dispatcher and reviewer
+      // so security issues block the unit BEFORE the independent reviewer
+      // is even consulted (a `fail` verdict is a hard gate, not advisory).
+      if (security) {
+        const sec = await runSecurityCheckpoint(u, security.base, {
+          askFn: security.askFn,
+          runSkillFn: security.runSkillFn,
+        });
+        outcome.security = sec;
+        if (sec.verdict === "fail") {
+          outcome.status = "blocked";
+          outcome.gates = { ...(outcome.gates ?? {}), security: "fail" };
+        } else if (sec.verdict === "pass" || sec.verdict === "needs-review") {
+          outcome.gates = { ...(outcome.gates ?? {}), security: "pass" };
+        }
       }
       const reviewed = applyOutcome(u, outcome);
       const review = opts.reviewer(reviewed, outcome);

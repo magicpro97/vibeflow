@@ -73,8 +73,12 @@ function instructionFilesForEngines(engines?: string[]): readonly string[] {
     : INSTRUCTION_FILES_BY_ENGINE[CONTEXT_FALLBACK_ENGINE];
 }
 
-/** AI init timeout: 10 minutes for large projects. */
-const AI_INIT_TIMEOUT_MS = 600_000;
+/** AI init timeout: 15 minutes for large projects.
+ * Bumped from 10 min (600_000) to 15 min (900_000) after eccho-team/eccho
+ * init test showed adapter units running 4+ Claude sessions (100-130s each)
+ * need more headroom. Per-unit overrides in ai-init-workflow.ts can further
+ * tune individual adapter unit budgets. */
+const AI_INIT_TIMEOUT_MS = 900_000;
 
 /** Temp directory for full-file context (no truncation). */
 const AI_CONTEXT_DIR = `${CTX_DIR}/ai-context`;
@@ -158,6 +162,27 @@ To reach confidence 1.0, read these files exhaustively:
 ☐ At least 2 test files read to understand test patterns
 ☐ Framework versions confirmed from package.json dependencies
 ☐ CI pipeline understood (if .github/workflows exists)
+
+### 1b. Planning Phase (REQUIRED before writing any files)
+
+**You MUST complete this planning phase before touching CLAUDE.md, AGENTS.md, .github/copilot-instructions.md, .agents/instructions.md, or any skill file.**
+
+**Invoke the \`planning-and-task-breakdown\` skill** (read \`.vibeflow/skills/planning-and-task-breakdown/SKILL.md\`) and apply its process:
+
+1. **Enter plan mode** — read-only only; do NOT write code yet.
+2. **Identify the dependency graph** for the work in tasks 2–4 below (instruction files, skills, project context). Map what depends on what.
+3. **Slice vertically** — group work into task units that each deliver a complete, testable slice (e.g. "analyze → instruction file edits" is one slice, not separate "analyze" and "edit" tasks).
+4. **Write the task list** with explicit acceptance criteria + verification steps for every task. Use the skill's task template.
+5. **Size tasks** — if any task would touch more than ~5 files or cannot state acceptance criteria in ≤3 bullets, break it down further.
+6. **Order and checkpoint** — arrange tasks so each leaves the system in a working state; add explicit checkpoints every 2–3 tasks.
+7. **Identify parallelization** — which tasks are safe to parallelize vs. which must be sequential.
+8. **Get human approval** of the plan BEFORE writing any instruction/skill/context files.
+
+**Output of this phase:** a written plan in your response (or in \`.vibeflow/ai-context/plan.md\` if the plan is long) that includes the task list with acceptance criteria, dependency graph, and checkpoint schedule. No code/file edits until the plan is approved.
+
+**If the user declines to review the plan:** proceed with a default vertical slice ordering (instruction files → skills → project context) but STILL record the plan in your response so the work is traceable.
+
+**Security note:** If your plan produces code changes (not just doc/skill edits), add a step to run the \`checklist-security\` skill (read \`.vibeflow/skills/checklist-security/SKILL.md\`) after the coding phase. The orchestrator's post-coding security checkpoint will prompt the user (y/n) per work unit; the skill output is a hard gate (fail → blocked).
 
 ### 2. Write/Update Instruction Files
 
@@ -715,32 +740,34 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
     //      forceEngine and the next iteration picks the best available).
     //   2. Invocation reported the engine as unavailable (CLI missing).
     //   3. Spawner returned a permission-denied / unauthorized pattern.
-    // Non-retryable: timeouts and unknown non-zero status codes.
+    //   4. Engine timed out — a different engine may have better throughput.
+    // Non-retryable: unknown non-zero status codes.
     const reason = result.reason ?? "";
     const isPermission = PERMISSION_DENIED_RE.test(reason);
     const isInvocationUnavail =
       result.engine !== undefined && UNAVAILABLE_RE.test(reason) && !result.raw;
     const isForceUnready =
       result.engine === undefined && attempt === 0 && originalRequested !== undefined;
-    if (!isPermission && !isInvocationUnavail && !isForceUnready) {
+    const isTimedOut = /timed out/i.test(reason);
+    if (!isPermission && !isInvocationUnavail && !isForceUnready && !isTimedOut) {
       // Not a retryable failure. Two wrapping paths:
       //   (a) "exhausted autopilot fallbacks" — when autopilot was on
-      //       AND the loop has already retried (tried.size > 1) AND
-      //       we are past the first attempt. A single failure with
-      //       no fallbacks attempted is just a plain failure (don't
-      //       wrap it with the "exhausted" message).
+      //       AND the loop has already retried (tried.size > 1).
+      //       Checked first: when a forced engine was tried AND
+      //       fallbacks also failed, the exhausted message is more
+      //       informative than "forced engine not ready".
       //   (b) "forced engine X is not ready" — when a specific engine
-      //       was requested and no candidate was reachable.
-      if (originalRequested && !result.engine) {
-        return {
-          ...result,
-          reason: `forced engine ${originalRequested} is not ready and no fallback engine is available — run \`vf doctor --probe\` to diagnose`,
-        };
-      }
+      //       was requested and no candidate was ever reachable.
       if (tried.size > 1 && autopilot) {
         return {
           ...result,
           reason: `${result.engine ?? "engine"} ${result.reason ?? "failed"} — exhausted ${AUTOPILOT_MAX_RETRIES} autopilot fallbacks; original request was ${originalRequested ?? "auto"}`,
+        };
+      }
+      if (originalRequested && !result.engine) {
+        return {
+          ...result,
+          reason: `forced engine ${originalRequested} is not ready and no fallback engine is available — run \`vf doctor --probe\` to diagnose`,
         };
       }
       return result;
@@ -854,8 +881,11 @@ async function runAiInitOnce(
     };
   }
 
-  // Resolve engine invocation
-  const invocation: EngineCommandResult = (opts.engineCommandFn ?? engineCommand)(engine);
+  // Resolve engine invocation. AI init benefits from --dangerously-skip-permissions
+  // (Claude) / --allow-all (Copilot) to avoid permission-denial stalls during
+  // automated init work. The eccho-team/eccho init test (2026-06-18) showed 3 of 4
+  // engine sessions wasted turns on denied tool calls (Edit, Write, Bash).
+  const invocation: EngineCommandResult = (opts.engineCommandFn ?? ((e) => engineCommand(e, undefined, true)))(engine);
 
   if (isUnavailable(invocation)) {
     // Write context files before returning — they are still useful
@@ -905,7 +935,7 @@ async function runAiInitOnce(
     return {
       ok: false,
       engine,
-      reason: `${engine} AI analysis timed out after ${timeoutMs / 1000}s — deterministic context files are in place`,
+      reason: `${engine} AI analysis timed out after ${timeoutMs / 1000}s — engine may be stuck, rate-limited, or overloaded. Deterministic context files are in place. Try --dry-run to inspect the prompt, a different --engine, or check engine auth/network.`,
       raw: result.stdout,
       __profile: profile,
     };

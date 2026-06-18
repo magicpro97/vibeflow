@@ -376,10 +376,22 @@ function copilotVersion(cmd = "copilot"): string | undefined {
  * `gh -p` is NOT a valid fallback (gh has no global -p flag) so copilot resolves to an explicit
  * unavailability when the binary is absent rather than a bogus command.
  */
-export function engineCommand(engine: Engine, probe: EngineProbe = {}): EngineCommandResult {
+export function engineCommand(
+  engine: Engine,
+  probe: EngineProbe = {},
+  /** When true, append the permissive flag (--dangerously-skip-permissions for
+   *  Claude, --allow-all for Copilot already present). Used in AI init /
+   *  workflow dispatch to avoid permission-denial stalls (eccho 2026-06-18). */
+  dangerouslySkipPermissions = false,
+): EngineCommandResult {
   switch (engine) {
-    case "claude":
-      return { cmd: "claude", args: ["-p", "--output-format", "json"] };
+    case "claude": {
+      const args = ["-p", "--output-format", "json"];
+      if (dangerouslySkipPermissions) {
+        args.push("--dangerously-skip-permissions");
+      }
+      return { cmd: "claude", args };
+    }
     case "codex":
       return { cmd: "codex", args: ["exec", "-"] };
     case "copilot": {
