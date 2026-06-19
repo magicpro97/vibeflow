@@ -69,11 +69,11 @@ function navigationPolicy(settings?: VibeSettings): string | null {
 const VF_COMMANDS = `## VibeFlow commands (use these)
 - \`vf doctor [--probe]\` — check engine readiness before dispatching.
 - \`vf init\` — regenerate context/engine files after editing ${CTX_DIR}/*.
-- \`vf units status|add <name>|update <name>|delete <name>\` — track work units.
+- \`vf units status|add <name>|update <name>|delete <name>\` — track work units. Record evidence with \`vf units evidence <name> --add "<text>"\` (required before a unit can close at confidence 1.0).
 - \`vf orchestrate --engine <e> [--yes]\` — plan + dispatch work units in parallel with the confidence gate.
 - \`vf verify\` — run typecheck/lint/test + confidence/evidence/scope gates BEFORE claiming done (no verification, no completion).
 - \`vf tools status|enable codegraph|lsp\` — code-navigation tools (prefer codegraph > lsp > native).
-- \`vf hooks status|install\` — guardrails (block destructive cmds, secret reads).
+- \`vf hooks status|install|emit --yes\` — guardrails (block destructive cmds, secret reads). \`install\` wires git hooks; \`emit --yes\` ARMS the live PreToolUse tool gate (\`vf doctor\` shows ON/OFF).
 - \`vf skills resolve\` / \`vf discover docs <lib> --yes\` — skill needs + Context7 docs.
 - \`vf workflow delete|import\` — manage/combine workflows.
 - \`${CTX_DIR}/knowledge/log.md\` + \`index.md\` — the work journal (append-only log + page catalog); read before, append after.`;
@@ -97,7 +97,17 @@ Drive every task through this loop instead of free-handing it:
 
 **Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (\`vf skills\` to list/resolve). Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy work, and pull external library docs on demand with \`vf discover docs <lib> --yes\`. After acting, record what you did or learned: append an entry to \`${CTX_DIR}/knowledge/log.md\` (\`## [YYYY-MM-DD] note | <title>\`, append-only) and keep \`${CTX_DIR}/knowledge/index.md\` current.
 
-**Tools.** \`vf tools enable codegraph|lsp\` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.`;
+**Tools.** \`vf tools enable codegraph|lsp\` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.
+
+**When \`vf verify\` fails.** A red gate is investigated, not worked around. (1) Read the \`✗\` lines — each names a failing gate (typecheck/lint/test) or a policy gate (\`confidence<1\`, \`no-evidence\`, scope overlap). (2) Fix the root cause. (3) For a unit stuck below the bar: record evidence (\`vf units evidence <u> --add "<proof>"\`) then close it (\`vf units update <u> --status done --confidence 1\`). (4) Re-run \`vf verify\`. \`vf verify\` is read-only by default; pass \`--journal\` only if you want the run appended to the work journal.
+
+**When blocked or interrupted.** If a hook returns \`deny\`/\`ask\`, do NOT bypass it — the command is genuinely risky; fix the approach or get approval. If \`vf orchestrate\` crashed mid-run, re-run it (work units track their own status in the ledger, so completed lanes are skipped). Two units editing the same file are serialized automatically; if you need to stop a lane touching a path, see the source-protection toggles in \`vf orchestrate --help\`.
+
+**Default engine.** \`vf init\` and \`vf orchestrate\` share one default (currently \`claude\`); pass \`--engine <claude|codex|copilot>\` to override. Check \`vf doctor\` for which engines are ready before dispatching.
+
+**Iterating on one fix.** \`vf verify\` runs the full suite. While iterating, run a single test (\`bun test test/<file>.test.ts\`) or a single-file lint, then \`vf verify\` once before you call it done.
+
+**Hook enforcement is engine-specific.** The live PreToolUse gate (armed via \`vf hooks emit --yes\`) BLOCKS on Claude. Codex and Copilot hook configs are detection-only (they observe + log, they do not block) — \`vf doctor\` reports per-engine status. Do not assume a destructive command is blocked when driving Codex/Copilot.`;
 
 /**
  * Options for {@link defaultContext}.
@@ -228,8 +238,7 @@ export function engineFiles(
         "AGENTS.md": body,
         ".github/copilot-instructions.md": compose(
           `Compose .github/copilot-instructions.md for "${ctx.name}".`,
-          () =>
-            `# Copilot Instructions\n\n${engineBody("copilot", ctx)}\nPath-specific rules live in .github/instructions/*.instructions.md.\n`,
+          () => `# Copilot Instructions\n\n${engineBody("copilot", ctx)}\n`,
         ),
       };
   }

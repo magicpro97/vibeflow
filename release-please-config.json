@@ -19,6 +19,5 @@
         { "type": "chore", "section": "Miscellaneous Chores", "hidden": true }
       ]
     }
-  },
-  "last-release-sha": "3e5bd90f2abf90b8d99066847b9c0b0ada77e5ae"
+  }
 }

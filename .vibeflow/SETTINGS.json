@@ -1,7 +1,7 @@
 {
   "tools": {
-    "codegraph": false,
-    "lsp": true
+    "codegraph": true,
+    "lsp": false
   },
   "toolPriority": [
     "codegraph",
