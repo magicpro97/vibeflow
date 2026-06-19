@@ -50,6 +50,7 @@ import {
   readSettings,
   runFindSkillsFallback,
   runInitAiEnrichment,
+  runMemoryPhase,
   spawnSync,
   updateLastConsult,
   writeSettings,
@@ -62,6 +63,7 @@ import type {
   Engine,
   EngineReadiness,
   IntakeAnswers,
+  MemoryPhaseInject,
   PreflightFn,
   StepSpawner,
   UnitDispatcher,
@@ -123,6 +125,10 @@ export async function init(
     // can stub the full tool-install pipeline without spawning
     // `npm` or `codegraph`. Production callers leave this undefined.
     syncSpawner?: StepSpawner;
+    // Test seam: drive Phase 1.5 (claude-mem opt-in) without a TTY or a
+    // real install. Forwarded to runMemoryPhase. Production callers leave
+    // this undefined; the real prompt + install run.
+    memoryInject?: MemoryPhaseInject;
   } = {},
 ): Promise<number> {
   // A1 brief-surface gate (#167 + #194): `vf init` ALWAYS consults the
@@ -304,6 +310,14 @@ export async function init(
         c.dim(`pruned ${prePruned.length} stale engine folder(s): ${prePruned.join(", ")}`),
       );
     }
+  }
+
+  // Phase 1.55: claude-mem opt-in. Prompt (TTY) or honour --memory/--no-memory,
+  // persist the answer to settings.memory, and on yes install claude-mem +
+  // append the usage guide to WORKFLOW_POLICY.md (written in Phase 1 above).
+  // Best-effort: never blocks init. Skipped on dry runs.
+  if (!dry && !result.refused) {
+    await runMemoryPhase(cwd(), flags, inject.memoryInject);
   }
 
   // Phase 1.6: Tool provisioning — auto-install codegraph if missing,

@@ -28,6 +28,7 @@ export function printHelp(): number {
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
+    ${c.cyan("config [sub]")}      memory <on|off|status> — read/toggle per-repo settings
     ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | import
     ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
@@ -147,6 +148,20 @@ ${c.bold("Subcommands:")}
 ${c.bold("Examples:")}
   vf units status
   vf units update auth --status done --confidence 1`,
+
+  config: () => `${c.bold("vf config")} ${c.dim("memory <on|off|status>")}
+Read or toggle per-repo settings in .vibeflow/SETTINGS.json.
+
+${c.bold("Subcommands:")}
+  memory status        print the current memory setting (default)
+  memory on            enable the claude-mem memory feature
+  memory off           disable the claude-mem memory feature
+
+${c.dim("The memory setting records your claude-mem opt-in; it does not gate the `vf init` prompt.")}
+
+${c.bold("Examples:")}
+  vf config memory status
+  vf config memory on`,
 
   skills: () =>
     `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import]")}

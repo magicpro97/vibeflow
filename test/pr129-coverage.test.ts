@@ -845,6 +845,9 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       // Make the bare ensureCtx7Auth() call at L490 succeed immediately
       // — "Logged in" in stdout trips the alreadyAuth branch.
       ctx7Inject: { spawner: makeCtx7Spawner() as never },
+      // Phase 1.5 (claude-mem): force a non-TTY skip so init never shells
+      // out to the real `npx claude-mem install` (which would hang the test).
+      memoryInject: { isTTY: () => false },
       // Skip the interactive questionnaire.
       answers: { goal: "test", engines: ["claude"] },
     } as never);
@@ -880,6 +883,8 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       hasCommandFn: () => false,
       syncSpawner: () => ({ status: 1 }),
       ctx7Inject: { spawner: makeCtx7Spawner() as never },
+      // Phase 1.5 (claude-mem): force a non-TTY skip (see the sibling test).
+      memoryInject: { isTTY: () => false },
       answers: { goal: "test", engines: ["claude"] },
     } as never);
     expect(typeof code).toBe("number");

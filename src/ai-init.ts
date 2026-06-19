@@ -885,7 +885,9 @@ async function runAiInitOnce(
   // (Claude) / --allow-all (Copilot) to avoid permission-denial stalls during
   // automated init work. The eccho-team/eccho init test (2026-06-18) showed 3 of 4
   // engine sessions wasted turns on denied tool calls (Edit, Write, Bash).
-  const invocation: EngineCommandResult = (opts.engineCommandFn ?? ((e) => engineCommand(e, undefined, true)))(engine);
+  const invocation: EngineCommandResult = (
+    opts.engineCommandFn ?? ((e) => engineCommand(e, undefined, true))
+  )(engine);
 
   if (isUnavailable(invocation)) {
     // Write context files before returning — they are still useful

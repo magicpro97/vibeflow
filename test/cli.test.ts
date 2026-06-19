@@ -289,6 +289,7 @@ describe("cli help routing", () => {
     const cases: Array<[string, string]> = [
       ["verify", "vf verify"],
       ["units", "vf units"],
+      ["config", "vf config"],
       ["init", "vf init"],
       ["orchestrate", "vf orchestrate"],
       ["tools", "vf tools"],
@@ -307,6 +308,29 @@ describe("cli help routing", () => {
     expect(short.code).toBe(0);
     expect(short.stdout).toContain("vf verify");
     expect(short.stdout).not.toBe(global);
+  });
+
+  test("`vf config memory` routes to the config command (not Unknown command)", () => {
+    // Run in a throwaway cwd so the status read never touches the project's
+    // own SETTINGS.json. `status` is read-only — no settings file is written.
+    const tmp = mkdtempSync(join(tmpdir(), "vf-cli-config-"));
+    try {
+      const r = cpSpawnSync(
+        "bun",
+        ["run", join(process.cwd(), "src/cli.ts"), "config", "memory", "status"],
+        {
+          cwd: tmp,
+          env: { ...process.env, NO_COLOR: "1" },
+        },
+      );
+      const stdout = typeof r.stdout === "string" ? r.stdout : new TextDecoder().decode(r.stdout);
+      const stderr = typeof r.stderr === "string" ? r.stderr : new TextDecoder().decode(r.stderr);
+      expect(r.status ?? 1).toBe(0);
+      expect(stderr).not.toContain("Unknown command");
+      expect(stdout).toContain("memory: on"); // default true on an empty repo
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 
@@ -328,6 +352,51 @@ describe("commands.init", () => {
     const state = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`), "utf8"));
     expect(state.totals.units).toBe(0);
     expect(readFileSync(join(dir, "CLAUDE.md"), "utf8").length).toBeGreaterThan(0);
+  });
+
+  test("init --memory installs claude-mem and appends the guide (Phase 1.5)", async () => {
+    let installed = 0;
+    const code = await init(
+      { engine: "claude", "no-ai": true, memory: true },
+      {
+        preflight: allReady,
+        memoryInject: {
+          isInstalled: () => false,
+          ensureInstalled: async () => {
+            installed++;
+            return { ok: true };
+          },
+        },
+      },
+    );
+    expect(code).toBe(0);
+    expect(installed).toBe(1);
+    // Setting persisted and guide appended to the canonical policy file.
+    const settings = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/SETTINGS.json`), "utf8"));
+    expect(settings.memory).toBe(true);
+    expect(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_POLICY.md`), "utf8")).toContain(
+      "## Memory: claude-mem",
+    );
+  });
+
+  test("init --no-memory persists memory:false and never installs (Phase 1.5)", async () => {
+    let installed = 0;
+    const code = await init(
+      { engine: "claude", "no-ai": true, "no-memory": true },
+      {
+        preflight: allReady,
+        memoryInject: {
+          ensureInstalled: async () => {
+            installed++;
+            return { ok: true };
+          },
+        },
+      },
+    );
+    expect(code).toBe(0);
+    expect(installed).toBe(0);
+    const settings = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/SETTINGS.json`), "utf8"));
+    expect(settings.memory).toBe(false);
   });
 
   test("units status returns 0 on an initialized ledger", () => {
@@ -1240,6 +1309,7 @@ describe("adapters settings integration", () => {
         tools: { codegraph: true, lsp: true },
         toolPriority: ["lsp", "codegraph", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+        memory: true,
         updatedAt: "",
       } satisfies VibeSettings,
     };
@@ -1261,6 +1331,7 @@ describe("adapters settings integration", () => {
         tools: { codegraph: true, lsp: false },
         toolPriority: ["codegraph", "lsp", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+        memory: true,
         updatedAt: "",
       } satisfies VibeSettings,
     };

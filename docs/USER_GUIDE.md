@@ -91,10 +91,19 @@ no third-party JavaScript under a strict CSP.
 vf init                       # scan repo + generate canonical context for all engines
 vf init --engine claude       # only Claude Code files
 vf init --interactive         # ask the intake questions in the terminal
+vf init --memory              # force the claude-mem install (skip the prompt)
+vf init --no-memory           # skip the claude-mem install (skip the prompt)
 vf init --dry-run             # show what would be written
 # per-role agent files are written alongside the engine files when a per-role
 # renderer is available (see src/agents/render.ts); see AGENT_ORCHESTRATION_POLICY.md
 ```
+
+On a TTY, `vf init` asks whether to install **claude-mem** so engines can recall
+past specs and decisions (`Install claude-mem for spec/plan recall? (Y/n)`, default
+yes). On yes it installs claude-mem and appends a usage guide to
+`WORKFLOW_POLICY.md`. The answer is saved to `settings.memory`; toggle it later with
+`vf config memory on|off` (a read-only `vf config memory status` prints the current
+state). `--memory` / `--no-memory` skip the prompt.
 
 `vf init --ai` runs the AI enrichment phase on top of the deterministic
 context. The chosen engine is the first ready one in priority order

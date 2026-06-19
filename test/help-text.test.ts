@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { printHelp } from "../src/commands.js";
+import { hasCommandHelp, printCommandHelp } from "../src/commands/help.js";
 
 const SKILL_SUBS = ["list", "search", "resolve", "validate", "sync", "verify-sync", "import"];
 
@@ -34,5 +35,12 @@ describe("help text", () => {
     for (const sub of ["list", "search", "resolve", "validate", "sync", "verify-sync", "import"]) {
       expect(line?.[0] ?? "").toContain(sub);
     }
+  });
+
+  test("config has a per-command help block naming its memory subcommand", () => {
+    expect(hasCommandHelp("config")).toBe(true);
+    // printCommandHelp returns 0 and renders the config block (covers the
+    // new COMMAND_HELP.config arm in src/commands/help.ts).
+    expect(printCommandHelp("config")).toBe(0);
   });
 });

@@ -69,6 +69,13 @@ export { liveGuardrailArmed, guardrailOffNote } from "./seams.js";
 // re-export resolveRepo through this barrel.
 export { resolveRepo } from "./doctor.js";
 
+// === init Phase 1.5 (claude-mem) re-exported from init-memory.ts ===
+// The `init` subcommand runs the memory opt-in between the deterministic
+// baseline and AI enrichment. The cycle rule forbids init.ts from importing
+// the sibling (./init-memory.js) directly, so it goes through this barrel.
+export { runMemoryPhase } from "./init-memory.js";
+export type { MemoryPhaseInject } from "./init-memory.js";
+
 // === dispatch helpers re-exported from dispatch.ts ===
 // (issue #80, phase 6/14) The units subcommand uses mutateUnits
 // to round-trip the workflow ledger. The cycle rule forbids

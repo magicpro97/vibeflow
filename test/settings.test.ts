@@ -248,6 +248,63 @@ describe("settings.failureProtection", () => {
   });
 });
 
+describe("settings.memory", () => {
+  test("defaults to true on an empty repo", () => {
+    const dir = tmpRepo();
+    try {
+      expect(readSettings(dir).memory).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("round-trips an explicit false through writeSettings", () => {
+    const dir = tmpRepo();
+    try {
+      const written = writeSettings(dir, { memory: false }, { now: fixedNow });
+      expect(written.memory).toBe(false);
+      expect(readSettings(dir).memory).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial write that omits memory preserves the stored value", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { memory: false }, { now: fixedNow });
+      const second = writeSettings(
+        dir,
+        { tools: { codegraph: true, lsp: false } },
+        { now: fixedNow },
+      );
+      expect(second.memory).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file missing memory is defaulted to true (forward-compat)", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ tools: { codegraph: true } }));
+      expect(readSettings(dir).memory).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a wrong-typed memory field falls back to true", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ memory: "nope" }));
+      expect(readSettings(dir).memory).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("settings.priorityRank", () => {
   test("default order: codegraph > lsp > native", () => {
     const rank = priorityRank(DEFAULT_SETTINGS);

@@ -22,6 +22,7 @@ import {
   verify,
   workflow,
 } from "./commands.js";
+import { config } from "./commands/config.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
 import { startServer } from "./server.js";
 
@@ -188,6 +189,8 @@ async function main(argv: string[]): Promise<number> {
       return workflow(positionals[0], positionals.slice(1), flags);
     case "units":
       return units(positionals[0], positionals.slice(1), flags);
+    case "config":
+      return config(positionals[0], positionals.slice(1));
     case "skills":
       return skills(positionals[0], positionals.slice(1));
     case "tools":

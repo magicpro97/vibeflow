@@ -36,12 +36,21 @@ requires it to reply `READY` (a bounded round-trip that proves auth and a workin
 vf init                  # scan repo + generate canonical context for all engines
 vf init --engine claude  # only one engine's files
 vf init --interactive    # terminal intake questionnaire (TTY only)
+vf init --memory         # force the claude-mem install (skip the prompt)
+vf init --no-memory      # skip the claude-mem install (skip the prompt)
 vf init --dry-run        # print what would be written
 ```
 
 Scans the repo and generates the minimal set: `CLAUDE.md`, `AGENTS.md`,
 `.github/copilot-instructions.md`, and `.vibeflow/*` (including a seeded
 `WORKFLOW_STATE.json`). `PROJECT_CONTEXT.md` includes a `## Detected stack` section.
+
+**Memory (claude-mem):** on a TTY, `init` asks `Install claude-mem for spec/plan
+recall? (Y/n)` (default yes). On yes it installs claude-mem (non-interactive) and
+appends a usage guide to `WORKFLOW_POLICY.md`. The answer is saved to
+`settings.memory`. `--memory` / `--no-memory` skip the prompt; a non-TTY run with
+neither flag skips the step entirely. Toggle the stored setting later with
+`vf config memory`.
 
 **Readiness gate:** a real `init` runs a live preflight (the same probe as
 `vf doctor --probe`) and **refuses to create a workflow when no engine is ready**.
@@ -76,6 +85,19 @@ vf units show <name>       # one unit as JSON
 vf units resources         # token / cost / wall-time totals
 vf units evidence <name>   # recorded evidence paths
 ```
+
+## Settings (config)
+
+```bash
+vf config memory status    # print the current memory setting (default: on)
+vf config memory on        # enable the claude-mem memory feature
+vf config memory off       # disable the claude-mem memory feature
+```
+
+Reads/toggles `memory` in `.vibeflow/SETTINGS.json`. The setting records your
+claude-mem opt-in; it does **not** gate the `vf init` prompt (init always asks on a
+TTY). It is the forward-compatible switch a later orchestrate-side memory query
+will honour.
 
 ## Skills (demand-driven)
 
