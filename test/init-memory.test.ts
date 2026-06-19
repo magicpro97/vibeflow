@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMemoryPhase } from "../src/commands/init-memory.js";
+import type { Engine } from "../src/core.js";
+import type { MemoryWireResult } from "../src/memory.js";
 import { readSettings } from "../src/settings.js";
 
 function tmpRepo(): string {
@@ -18,15 +20,14 @@ function seedPolicy(base: string): void {
 
 /** Collect the injection spies a test cares about. */
 function spies(over: Record<string, unknown> = {}) {
-  const calls = { ensure: 0, append: 0 };
+  const calls = { wired: [] as Engine[][], append: 0 };
   return {
     calls,
     inject: {
       isTTY: () => false,
-      isInstalled: () => false,
-      ensureInstalled: async () => {
-        calls.ensure++;
-        return { ok: true };
+      ensureInstalledForEngines: (engines: Engine[]): MemoryWireResult => {
+        calls.wired.push(engines);
+        return { wired: engines, failed: [] };
       },
       appendMemoryGuide: (base: string) => {
         calls.append++;
@@ -40,14 +41,15 @@ function spies(over: Record<string, unknown> = {}) {
 }
 
 describe("runMemoryPhase — flag-driven decision", () => {
-  test("--memory installs, persists memory:true, and appends the guide", async () => {
+  test("--memory wires the given engines, persists memory:true, and appends the guide", async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
       const { calls, inject } = spies();
-      await runMemoryPhase(dir, { memory: true }, inject);
+      await runMemoryPhase(dir, { memory: true }, ["claude", "codex", "copilot"], inject);
       expect(readSettings(dir).memory).toBe(true);
-      expect(calls.ensure).toBe(1);
+      // One wiring call carrying all three engines.
+      expect(calls.wired).toEqual([["claude", "codex", "copilot"]]);
       expect(calls.append).toBe(1);
       expect(readFileSync(join(dir, ".vibeflow/WORKFLOW_POLICY.md"), "utf8")).toContain(
         "## Memory: claude-mem",
@@ -57,48 +59,75 @@ describe("runMemoryPhase — flag-driven decision", () => {
     }
   });
 
-  test("--no-memory persists memory:false and never installs", async () => {
+  test("--no-memory persists memory:false and never wires", async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
       const { calls, inject } = spies();
-      await runMemoryPhase(dir, { "no-memory": true }, inject);
+      await runMemoryPhase(dir, { "no-memory": true }, ["claude"], inject);
       expect(readSettings(dir).memory).toBe(false);
-      expect(calls.ensure).toBe(0);
+      expect(calls.wired).toEqual([]);
       expect(calls.append).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("when already installed, skips install but still appends the guide", async () => {
+  test("wires only the workflow's chosen engines (not all three)", async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
-      const { calls, inject } = spies({ isInstalled: () => true });
-      await runMemoryPhase(dir, { memory: true }, inject);
-      expect(calls.ensure).toBe(0); // ensureInstalled not reached
-      expect(calls.append).toBe(1);
-      expect(readSettings(dir).memory).toBe(true);
+      const { calls, inject } = spies();
+      await runMemoryPhase(dir, { memory: true }, ["claude", "codex"], inject);
+      expect(calls.wired).toEqual([["claude", "codex"]]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("a failed install persists the setting but writes no guide", async () => {
+  test("a fully-failed wiring persists the setting but writes no guide", async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
       const { calls, inject } = spies({
-        ensureInstalled: async () => {
-          calls.ensure++;
-          return { ok: false, reason: "network down" };
+        ensureInstalledForEngines: (engines: Engine[]): MemoryWireResult => {
+          calls.wired.push(engines);
+          return { wired: [], failed: engines.map((e) => ({ engine: e, reason: "network down" })) };
         },
       });
-      await runMemoryPhase(dir, { memory: true }, inject);
+      await runMemoryPhase(dir, { memory: true }, ["claude"], inject);
       expect(readSettings(dir).memory).toBe(true);
-      expect(calls.ensure).toBe(1);
-      expect(calls.append).toBe(0); // guide skipped on failed install
+      expect(calls.wired).toEqual([["claude"]]);
+      expect(calls.append).toBe(0); // guide skipped when nothing wired
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial wiring (one engine fails) still appends the guide", async () => {
+    const dir = tmpRepo();
+    try {
+      seedPolicy(dir);
+      const { calls, inject } = spies({
+        ensureInstalledForEngines: (engines: Engine[]): MemoryWireResult => {
+          calls.wired.push(engines);
+          return { wired: ["claude"], failed: [{ engine: "copilot", reason: "exited 1" }] };
+        },
+      });
+      await runMemoryPhase(dir, { memory: true }, ["claude", "copilot"], inject);
+      expect(calls.append).toBe(1); // shared store wired → guide added
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an empty engine list defaults to claude (never wires nothing-yet-claims-success)", async () => {
+    const dir = tmpRepo();
+    try {
+      seedPolicy(dir);
+      const { calls, inject } = spies();
+      await runMemoryPhase(dir, { memory: true }, [], inject);
+      expect(calls.wired).toEqual([["claude"]]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -106,46 +135,44 @@ describe("runMemoryPhase — flag-driven decision", () => {
 });
 
 describe("runMemoryPhase — prompt + skip", () => {
-  test("non-TTY with no flag skips entirely (no settings write, no install)", async () => {
+  test("non-TTY with no flag skips entirely (no settings write, no wiring)", async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
       const { calls, inject } = spies();
       // No SETTINGS.json exists yet — a skip must not create one.
-      await runMemoryPhase(dir, {}, inject);
-      expect(calls.ensure).toBe(0);
+      await runMemoryPhase(dir, {}, ["claude"], inject);
+      expect(calls.wired).toEqual([]);
       expect(calls.append).toBe(0);
       // readSettings returns the default (memory:true) but nothing was persisted.
-      // Assert the file was not written by checking it stays at the default
-      // even though we never wrote false — i.e. no write occurred.
       expect(readSettings(dir).memory).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("TTY prompt answered yes installs and persists true", async () => {
+  test("TTY prompt answered yes wires and persists true", async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
       const { calls, inject } = spies({ isTTY: () => true, ask: async () => true });
-      await runMemoryPhase(dir, {}, inject);
+      await runMemoryPhase(dir, {}, ["claude", "codex"], inject);
       expect(readSettings(dir).memory).toBe(true);
-      expect(calls.ensure).toBe(1);
+      expect(calls.wired).toEqual([["claude", "codex"]]);
       expect(calls.append).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("TTY prompt answered no persists false and never installs", async () => {
+  test("TTY prompt answered no persists false and never wires", async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
       const { calls, inject } = spies({ isTTY: () => true, ask: async () => false });
-      await runMemoryPhase(dir, {}, inject);
+      await runMemoryPhase(dir, {}, ["claude"], inject);
       expect(readSettings(dir).memory).toBe(false);
-      expect(calls.ensure).toBe(0);
+      expect(calls.wired).toEqual([]);
       expect(calls.append).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });

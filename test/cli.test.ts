@@ -354,23 +354,22 @@ describe("commands.init", () => {
     expect(readFileSync(join(dir, "CLAUDE.md"), "utf8").length).toBeGreaterThan(0);
   });
 
-  test("init --memory installs claude-mem and appends the guide (Phase 1.5)", async () => {
-    let installed = 0;
+  test("init --memory wires claude-mem and appends the guide (Phase 1.5)", async () => {
+    let wired = 0;
     const code = await init(
       { engine: "claude", "no-ai": true, memory: true },
       {
         preflight: allReady,
         memoryInject: {
-          isInstalled: () => false,
-          ensureInstalled: async () => {
-            installed++;
-            return { ok: true };
+          ensureInstalledForEngines: (engines) => {
+            wired++;
+            return { wired: engines, failed: [] };
           },
         },
       },
     );
     expect(code).toBe(0);
-    expect(installed).toBe(1);
+    expect(wired).toBe(1);
     // Setting persisted and guide appended to the canonical policy file.
     const settings = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/SETTINGS.json`), "utf8"));
     expect(settings.memory).toBe(true);
@@ -380,21 +379,21 @@ describe("commands.init", () => {
   });
 
   test("init --no-memory persists memory:false and never installs (Phase 1.5)", async () => {
-    let installed = 0;
+    let wired = 0;
     const code = await init(
       { engine: "claude", "no-ai": true, "no-memory": true },
       {
         preflight: allReady,
         memoryInject: {
-          ensureInstalled: async () => {
-            installed++;
-            return { ok: true };
+          ensureInstalledForEngines: (engines) => {
+            wired++;
+            return { wired: engines, failed: [] };
           },
         },
       },
     );
     expect(code).toBe(0);
-    expect(installed).toBe(0);
+    expect(wired).toBe(0);
     const settings = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/SETTINGS.json`), "utf8"));
     expect(settings.memory).toBe(false);
   });

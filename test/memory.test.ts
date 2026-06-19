@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CTX_DIR } from "../src/core.js";
+import { CTX_DIR, type Engine } from "../src/core.js";
 import {
+  ENGINE_IDE,
   appendMemoryGuide,
   buildMemoryGuide,
-  ensureInstalled,
+  ensureInstalledForEngines,
+  installForEngine,
   isInstalled,
 } from "../src/memory.js";
 
@@ -37,63 +39,70 @@ describe("memory.isInstalled", () => {
   });
 });
 
-describe("memory.ensureInstalled", () => {
-  test("short-circuits ok when claude-mem is already installed (no spawn)", async () => {
-    let spawned = false;
-    const res = await ensureInstalled({
-      has: () => true,
-      spawner: (() => {
-        spawned = true;
+describe("memory.ENGINE_IDE", () => {
+  test("maps each VibeFlow engine to claude-mem's exact --ide id", () => {
+    expect(ENGINE_IDE).toEqual({
+      claude: "claude-code",
+      codex: "codex-cli",
+      copilot: "copilot-cli",
+    });
+  });
+});
+
+describe("memory.installForEngine", () => {
+  test("runs the non-interactive installer with the engine's --ide and returns ok on status 0", () => {
+    const calls: { cmd: string; args: readonly string[]; opts: unknown }[] = [];
+    const res = installForEngine("codex", {
+      spawner: ((cmd: string, args: readonly string[], opts: unknown) => {
+        calls.push({ cmd, args, opts });
         return { status: 0 };
       }) as never,
     });
     expect(res).toEqual({ ok: true });
-    expect(spawned).toBe(false);
-  });
-
-  test("runs the non-interactive installer and returns ok on status 0", async () => {
-    const calls: { cmd: string; args: readonly string[] }[] = [];
-    const res = await ensureInstalled({
-      has: () => false,
-      spawner: ((cmd: string, args: readonly string[]) => {
-        calls.push({ cmd, args });
-        return { status: 0 };
-      }) as never,
-    });
-    expect(res.ok).toBe(true);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.cmd).toBe("npx");
     expect(calls[0]?.args).toEqual([
       "-y",
       "claude-mem",
       "install",
+      "--ide",
+      "codex-cli",
       "--provider",
       "claude",
       "--no-auto-start",
     ]);
   });
 
-  test("returns ok=false with the stderr reason on a nonzero exit", async () => {
-    const res = await ensureInstalled({
-      has: () => false,
-      spawner: (() => ({ status: 1, stderr: "network down" })) as never,
+  test("inherits stdio so the installer streams live (no perceived hang)", () => {
+    let seenStdio: unknown;
+    installForEngine("claude", {
+      spawner: ((_cmd: string, _args: readonly string[], opts: { stdio?: unknown }) => {
+        seenStdio = opts.stdio;
+        return { status: 0 };
+      }) as never,
     });
-    expect(res.ok).toBe(false);
-    expect(res.reason).toBe("network down");
+    expect(seenStdio).toBe("inherit");
   });
 
-  test("falls back to an exit-code reason when stderr is empty", async () => {
-    const res = await ensureInstalled({
-      has: () => false,
-      spawner: (() => ({ status: 7, stderr: "" })) as never,
+  test("returns ok=false with an exit-code reason on a nonzero exit", () => {
+    const res = installForEngine("copilot", {
+      spawner: (() => ({ status: 7 })) as never,
     });
     expect(res.ok).toBe(false);
     expect(res.reason).toContain("7");
+    expect(res.reason).toContain("copilot-cli");
   });
 
-  test("never throws — a throwing spawner yields ok=false with a reason", async () => {
-    const res = await ensureInstalled({
-      has: () => false,
+  test("reports a timeout (killed by signal) distinctly", () => {
+    const res = installForEngine("claude", {
+      spawner: (() => ({ status: null, signal: "SIGTERM" })) as never,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.reason?.toLowerCase()).toContain("timed out");
+  });
+
+  test("never throws — a throwing spawner yields ok=false with a reason", () => {
+    const res = installForEngine("claude", {
       spawner: (() => {
         throw new Error("ENOENT npx");
       }) as never,
@@ -102,10 +111,9 @@ describe("memory.ensureInstalled", () => {
     expect(res.reason).toContain("ENOENT npx");
   });
 
-  test("forwards the timeout bound and cwd to the spawner", async () => {
+  test("forwards the timeout bound and cwd to the spawner", () => {
     let seen: { timeout?: number; cwd?: string } | undefined;
-    await ensureInstalled({
-      has: () => false,
+    installForEngine("claude", {
       timeoutMs: 5000,
       cwd: "/tmp/proj",
       spawner: ((_cmd: string, _args: readonly string[], o: { timeout?: number; cwd?: string }) => {
@@ -115,6 +123,60 @@ describe("memory.ensureInstalled", () => {
     });
     expect(seen?.timeout).toBe(5000);
     expect(seen?.cwd).toBe("/tmp/proj");
+  });
+});
+
+describe("memory.ensureInstalledForEngines", () => {
+  test("wires every engine and records them in order", () => {
+    const ides: string[] = [];
+    const res = ensureInstalledForEngines(["claude", "codex", "copilot"], {
+      spawner: ((_cmd: string, args: readonly string[]) => {
+        ides.push(args[args.indexOf("--ide") + 1] as string);
+        return { status: 0 };
+      }) as never,
+    });
+    expect(res.wired).toEqual(["claude", "codex", "copilot"]);
+    expect(res.failed).toEqual([]);
+    // One installer invocation per engine, each with the matching --ide id.
+    expect(ides).toEqual(["claude-code", "codex-cli", "copilot-cli"]);
+  });
+
+  test("is best-effort: one engine failing does not block the others", () => {
+    const res = ensureInstalledForEngines(["claude", "codex", "copilot"], {
+      spawner: ((_cmd: string, args: readonly string[]) => {
+        // codex fails, the rest succeed.
+        const ide = args[args.indexOf("--ide") + 1];
+        return ide === "codex-cli" ? { status: 1 } : { status: 0 };
+      }) as never,
+    });
+    expect(res.wired).toEqual(["claude", "copilot"]);
+    expect(res.failed).toHaveLength(1);
+    expect(res.failed[0]?.engine).toBe("codex");
+    expect(res.failed[0]?.reason).toContain("codex-cli");
+  });
+
+  test("de-duplicates engines, preserving first-seen order (one install each)", () => {
+    let calls = 0;
+    const res = ensureInstalledForEngines(["claude", "claude", "codex"] as Engine[], {
+      spawner: (() => {
+        calls++;
+        return { status: 0 };
+      }) as never,
+    });
+    expect(res.wired).toEqual(["claude", "codex"]);
+    expect(calls).toBe(2);
+  });
+
+  test("an empty engine list installs nothing and reports nothing", () => {
+    let calls = 0;
+    const res = ensureInstalledForEngines([], {
+      spawner: (() => {
+        calls++;
+        return { status: 0 };
+      }) as never,
+    });
+    expect(res).toEqual({ wired: [], failed: [] });
+    expect(calls).toBe(0);
   });
 });
 

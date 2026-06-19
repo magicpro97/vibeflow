@@ -6,15 +6,34 @@
 // best-effort — they return a result, never throw — because memory is an
 // enrichment, not a gate: a failed install or a missing policy file must
 // not block init.
+//
+// claude-mem keeps ONE shared store (~/.claude-mem); installing wires the
+// per-IDE hooks that feed it. claude-mem's `--ide` flag takes a SINGLE id
+// (verified against its installer: `selectedIDEs = [options.ide]`, no
+// comma-split), so wiring N engines means N installer invocations — one
+// per engine — against the same shared store. We stream the installer's
+// output (stdio:"inherit") because the first run downloads the plugin and
+// runs bun/npm install; a silent spawnSync looked like a hang.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { ctxPathIn, hasCommand, writeFileSafe } from "./core.js";
+import { type Engine, ctxPathIn, hasCommand, writeFileSafe } from "./core.js";
 
 /** Default bound for the (network-bound) installer; keeps init from hanging. */
 export const DEFAULT_INSTALL_TIMEOUT_MS = 180_000;
 
 /** The header the guide block is keyed on (idempotency + spec contract). */
 const GUIDE_HEADER = "## Memory: claude-mem";
+
+/**
+ * VibeFlow engine → claude-mem `--ide` identifier. These are the exact IDs
+ * claude-mem's installer accepts (`claude-code`, `codex-cli`, `copilot-cli`);
+ * a wrong id makes the installer exit non-zero with "Unknown IDE".
+ */
+export const ENGINE_IDE: Record<Engine, string> = {
+  claude: "claude-code",
+  codex: "codex-cli",
+  copilot: "copilot-cli",
+};
 
 export interface MemoryBackendOpts {
   /** Bound for the installer subprocess (ms). Default {@link DEFAULT_INSTALL_TIMEOUT_MS}. */
@@ -38,27 +57,71 @@ export function isInstalled(opts: Pick<MemoryBackendOpts, "has"> = {}): boolean 
 }
 
 /**
- * Install claude-mem non-interactively. No-op (ok) when already present.
- * Runs `npx -y claude-mem install --provider claude --no-auto-start` so the
- * installer never blocks on its own prompts. Bounded; never throws.
+ * Wire claude-mem for ONE engine. Runs
+ *   npx -y claude-mem install --ide <id> --provider claude --no-auto-start
+ * with stdio inherited so the user sees live progress (the first run
+ * downloads the plugin + runs bun/npm install — a silent spawn looked like
+ * a hang). `--no-auto-start` skips the worker autostart prompt; `--ide`
+ * scopes the install to one IDE (the flag takes a single value). Bounded by
+ * `timeoutMs`; never throws.
+ *
+ * Because stdio is inherited, the installer's own stderr goes straight to
+ * the terminal, so a failure `reason` here is just the exit signal — the
+ * actionable detail is already on screen.
  */
-export async function ensureInstalled(
+export function installForEngine(
+  engine: Engine,
   opts: MemoryBackendOpts = {},
-): Promise<{ ok: boolean; reason?: string }> {
-  if (isInstalled({ has: opts.has })) return { ok: true };
+): { ok: boolean; reason?: string } {
   const spawn = opts.spawner ?? spawnSync;
+  const ide = ENGINE_IDE[engine];
   try {
     const r = spawn(
       "npx",
-      ["-y", "claude-mem", "install", "--provider", "claude", "--no-auto-start"],
-      { encoding: "utf8", timeout: opts.timeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS, cwd: opts.cwd },
+      ["-y", "claude-mem", "install", "--ide", ide, "--provider", "claude", "--no-auto-start"],
+      { stdio: "inherit", timeout: opts.timeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS, cwd: opts.cwd },
     );
     if (r.status === 0) return { ok: true };
-    const stderr = typeof r.stderr === "string" ? r.stderr.trim() : "";
-    return { ok: false, reason: stderr ? stderr : `claude-mem install exited ${r.status}` };
+    if (r.signal) return { ok: false, reason: `killed by ${r.signal} (likely timed out)` };
+    return { ok: false, reason: `claude-mem install --ide ${ide} exited ${r.status}` };
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Per-engine wiring outcome from {@link ensureInstalledForEngines}. */
+export interface MemoryWireResult {
+  /** Engines whose claude-mem hook was wired successfully. */
+  wired: Engine[];
+  /** Engines that failed, with the reason (exit/signal/throw). */
+  failed: Array<{ engine: Engine; reason: string }>;
+}
+
+/**
+ * Wire claude-mem for each engine in `engines`, sharing the one ~/.claude-mem
+ * store. Best-effort per engine: a failure on one engine is recorded and the
+ * loop continues, so a missing copilot CLI never blocks wiring claude/codex.
+ * Never throws. Engines are de-duplicated, preserving first-seen order.
+ *
+ * Note: claude-mem install is idempotent and the heavy first-run work
+ * (plugin download, bun/npm install) is shared, so later engines in the loop
+ * only register their IDE hook — fast.
+ */
+export function ensureInstalledForEngines(
+  engines: Engine[],
+  opts: MemoryBackendOpts = {},
+): MemoryWireResult {
+  const seen = new Set<Engine>();
+  const wired: Engine[] = [];
+  const failed: Array<{ engine: Engine; reason: string }> = [];
+  for (const engine of engines) {
+    if (seen.has(engine)) continue;
+    seen.add(engine);
+    const res = installForEngine(engine, opts);
+    if (res.ok) wired.push(engine);
+    else failed.push({ engine, reason: res.reason ?? "unknown" });
+  }
+  return { wired, failed };
 }
 
 /** Render the markdown guide block appended to WORKFLOW_POLICY.md. Pure. */

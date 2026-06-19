@@ -313,11 +313,15 @@ export async function init(
   }
 
   // Phase 1.55: claude-mem opt-in. Prompt (TTY) or honour --memory/--no-memory,
-  // persist the answer to settings.memory, and on yes install claude-mem +
+  // persist the answer to settings.memory, and on yes wire claude-mem for the
+  // workflow's chosen engines (one shared store, one IDE hook per engine) +
   // append the usage guide to WORKFLOW_POLICY.md (written in Phase 1 above).
   // Best-effort: never blocks init. Skipped on dry runs.
   if (!dry && !result.refused) {
-    await runMemoryPhase(cwd(), flags, inject.memoryInject);
+    const memoryEngines = (answers.engines?.length ? answers.engines : ENGINES).filter(
+      (e): e is Engine => (ENGINES as string[]).includes(e),
+    );
+    await runMemoryPhase(cwd(), flags, memoryEngines, inject.memoryInject);
   }
 
   // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
