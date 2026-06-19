@@ -40,6 +40,7 @@ import {
 import { CTX_DIR, type Engine, type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import { claudeHookConfig } from "../src/hooks/adapters.js";
+import { getLogbus, setLogbusForTests } from "../src/logbus.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
@@ -3086,6 +3087,49 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       console.error = origErr;
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // F3 #164: installLogbus() is called during init --ai enrichment, so the
+  // engine-stdout / engine-stderr callbacks actually persist to the file log
+  // and the SSE relay — not just the console fallback.
+  test("init --ai installs the logbus so the SSE relay sees enrichment events", async () => {
+    setLogbusForTests(null);
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "vf-init-logbus-f3-"));
+      const origCwd = process.cwd();
+      const origIsTTY = process.stderr.isTTY;
+      Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+      process.chdir(dir);
+      try {
+        await init(
+          { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+          {
+            preflight: () => [
+              { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-15" },
+            ],
+            aiPreflight: () => [
+              { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-15" },
+            ],
+            aiSpawner: async () => ({
+              status: 0,
+              stdout: '```json\\n{"confidence": 1, "files_changed": []}\\n```',
+              stderr: "",
+              timedOut: false,
+            }),
+          },
+        );
+        const bus = getLogbus();
+        expect(bus).not.toBeNull();
+        const logDir = join(dir, CTX_DIR, "logs");
+        expect(existsSync(logDir)).toBe(true);
+      } finally {
+        process.chdir(origCwd);
+        Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } finally {
+      setLogbusForTests(null);
     }
   });
 });

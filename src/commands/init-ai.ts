@@ -13,6 +13,12 @@
 // exactly as they were in the inline init() body, so the AI bundle is only
 // pulled in when an enrichment actually runs.
 
+// F3: installLogbus is needed so the engine-stdout/engine-stderr callbacks
+// below actually persist to .vibeflow/logs/current.log and reach the SSE
+// relay. Without it, the bus singleton is null and out() falls back to
+// console-only — no file log, no UI stream, no replay. Mirrors the
+// `orchestrate.ts:176` call. installLogbus is idempotent.
+import { installLogbus } from "../logbus.js";
 import {
   type AgentEngine,
   type AsyncSpawner,
@@ -78,6 +84,13 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
 
   // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded)
   if (ai && !dry && !refused) {
+    // F3: install the logbus before any out("engine-stderr", …) can fire.
+    // The onChunk / onStderrChunk callbacks below route engine output to
+    // out() — without an installed bus, out() falls through to the
+    // console-only fallback (logbus.ts:466-500) and the SSE relay / file
+    // log get nothing. Mirrors the M2 contract at orchestrate.ts:176.
+    // installLogbus is idempotent (replaces the active singleton).
+    installLogbus();
     out("vf");
     const aiEngine = initEngine;
     const prefix = aiEngine ? `[${aiEngine}]` : "[ai]";
