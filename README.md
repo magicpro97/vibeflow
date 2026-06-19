@@ -2,6 +2,17 @@
 
 ## Purpose
 
+## Guardrail (arm before editing)
+
+On a fresh clone, arm the guardrail before any human edit:
+
+```bash
+./scripts/guardrail-on.sh
+```
+
+See issue #162 (orchestrator-first / F1) for the full rationale.
+
+
 VibeFlow is a local-first npm CLI tool that opens a visual web UI and helps users run AI-assisted software development workflows using Claude Code, Codex CLI, and GitHub Copilot CLI out-of-the-box.
 
 The tool acts as the main orchestrator. It collects task context, reads project sources, selects skills, generates tool-specific instruction files, dispatches AI coding engines, verifies results, and continuously improves local skills based on lessons learned.
