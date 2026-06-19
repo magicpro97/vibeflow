@@ -359,3 +359,59 @@ describe("scanner truncation signal (issue #86)", () => {
     }
   });
 });
+
+describe("scanner sub-package framework detection (issue #150)", () => {
+  test("detects Astro in a sub-package via astro.config.mjs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-sub-"));
+    try {
+      // root package.json with NO framework deps (just tooling)
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({ name: "root", devDependencies: { typescript: "5" } }),
+      );
+      // a landing/ sub-package that IS an Astro app
+      const landing = join(dir, "landing");
+      mkdirSync(landing, { recursive: true });
+      writeFileSync(join(landing, "astro.config.mjs"), "export default {};\n");
+      writeFileSync(
+        join(landing, "package.json"),
+        JSON.stringify({ name: "landing", dependencies: { astro: "4" } }),
+      );
+      const profile = scanRepo(dir);
+      expect(profile.frameworks).toContain("Astro");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("detects framework from a sub-package's package.json deps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-subdep-"));
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "root" }));
+      const web = join(dir, "web");
+      mkdirSync(web, { recursive: true });
+      writeFileSync(
+        join(web, "package.json"),
+        JSON.stringify({ name: "web", dependencies: { next: "14" } }),
+      );
+      const profile = scanRepo(dir);
+      expect(profile.frameworks).toContain("Next.js");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not descend into node_modules or dotdirs for frameworks", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-skip-"));
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "root" }));
+      const nm = join(dir, "node_modules", "some-dep");
+      mkdirSync(nm, { recursive: true });
+      writeFileSync(join(nm, "astro.config.mjs"), "export default {};\n");
+      const profile = scanRepo(dir);
+      expect(profile.frameworks).not.toContain("Astro");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -79,6 +79,9 @@ const FRAMEWORK_HINTS: Array<[string, string]> = [
   ["fastify", "Fastify"],
   ["nestjs", "NestJS"],
   ["@nestjs/core", "NestJS"],
+  ["astro", "Astro"],
+  ["nuxt", "Nuxt"],
+  ["solid-js", "SolidJS"],
   ["django", "Django"],
   ["flask", "Flask"],
   ["fastapi", "FastAPI"],
@@ -290,6 +293,50 @@ export function scanRepo(repo: string): ProjectProfile {
       for (const [dep, fw] of FRAMEWORK_HINTS) if (txt.includes(dep)) frameworks.add(fw);
       void lang;
     }
+  }
+
+  // --- Sub-package framework detection (issue #150) ---
+  // A monorepo / multi-package layout (e.g. a `landing/` Astro app beside the
+  // root tooling package) hides frameworks from the root-package.json-only
+  // scan above. Sweep one level of immediate sub-directories for their own
+  // package.json deps and for framework config markers so the profile does
+  // not report "frameworks: []" while a real app sits in a sub-package.
+  const FRAMEWORK_CONFIG_MARKERS: Array<[RegExp, string]> = [
+    [/^astro\.config\.(mjs|js|ts|cjs|mts)$/, "Astro"],
+    [/^next\.config\.(mjs|js|ts|cjs|mts)$/, "Next.js"],
+    [/^nuxt\.config\.(mjs|js|ts|cjs|mts)$/, "Nuxt"],
+    [/^svelte\.config\.(mjs|js|ts|cjs|mts)$/, "Svelte"],
+    [/^vite\.config\.(mjs|js|ts|cjs|mts)$/, "Vite"],
+  ];
+  try {
+    for (const entry of readdirSync(repo, { withFileTypes: true })) {
+      if (!entry.isDirectory() || SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) {
+        continue;
+      }
+      const subDir = join(repo, entry.name);
+      // (a) framework config markers (astro.config.mjs, etc.)
+      try {
+        for (const child of readdirSync(subDir)) {
+          for (const [re, fw] of FRAMEWORK_CONFIG_MARKERS) if (re.test(child)) frameworks.add(fw);
+        }
+      } catch {
+        // unreadable sub-dir — skip
+      }
+      // (b) the sub-package's own package.json deps
+      const subPkgPath = join(subDir, "package.json");
+      if (existsSync(subPkgPath)) {
+        const subPkg = readJson(subPkgPath);
+        if (subPkg) {
+          const subDeps = {
+            ...((subPkg.dependencies as Record<string, string>) ?? {}),
+            ...((subPkg.devDependencies as Record<string, string>) ?? {}),
+          };
+          for (const [dep, fw] of FRAMEWORK_HINTS) if (subDeps[dep]) frameworks.add(fw);
+        }
+      }
+    }
+  } catch {
+    // repo root unreadable — leave frameworks as detected from root manifests
   }
 
   // --- Gradle/KMP build detection (picks commands + frameworks from build files) ---
