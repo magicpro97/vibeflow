@@ -18,6 +18,7 @@
 // All helpers used by `doctor` (liveGuardrailArmed, guardrailOffNote)
 // come from the seams module via the barrel.
 
+import { CTX_DIR } from "../core.js";
 import type { Engine, EngineReadiness } from "./_shared.js";
 import {
   ENGINES,
@@ -96,6 +97,28 @@ export async function doctor(
   out("vf", table(["", "tool", "status"], toolRows));
   out("vf", `\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
   out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
+
+  // F2: stale-lock detection. A live lockfile older than 60s means a prior
+  // Logbus process crashed mid-write; new writers will spin waiting for it
+  // (proper-lockfile's `stale` option releases it after 2s, but a wedged
+  // PID + filesystem latency can keep the lock held longer). Surface this
+  // as an actionable warning so the operator can `rm` the lock + restart.
+  const lockPath = join(cwd(), CTX_DIR, "logs", "current.log.lock");
+  if (existsSync(lockPath)) {
+    try {
+      const ageMs = Date.now() - statSync(lockPath).mtimeMs;
+      if (ageMs > 60_000) {
+        out(
+          "vf",
+          c.yellow(
+            `  logbus lock: STALE (age ${(ageMs / 1000).toFixed(0)}s) at ${lockPath} — remove it if no writer is active`,
+          ),
+        );
+      }
+    } catch {
+      /* stat lost the race; the writer probably released it — fine */
+    }
+  }
 
   const probe = Boolean(flags.probe);
   const refresh = Boolean(flags.refresh);

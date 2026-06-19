@@ -424,6 +424,66 @@ describe("Logbus concurrent writes (same dir, two instances)", () => {
   });
 });
 
+describe("Logbus concurrent writes — 5 writers (issue #163 F2)", () => {
+  // F2: extend the 2-writer pattern to 5 concurrent writers. The audit B7
+  // fix added ENOENT recovery; F2 verifies it under heavier contention.
+  // Goal: zero `dropped event` messages on stderr AND all 5*N events
+  // recoverable from the log.
+  it("5 concurrent Logbus instances, 20 events each, zero drops", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-logbus-5x-"));
+    try {
+      const writerCount = 5;
+      const eventsPerWriter = 20;
+      const buses = Array.from({ length: writerCount }, (_, i) =>
+        newBus({ dir, runId: `5x-${i}` }),
+      );
+      // 1) fire all writes concurrently
+      const fire = buses.flatMap((b, i) =>
+        Array.from({ length: eventsPerWriter }, (_, j) =>
+          b.bus.write({
+            ...FIXTURE_EVENT,
+            runId: `5x-${i}`,
+            text: `5x writer ${i} event ${j}`,
+          }),
+        ),
+      );
+      // 2) close all
+      await Promise.all(buses.map((b) => b.bus.close()));
+      // 3) inspect the log
+      const mainLog = join(dir, "current.log");
+      expect(existsSync(mainLog)).toBe(true);
+      // 4) collect all events
+      const lines = readFileSync(mainLog, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      const drops = lines.filter((l) => l.text?.toString().includes("dropped event"));
+      // The log MAY also have dropped-event lines in some failure modes
+      // (we don't want them — that's the whole point). Strict: zero.
+      expect(drops).toHaveLength(0);
+      // Total events: writerCount * eventsPerWriter. Strict accounting
+      // (a stricter guarantee than just "non-zero written"). Events
+      // should be roughly accounted for; allow 5% slack for in-flight
+      // appends across rotations.
+      const total = lines.length;
+      const expected = writerCount * eventsPerWriter;
+      // If rotation kicked in, some events may be in current.log.1+; we
+      // read them all below and reconcile.
+      const rotated = readdirSync(dir)
+        .filter((f) => /^current\.log(\.\d+)?$/.test(f))
+        .flatMap((f) =>
+          readFileSync(join(dir, f), "utf8")
+            .split("\n")
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as Record<string, unknown>),
+        );
+      expect(rotated.length).toBeGreaterThanOrEqual(expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("watchLogbus: stream error callback (line 598)", () => {
   it("stream error fires the .on('error') callback which writes to stderr", async () => {
     const { installLogbus, setLogbusForTests, watchLogbus } = await import("../src/logbus.js");

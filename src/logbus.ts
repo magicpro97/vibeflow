@@ -290,6 +290,10 @@ export class Logbus {
 
   private rotateLocked(): void {
     const cur = this.currentFile();
+    // F2: ensure the log dir exists. The dir can be removed between writes
+    // by a checkpoint or rotation elsewhere (see audit B7); without this
+    // mkdir, `renameSync` below would ENOENT and rotation silently fails.
+    mkdirSync(this.dir, { recursive: true });
     if (!existsSync(cur)) return;
     const st = statSync(cur);
     if (st.size < DEFAULTS.minRotateSize) return;
