@@ -102,9 +102,14 @@ export function detectToolchain(
   return { kind: "none" };
 }
 
-export function verify(inject: { spawner?: typeof spawnSync } = {}): number {
+export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean } = {}): number {
   let failed = 0;
   const base = cwd();
+  // `vf verify` is a READ-ONLY gate by default (issue #154): it must not
+  // mutate the tree it audits. The journal append is opt-in via
+  // `journal: true` (wired to a `--journal` flag) so the default invocation
+  // an agent is told to run before "claiming done" leaves git status clean.
+  const writeJournal = inject.journal === true;
   const runGate = (label: string, cmd: string, args: string[], dir = base) => {
     out("vf", c.cyan(`▶ ${label}`));
     // Test seam: tests inject a fake spawner to avoid the 28s
@@ -156,17 +161,21 @@ export function verify(inject: { spawner?: typeof spawnSync } = {}): number {
 
   if (failed > 0) {
     out("vf", c.red(`\n${failed} gate(s) failed.`));
-    appendJournal(base, "verify", "fail", [
-      `${failed} gate(s) failed`,
-      ...report.failures.map((f) => `- ${f}`),
-    ]);
+    if (writeJournal) {
+      appendJournal(base, "verify", "fail", [
+        `${failed} gate(s) failed`,
+        ...report.failures.map((f) => `- ${f}`),
+      ]);
+    }
     return 1;
   }
   out("vf", c.green("\nAll configured gates passed."));
-  appendJournal(base, "verify", "pass", [
-    `${report.passed.length} gate(s) passed`,
-    ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
-  ]);
+  if (writeJournal) {
+    appendJournal(base, "verify", "pass", [
+      `${report.passed.length} gate(s) passed`,
+      ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
+    ]);
+  }
   return 0;
 }
 

@@ -200,7 +200,7 @@ async function main(argv: string[]): Promise<number> {
     case "hooks":
       return hooks(positionals[0], flags);
     case "verify":
-      return verify();
+      return verify({ journal: flags.journal === true });
     default:
       out("vf", c.red(`Unknown command: ${cmd}`), {
         level: "error",

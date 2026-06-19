@@ -1559,11 +1559,34 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify();
+      const code = verify({ journal: true });
       expect(code).toBe(0);
-      // The journal entry was written
+      // The journal entry was written (opt-in via journal:true; issue #154)
       const journal = existsSync(join(dir, CTX_DIR, "knowledge", "log.md"));
       expect(journal).toBe(true);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify is read-only by default: no journal append without journal flag (issue #154)", () => {
+    const dir = freshDir("vf-verify-readonly-");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = verify();
+      expect(code).toBe(0);
+      // Default invocation must NOT write the journal — verify is a read-only gate.
+      expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(false);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1635,8 +1658,10 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify();
+      const code = verify({ journal: true });
       expect(code).toBe(1);
+      // fail-branch journal write is opt-in (issue #154)
+      expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
