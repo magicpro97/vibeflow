@@ -165,28 +165,29 @@ export class Logbus {
   private async writeLocked(ev: LogEvent): Promise<void> {
     let release: (() => Promise<void>) | undefined;
     try {
-      release = await lockfile.lock(this.currentFile(), {
-        realpath: false,
-        lockfilePath: this.lockfilePath,
-        retries: {
-          retries: Math.ceil(DEFAULTS.lockTimeoutMs / DEFAULTS.lockRetryMs),
-          factor: 1,
-          minTimeout: DEFAULTS.lockRetryMs,
-          maxTimeout: DEFAULTS.lockRetryMs,
-        },
-        stale: 2_000,
-      });
+      release = await this.acquireLock();
     } catch (err) {
-      // Lock acquisition failed (timeout, etc.) — log and continue.
-      process.stderr.write(
-        `[logbus] lock acquire failed: ${(err as Error).message}\n` +
-          `[logbus] dropped event seq=${ev.seq} text="${ev.text.slice(0, 80)}"\n`,
-      );
-      return;
+      // Lock acquisition failed. A common cause is the log dir (or the
+      // lockfile's parent) having been removed mid-run by a checkpoint /
+      // rotation elsewhere, surfacing as ENOENT. Recreate the dir and retry
+      // ONCE before giving up, so a transient missing directory does not
+      // silently drop events (issue #145).
+      const recovered = await this.recoverAndRelock(err);
+      if (recovered) {
+        release = recovered;
+      } else {
+        process.stderr.write(
+          `[logbus] lock acquire failed: ${(err as Error).message}\n` +
+            `[logbus] dropped event seq=${ev.seq} text="${ev.text.slice(0, 80)}"\n`,
+        );
+        return;
+      }
     }
 
     try {
       const line = `${stringifyEvent(ev)}\n`;
+      // The dir may have vanished between lock and append; ensure it exists.
+      mkdirSync(this.dir, { recursive: true });
       appendFileSync(this.currentFile(), line, "utf8");
       this.currentSize += Buffer.byteLength(line, "utf8");
 
@@ -203,6 +204,40 @@ export class Logbus {
       } catch {
         /* lockfile release failures are non-fatal */
       }
+    }
+  }
+
+  /** Acquire the cross-process write lock with the standard retry/stale params. */
+  private acquireLock(): Promise<() => Promise<void>> {
+    return lockfile.lock(this.currentFile(), {
+      realpath: false,
+      lockfilePath: this.lockfilePath,
+      retries: {
+        retries: Math.ceil(DEFAULTS.lockTimeoutMs / DEFAULTS.lockRetryMs),
+        factor: 1,
+        minTimeout: DEFAULTS.lockRetryMs,
+        maxTimeout: DEFAULTS.lockRetryMs,
+      },
+      stale: 2_000,
+    });
+  }
+
+  /** ENOENT recovery: recreate the log dir + lock target, then relock once.
+   *  Returns the release fn on success, or null if recovery is not applicable
+   *  (non-ENOENT) or the retry also failed. */
+  private async recoverAndRelock(err: unknown): Promise<(() => Promise<void>) | null> {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const msg = (err as Error)?.message ?? "";
+    if (code !== "ENOENT" && !msg.includes("ENOENT")) return null;
+    try {
+      mkdirSync(this.dir, { recursive: true });
+      if (!existsSync(this.currentFile())) {
+        appendFileSync(this.currentFile(), "");
+        chmodSync(this.currentFile(), 0o600);
+      }
+      return await this.acquireLock();
+    } catch {
+      return null;
     }
   }
 

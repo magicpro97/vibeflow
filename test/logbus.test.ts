@@ -475,3 +475,29 @@ describe("watchLogbus: stream error callback (line 598)", () => {
     }
   });
 });
+
+describe("Logbus ENOENT recovery (issue #145)", () => {
+  it("recreates the log dir and does NOT drop the event when the dir vanishes mid-run", async () => {
+    const { bus, dir, cleanup } = newBus();
+    try {
+      // First write establishes the dir + file.
+      bus.write({ ...FIXTURE_EVENT, runId: "r", text: "before" });
+      await bus.close();
+      // Simulate a checkpoint/rotation elsewhere removing the whole log dir.
+      rmSync(dir, { recursive: true, force: true });
+      expect(existsSync(dir)).toBe(false);
+
+      // A fresh bus on the same (now-missing) dir must recover, not drop.
+      const { bus: bus2 } = newBus({ dir });
+      bus2.write({ ...FIXTURE_EVENT, runId: "r", text: "after-rm" });
+      await bus2.close();
+
+      // The event survived: dir recreated, line present.
+      expect(existsSync(dir)).toBe(true);
+      const lines = readFileSync(bus2.currentFile(), "utf8").split("\n").filter(Boolean);
+      expect(lines.some((l) => l.includes("after-rm"))).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+});
