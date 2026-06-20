@@ -252,3 +252,19 @@ export {
   DEFAULT_REVIEW_ENGINE,
 } from "./commands/review.js";
 export type { ReviewTarget, ReviewVerdict, ReviewResult } from "./commands/review.js";
+
+// === Re-export the worktree cluster (issue #172, A6) ===
+// `vf worktree create|remove|list` — symlink node_modules from
+// the parent repo, skip `bun install`. The TS wrapper is a thin
+// shell-out to git + `scripts/create-worktree.sh`. The
+// `runCommandSync` inject is the test seam (same pattern as
+// `vf review`'s dispatch inject).
+export {
+  worktree,
+  worktreeCreate,
+  worktreeRemove,
+  worktreeList,
+  buildCreateArgs,
+  defaultWorktreePath,
+} from "./commands/worktree.js";
+export type { WorktreeAction, WorktreeInject, RunCommandResult } from "./commands/worktree.js";
