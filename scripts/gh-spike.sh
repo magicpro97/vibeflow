@@ -31,7 +31,10 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 auth_status="$(gh auth status 2>&1 || true)"
-active_line="$(printf '%s\n' "$auth_status" | awk -F': ' '/Active account: true/ {print; exit}')"
+# Modern gh (>= 2.40) prints "✓ Active session: true"; older versions print
+# "Active account: true". Match both phrasings; the optional ✓ prefix is
+# handled by `grep` before the awk, but we accept it in the regex too.
+active_line="$(printf '%s\n' "$auth_status" | awk -F': ' '/Active (account|session):[ \t]*true/ {print; exit}')"
 
 # Extract the account name on the *next* line after "Active account: true".
 # `gh auth status` formats each logged-in account as a block; the account
@@ -44,7 +47,7 @@ fi
 
 # Re-parse: find the "Logged in to github.com account <name>" line that
 # corresponds to the active block. Easiest robust approach: print the
-# account that appears just before "Active account: true" in the raw output.
+# account that appears just before the active marker in the raw output.
 active_account="$(printf '%s\n' "$auth_status" | awk '
   /Logged in to github.com account/ {
     name = $0
@@ -52,14 +55,27 @@ active_account="$(printf '%s\n' "$auth_status" | awk '
     sub(/[[:space:]].*$/, "", name)   # drop trailing " (keyring)" / " (oauth_token)" / etc.
     next
   }
-  /Active account: true/ { print name; exit }
+  /Active (account|session):[ \t]*true/ { print name; exit }
 ')"
+
+# Guard against a parsing miss that yields an empty name — the comparison
+# below would otherwise report a confusing "active gh account is '', expected
+# magicpro97" instead of telling the user the parse failed.
+if [ -z "$active_account" ]; then
+  printf '✗ could not parse active gh account name from `gh auth status`.\n' >&2
+  echo "$auth_status" >&2
+  exit 2
+fi
 
 if [ "$active_account" != "$REQUIRED_ACCOUNT" ]; then
   printf '✗ active gh account is "%s", expected "%s".\n' "$active_account" "$REQUIRED_ACCOUNT" >&2
   printf '  Switch with: gh auth switch --user %s\n' "$REQUIRED_ACCOUNT" >&2
   exit 2
 fi
+
+# Sentinel: prove the auth guard ran even when the network round-trip is
+# skipped. The next test grep needs to see this exact token.
+printf '  ✓ step 1: account is %s\n' "$active_account"
 
 # --- Step 1: gh auth status -----------------------------------------------
 log_step 1 "gh auth status"
@@ -80,7 +96,7 @@ printf '  project #6 id: %s\n' "$project_id"
 # --- Step 4: project round-trip (add → edit → archive) --------------------
 log_step 4 "gh project round-trip (item-add / item-edit / item-archive)"
 if [ "${SKIP_NETWORK:-0}" = "1" ]; then
-  printf '  SKIP_NETWORK=1: skipping round-trip\n'
+  printf '  SKIP_NETWORK=1: skipping round-trip (auth guard already ran; see step 1)\n'
 else
   # `gh project item-add` is silent without --format json; request json so we can
   # capture the new item's id for the subsequent item-edit and item-archive calls.
@@ -93,6 +109,13 @@ else
   fi
   [ -n "$item_id" ] || { printf '  could not parse item id from: %s\n' "$added_json" >&2; abort_step 4 "gh project item-add"; }
   printf '  added item id: %s\n' "$item_id"
+
+  # Best-effort orphan cleanup: an item-add that succeeds but is followed by
+  # an item-edit failure (or a script abort) would otherwise leave a real
+  # card on the production Project #6 board. Install a trap right after the
+  # successful add so the archive always runs — both on early aborts AND
+  # on the normal happy-path exit. This is the ONLY archive call.
+  trap 'gh project item-archive 6 --id "$item_id" --owner magicpro97 >/dev/null 2>&1 || true' EXIT
 
   # Write proof: set the Status single-select field to "In Progress".
   # `gh project item-edit` has no shorthand --status flag in this version; it
@@ -115,8 +138,10 @@ else
     || abort_step 4 "gh project item-edit (Status=In Progress)"
   printf '  status set to In Progress\n'
 
-  gh project item-archive 6 --id "$item_id" --owner magicpro97 >/dev/null 2>&1 \
-    || abort_step 4 "gh project item-archive"
+  # Success path cleanup is the EXIT trap installed above. The trap fires
+  # on the normal script exit too, so the archive runs exactly once. We
+  # deliberately do NOT call `gh project item-archive` here — the trap owns
+  # the lifecycle, which is what prevents orphan cards on early aborts.
   printf '  item archived (test non-destructive)\n'
 fi
 

@@ -29,7 +29,7 @@ active_account="$(printf '%s\n' "$auth_status" | awk '
     sub(/[[:space:]].*$/, "", name)
     next
   }
-  /Active account: true/ { print name; exit }
+  /Active (account|session):[ \t]*true/ { print name; exit }
 ')"
 
 if [ -z "$active_account" ]; then
@@ -43,57 +43,73 @@ if [ "$active_account" != "$REQUIRED_ACCOUNT" ]; then
 fi
 
 # --- Run the spike --------------------------------------------------------
-echo "Running: bash $SPIKE"
+# We run the spike TWICE: once with SKIP_NETWORK=1 and once without. Both
+# runs must execute the auth guard (the `✓ step 1: account is magicpro97`
+# line is present in both). This guards against a regression that moves
+# the SKIP_NETWORK check above the auth guard.
 tmp_out="$(mktemp)"
 tmp_err="$(mktemp)"
 trap 'rm -f "$tmp_out" "$tmp_err"' EXIT
 
-set +e
-bash "$SPIKE" >"$tmp_out" 2>"$tmp_err"
-spike_rc=$?
-set -e
-
-stdout="$(cat "$tmp_out")"
-stderr="$(cat "$tmp_err")"
-
-if [ $spike_rc -ne 0 ]; then
-  red "spike exited $spike_rc"
-  printf '--- stdout ---\n%s\n' "$stdout"
-  printf '--- stderr ---\n%s\n' "$stderr"
-  exit 1
-fi
-
-# --- Assert all 7 step lines present --------------------------------------
-missing=0
-for n in 1 2 3 4 5 6 7; do
-  if ! printf '%s\n' "$stdout" | grep -qE "^✓ step $n:"; then
-    red "missing step $n line"
-    missing=1
+run_spike() {
+  # run_spike <label> [env-overrides...]
+  local label="$1"
+  shift
+  echo "Running: $@ bash $SPIKE"
+  set +e
+  "$@" bash "$SPIKE" >"$tmp_out" 2>"$tmp_err"
+  local rc=$?
+  set -e
+  local stdout stderr
+  stdout="$(cat "$tmp_out")"
+  stderr="$(cat "$tmp_err")"
+  if [ $rc -ne 0 ]; then
+    red "[$label] spike exited $rc"
+    printf '--- stdout ---\n%s\n' "$stdout"
+    printf '--- stderr ---\n%s\n' "$stderr"
+    exit 1
   fi
-done
-
-if [ $missing -ne 0 ]; then
-  printf '--- stdout ---\n%s\n' "$stdout"
-  exit 1
-fi
-
-# --- Assert the final summary line ---------------------------------------
-if ! printf '%s\n' "$stdout" | grep -qE "magicpro97/vibeflow: account=$REQUIRED_ACCOUNT, project#6="; then
-  red "missing final summary line"
-  printf '--- stdout ---\n%s\n' "$stdout"
-  exit 1
-fi
-
-# --- SKIP_NETWORK path assertion ------------------------------------------
-if [ "${SKIP_NETWORK:-0}" = "1" ]; then
-  if ! printf '%s\n' "$stdout" | grep -q "SKIP_NETWORK=1: skipping round-trip"; then
-    red "SKIP_NETWORK=1 set but spike did not report skipping round-trip"
+  # Auth guard must run regardless of SKIP_NETWORK — assert the literal
+  # `✓ step 1: account is magicpro97` line is in stdout.
+  if ! printf '%s\n' "$stdout" | grep -qE "^  ✓ step 1: account is $REQUIRED_ACCOUNT$"; then
+    red "[$label] auth guard did not run (no `✓ step 1: account is $REQUIRED_ACCOUNT` line)"
     printf '--- stdout ---\n%s\n' "$stdout"
     exit 1
   fi
-  green "OK (SKIP_NETWORK=1 mode, round-trip reported as skipped)"
-  exit 0
-fi
+  # All 7 step headers must be present.
+  local missing=0 n
+  for n in 1 2 3 4 5 6 7; do
+    if ! printf '%s\n' "$stdout" | grep -qE "^✓ step $n:"; then
+      red "[$label] missing step $n line"
+      missing=1
+    fi
+  done
+  if [ $missing -ne 0 ]; then
+    printf '--- stdout ---\n%s\n' "$stdout"
+    exit 1
+  fi
+  # Final summary line.
+  if ! printf '%s\n' "$stdout" | grep -qE "magicpro97/vibeflow: account=$REQUIRED_ACCOUNT, project#6="; then
+    red "[$label] missing final summary line"
+    printf '--- stdout ---\n%s\n' "$stdout"
+    exit 1
+  fi
+  # Mode-specific banner.
+  case "$label" in
+    skip)
+      if ! printf '%s\n' "$stdout" | grep -q "SKIP_NETWORK=1: skipping round-trip"; then
+        red "[$label] SKIP_NETWORK banner not found"
+        printf '--- stdout ---\n%s\n' "$stdout"
+        exit 1
+      fi
+      ;;
+    live) : ;;
+    *) red "[$label] unknown run label"; exit 1 ;;
+  esac
+}
 
-green "OK (7 steps + final summary present)"
+run_spike live env
+run_spike skip env SKIP_NETWORK=1
+
+green "OK (7 steps + final summary present in both live and SKIP_NETWORK runs; auth guard ran in both)"
 exit 0
