@@ -238,3 +238,17 @@ export {
   SLUG_MAX,
   slugify,
 } from "./commands/plan.js";
+
+// === Re-export the review cluster (issue #170, A4) ===
+// `vf review <target>` dispatches a reviewer engine, parses the
+// verdict (approve | revise | block), logs to the logbus. The
+// dispatch is injected for testability. HUMAN-ONLY in v0.8.0;
+// A5 (auto cross-debate) is a follow-up.
+export {
+  review,
+  parseReviewVerdict,
+  readTargetContent,
+  buildReviewPrompt,
+  DEFAULT_REVIEW_ENGINE,
+} from "./commands/review.js";
+export type { ReviewTarget, ReviewVerdict, ReviewResult } from "./commands/review.js";
