@@ -186,14 +186,18 @@ export async function coord(
   // Validate the engine name against the known set; anything else is
   // treated as a sub-command of the consult itself (e.g. `vf coord
   // status` would land here as engine="status"). The shim accepts
-  // only the canonical engine names; otherwise exit 2.
+  // only the canonical engine names; otherwise exit 1 (it's a usage
+  // error like any other bad input — same class as missing brief or
+  // stale brief). Exit code 2 is RESERVED for the A0 spec's "fresh
+  // brief but §2 Non-negotiables violated" case (not yet implemented
+  // — see issue #200). Per the A1 cross-review.
   if (engine !== "claude" && engine !== "codex" && engine !== "copilot") {
     out(
       "vf",
       c.red(`vf coord ${engine}: unknown engine. Expected one of claude, codex, copilot.`),
       { level: "error" },
     );
-    return 2;
+    return 1;
   }
 
   // Spawn the engine with a tool-deny-list wrapper. In production the

@@ -265,12 +265,15 @@ describe("coord shim (A1 #167 + #194)", () => {
     expect(code).toBe(1);
   });
 
-  // ---- Unknown engine → exit 2 (reserved A1 code) -----------------
-  test("(engine) coord with unknown engine name returns 2", async () => {
+  // ---- Unknown engine → exit 1 (usage error; same class as missing
+  //      brief or stale brief). Exit 2 is reserved for the A0 spec's
+  //      "fresh brief but §2 Non-negotiables violated" case (not yet
+  //      implemented — see issue #200). Per the A1 cross-review. ----
+  test("(engine) coord with unknown engine name returns 1", async () => {
     const fresh = new Date(Date.now() - 60_000).toISOString();
     writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
     const code = await coord(["bogus-engine"], {}, { now: () => Date.now() });
-    expect(code).toBe(2);
+    expect(code).toBe(1);
   });
 
   // ---- Engine spawner error propagates the engine exit code --------
