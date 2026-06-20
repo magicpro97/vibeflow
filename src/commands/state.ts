@@ -53,6 +53,8 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CTX_DIR, type Channel, c, cwd, out } from "./_shared.js";
+import { atomicWriteFileSync } from "./atomic-write.js";
+import { parseFrontmatter, upsertFrontmatter } from "./state-frontmatter.js";
 
 /** Path to the brief file, relative to the project base. */
 export const BRIEF_PATH = `${CTX_DIR}/knowledge/coordinator-brief.md`;
@@ -76,6 +78,38 @@ export interface Brief {
 
 /** Sink used by `formatBriefForHuman` for testability (default: `out`). */
 export type OutFn = (channel: Channel, ...rawParts: unknown[]) => void;
+
+/** F0 review #1: the 6 canonical brief sections. The order and titles
+ *  are the contract — A2-A14 skills diff against them, gate non-trivial
+ *  actions on §2, etc. A brief missing any of these is a contract
+ *  violation, not a stylistic preference. */
+export const BRIEF_SECTIONS = [
+  "## 1. The user",
+  "## 2. Non-negotiables",
+  "## 3. Active plan",
+  "## 4. State",
+  "## 5. Next action",
+  "## 6. Open questions",
+] as const;
+
+/** F0 review #1: validate the brief's body has all 6 canonical sections.
+ *  Returns the list of missing section titles (empty array = OK).
+ *  Cheap: a single pass over the body, no allocation beyond the array. */
+export function validateBriefShape(raw: string): { ok: boolean; missing: readonly string[] } {
+  const body = raw.startsWith("---")
+    ? // strip frontmatter (down to and including the second `---`)
+      raw.replace(/^---\n[\s\S]*?\n---\n?/, "")
+    : raw;
+  const missing: string[] = [];
+  for (const heading of BRIEF_SECTIONS) {
+    if (!body.includes(heading)) missing.push(heading);
+  }
+  return { ok: missing.length === 0, missing };
+}
+
+/** F0 review #3: atomic write of the brief — see ./atomic-write.ts.
+ *  Extracted to keep state.ts under the 400-line cap. Re-exported
+ *  via the facade. */
 
 /** Top-level `vf state` dispatcher. */
 export function state(
@@ -122,7 +156,6 @@ export function brief(
   const _exists = inject.existsSync ?? existsSync;
   const _stat = inject.statSync ?? statSync;
   const _read = inject.readFileSync ?? readFileSync;
-  const _write = inject.writeFileSync ?? writeFileSync;
   const _now = inject.now ?? (() => Date.now());
 
   const base = cwd();
@@ -136,14 +169,34 @@ export function brief(
   const stat = _stat(path);
   const raw = _read(path, "utf8");
   const parsed = parseFrontmatter(raw);
-  const mtimeMs = stat.mtimeMs;
+  let mtimeMs = stat.mtimeMs;
   let lastConsult = parsed.lastConsult;
   if (flags.consult) {
     const nowMs = _now();
     const nowIso = new Date(nowMs).toISOString();
     const updated = upsertFrontmatter(raw, { "last-consult": nowIso });
-    _write(path, updated);
+    // F0 review #1: enforce the shape on --consult. If the brief is
+    // missing canonical sections, warn loudly (the consult still
+    // writes the new mtime so the gate will pass next time, but the
+    // operator is told the brief is incomplete).
+    const shape = validateBriefShape(updated);
+    if (!shape.ok) {
+      out(
+        "vf",
+        c.yellow(
+          `brief is missing ${shape.missing.length} canonical section(s): ${shape.missing.join(", ")}. \`vf state brief --consult\` wrote the new mtime but the brief is still incomplete.`,
+        ),
+      );
+    }
+    // F0 review #3: atomic write (temp + fsync + rename). A SIGKILL
+    // mid-write leaves the OLD brief intact.
+    atomicWriteFileSync(path, updated, {
+      writeFileSync: inject.writeFileSync,
+    });
     lastConsult = nowIso;
+    // F0 review #4: re-stat after the write so the "what changed"
+    // diff uses the post-write mtime, not the pre-write one.
+    mtimeMs = _stat(path).mtimeMs;
   }
   const mtimeIso = new Date(mtimeMs).toISOString();
   const briefObj: Brief = {
@@ -222,68 +275,21 @@ export function updateLastConsult(
 ): boolean {
   const _exists = inject.existsSync ?? existsSync;
   const _read = inject.readFileSync ?? readFileSync;
-  const _write = inject.writeFileSync ?? writeFileSync;
   if (!_exists(briefPath)) return false;
   const raw = _read(briefPath, "utf8");
   const iso = new Date(nowMs).toISOString();
-  _write(briefPath, upsertFrontmatter(raw, { "last-consult": iso }));
+  // F0 review #3: atomic write so a SIGKILL mid-write leaves the
+  // previous brief intact.
+  atomicWriteFileSync(briefPath, upsertFrontmatter(raw, { "last-consult": iso }), {
+    writeFileSync: inject.writeFileSync,
+  });
   return true;
 }
 
 // === Frontmatter helpers (kept private; covered indirectly through brief/updateLastConsult tests) ===
 
-interface ParsedFrontmatter {
-  body: string;
-  lastConsult: string | null;
-}
-
-/** Parse a leading `---` YAML frontmatter block (best-effort, single-key). */
-function parseFrontmatter(raw: string): ParsedFrontmatter {
-  if (!raw.startsWith("---")) return { body: raw, lastConsult: null };
-  const end = raw.indexOf("\n---", 3);
-  if (end === -1) return { body: raw, lastConsult: null };
-  const header = raw.slice(3, end).trim();
-  const rest = raw.slice(end + 4).replace(/^[\r\n]+/, "");
-  let lastConsult: string | null = null;
-  for (const line of header.split(/\r?\n/)) {
-    const m = line.match(/^\s*last-consult:\s*(.+?)\s*$/);
-    if (m) lastConsult = m[1] ?? null;
-  }
-  return { body: rest, lastConsult };
-}
-
-/** Upsert a key into the YAML frontmatter. Adds the block if absent. */
-function upsertFrontmatter(raw: string, kv: Record<string, string>): string {
-  const entries = Object.entries(kv)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join("\n");
-  if (raw.startsWith("---")) {
-    const end = raw.indexOf("\n---", 3);
-    if (end === -1) return `---\n${entries}\n---\n${raw}`;
-    const header = raw.slice(3, end);
-    const rest = raw.slice(end + 4);
-    const updated = upsertKeys(header, kv);
-    return `---\n${updated}\n---${rest}`;
-  }
-  return `---\n${entries}\n---\n\n${raw}`;
-}
-
-function upsertKeys(header: string, kv: Record<string, string>): string {
-  const lines = header.split(/\r?\n/);
-  for (const [k, v] of Object.entries(kv)) {
-    let found = false;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? "";
-      if (line.match(new RegExp(`^\\s*${k}:\\s*`))) {
-        lines[i] = `${k}: ${v}`;
-        found = true;
-        break;
-      }
-    }
-    if (!found) lines.push(`${k}: ${v}`);
-  }
-  return lines.filter((l, i, arr) => !(l.trim() === "" && i === arr.length - 1)).join("\n");
-}
+// === Frontmatter helpers (extracted to state-frontmatter.ts to keep
+//   state.ts under the 400-line cap) ===
 
 // === Cross-module helpers: read the brief's last-consult mtime for
 //   the `vf init --coord` and `vf coord` staleness gates. Kept here
@@ -350,9 +356,12 @@ export function assertCoordBriefFresh(
 }
 
 /** Convenience: is the brief fresh? `true` when the last-consult
- *  mtime is within `BRIEF_FRESH_MS` of `nowMs`. */
+ *  mtime is within `BRIEF_FRESH_MS` of `nowMs` AND not in the future.
+ *  A future timestamp (clock skew, hand-edited brief, NTP jump) is
+ *  treated as STALE — the gate refuses rather than bypasses. */
 export function isBriefFresh(base: string, nowMs: number, inject: BriefInject = {}): boolean {
   const last = readBriefLastConsult(base, inject);
   if (last === null) return false;
+  if (last > nowMs) return false; // F0 review #2: future timestamps are stale, not fresh
   return nowMs - last <= BRIEF_FRESH_MS;
 }

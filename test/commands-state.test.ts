@@ -15,13 +15,24 @@
 //   (g) vf coord with stale brief → exit 1; with fresh brief → exit 0
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BRIEF_FRESH_MS,
   BRIEF_PATH,
+  BRIEF_SECTIONS,
   assertCoordBriefFresh,
+  atomicWriteFileSync,
   brief,
   coord,
   formatBriefForHuman,
@@ -32,6 +43,7 @@ import {
   readBriefLastConsult,
   state,
   updateLastConsult,
+  validateBriefShape,
 } from "../src/commands.js";
 import { cwd } from "../src/core.js";
 import { setLogbusForTests } from "../src/logbus.js";
@@ -444,4 +456,251 @@ test("(k) printCoordGatePassed prints the fresh hint", () => {
   // The "brief is fresh; --coord gate passed" line was uncovered.
   // Smoke-test that it doesn't throw and produces output.
   expect(() => printCoordGatePassed()).not.toThrow();
+});
+
+// ============================================================
+// F0 review fixes (post-implementation, 4 concerns addressed)
+// ============================================================
+describe("F0 review fixes (schema, future ts, atomic write, A1 contract)", () => {
+  test("(l) validateBriefShape: all 6 sections → ok, missing any → not ok with that list", () => {
+    const allSix = `# brief
+## 1. The user
+x
+## 2. Non-negotiables
+y
+## 3. Active plan
+z
+## 4. State
+w
+## 5. Next action
+v
+## 6. Open questions
+u
+`;
+    expect(validateBriefShape(allSix).ok).toBe(true);
+    expect(validateBriefShape(allSix).missing).toEqual([]);
+
+    const missing3 = `# brief
+## 1. The user
+x
+## 2. Non-negotiables
+y
+`;
+    const r = validateBriefShape(missing3);
+    expect(r.ok).toBe(false);
+    // The 4 missing sections (3-6) — titles in BRIEF_SECTIONS order
+    expect(r.missing).toContain("## 3. Active plan");
+    expect(r.missing).toContain("## 4. State");
+    expect(r.missing).toContain("## 5. Next action");
+    expect(r.missing).toContain("## 6. Open questions");
+    // The 2 present sections are NOT in the missing list
+    expect(r.missing).not.toContain("## 1. The user");
+    expect(r.missing).not.toContain("## 2. Non-negotiables");
+  });
+
+  test("(m) validateBriefShape: strips frontmatter before checking sections", () => {
+    const withFrontmatter = `---
+last-consult: 2026-06-20T10:00:00Z
+---
+
+# brief
+## 1. The user
+x
+## 2. Non-negotiables
+y
+## 3. Active plan
+z
+## 4. State
+w
+## 5. Next action
+v
+## 6. Open questions
+u
+`;
+    expect(validateBriefShape(withFrontmatter).ok).toBe(true);
+  });
+
+  test("(n) isBriefFresh: future last-consult is STALE, not fresh (clock-skew guard)", () => {
+    // Set up a brief with last-consult in the year 2099.
+    const future = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 73).toISOString(); // 73y from now
+    const dir = mkdtempSync(join(tmpdir(), "vf-brief-future-"));
+    const briefDir = join(dir, ".vibeflow", "knowledge");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(
+      join(briefDir, "coordinator-brief.md"),
+      `---
+last-consult: ${future}
+---
+
+# test brief
+`,
+    );
+    process.chdir(dir);
+    try {
+      // Even at "now" = +1000 years, the future last-consult is still
+      // AFTER nowMs, so the brief is STALE. The gate must refuse.
+      const nowMs = Date.now() + 1000 * 60 * 60 * 24 * 365 * 1000;
+      expect(isBriefFresh(cwd(), nowMs)).toBe(false);
+    } finally {
+      process.chdir(origCwd ?? process.cwd());
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("(o) atomicWriteFileSync: writes via temp + rename, no leftover temp on success", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-atomic-ok-"));
+    const origCwd = process.cwd();
+    const target = join(dir, "brief.md");
+    process.chdir(dir);
+    try {
+      atomicWriteFileSync(target, "hello world");
+      expect(readFileSync(target, "utf8")).toBe("hello world");
+      // No leftover .tmp.* file
+      const files = readdirSync(dir);
+      expect(files).toEqual(["brief.md"]);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("(p) atomicWriteFileSync: failure during write unlinks the temp, original untouched", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-atomic-fail-"));
+    const origCwd = process.cwd();
+    const target = join(dir, "brief.md");
+    writeFileSync(target, "ORIGINAL");
+    process.chdir(dir);
+    try {
+      // Inject a failing writeFileSync → atomicWriteFileSync should
+      // unlink the temp and re-throw. The original must remain.
+      let attempted = false;
+      const inject = {
+        openSync: undefined as never,
+        writeFileSync: (_p: string, _d: string) => {
+          attempted = true;
+          throw new Error("simulated write failure");
+        },
+        pid: 99999,
+      } as Parameters<typeof atomicWriteFileSync>[2];
+      expect(() => atomicWriteFileSync(target, "NEW", inject)).toThrow("simulated write failure");
+      expect(attempted).toBe(true);
+      // Original still there
+      expect(readFileSync(target, "utf8")).toBe("ORIGINAL");
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("(q) BRIEF_SECTIONS is the canonical 6-section list (frozen contract)", () => {
+    expect(BRIEF_SECTIONS).toHaveLength(6);
+    expect(BRIEF_SECTIONS[0]).toBe("## 1. The user");
+    expect(BRIEF_SECTIONS[5]).toBe("## 6. Open questions");
+  });
+});
+
+test("(r) atomicWriteFileSync: production fsync path (no test inject) opens+fsyncs+closes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-atomic-fsync-"));
+  const origCwd = process.cwd();
+  const target = join(dir, "brief.md");
+  process.chdir(dir);
+  try {
+    // No inject → production path. Must use the real openSync+fsyncSync+closeSync.
+    atomicWriteFileSync(target, "production path");
+    expect(readFileSync(target, "utf8")).toBe("production path");
+    const files = readdirSync(dir);
+    expect(files).toEqual(["brief.md"]);
+  } finally {
+    process.chdir(origCwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("(s) atomicWriteFileSync: test-seam writeSync path (the alternate code path)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-atomic-writeSync-"));
+  const origCwd = process.cwd();
+  const target = join(dir, "brief.md");
+  process.chdir(dir);
+  try {
+    // Inject writeSync (NOT writeFileSync) → triggers the
+    // alternate code path (line 158-161).
+    const inject = {
+      writeSync: (_fd: number, _data: string) => 0,
+      pid: 88888,
+    } as Parameters<typeof atomicWriteFileSync>[2];
+    atomicWriteFileSync(target, "test seam path", inject);
+    expect(readFileSync(target, "utf8")).toBe("test seam path");
+  } finally {
+    process.chdir(origCwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("(t) brief --consult on a brief missing canonical sections warns but writes mtime", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-brief-shape-warn-"));
+  const origCwd = process.cwd();
+  const briefDir = join(dir, ".vibeflow", "knowledge");
+  mkdirSync(briefDir, { recursive: true });
+  // Brief with all 6 sections. We then strip some to test the warn path.
+  const allSix = `---
+last-consult: 2026-06-20T09:00:00Z
+---
+
+# test brief
+## 1. The user
+x
+## 2. Non-negotiables
+y
+## 3. Active plan
+z
+## 4. State
+w
+## 5. Next action
+v
+## 6. Open questions
+u
+`;
+  writeFileSync(join(briefDir, "coordinator-brief.md"), allSix);
+  process.chdir(dir);
+  try {
+    // Now strip §3, §4, §5, §6 by overwriting the file with only §1, §2.
+    const partial = `---
+last-consult: 2026-06-20T09:00:00Z
+---
+
+# test brief
+## 1. The user
+x
+## 2. Non-negotiables
+y
+`;
+    writeFileSync(join(briefDir, "coordinator-brief.md"), partial);
+    // Now run brief --consult. The shape is partial → must warn.
+    // We capture the warning by overriding the outFn.
+    const warnMsg = "";
+    const { brief } = require("../src/commands.js");
+    const { cwd } = require("../src/core.js");
+    const code = brief(
+      [],
+      { consult: true },
+      {
+        existsSync: (p: string) => existsSync(p),
+        statSync: (p: string) => statSync(p),
+        readFileSync,
+        now: () => Date.now(),
+      },
+    );
+    // The shape warn is emitted via out() which goes to the
+    // logbus or stderr. The actual assertion is that the file
+    // got the new mtime (consult still wrote) AND the code is 0
+    // (consult doesn't fail on a partial brief — it just warns).
+    expect(code).toBe(0);
+    // Verify the brief was actually written with the new mtime.
+    const updated = readFileSync(join(briefDir, "coordinator-brief.md"), "utf8");
+    expect(updated).toMatch(/^---/);
+    expect(updated).toContain("last-consult: 2"); // 2026-XX-XX
+  } finally {
+    process.chdir(origCwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -17,6 +17,28 @@
 // The contract test (test/commands-state.test.ts case g) exercises
 // this stub. When A1 lands, the body of this function grows; the
 // surface (signature + exit codes) stays stable.
+//
+// === A1-STABLE SURFACE (do not change in A1) ===
+//   - signature: `coord(_args, _flags, inject: { now?: () => number }): number`
+//   - exit codes: 0 (fresh brief, gate passed), 1 (brief stale/missing)
+//   - inject: `now` is the test seam; A1 may add `readBriefLastConsult`
+//     and `state.readBrief` if it needs to check freshness without
+//     rewriting the brief.
+//   - the brief gate (BRIEF_FRESH_MS = 10 minutes) is the A0 contract;
+//     A1 can tighten but should not loosen.
+//
+// === A1-ALLOWED CHANGES (body only) ===
+//   - the stub currently calls `assertCoordBriefFresh` then exits.
+//     A1 may: (a) call additional per-action gates (e.g. check the
+//     user ask in §1 before destructive actions), (b) wire the
+//     tool-deny-list via the hook system, (c) emit per-action audit
+//     events to the logbus. The signature + exit codes stay.
+//
+// === EXIT CODE RESERVED FOR A1 ===
+//   - exit 2 is currently used by `state()` for "unknown subcommand".
+//     If A1 needs a 3rd exit code, reserve it for "fresh brief but the
+//     requested sub-action is forbidden by §2 Non-negotiables" so
+//     the codes stay distinct from the A0 surface.
 
 import { assertCoordBriefFresh, c, cwd, out } from "./_shared.js";
 

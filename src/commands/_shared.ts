@@ -183,6 +183,7 @@ export type { InitAiEnrichmentOpts } from "./init-ai.js";
 export {
   BRIEF_FRESH_MS,
   BRIEF_PATH,
+  BRIEF_SECTIONS,
   assertCoordBriefFresh,
   brief,
   formatBriefForHuman,
@@ -192,7 +193,12 @@ export {
   readBriefLastConsult,
   state,
   updateLastConsult,
+  validateBriefShape,
 } from "./state.js";
+// F0 review #3: atomic write is in its own module (atomic-write.ts).
+// state.ts re-exports the frontmatter helpers; atomic write is a generic
+// file-IO helper that doesn't belong to the state cluster.
+export { atomicWriteFileSync } from "./atomic-write.js";
 export type { Brief, BriefInject, OutFn } from "./state.js";
 // === Re-export the coord stub (issue #184, A0) ===
 // `coord.ts` is the A0 stub; A1 (#167) will replace the body but the

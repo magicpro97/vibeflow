@@ -200,13 +200,19 @@ export {
   brief,
   BRIEF_FRESH_MS,
   BRIEF_PATH,
+  BRIEF_SECTIONS,
   formatBriefForHuman,
   isBriefFresh,
   readBrief,
   readBriefLastConsult,
   state,
   updateLastConsult,
+  validateBriefShape,
 } from "./commands/state.js";
+// F0 review #3: atomic write extracted to its own module (state.ts
+// was over the 400-line cap). The facade re-exports it from here
+// so callers can `import { atomicWriteFileSync } from "commands"`.
+export { atomicWriteFileSync } from "./commands/atomic-write.js";
 export type { Brief, BriefInject, OutFn } from "./commands/state.js";
 // === Re-export the coord stub (issue #184, A0) ===
 // `vf coord` shim lives in src/commands/coord.ts. A0 ships the stub;
