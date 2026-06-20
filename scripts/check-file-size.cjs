@@ -74,37 +74,75 @@ function walk(dir) {
 
 function lineCount(file) {
   const text = fs.readFileSync(file, "utf8");
-  if (text.length === 0) return 0;
+  if (text.trim() === "") return 0;
   const n = text.split("\n").length;
   return text.endsWith("\n") ? n - 1 : n;
 }
 
+// Walk every .ts file the gate should see: SCAN_DIRS (recursively) plus
+// SCAN_FILES (the facade, with no parent directory to recurse into).
+// Deduped by absolute path so a facade file that lives under a scanned
+// dir is only visited once.
+function walkSrcFiles() {
+  const seen = new Set();
+  const out = [];
+  for (const rel of SCAN_DIRS) {
+    const abs = path.join(REPO_ROOT, rel);
+    if (!fs.existsSync(abs)) continue;
+    for (const file of walk(abs)) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      out.push(file);
+    }
+  }
+  for (const relFile of SCAN_FILES) {
+    const abs = path.join(REPO_ROOT, relFile);
+    if (!fs.existsSync(abs)) continue;
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+  }
+  return out;
+}
+
 // Scan the LEADING COMMENT BLOCK of a file (not just line 0) for the
-// `// size-waiver: ...` marker. Stops at the first executable statement,
-// a blank-line-then-statement, or a `/* */` block boundary. Returns
-// `{ line, reason } | null`. The `line` is 0-based; the `reason` is the
-// full comment text after `// size-waiver:`.
+// `// size-waiver: ...` marker. Skips past `/* … */` block comments
+// (JSDoc, `/* @ts-check */`, license headers) so a file that opens
+// with a block comment is still scanned. Stops at the first
+// executable statement, a blank-line-then-statement, or any line that
+// isn't a `//` comment / `/* */` block / blank / shebang. Returns
+// `{ line, reason } | null`. The `line` is 0-based; the `reason` is
+// the full comment text after `// size-waiver:`.
 function findWaiver(file) {
   const text = fs.readFileSync(file, "utf8");
   if (text.length === 0) return null;
   const lines = text.split("\n");
+  let inBlock = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const t = line.trim();
     // Skip shebangs (must be on the very first line).
     if (i === 0 && line.startsWith("#!")) continue;
     // Skip pure blank lines.
-    if (line.trim() === "") continue;
+    if (t === "") continue;
+    // Track `/* … */` blocks (single-line or multi-line).
+    if (!inBlock && t.startsWith("/*")) {
+      if (t.includes("*/")) continue;          // single-line block
+      inBlock = true; continue;                 // enter multi-line block
+    }
+    if (inBlock) {
+      if (t.includes("*/")) inBlock = false;
+      continue;
+    }
     // Stop at the first executable statement.
-    if (EXECUTABLE_FIRST_LINE.test(line.trim())) return null;
+    if (EXECUTABLE_FIRST_LINE.test(t)) return null;
     // Look for the waiver comment in this line.
     const m = INLINE_WAIVER_REGEX.exec(line);
     if (m) {
       const reasonMatch = line.match(/size-waiver:\s*(.+?)\s*$/);
       return { line: i, reason: reasonMatch ? reasonMatch[1] : "" };
     }
-    // If this is a `/* */` block, we'd have to parse it; for the
-    // simple-shape waivers we expect, we stop at any non-`//` line
-    // that isn't blank/shebang/executable.
+    // Any other non-`//` line is past the leading comment block.
     if (!line.trimStart().startsWith("//")) return null;
   }
   return null;
@@ -121,54 +159,52 @@ function main() {
   const violations = [];
   const waiverMismatches = [];
   const scanned = [];
-  for (const rel of SCAN_DIRS) {
-    const abs = path.join(REPO_ROOT, rel);
-    if (!fs.existsSync(abs)) continue;
-    for (const file of walk(abs)) {
-      const relFile = path.relative(REPO_ROOT, file);
-      const { cap, waiver } = capFor(relFile);
-      const lines = lineCount(file);
-      const w = findWaiver(file);
-      scanned.push({ file: relFile, lines, cap, waiver, inline: w });
-      if (w === null && lines > cap) {
-        violations.push({ file: relFile, lines, cap, waiver, inline: w });
-      }
-    }
-  }
-  for (const relFile of SCAN_FILES) {
-    const abs = path.join(REPO_ROOT, relFile);
-    if (!fs.existsSync(abs)) continue;
+  const srcFiles = walkSrcFiles();
+  // First pass: count lines, find valid inline waiver, flag violations.
+  // We re-read the file in the second pass (malformed-walk) — that
+  // second pass is needed only to catch the rare "comment present but
+  // regex-rejected" case, so the duplicate read is bounded to files
+  // that matter (not a hot path).
+  for (const file of srcFiles) {
+    const relFile = path.relative(REPO_ROOT, file);
     const { cap, waiver } = capFor(relFile);
-    const lines = lineCount(abs);
-    const w = findWaiver(abs);
+    const lines = lineCount(file);
+    const w = findWaiver(file);
     scanned.push({ file: relFile, lines, cap, waiver, inline: w });
     if (w === null && lines > cap) {
       violations.push({ file: relFile, lines, cap, waiver, inline: w });
     }
   }
 
-  // Walk again to find malformed in-line waivers (look like a waiver,
-  // miss the regex). The first pass is "is there a waiver comment?";
-  // this one is "is the comment present but malformed?". We detect by
-  // reading the leading comment block and looking for any line that
-  // starts with "// size-waiver:" but does NOT match the strict regex.
-  for (const rel of SCAN_DIRS) {
-    const abs = path.join(REPO_ROOT, rel);
-    if (!fs.existsSync(abs)) continue;
-    for (const file of walk(abs)) {
-      const text = fs.readFileSync(file, "utf8");
-      const lines = text.split("\n");
-      const inLeadingBlock = true;
-      for (let i = 0; i < lines.length && inLeadingBlock; i++) {
-        const line = lines[i];
-        if (i === 0 && line.startsWith("#!")) continue;
-        if (line.trim() === "") continue;
-        if (EXECUTABLE_FIRST_LINE.test(line.trim())) break;
-        const trimmed = line.trimStart();
-        if (!trimmed.startsWith("//")) break;
-        if (trimmed.startsWith("// size-waiver:") && !INLINE_WAIVER_REGEX.test(line)) {
-          waiverMismatches.push({ file: path.relative(REPO_ROOT, file), line: i, text: trimmed });
-        }
+  // Second pass: walk every .ts file the gate sees (SCAN_DIRS + the
+  // SCAN_FILES facade) and flag any "// size-waiver:" comment in the
+  // leading comment block that fails the strict regex. The first pass
+  // is "is there a valid waiver?"; this one is "is the comment
+  // present but malformed?". Both passes use the same `inBlock`
+  // state machine so a JSDoc / `/* @ts-check */` header doesn't hide
+  // a malformed waiver on a later leading line.
+  for (const file of srcFiles) {
+    const text = fs.readFileSync(file, "utf8");
+    const lines = text.split("\n");
+    let inBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const t = line.trim();
+      if (i === 0 && line.startsWith("#!")) continue;
+      if (t === "") continue;
+      if (!inBlock && t.startsWith("/*")) {
+        if (t.includes("*/")) continue;
+        inBlock = true; continue;
+      }
+      if (inBlock) {
+        if (t.includes("*/")) inBlock = false;
+        continue;
+      }
+      if (EXECUTABLE_FIRST_LINE.test(t)) break;
+      const trimmed = line.trimStart();
+      if (!trimmed.startsWith("//")) break;
+      if (trimmed.startsWith("// size-waiver:") && !INLINE_WAIVER_REGEX.test(line)) {
+        waiverMismatches.push({ file: path.relative(REPO_ROOT, file), line: i, text: trimmed });
       }
     }
   }
@@ -182,6 +218,10 @@ function main() {
   }
 
   if (violations.length === 0) {
+    if (scanned.length === 0) {
+      console.log("::notice::file-size gate: OK (no .ts files scanned)");
+      process.exit(0);
+    }
     let largest = scanned[0];
     for (const s of scanned) {
       if (s.lines > largest.lines) largest = s;
@@ -192,6 +232,19 @@ function main() {
     console.log(
       `::notice::file-size gate: OK (largest is ${largest.file} at ${largest.lines} lines, cap ${largest.cap})${wnote}`,
     );
+    // File-scoped ::warning for every file that carries a valid inline
+    // waiver and is OVER its cap — the waiver is doing work, so the PR
+    // reviewer should see it in the diff annotations. Under-cap files
+    // are silent (the waiver is dormant).
+    for (const s of scanned) {
+      if (!s.inline) continue;
+      if (s.lines <= s.cap) continue;
+      const m = s.inline.reason.match(/#(\d+)\b/);
+      const issueNum = m ? m[1] : "?";
+      console.error(
+        `::warning file=${s.file},line=${s.inline.line + 1},col=1::inline waiver #${issueNum} active (${s.inline.reason}); file is ${s.lines} lines, cap ${s.cap}`,
+      );
+    }
     process.exit(0);
   }
 
