@@ -1,3 +1,4 @@
+// size-waiver: #186 — workflow-artifacts.ts split into workflow-artifacts/{render,validate,types}; see issue #186
 import {
   copyFileSync,
   existsSync,

@@ -1,3 +1,4 @@
+// size-waiver: #186 — scanner.ts split into scanner/{scan,hints,framework}; see issue #186
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 

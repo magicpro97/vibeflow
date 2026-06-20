@@ -1,3 +1,4 @@
+// size-waiver: #186 — preflight.ts split into preflight/{probe,claude,codex,copilot}; see issue #186
 import { spawnSync } from "node:child_process";
 import {
   ENGINES,

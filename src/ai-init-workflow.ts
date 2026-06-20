@@ -1,3 +1,4 @@
+// size-waiver: #186 — ai-init-workflow.ts split into ai-init-workflow/{dispatch,review,subagents}; see issue #186
 /**
  * AI-init workflow decomposition.
  *

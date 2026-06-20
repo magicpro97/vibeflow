@@ -1,3 +1,4 @@
+// size-waiver: #186 — dispatch.ts split into dispatch/{resolve,materialize,spawn,bridge}; see issue #186
 import { existsSync } from "node:fs";
 import { extname, join } from "node:path";
 import type { ProjectContext, UnitBrief } from "./adapters.js";

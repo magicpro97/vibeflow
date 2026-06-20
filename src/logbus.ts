@@ -1,3 +1,4 @@
+// size-waiver: #186 — logbus.ts split into logbus/{write,rotate,prune,watcher}; see issue #186
 import {
   appendFileSync,
   chmodSync,

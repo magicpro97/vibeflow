@@ -1,3 +1,4 @@
+// size-waiver: #186 — server.ts split into server/{http,sse,handlers}; see issue #186
 import { randomUUID } from "node:crypto";
 import {
   closeSync,

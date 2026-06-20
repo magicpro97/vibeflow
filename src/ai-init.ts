@@ -1,3 +1,4 @@
+// size-waiver: #186 — ai-init.ts split into ai-init/{workflow,runtime,agents}; see issue #186
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { detectRolesForRepo } from "./agents/detect-roles.js";

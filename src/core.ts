@@ -1,3 +1,4 @@
+// size-waiver: #186 — core.ts split into core/{path,fs,state}; see issue #186
 import {
   appendFileSync,
   chmodSync,

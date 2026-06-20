@@ -1,3 +1,4 @@
+// size-waiver: #186 — terminal-prompts.ts split into terminal-prompts/{prompts,utils}; see issue #186
 import { createInterface, emitKeypressEvents } from "node:readline";
 import { c } from "./core.js";
 
