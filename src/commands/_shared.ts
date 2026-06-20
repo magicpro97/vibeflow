@@ -217,3 +217,26 @@ export {
   DEFAULT_DENIED_TOOLS,
 } from "./coord.js";
 export type { CoordInject, DeniedToolCall, Engine } from "./coord.js";
+
+// A4 review surface (issue #170). Re-exported through the barrel
+// so review-cross.ts (A5) and other A* commands can import via
+// the no-cycle path.
+export {
+  review,
+  parseReviewVerdict,
+  readTargetContent,
+  buildReviewPrompt,
+  DEFAULT_REVIEW_ENGINE,
+} from "./review.js";
+export type { ReviewTarget, ReviewVerdict, ReviewResult } from "./review.js";
+
+// A5 review-cross surface (issue #171). Same no-cycle rationale.
+export {
+  reviewCross,
+  readPilotData,
+  appendPilotData,
+  computeDisagreementRate,
+  DEFAULT_CROSS_ENGINES,
+  PILOT_DATA_PATH,
+} from "./review-cross.js";
+export type { PilotEncounter } from "./review-cross.js";
