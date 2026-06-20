@@ -32,6 +32,7 @@ import { join } from "node:path";
 import {
   BRIEF_FRESH_MS,
   BRIEF_PATH,
+  assertCoordBriefReady,
   c,
   cwd,
   out,
@@ -108,59 +109,25 @@ export async function coord(
 ): Promise<number> {
   const nowFn = inject.now ?? inject.Date_now ?? (() => Date.now());
   const _exists = inject.existsSync ?? existsSync;
-  const _read = inject.readFileSync ?? readFileSync;
   const _stat = inject.statSync ?? statSync;
   const _write = inject.writeFileSync ?? writeFileSync;
   const denier = inject.toolDenier ?? defaultToolDenier;
   const base = cwd();
   const briefPath = join(base, BRIEF_PATH);
 
-  // 1. Brief must exist.
-  if (!_exists(briefPath)) {
-    out(
-      "vf",
-      c.red(
-        `no brief at ${BRIEF_PATH}. Run \`vf state brief write\` to create one, then \`vf state brief --consult\`.`,
-      ),
-      { level: "error" },
-    );
-    return 1;
-  }
-
-  // 2. Brief must be well-formed (all 6 canonical sections present).
-  const raw = _read(briefPath, "utf8");
-  const shape = validateBriefShape(raw);
-  if (!shape.ok) {
-    out(
-      "vf",
-      c.red(
-        `brief is missing ${shape.missing.length} canonical section(s): ${shape.missing.join(", ")}. Run \`vf state brief write\` to repair, then \`vf state brief --consult\`.`,
-      ),
-      { level: "error", meta: { kind: "coord-gate-refused", missing: [...shape.missing] } },
-    );
-    return 1;
-  }
-
-  // 3. Brief must be fresh (last-consult within BRIEF_FRESH_MS).
-  //    A future timestamp is STALE — the gate refuses rather than
-  //    bypasses (same clock-skew guard as `isBriefFresh` in state.ts).
+  // 1-3. Brief must exist, well-formed (all 6 sections), AND fresh.
+  //      A1 FU #199: the order is shape before freshness because a
+  //      malformed brief is a hard error regardless of timestamp;
+  //      freshness is perishable so it's a soft gate. Shape is a hard
+  //      refusal. The shared gate is `assertCoordBriefReady` (in
+  //      state.ts) — both this shim AND `init` use it for consistency.
+  //      Returns 1 on any failure, 0 if all 3 checks pass.
   const nowMs = nowFn();
-  const stat = _stat(briefPath);
-  const lastConsultMs = readLastConsultMs(raw);
-  if (lastConsultMs === null || lastConsultMs > nowMs || nowMs - lastConsultMs > BRIEF_FRESH_MS) {
-    const ageSec =
-      lastConsultMs === null || lastConsultMs > nowMs
-        ? "never"
-        : Math.round((nowMs - lastConsultMs) / 1000);
-    out(
-      "vf",
-      c.red(
-        `brief is stale (last consulted ${ageSec}s ago, freshness window: ${Math.round(BRIEF_FRESH_MS / 1000)}s). Run \`vf state brief --consult\` first.`,
-      ),
-      { level: "error", meta: { kind: "coord-gate-refused", ageSec, mtimeMs: stat.mtimeMs } },
-    );
-    return 1;
-  }
+  const gateCode = assertCoordBriefReady(base, nowMs, {
+    existsSync: inject.existsSync,
+    readFileSync: inject.readFileSync,
+  });
+  if (gateCode !== 0) return gateCode;
 
   // 4. Gate passed. Mark the brief fresh (idempotent — the new mtime
   //    is the new "last consulted" reference point).
@@ -170,7 +137,7 @@ export async function coord(
     writeFileSync: _write,
   });
   out("vf", c.dim("brief is fresh; coord gate passed"), {
-    meta: { kind: "coord-consult", mtimeMs: stat.mtimeMs, path: briefPath },
+    meta: { kind: "coord-consult", mtimeMs: _stat(briefPath).mtimeMs, path: briefPath },
   });
 
   // 5. Optional engine spawn + tool-deny-list wrapper. `_args[0]` is
@@ -237,23 +204,4 @@ export async function defaultEngineSpawner(
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));
   });
-}
-
-/** Read the brief's `last-consult` frontmatter value and return it as
- *  ms-since-epoch, or `null` if missing/unparseable. Mirrors the A0
- *  brief surface parser (see ./state-frontmatter.ts parseFrontmatter)
- *  so the staleness check matches `isBriefFresh`. */
-function readLastConsultMs(raw: string): number | null {
-  if (!raw.startsWith("---")) return null;
-  const end = raw.indexOf("\n---", 3);
-  if (end === -1) return null;
-  const header = raw.slice(3, end);
-  for (const line of header.split(/\r?\n/)) {
-    const m = line.match(/^\s*last-consult:\s*(.+?)\s*$/);
-    if (m?.[1]) {
-      const ms = Date.parse(m[1]);
-      return Number.isFinite(ms) ? ms : null;
-    }
-  }
-  return null;
 }

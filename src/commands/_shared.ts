@@ -185,6 +185,7 @@ export {
   BRIEF_PATH,
   BRIEF_SECTIONS,
   assertCoordBriefFresh,
+  assertCoordBriefReady,
   brief,
   formatBriefForHuman,
   isBriefFresh,

@@ -32,6 +32,7 @@ import {
   BRIEF_PATH,
   BRIEF_SECTIONS,
   assertCoordBriefFresh,
+  assertCoordBriefReady,
   atomicWriteFileSync,
   brief,
   coord,
@@ -334,6 +335,9 @@ describe("init --coord brief gate (issue #184 A0 + #194 A1 integration)", () => 
     mkdirSync(briefDir, { recursive: true });
     const stale = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     const briefPath = join(briefDir, "coordinator-brief.md");
+    // A1 FU #199: plant a brief WITH all 6 canonical sections (so
+    // the shared gate's shape check passes). Only the last-consult
+    // is stale (the freshness check is what we exercise).
     writeFileSync(
       briefPath,
       `---
@@ -341,6 +345,7 @@ last-consult: ${stale}
 ---
 
 # test brief
+${BRIEF_SECTIONS.join("\n")}
 `,
     );
     process.chdir(dir);
@@ -380,6 +385,7 @@ last-consult: ${stale}
     const briefDir = join(dir, ".vibeflow", "knowledge");
     mkdirSync(briefDir, { recursive: true });
     const fresh = new Date(Date.now() - 60 * 1000).toISOString(); // 1 min ago
+    // A1 FU #199: plant a brief WITH all 6 canonical sections.
     writeFileSync(
       join(briefDir, "coordinator-brief.md"),
       `---
@@ -387,6 +393,7 @@ last-consult: ${fresh}
 ---
 
 # test brief
+${BRIEF_SECTIONS.join("\n")}
 `,
     );
     process.chdir(dir);
@@ -707,4 +714,56 @@ y
     process.chdir(origCwd);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ============================================================
+// A1 FU #199: shared gate (assertCoordBriefReady) — used by both
+// `coord()` and `init()`. The 4 test cases below prove the 4
+// branches of the combined gate: shape missing / shape invalid /
+// stale / fresh. ============================================================
+describe("assertCoordBriefReady (A1 FU #199 — shared gate)", () => {
+  test("(r) ready: shape OK + fresh → exit 0 + 'gate passed' message", () => {
+    const fresh = new Date(Date.now() - 60_000).toISOString();
+    writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
+    const code = assertCoordBriefReady(cwd(), Date.now());
+    expect(code).toBe(0);
+  });
+
+  test("(r) ready: missing brief → exit 1 + 'no brief' message", () => {
+    expect(existsSync(join(dir, BRIEF_PATH))).toBe(false);
+    const code = assertCoordBriefReady(cwd(), Date.now());
+    expect(code).toBe(1);
+  });
+
+  test("(r) ready: shape invalid (missing §3) → exit 1 + 'missing sections' message", () => {
+    const fresh = new Date(Date.now() - 60_000).toISOString();
+    // Brief is shape-invalid: only §1 + §2 (missing §3-§6).
+    const partialBody = [
+      "# brief",
+      "",
+      "## 1. The user's verbatim ask",
+      "test",
+      "",
+      "## 2. Non-negotiables",
+      "test",
+      "",
+    ].join("\n");
+    writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh, body: partialBody }));
+    const code = assertCoordBriefReady(cwd(), Date.now());
+    expect(code).toBe(1);
+  });
+
+  test("(r) ready: shape OK + stale → exit 1 + 'stale' message", () => {
+    const stale = new Date(Date.now() - 2 * BRIEF_FRESH_MS).toISOString();
+    writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: stale }));
+    const code = assertCoordBriefReady(cwd(), Date.now());
+    expect(code).toBe(1);
+  });
+
+  test("(r) ready: shape OK + future last-consult → exit 1 (clock-skew guard)", () => {
+    const future = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 73).toISOString();
+    writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: future }));
+    const code = assertCoordBriefReady(cwd(), Date.now());
+    expect(code).toBe(1);
+  });
 });

@@ -27,6 +27,7 @@ import {
   Spinner,
   applyIntake,
   assertCoordBriefFresh,
+  assertCoordBriefReady,
   basename,
   c,
   collectInitAskQuestionnaireData,
@@ -158,8 +159,12 @@ export async function init(
     // expects init to proceed normally.
     const briefPath = join(cwd(), BRIEF_PATH);
     if (existsSync(briefPath)) {
+      // A1 FU #199: use the SHARED gate (shape + freshness) so init
+      // and coord stay consistent. A malformed brief must refuse
+      // init, not just coord. (The previous code only checked
+      // freshness, which let a broken brief through init.)
       updateLastConsult(briefPath, Date.now());
-      const code = assertCoordBriefFresh(cwd(), Date.now());
+      const code = assertCoordBriefReady(cwd(), Date.now());
       if (code !== 0) return code;
     }
   }
