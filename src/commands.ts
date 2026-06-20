@@ -252,3 +252,18 @@ export {
   DEFAULT_REVIEW_ENGINE,
 } from "./commands/review.js";
 export type { ReviewTarget, ReviewVerdict, ReviewResult } from "./commands/review.js";
+
+// === Re-export the review-cross cluster (issue #171, A5) ===
+// `vf review --cross <target>` dispatches TWO engines, extracts
+// disagreements, surfaces them to the human, logs pilot data.
+// The `--cross` flag is the EXPLICIT opt-in (A4's HUMAN-ONLY guard
+// refuses `--auto` and `VF_REVIEW_AUTO=1`).
+export {
+  reviewCross,
+  readPilotData,
+  appendPilotData,
+  computeDisagreementRate,
+  DEFAULT_CROSS_ENGINES,
+  PILOT_DATA_PATH,
+} from "./commands/review-cross.js";
+export type { PilotEncounter } from "./commands/review-cross.js";

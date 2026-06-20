@@ -199,6 +199,16 @@ export {
 // module to keep state.ts under the 400-line cap. Re-exported here
 // so callers can `import { assertCoordBriefReady } from "commands"`.
 export { assertCoordBriefReady } from "./state-gate.js";
+// A4 re-exports (so review-cross.ts can import via the barrel
+// instead of pulling in the sibling review.ts).
+export {
+  review,
+  parseReviewVerdict,
+  readTargetContent,
+  buildReviewPrompt,
+  DEFAULT_REVIEW_ENGINE,
+} from "./review.js";
+export type { ReviewTarget, ReviewVerdict, ReviewResult } from "./review.js";
 // F0 review #3: atomic write is in its own module (atomic-write.ts).
 // state.ts re-exports the frontmatter helpers; atomic write is a generic
 // file-IO helper that doesn't belong to the state cluster.
