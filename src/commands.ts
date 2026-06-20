@@ -225,3 +225,16 @@ export {
   DEFAULT_DENIED_TOOLS,
 } from "./commands/coord.js";
 export type { CoordInject, DeniedToolCall, Engine } from "./commands/coord.js";
+
+// === Re-export the plan cluster (issue #169, A3) ===
+// `vf plan <artifact>` dispatches a planner engine, parses the 6
+// canonical sections, writes the plan file. The dispatch is injected
+// for testability (production wires the real engine dispatcher).
+export {
+  plan,
+  PLAN_SECTIONS,
+  PLANS_DIR,
+  DEFAULT_PLAN_ENGINE,
+  SLUG_MAX,
+  slugify,
+} from "./commands/plan.js";
