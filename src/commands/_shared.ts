@@ -175,3 +175,26 @@ export type { Ctx7AuthResult } from "./init-ctx7.js";
 // under the 400-line cap. The cycle rule routes it through this barrel.
 export { runInitAiEnrichment } from "./init-ai.js";
 export type { InitAiEnrichmentOpts } from "./init-ai.js";
+
+// === Re-export the state cluster (issue #184, A0 brief surface) ===
+// `coord.ts` and `init.ts` use `isBriefFresh` to gate non-trivial
+// actions on the brief's last-consult mtime. The cycle rule forbids
+// sibling imports, so we re-export through this barrel.
+export {
+  BRIEF_FRESH_MS,
+  BRIEF_PATH,
+  assertCoordBriefFresh,
+  brief,
+  formatBriefForHuman,
+  isBriefFresh,
+  printCoordGatePassed,
+  readBrief,
+  readBriefLastConsult,
+  state,
+  updateLastConsult,
+} from "./state.js";
+export type { Brief, BriefInject, OutFn } from "./state.js";
+// === Re-export the coord stub (issue #184, A0) ===
+// `coord.ts` is the A0 stub; A1 (#167) will replace the body but the
+// signature stays stable. Re-exported here for the facade and tests.
+export { coord } from "./coord.js";

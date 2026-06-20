@@ -25,6 +25,7 @@ import {
   ENGINES,
   Spinner,
   applyIntake,
+  assertCoordBriefFresh,
   basename,
   c,
   collectInitAskQuestionnaireData,
@@ -119,6 +120,16 @@ export async function init(
     syncSpawner?: StepSpawner;
   } = {},
 ): Promise<number> {
+  // A0 brief-surface gate: --coord refuses to proceed unless a fresh
+  // brief exists (issue #184 AC #3). The brief is what the coordinator
+  // consults before any non-trivial action; a stale brief means the
+  // coordinator is operating on outdated state. The gate runs BEFORE
+  // the questionnaire / engine preflight so a missing brief aborts
+  // init immediately, not after the user has answered the intake.
+  if (flags.coord) {
+    const code = assertCoordBriefFresh(cwd(), Date.now());
+    if (code !== 0) return code;
+  }
   const initEngine: Engine =
     typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
       ? (flags.engine as Engine)
