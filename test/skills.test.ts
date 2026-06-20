@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CTX_DIR, type Skill } from "../src/core.js";
@@ -309,6 +309,89 @@ describe("parseSkill: edge cases", () => {
 // Documented limitation: the catch blocks exist for fail-closed
 // behaviour but cannot be exercised in unit tests without mocking
 // the fs module.
+
+describe("coordinator skill (A2 #168)", () => {
+  const repoRoot = join(import.meta.dir, "..");
+  const skillPath = join(repoRoot, ".vibeflow", "skills", "coordinator", "SKILL.md");
+
+  test("SKILL.md exists at the canonical path", () => {
+    const exists = existsSync(skillPath);
+    expect(exists).toBe(true);
+  });
+
+  test("SKILL.md has YAML frontmatter with name=coordinator, description, when_to_load", () => {
+    const text = readFileSync(skillPath, "utf8");
+    // Frontmatter opens on line 1 and closes on a later --- line.
+    expect(text.split("\n")[0]?.trim()).toBe("---");
+    const fmEnd = text
+      .split("\n")
+      .slice(1)
+      .findIndex((l) => l.trim() === "---");
+    expect(fmEnd).toBeGreaterThan(0);
+    const fm = text
+      .split("\n")
+      .slice(1, fmEnd + 1)
+      .join("\n");
+    expect(fm).toMatch(/^name:\s*coordinator\s*$/m);
+    expect(fm).toMatch(/^description:\s*\S/m);
+    expect(fm).toMatch(/^when_to_load:\s*\S/m);
+  });
+
+  test("SKILL.md has the 6 required sections (## 0 .. ## 5)", () => {
+    const text = readFileSync(skillPath, "utf8");
+    for (const n of ["0", "1", "2", "3", "4", "5"]) {
+      // Match "## N. <heading>" — the section number is required.
+      const re = new RegExp(`^## ${n}\\. `, "m");
+      expect(text).toMatch(re);
+    }
+  });
+
+  test("SKILL.md is between 100 and 200 lines (skill must be cheap to read)", () => {
+    const text = readFileSync(skillPath, "utf8");
+    const n = text.trim() === "" ? 0 : text.split("\n").length;
+    // The "skill is cheap" rule from the A2 spec: 100-200 lines.
+    // The exact 100-lower bound is a hard floor; the 200 ceiling
+    // is a soft cap. Assert both.
+    expect(n).toBeGreaterThanOrEqual(100);
+    expect(n).toBeLessThanOrEqual(200);
+  });
+
+  test("validate-coordinator-skill.sh exits 0 on the shipped SKILL.md", () => {
+    const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+    const r = spawnSync("bash", [join(repoRoot, "scripts", "validate-coordinator-skill.sh")], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    // The script is the "skill is shipped" gate — exit 0 = pass.
+    if (r.status !== 0) {
+      // Surface the actual error so a CI failure isn't a black box.
+      console.error("validate-coordinator-skill.sh stdout:", r.stdout);
+      console.error("validate-coordinator-skill.sh stderr:", r.stderr);
+    }
+    expect(r.status).toBe(0);
+  });
+
+  test("validate-coordinator-skill.sh exits non-zero on a malformed SKILL.md", () => {
+    // Sanity-check the gate: a SKILL.md missing the frontmatter MUST fail.
+    // This protects against a future refactor that silently passes everything.
+    const dir = mkdtempSync(join(tmpdir(), "vf-coord-bad-"));
+    try {
+      mkdirSync(join(dir, ".vibeflow", "skills", "coordinator"), { recursive: true });
+      writeFileSync(
+        join(dir, ".vibeflow", "skills", "coordinator", "SKILL.md"),
+        "# no frontmatter\n",
+      );
+      const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+      const r = spawnSync("bash", [join(repoRoot, "scripts", "validate-coordinator-skill.sh")], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+      expect(r.status).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("matchSkillsForFile: deprecated + score branches", () => {
   test("deprecated skill is never matched (line 155 continue)", () => {
