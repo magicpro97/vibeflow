@@ -41,7 +41,7 @@ const EXCLUDE_PATTERNS = [/\.generated\.ts$/, /\.gen\.ts$/, /\/dist\//, /\/build
 //   - optional: " — " followed by the reason (>= 10 chars, otherwise
 //     the gate treats the waiver as malformed and falls through to the
 //     cap)
-const INLINE_WAIVER_REGEX = /^\s*\/\/\s*size-waiver:\s*#\d+(?:\s*[—\-]\s*\S.{8,})?\s*$/;
+const INLINE_WAIVER_REGEX = /^\s*\/\/\s*size-waiver:\s*#\d+(?:\s*[—\-]\s*\S.{8,})\s*$/;
 
 // The first non-comment, non-blank line is where the executable code
 // starts. The waiver scan stops at that line — anything after is code,
