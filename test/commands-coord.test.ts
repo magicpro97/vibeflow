@@ -300,6 +300,30 @@ describe("coord shim (A1 #167 + #194)", () => {
     expect(code).toBe(1);
   });
 
+  // ---- A1 FU #198: spawner is called WITH the env that includes
+  //      VF_DENY_TOOLS. The test verifies the contract (spawnEnv is
+  //      passed) but not the enforcement (the wrapper is a followup). ----
+  test("(deny-list env) spawner receives VF_DENY_TOOLS in the spawn env", async () => {
+    const fresh = new Date(Date.now() - 60_000).toISOString();
+    writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
+    let capturedEnv: Record<string, string | undefined> | null = null;
+    const spawner = async (
+      _e: string,
+      _a: readonly string[],
+      env: NodeJS.ProcessEnv,
+    ): Promise<number> => {
+      capturedEnv = { ...env };
+      return 0;
+    };
+    const code = await coord(["claude"], {}, { now: () => Date.now(), spawner });
+    expect(code).toBe(0);
+    expect(capturedEnv).not.toBeNull();
+    const env = capturedEnv as unknown as Record<string, string | undefined>;
+    expect(env.VF_DENY_TOOLS).toContain("Write");
+    expect(env.VF_DENY_TOOLS).toContain("Edit");
+    expect(env.VF_DENY_TOOLS).toContain("Bash");
+  });
+
   // ---- --coord deprecation: init warns but still auto-coords ------
   test("(deprecation) init --coord emits a ::notice but still runs the auto-coord gate", async () => {
     const fresh = new Date(Date.now() - 60_000).toISOString();

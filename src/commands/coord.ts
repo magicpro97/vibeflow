@@ -62,9 +62,15 @@ export interface CoordInject {
   readFileSync?: (p: string, enc: string) => string;
   writeFileSync?: (p: string, data: string) => void;
   statSync?: (p: string) => { mtimeMs: number };
-  /** Engine spawner. Receives the engine name + the remaining args.
-   *  Returns the exit code of the engine (or 0 on simulated success). */
-  spawner?: (engine: string, args: readonly string[]) => Promise<number>;
+  /** Engine spawner. Receives the engine name + the remaining args +
+   *  the spawn environment (A1 FU #198: includes VF_DENY_TOOLS).
+   *  The default `defaultEngineSpawner` (see below) merges
+   *  `spawnEnv` into `process.env` and spawns the engine. */
+  spawner?: (
+    engine: string,
+    args: readonly string[],
+    spawnEnv: NodeJS.ProcessEnv,
+  ) => Promise<number>;
   /** Tool-deny-list policy. Receives a tool name; returns null if
    *  allowed, or a `DeniedToolCall` if denied. Default policy denies
    *  the mutation/side-effect tools: Write, Edit, MultiEdit, NotebookEdit,
@@ -167,16 +173,34 @@ export async function coord(
     return 1;
   }
 
-  // Spawn the engine with a tool-deny-list wrapper. In production the
-  // shim hands the engine a thin wrapper that calls `denier(tool)`
-  // for every PreToolUse event; in tests, the `spawner` inject seam
-  // returns immediately so we never touch a real engine binary.
+  // Spawn the engine with the tool-deny-list env var (A1 FU #198).
+  // A1 FU #198 partial fix: the shim now sets VF_DENY_TOOLS for engines
+  // that support it (so the engine sees the deny-list as a runtime
+  // hint). The full PreToolUse wrapper (a thin shim binary that
+  // intercepts every tool call) is a followup — see the issue body
+  // for the design. For now, the shim is honest: it logs that the
+  // engine is spawned with the deny-list *hint*, NOT a guarantee.
+  // The `toolDenier` inject in tests proves the policy; the env var
+  // is the production enforcement signal (engines that support it
+  // apply the policy natively).
   const spawner = inject.spawner ?? defaultEngineSpawner;
   const engineArgs = _args.slice(1);
-  out("vf", c.dim(`coord: spawning ${engine} (with tool deny-list)`), {
-    meta: { kind: "coord-spawn", engine, args: engineArgs },
+  // Build the deny-list env: comma-separated, matching the engine's
+  // native tool name. The env var is a hint; engines may or may
+  // not honor it (see A1 FU #198 for the wrapper that would
+  // intercept every tool call regardless of engine support).
+  const deniedToolNames = Array.from(DEFAULT_DENIED_TOOLS).join(",");
+  const spawnEnv: NodeJS.ProcessEnv = { VF_DENY_TOOLS: deniedToolNames, ...process.env };
+  out("vf", c.dim(`coord: spawning ${engine} (deny-list hint: ${deniedToolNames})`), {
+    meta: {
+      kind: "coord-spawn",
+      engine,
+      args: engineArgs,
+      deniedTools: DEFAULT_DENIED_TOOLS,
+      wrapperStatus: "policy-only", // see A1 FU #198 for the full wrapper
+    },
   });
-  const code = await spawner(engine, engineArgs);
+  const code = await spawner(engine, engineArgs, spawnEnv);
 
   // The deny-list is enforced by the engine's PreToolUse hook in
   // production (the engine's wrapper calls `denier(tool)` for every
@@ -194,17 +218,27 @@ export async function coord(
  *  is a no-op real binary). Returns 0 on success, 1 on spawn failure.
  *  F0 review #B1: this function is the only test seam to the
  *  real node:child_process; the coverage-anti-patterns test confirms
- *  no other source file uses spawn directly. */
+ *  no other source file uses spawn directly.
+ *
+ *  A1 FU #198: the spawnEnv parameter carries VF_DENY_TOOLS (the
+ *  tool-deny-list hint). We merge it into process.env so the
+ *  spawned engine can read it natively. The full PreToolUse wrapper
+ *  (a thin shim binary that intercepts every tool call) is a
+ *  followup — see issue #198 for the design. */
 export async function defaultEngineSpawner(
   engine: string,
   _args: readonly string[],
+  spawnEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
   // Use a dynamic import so the node:child_process dependency is
   // not pulled into the test bundle (most unit tests inject a
   // stub spawner and never reach this code).
   const { spawn } = await import("node:child_process");
   return await new Promise<number>((resolve) => {
-    const child = spawn(engine, _args, { stdio: "inherit" });
+    const child = spawn(engine, _args, {
+      stdio: "inherit",
+      env: { ...spawnEnv }, // merge deny-list hint into the engine's env
+    });
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));
   });

@@ -185,7 +185,6 @@ export {
   BRIEF_PATH,
   BRIEF_SECTIONS,
   assertCoordBriefFresh,
-  assertCoordBriefReady,
   brief,
   formatBriefForHuman,
   isBriefFresh,
@@ -196,6 +195,10 @@ export {
   updateLastConsult,
   validateBriefShape,
 } from "./state.js";
+// F0/A1 #199: the shared gate (shape + freshness) lives in its own
+// module to keep state.ts under the 400-line cap. Re-exported here
+// so callers can `import { assertCoordBriefReady } from "commands"`.
+export { assertCoordBriefReady } from "./state-gate.js";
 // F0 review #3: atomic write is in its own module (atomic-write.ts).
 // state.ts re-exports the frontmatter helpers; atomic write is a generic
 // file-IO helper that doesn't belong to the state cluster.
