@@ -158,19 +158,19 @@ describe("state cluster (issue #184 A0 brief surface)", () => {
   });
 
   // ---- (g) vf coord with stale vs fresh brief --------------------
-  test("(g) coord with stale brief → exit 1", () => {
+  test("(g) coord with stale brief → exit 1", async () => {
     const path = join(dir, BRIEF_PATH);
     const stale = new Date(Date.now() - 2 * BRIEF_FRESH_MS).toISOString();
     writeFileSync(path, makeBrief({ withLastConsult: stale }));
-    const code = coord([], {}, { now: () => Date.now() });
+    const code = await coord([], {}, { now: () => Date.now() });
     expect(code).toBe(1);
   });
 
-  test("(g) coord with fresh brief → exit 0", () => {
+  test("(g) coord with fresh brief → exit 0", async () => {
     const path = join(dir, BRIEF_PATH);
     const fresh = new Date(Date.now() - 60_000).toISOString();
     writeFileSync(path, makeBrief({ withLastConsult: fresh }));
-    const code = coord([], {}, { now: () => Date.now() });
+    const code = await coord([], {}, { now: () => Date.now() });
     expect(code).toBe(0);
   });
 });
@@ -320,16 +320,22 @@ describe("state cluster — top-level dispatcher", () => {
 // minimal integration test that only exercises the brief-gate (lines
 // 123-132 of src/commands/init.ts). The injected-readiness / answers
 // pattern lets us drive the function without a real engine.
-describe("init --coord brief gate (issue #184 A0 integration)", () => {
-  test("(h) init --coord with stale brief → exit 1 (stale brief, gate fires)", async () => {
+describe("init --coord brief gate (issue #184 A0 + #194 A1 integration)", () => {
+  // A1 (#194): `vf init` now auto-coords. The old A0 test "stale brief +
+  // --coord → exit 1" is OBSOLETE — the auto-coord consults the stale
+  // brief BEFORE the gate runs, so the brief becomes fresh and init
+  // proceeds. The regression we now protect: the brief's mtime is
+  // advanced (proving the auto-coord fired) and init does not return
+  // 1 from the brief-gate.
+  test("(h) init (auto-coord, default) with stale brief → auto-coord consults, gate passes, init proceeds (code !== 1)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-coord-stale-"));
     const origCwd = process.cwd();
-    // Plant a brief with a stale last-consult (15 min ago)
     const briefDir = join(dir, ".vibeflow", "knowledge");
     mkdirSync(briefDir, { recursive: true });
     const stale = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const briefPath = join(briefDir, "coordinator-brief.md");
     writeFileSync(
-      join(briefDir, "coordinator-brief.md"),
+      briefPath,
       `---
 last-consult: ${stale}
 ---
@@ -340,7 +346,7 @@ last-consult: ${stale}
     process.chdir(dir);
     try {
       const code = await init(
-        { coord: true, "no-ask": true, "no-ai": true, engine: "claude" },
+        { "no-ask": true, "no-ai": true, engine: "claude" },
         {
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
@@ -351,17 +357,24 @@ last-consult: ${stale}
           aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
         },
       );
-      // The gate fires BEFORE the questionnaire, so we expect 1 (or
-      // whatever the brief-gate returns). The test is asserting that
-      // init() with --coord and a stale brief does NOT proceed normally.
-      expect(code).toBe(1);
+      // Auto-coord consulted the brief → gate passes → init does not
+      // return 1 from the brief-gate. Other init phases may return
+      // other codes; we only assert the brief-gate did not refuse.
+      expect(code).not.toBe(1);
+      // The brief's last-consult was updated (proves the auto-coord
+      // actually ran). We check the FILE CONTENT, not mtime — mtime
+      // granularity is 1ms on some FS and the consult + stat may
+      // land in the same tick.
+      const after = readFileSync(briefPath, "utf8");
+      expect(after).not.toContain(stale);
+      expect(after).toMatch(/last-consult:\s*2/); // 2026-XX-XX
     } finally {
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("(i) init --coord with fresh brief → proceeds (gate passes)", async () => {
+  test("(i) init (auto-coord, default) with fresh brief → gate passes, init proceeds (code !== 1)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-coord-fresh-"));
     const origCwd = process.cwd();
     const briefDir = join(dir, ".vibeflow", "knowledge");
@@ -379,7 +392,7 @@ last-consult: ${fresh}
     process.chdir(dir);
     try {
       const code = await init(
-        { coord: true, "no-ask": true, "no-ai": true, engine: "claude" },
+        { "no-ask": true, "no-ai": true, engine: "claude" },
         {
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
@@ -390,18 +403,9 @@ last-consult: ${fresh}
           aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
         },
       );
-      // Fresh brief: gate passes. Init may continue to other phases;
-      // we don't assert the exact code (init has many paths), just
-      // that it does NOT return 1 from the brief-gate.
-      // To check the gate was bypassed, the simplest signal is the
-      // code being SOMETHING OTHER than 1. But init may return 0 or
-      // other values depending on which phases run. The strict
-      // assertion we can make: with no-ai + no-ask + ready engine,
-      // the brief-gate does not block (it doesn't return 1 just for
-      // the brief).
-      // We just assert != 1 (brief-gate didn't refuse). Note: a real
-      // init() with --no-ai + no-ask + ready engine may return 0
-      // (early-exit when no-ai and no workflow).
+      // Fresh brief: gate passes (whether auto-coord ran or not).
+      // Init may continue to other phases; we just assert the
+      // brief-gate did not refuse.
       expect(code).not.toBe(1);
     } finally {
       process.chdir(origCwd);

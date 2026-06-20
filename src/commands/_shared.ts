@@ -200,7 +200,16 @@ export {
 // file-IO helper that doesn't belong to the state cluster.
 export { atomicWriteFileSync } from "./atomic-write.js";
 export type { Brief, BriefInject, OutFn } from "./state.js";
-// === Re-export the coord stub (issue #184, A0) ===
-// `coord.ts` is the A0 stub; A1 (#167) will replace the body but the
-// signature stays stable. Re-exported here for the facade and tests.
-export { coord } from "./coord.js";
+// === Re-export the coord shim (issue #184 A0 stub, A1 #167+#194 real) ===
+// `coord.ts` is the A0 stub (brief freshness only) plus the A1 real
+// shim (auto-coord + tool-deny-list). The A0↔A1 contract keeps the
+// signature stable: the body grew but the surface did not. Re-exported
+// here for the facade and tests; the helper `defaultToolDenier` +
+// `DEFAULT_DENIED_TOOLS` are exposed too so callers can reuse the
+// B5 audit-fixed policy outside the shim.
+export {
+  coord,
+  defaultToolDenier,
+  DEFAULT_DENIED_TOOLS,
+} from "./coord.js";
+export type { CoordInject, DeniedToolCall, Engine } from "./coord.js";

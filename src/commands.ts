@@ -214,7 +214,14 @@ export {
 // so callers can `import { atomicWriteFileSync } from "commands"`.
 export { atomicWriteFileSync } from "./commands/atomic-write.js";
 export type { Brief, BriefInject, OutFn } from "./commands/state.js";
-// === Re-export the coord stub (issue #184, A0) ===
-// `vf coord` shim lives in src/commands/coord.ts. A0 ships the stub;
-// A1 (#167) will replace the body while keeping the signature.
-export { coord } from "./commands/coord.js";
+// === Re-export the coord shim (issue #184 A0 stub, A1 #167+#194 real) ===
+// `vf coord` lives in src/commands/coord.ts. A0 shipped the brief-
+// freshness stub; A1 replaced the body with the real shim (auto-coord +
+// tool-deny-list) while keeping the A0 signature + exit-code contract.
+export {
+  coord,
+  defaultEngineSpawner,
+  defaultToolDenier,
+  DEFAULT_DENIED_TOOLS,
+} from "./commands/coord.js";
+export type { CoordInject, DeniedToolCall, Engine } from "./commands/coord.js";

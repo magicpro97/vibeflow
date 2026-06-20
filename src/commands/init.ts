@@ -20,6 +20,7 @@
 //     runFindSkillsFallback + Ctx7AuthResult.
 //   - init-ai.ts: runInitAiEnrichment (Phase 2) + InitAiEnrichmentOpts.
 import {
+  BRIEF_PATH,
   CTX_DIR,
   DEFAULT_ENGINE,
   ENGINES,
@@ -33,9 +34,11 @@ import {
   cwd,
   ensureCtx7Auth,
   ensureToolIndex,
+  existsSync,
   generateWorkflowArtifacts,
   hasCommand,
   initAskQuestionnaireToIntakeAnswers,
+  join,
   out,
   panel,
   provisionTool,
@@ -43,6 +46,7 @@ import {
   runFindSkillsFallback,
   runInitAiEnrichment,
   spawnSync,
+  updateLastConsult,
   writeSettings,
   writeToolConfigs,
 } from "./_shared.js";
@@ -120,15 +124,44 @@ export async function init(
     syncSpawner?: StepSpawner;
   } = {},
 ): Promise<number> {
-  // A0 brief-surface gate: --coord refuses to proceed unless a fresh
-  // brief exists (issue #184 AC #3). The brief is what the coordinator
-  // consults before any non-trivial action; a stale brief means the
-  // coordinator is operating on outdated state. The gate runs BEFORE
-  // the questionnaire / engine preflight so a missing brief aborts
-  // init immediately, not after the user has answered the intake.
+  // A1 brief-surface gate (#167 + #194): `vf init` ALWAYS consults the
+  // brief and gates on freshness, unless `--no-coord` opts out (the
+  // OOB 2026-06-20 user feedback: "dùng vf init là chạy luôn ai mode
+  // và ai tự điều phối luôn, không cần cờ --coord"). The legacy
+  // `--coord` flag from A0 is accepted as a no-op for back-compat
+  // (a follow-up PR can remove it).
+  const noCoord = flags["no-coord"] === true;
   if (flags.coord) {
-    const code = assertCoordBriefFresh(cwd(), Date.now());
-    if (code !== 0) return code;
+    out(
+      "vf",
+      c.yellow(
+        "::notice: --coord is deprecated. `vf init` now consults the brief by default; pass --no-coord to opt out.",
+      ),
+    );
+  }
+  if (!noCoord && !flags["dry-run"]) {
+    // Auto-coord: consult the brief (marks it fresh) BEFORE the
+    // gate runs. This way, `vf init` after a `vf state brief --consult`
+    // (even minutes ago) is a single-step action — the user does NOT
+    // see a "brief is stale" message; they see the auto-consult
+    // happen as part of init.
+    // Skip in dry-run mode: dry-run is a preview of the workflow
+    // without actually running it; the brief consult would either
+    // need to write a real mtime (contradicting dry-run semantics)
+    // or refuse (blocking the preview). Either way, dry-run should
+    // preview everything including the brief gate's verdict.
+    // Skip if the brief DOESN'T EXIST: initial-setup init (no brief
+    // yet) should proceed without the gate — the user is creating
+    // the brief as part of init's questionnaire. This is the common
+    // case for `vf init` on a fresh repo. The pre-existing test
+    // surface (commands-coverage.test.ts) plants NO brief and
+    // expects init to proceed normally.
+    const briefPath = join(cwd(), BRIEF_PATH);
+    if (existsSync(briefPath)) {
+      updateLastConsult(briefPath, Date.now());
+      const code = assertCoordBriefFresh(cwd(), Date.now());
+      if (code !== 0) return code;
+    }
   }
   const initEngine: Engine =
     typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
