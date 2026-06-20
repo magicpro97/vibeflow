@@ -37,7 +37,9 @@
     "coverage": "bun test --coverage",
     "coverage:check": "rm -rf coverage && bun test --coverage --coverage-reporter=lcov && bun run coverage:gate",
     "coverage:report": "node -e \"const fs=require(\"fs\");const lines=fs.readFileSync(\"coverage/lcov.info\",\"utf8\").split(\"\\n\");let totl=0,toth=0;for(const l of lines){const m=l.match(/^L([FH]):(\\d+)/);if(m){{m[1]===\"F\"&&(totl+=+m[2]);m[1]===\"H\"&&(toth+=+m[2])}}}const pct=100*toth/totl;console.log(\"lcov line coverage:\",pct.toFixed(2)+\"%\");if(Math.floor(pct)<100){console.error(\"::error::lcov line coverage is\",pct.toFixed(2)+\"%, must be 100%\");process.exit(1)}\"",
-    "coverage:gate": "node scripts/coverage-gate.cjs"
+    "coverage:gate": "node scripts/coverage-gate.cjs",
+    "spike:gh": "bash scripts/gh-spike.sh",
+    "test:spike:gh": "bash test/scripts-gh-spike.test.sh"
   },
   "keywords": [
     "ai",
