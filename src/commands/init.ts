@@ -26,10 +26,12 @@ import {
   ENGINES,
   Spinner,
   applyIntake,
+  armHooks,
   assertCoordBriefFresh,
   assertCoordBriefReady,
   basename,
   c,
+  collectHookSetup,
   collectInitAskQuestionnaireData,
   copySkillCreator,
   cwd,
@@ -57,6 +59,7 @@ import type {
   Ctx7AuthResult,
   Engine,
   EngineReadiness,
+  HookConfig,
   IntakeAnswers,
   PreflightFn,
   StepSpawner,
@@ -123,6 +126,12 @@ export async function init(
     // drive the install path with a stub spawner. Production callers
     // leave this undefined.
     syncSpawner?: StepSpawner;
+    // Test seam: bypass the interactive hooks menu. When provided, this
+    // config is armed directly (no TTY/stdin). `null` simulates the user
+    // cancelling the menu (init then leaves the existing policy untouched).
+    // Production callers leave this undefined; the `process.stdin.isTTY`
+    // gate is the only path for end users.
+    hookSetup?: HookConfig | null;
   } = {},
 ): Promise<number> {
   // A1 brief-surface gate (#167 + #194): `vf init` ALWAYS consults the
@@ -303,6 +312,28 @@ export async function init(
           ),
         );
       }
+    }
+  }
+
+  // Phase 1.65: Interactive guardrail-hooks setup. Lets the user pick which
+  // built-in hook templates stay active and add custom rules, then arms the
+  // engine configs (the live PreToolUse gate) + persists the policy to
+  // SETTINGS.json. TTY-gated and opt-out via --no-hooks; skipped on dry runs and
+  // when preflight refused. The default menu keeps every template on, so a user
+  // who just taps Enter ends up with the same all-on guardrail as before.
+  const wantHooks = ai && !dry && !result.refused && !flags["no-hooks"];
+  if (wantHooks && (inject.hookSetup !== undefined || process.stdin.isTTY)) {
+    out("vf");
+    const config = inject.hookSetup !== undefined ? inject.hookSetup : await collectHookSetup();
+    if (config) {
+      const armed = armHooks(cwd(), config);
+      out("vf", panel("Hooks", c.bold("armed")));
+      out("vf", c.green(`+ ${CTX_DIR}/SETTINGS.json (hooks policy)`));
+      for (const rel of armed) out("vf", `${c.green("+")} ${rel}`);
+      const custom = config.custom.length ? `, ${config.custom.length} custom` : "";
+      out("vf", c.dim(`${config.templates.length} template(s) active${custom}.`));
+    } else {
+      out("vf", c.dim("Hooks setup skipped — existing guardrail policy left unchanged."));
     }
   }
 

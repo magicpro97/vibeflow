@@ -242,3 +242,23 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
   audit-synthesis files in `.vibeflow/knowledge/` and the 6 merged PRs.
 - Deleted `20260613_120449_589ec6` Hermes session export (local, 3.6MB).
 - Working tree now clean apart from committed-knowledge staging.
+
+## [2026-06-21] init-hooks | vf init interactive guardrail-hook customization
+- New: `vf init` Phase 1.65 — TTY menu to pick which built-in hook
+  templates stay active + add custom rules; arms engine configs +
+  persists policy to SETTINGS.json `hooks`. `--no-hooks` opts out.
+- 5 built-in templates (block-destructive, flag-installs, protect-secrets,
+  protect-config, workspace-guard) wrap the existing risk.ts clusters;
+  scoreRisk gated by a resolved policy. Fail-safe: missing/corrupt config
+  => ALL templates on (byte-identical to pre-feature). Only an explicit
+  valid opt-out can drop a guardrail.
+- Custom rules: case-insensitive LITERAL SUBSTRING match (NOT regex).
+  Independent cross-review found regex => ReDoS holes (a blocklist for
+  nested quantifiers misses `(a|a)*`, `((a)+)+`, backrefs); switched to
+  String.includes to make CWE-1333 structurally impossible. Rules can
+  only RAISE risk, never weaken a built-in.
+- New files: src/hooks/templates.ts, src/init-hooks.ts. Reusable
+  emitHookFiles/armHooks extracted from `vf hooks emit`.
+- Verified: typecheck + lint + file-size + 100% per-file coverage + full
+  suite; hook selftest 20/20 unchanged. Two independent review subagents
+  signed off (security + UX/compat).

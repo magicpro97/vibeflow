@@ -384,7 +384,16 @@ export async function selectMany(
 
   let cursor = 0;
   let renderedLines = 0;
-  const selected = new Set<number>();
+  // Pre-check the items whose label is in defaultValues, so the rendered ●/○
+  // state matches the "these are preselected" contract callers rely on (e.g.
+  // the vf-init hooks menu prints "All are preselected — Enter keeps them").
+  // Without this, every box renders unchecked and a single Space INVERTS the
+  // user's intent — toggling the one item ON instead of dropping it from the
+  // preselected set.
+  const defaults = new Set(opts.defaultValues ?? []);
+  const selected = new Set<number>(
+    items.flatMap((item, idx) => (!item.custom && defaults.has(item.label) ? [idx] : [])),
+  );
 
   const render = () => {
     if (renderedLines) clearLines(renderedLines);

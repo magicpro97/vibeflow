@@ -791,6 +791,9 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       // Make the bare ensureCtx7Auth() call at L490 succeed immediately
       // — "Logged in" in stdout trips the alreadyAuth branch.
       ctx7Inject: { spawner: makeCtx7Spawner() as never },
+      // isTTY=true here would otherwise drive the real interactive hooks
+      // menu (Phase 1.65) and block on stdin; null no-ops that step.
+      hookSetup: null,
       // Skip the interactive questionnaire.
       answers: { goal: "test", engines: ["claude"] },
     } as never);
@@ -819,6 +822,7 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
       syncSpawner: () => ({ status: 1 }),
       ctx7Inject: { spawner: makeCtx7Spawner() as never },
+      hookSetup: null,
       answers: { goal: "test", engines: ["claude"] },
     } as never);
     expect(typeof code).toBe("number");

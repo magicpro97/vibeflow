@@ -235,6 +235,29 @@ describe("terminal prompts", () => {
     process.stdin.emit("keypress", "", { name: "return" });
     await expect(promise).resolves.toEqual(["B", "C"]);
   });
+
+  test("selectMany raw-mode pre-checks defaultValues so Enter keeps them all", async () => {
+    installTtyMock();
+    // All three preselected — pressing Enter immediately keeps every one.
+    const promise = selectMany("Pick", ["A", "B", "C"], {
+      defaultValues: ["A", "B", "C"],
+      timeoutMs: 1_000,
+    });
+    process.stdin.emit("keypress", "", { name: "return" });
+    await expect(promise).resolves.toEqual(["A", "B", "C"]);
+  });
+
+  test("selectMany raw-mode Space on a preselected item DROPS it (intent not inverted)", async () => {
+    installTtyMock();
+    // All preselected; Space on the cursor item (A) unchecks it → keep B, C.
+    const promise = selectMany("Pick", ["A", "B", "C"], {
+      defaultValues: ["A", "B", "C"],
+      timeoutMs: 1_000,
+    });
+    process.stdin.emit("keypress", "", { name: "space" }); // toggle A off
+    process.stdin.emit("keypress", "", { name: "return" });
+    await expect(promise).resolves.toEqual(["B", "C"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

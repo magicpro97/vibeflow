@@ -1,5 +1,6 @@
 import type { HookDecision, HookInput, HookResult, RiskLevel } from "../core.js";
 import { scoreRisk } from "./risk.js";
+import type { ResolvedHookPolicy } from "./templates.js";
 
 /** Map a risk level to a guardrail decision (HOOKS_AND_GUARDRAILS.md vocabulary). */
 function decisionFor(risk: RiskLevel): HookDecision {
@@ -42,10 +43,18 @@ function disabledResult(): HookResult {
  * Evaluate a hook event into a decision. Pure: same input → same result, so it is
  * safe to run from any engine adapter or the git pre-commit hook. The kill-switch (item 4)
  * is consulted first via an injectable env getter (defaults to process.env).
+ *
+ * An optional resolved `policy` gates which guardrail clusters run and adds custom
+ * rules. Omitting it scores with the all-on default — every existing caller keeps its
+ * exact behavior; only the live `vf hook` gate loads the repo's stored policy.
  */
-export function evaluateHook(input: HookInput, getEnv: EnvGetter = () => process.env): HookResult {
+export function evaluateHook(
+  input: HookInput,
+  getEnv: EnvGetter = () => process.env,
+  policy?: ResolvedHookPolicy,
+): HookResult {
   if (hooksDisabled(getEnv())) return disabledResult();
-  const { risk, reasons } = scoreRisk(input);
+  const { risk, reasons } = policy ? scoreRisk(input, policy) : scoreRisk(input);
   return { decision: decisionFor(risk), risk, reasons };
 }
 

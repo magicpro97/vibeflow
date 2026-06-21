@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
+import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
 
 /** Tool tiers, in the canonical preference family used by the priority ladder. */
 export type ToolTier = "codegraph" | "lsp" | "native";
@@ -29,6 +30,9 @@ export interface VibeSettings {
   toolPriority: ToolTier[];
   lspServers?: string[];
   failureProtection: FailureProtection;
+  /** Guardrail hook policy: which built-in templates are active + custom rules.
+   *  Absent (the common case) means the fail-safe all-on default applies. */
+  hooks?: HookConfig;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -115,6 +119,12 @@ function coerce(raw: unknown): VibeSettings {
   out.toolPriority = normalizePriority(obj.toolPriority);
   out.failureProtection = coerceFailureProtection(obj.failureProtection);
 
+  // Only materialize `hooks` when the stored file actually carries the key, so
+  // repos that never configured hooks keep an absent block (fail-safe all-on at
+  // scoring time) and SETTINGS.json stays free of churn. A present-but-garbage
+  // block coerces to the all-on default rather than throwing.
+  if ("hooks" in obj) out.hooks = coerceHookConfig(obj.hooks);
+
   if (Array.isArray(obj.lspServers)) {
     const servers = obj.lspServers.filter(
       (s): s is string => typeof s === "string" && s.length > 0,
@@ -151,6 +161,11 @@ export function writeSettings(
     failureProtection: { ...current.failureProtection, ...(next.failureProtection ?? {}) },
     updatedAt: now(),
   };
+  // `hooks` is replace-on-write (the menu hands a complete policy), not a deep
+  // merge: a partial template list is a deliberate opt-out and must not be
+  // re-expanded by the previous value. Keep the prior block when `next` omits it.
+  const hooks = next.hooks ?? current.hooks;
+  if (hooks) merged.hooks = hooks;
   const servers = next.lspServers ?? current.lspServers;
   if (servers?.length) merged.lspServers = [...servers];
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
