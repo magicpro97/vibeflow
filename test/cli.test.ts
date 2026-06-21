@@ -313,6 +313,14 @@ describe("cli help routing", () => {
 describe("commands.init", () => {
   let dir: string;
   const origCwd = process.cwd();
+  // Keep init hermetic: never shell out to a real `codegraph` index build
+  // (Phase 1.6) and never open the interactive hooks menu (Phase 1.65). Both
+  // make these unit tests flaky-timeout under load / on an interactive runner.
+  const hermetic = {
+    hasCommandFn: () => true,
+    syncSpawner: () => ({ status: 0 }),
+    hookSetup: null,
+  };
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "vf-"));
     process.chdir(dir);
@@ -323,15 +331,23 @@ describe("commands.init", () => {
   });
 
   test("init writes canonical context and a valid ledger", async () => {
-    const code = await init({ engine: "claude", "no-ai": true }, { preflight: allReady });
+    // This ONE test intentionally omits the syncSpawner stub so it exercises
+    // init.ts's default per-step spawner (the real `codegraph` index closure) —
+    // that closure is otherwise uncovered. codegraph is present on CI/dev, so the
+    // index build is fast; the generous timeout absorbs load spikes. hookSetup:null
+    // still skips the interactive Phase 1.65 menu so stdin is never read.
+    const code = await init(
+      { engine: "claude", "no-ai": true },
+      { preflight: allReady, hookSetup: null },
+    );
     expect(code).toBe(0);
     const state = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`), "utf8"));
     expect(state.totals.units).toBe(0);
     expect(readFileSync(join(dir, "CLAUDE.md"), "utf8").length).toBeGreaterThan(0);
-  });
+  }, 60_000);
 
-  test("units status returns 0 on an initialized ledger", () => {
-    init({ "no-ai": true }, { preflight: allReady });
+  test("units status returns 0 on an initialized ledger", async () => {
+    await init({ "no-ai": true }, { preflight: allReady, ...hermetic });
     expect(units("status", [])).toBe(0);
     expect(units("resources", [])).toBe(0);
   });
@@ -345,6 +361,7 @@ describe("commands.init", () => {
           requested = engines;
           return allReady(engines);
         },
+        ...hermetic,
       },
     );
     expect(code).toBe(0);
@@ -352,7 +369,7 @@ describe("commands.init", () => {
   });
 
   test("init with --no-ai skips AI enrichment but still writes context files", async () => {
-    const code = await init({ "no-ai": true }, { preflight: allReady });
+    const code = await init({ "no-ai": true }, { preflight: allReady, ...hermetic });
     expect(code).toBe(0);
     expect(existsSync(join(dir, CTX_DIR))).toBe(true);
   });

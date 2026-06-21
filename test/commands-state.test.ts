@@ -360,6 +360,9 @@ ${BRIEF_SECTIONS.join("\n")}
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
           ],
           aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
         },
       );
       // Auto-coord consulted the brief → gate passes → init does not
@@ -408,6 +411,9 @@ ${BRIEF_SECTIONS.join("\n")}
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
           ],
           aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
         },
       );
       // Fresh brief: gate passes (whether auto-coord ran or not).
