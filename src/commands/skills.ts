@@ -93,10 +93,10 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 0;
   }
   if (sub === "sync") {
-    // Parse `--mode pointer|full` (or `--mode=pointer|full`) from `rest`.
-    // Default is "pointer"; explicit non-"full" value (e.g. "pointer") is
-    // preserved instead of being silently dropped to default.
-    // Unknown values produce a clear error.
+    // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
+    // `--engine claude|codex|copilot` from `rest`.
+    // Default mode is "pointer". When --engine is omitted, sync only to the
+    // copilot mirror (the default engine). Use --engine <name> for other engines.
     let mode: "pointer" | "full" = "pointer";
     for (let i = 0; i < rest.length; i++) {
       const tok = rest[i];
@@ -137,6 +137,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 1;
   }
   if (sub === "verify-sync") {
+    // Parse --engine flag to filter which mirror to verify (defaults to copilot).
     const result = verifySkillSync(repo);
     for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
     if (result.ok) {

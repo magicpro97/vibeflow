@@ -196,9 +196,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   const profile = scanRepo(base);
   const roles = detectRolesForRepo(base, profile);
   const targetEngines: readonly AgentEngine[] =
-    gate.engines.length > 0
-      ? (gate.engines as readonly AgentEngine[])
-      : (ENGINES as readonly AgentEngine[]);
+    gate.engines.length > 0 ? (gate.engines as readonly AgentEngine[]) : [DEFAULT_ENGINE];
   Object.assign(files, agentFiles(profile, roles, useAi, targetEngines));
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
   // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`
@@ -266,5 +264,11 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
   // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
   if (!opts.dry) ensureIndex(base);
-  return { files: written, state, readiness: gate.readiness, refused: false, backedUp };
+  return {
+    files: written,
+    state,
+    readiness: gate.readiness,
+    refused: false,
+    backedUp,
+  };
 }

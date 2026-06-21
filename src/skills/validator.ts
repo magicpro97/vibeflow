@@ -84,6 +84,29 @@ export function validateSkillDir(
     warnings.push("SKILL.md body should contain markdown headings");
   }
 
+  // Anti-pattern: task-specific content leak. A reusable skill must NOT
+  // embed concrete requirement IDs (BR-001, E-014, AC-032, …) or other
+  // task-specific tokens. Such content freezes the skill to the first
+  // task it was enriched from and defeats reusability. Report as a
+  // warning (not an error) so existing skills with legacy content keep
+  // validating; promote to an error in a future major version.
+  // The pattern is intentionally narrow: bracketed uppercase prefixes
+  // (BR/FR/NFR/AC/E/VP) followed by 2-4 digits. Real product code
+  // occasionally matches (\d{2,4} is permissive) so we keep this as a
+  // warning to avoid false positives in skills that genuinely reference
+  // such IDs in their inputs.
+  if (body) {
+    const TASK_ID_PATTERN = /\b(?:BR|FR|NFR|AC|E|VP)-\d{2,4}\b/;
+    const taskLeaks = body.match(new RegExp(TASK_ID_PATTERN.source, "g"));
+    if (taskLeaks && taskLeaks.length > 0) {
+      warnings.push(
+        `task-specific content leak: skill body contains ${taskLeaks.length} concrete requirement ID(s) ` +
+          `(e.g. ${taskLeaks.slice(0, 3).join(", ")}). A reusable skill should use placeholders ` +
+          `like {{task.requirement_ids}} instead of embedded IDs from a sample task.`,
+      );
+    }
+  }
+
   try {
     for (const entry of _readdirSync(dir)) {
       if (!ALLOWED_CHILDREN.has(entry)) {

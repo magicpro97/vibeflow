@@ -55,12 +55,17 @@ export interface SyncResult {
 
 /** Async spawn seam: genuinely overlapping process launches for the parallel path.
  *  Test seams may omit fields that production never inspects (e.g. `stderr`); the in-process
- *  chain only requires status + stdout for the dispatch contract. */
+ *  chain only requires status + stdout for the dispatch contract.
+ *
+ *  `stderr` is optional so existing tests that only construct `{ status, stdout }` keep
+ *  compiling — but production code that needs to inspect stderr (e.g. rate-limit
+ *  detection in `defaultAiInitDispatcher`) should pass an `onStderrChunk` hook on
+ *  `AsyncSpawnerOpts` and the spawner will accumulate it onto the returned object. */
 export type AsyncSpawner = (
   cmd: string,
   args: string[],
   input: string,
-) => Promise<{ status: number; stdout: string; timedOut?: boolean }>;
+) => Promise<{ status: number; stdout: string; stderr?: string; timedOut?: boolean }>;
 
 export interface AsyncSpawnerOpts {
   timeoutMs?: number;

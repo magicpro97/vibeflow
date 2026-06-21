@@ -1011,6 +1011,11 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("sync", ["--mode=weird"])).toBe(2);
   });
 
+  test("skills: sync rejects bad engine (line 1733-1735)", () => {
+    expect(skills("sync", ["--engine", "bogus"])).toBe(2);
+    expect(skills("sync", ["--engine=bogus"])).toBe(2);
+  });
+
   test("skills: sync --mode=full returns 0 (line 1743-1754)", () => {
     expect(skills("sync", ["--mode", "full"])).toBe(0);
     expect(skills("sync", ["--mode=full"])).toBe(0);
@@ -1045,7 +1050,7 @@ describe("commands.skills subcommand branches", () => {
         ].join("\n"),
       );
       // Pre-create a mirror dir and make it read-only
-      const mirrorDir = join(dir, ".claude", "skills");
+      const mirrorDir = join(dir, ".github", "skills");
       mkdirSync(mirrorDir, { recursive: true });
       const { chmodSync } = await import("node:fs");
       chmodSync(mirrorDir, 0o500);
@@ -1069,6 +1074,16 @@ describe("commands.skills subcommand branches", () => {
 
   test("skills: verify-sync on empty repo (line 1758-1766)", () => {
     expect(skills("verify-sync", [])).toBe(0);
+  });
+
+  test("skills: verify-sync with --engine=claude filters to one mirror (line 1026-1029)", () => {
+    expect(skills("verify-sync", ["--engine", "claude"])).toBe(0);
+    expect(skills("verify-sync", ["--engine=claude"])).toBe(0);
+  });
+
+  test("skills: verify-sync with --engine=bogus is silently ignored (line 1028/1032)", () => {
+    // Unknown engine names are filtered out — falls through to "all engines".
+    expect(skills("verify-sync", ["--engine", "bogus"])).toBe(0);
   });
 
   test("skills: verify-sync with missing mirror SKILL.md returns 1 (line 1840-1842)", async () => {
@@ -1843,10 +1858,10 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     expect(resolveEngine({ engine: "copilot" })).toBe("copilot");
   });
 
-  test("resolveEngine: unknown engine falls back to 'claude' (line 544)", () => {
-    expect(resolveEngine({ engine: "bogus" })).toBe("claude");
-    expect(resolveEngine({ engine: 42 as unknown as string })).toBe("claude");
-    expect(resolveEngine({})).toBe("claude");
+  test("resolveEngine: unknown engine falls back to DEFAULT_ENGINE ('copilot')", () => {
+    expect(resolveEngine({ engine: "bogus" })).toBe("copilot");
+    expect(resolveEngine({ engine: 42 as unknown as string })).toBe("copilot");
+    expect(resolveEngine({})).toBe("copilot");
   });
 
   test("issue #78: DEFAULT_ENGINE parity across init and orchestrate", () => {
@@ -1863,8 +1878,8 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     const decls =
       initSrc.match(/^(?:export )?const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
     expect(decls.length).toBe(1);
-    expect(decls[0]).toContain('"claude"');
-    // resolveEngine uses it (no hardcoded "claude" string literal anymore).
+    expect(decls[0]).toContain('"copilot"');
+    // resolveEngine uses it (no hardcoded "copilot" string literal anymore).
     // After the issue #80 split (phase 6/14), resolveEngine lives in
     // src/commands/orchestrate.ts (paired with the `orchestrate`
     // subcommand). It is re-exported by the facade for back-compat
@@ -1876,7 +1891,7 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     // The facade must re-export resolveEngine (for back-compat callers).
     expect(src).toMatch(/export \{[^}]*resolveEngine[^}]*\}/);
     // The source-of-truth definition must reference DEFAULT_ENGINE
-    // (not a hardcoded "claude" string literal).
+    // (not a hardcoded "copilot" string literal).
     expect(orchestrateSrc).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
   });
 });

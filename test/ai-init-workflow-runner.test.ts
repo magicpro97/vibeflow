@@ -69,25 +69,33 @@ describe("runAiInitWorkflow", () => {
   });
 
   test("dispatches 8 units, returns per-unit reviews + ok=true when reviewer passes", async () => {
-    // MINOR-2/3/4: cite each adapter's required acceptance file
-    // (pre-created in beforeEach) so the reviewer's evidence + file-exists
-    // checks pass.
-    const SCOPE_BY_NAME: Record<string, string> = {
+    // P1-7: with batchFinishers=true (the default), the 4 separate
+    // finisher adapters are collapsed into a single
+    // `ai-init-finishers-batch` unit. Total dispatch count drops
+    // from 8 to 5. The dispatcher returns evidence citing the
+    // batch unit's first scope path so the reviewer's all-or-
+    // nothing gate can verify all 4 files.
+    const SCOPE_BY_NAME: Record<string, string | string[]> = {
       "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
       "ai-init-instruction-writer": "CLAUDE.md",
       "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
       "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
-      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
-      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
-      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
-      "ai-init-quickstart-writer": "QUICKSTART.md",
+      "ai-init-finishers-batch": [
+        ".vibeflow/SETTINGS.json",
+        ".vibeflow/WORKFLOW_POLICY.md",
+        ".vibeflow/WORKFLOW_STATE.json",
+        "QUICKSTART.md",
+      ],
     };
-    const dispatcher: UnitDispatcher = async (unit) => ({
-      status: "done",
-      confidence: 1,
-      evidence: [SCOPE_BY_NAME[unit.name] ?? unit.scope?.[0] ?? "src/cli.ts"],
-      gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
-    });
+    const dispatcher: UnitDispatcher = async (unit) => {
+      const ev = SCOPE_BY_NAME[unit.name] ?? unit.scope?.[0] ?? "src/cli.ts";
+      return {
+        status: "done",
+        confidence: 1,
+        evidence: Array.isArray(ev) ? ev : [ev],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+      };
+    };
     const result = await runAiInitWorkflow({
       base: repo,
       intake: { goal: "add web UI" },
@@ -97,31 +105,37 @@ describe("runAiInitWorkflow", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.goalMet).toBe(true);
-    expect(result.units).toHaveLength(8);
-    expect(result.reviews).toHaveLength(8);
+    expect(result.units).toHaveLength(5);
+    expect(result.reviews).toHaveLength(5);
     expect(result.reviews.every((r) => r.pass)).toBe(true);
     expect(result.units.every((u) => u.status === "done")).toBe(true);
     expect(result.units.every((u) => u.confidence === 1)).toBe(true);
   });
 
   test("uses the forced engine as instruction-writer scope when intake omits engines", async () => {
-    const SCOPE_BY_NAME: Record<string, string> = {
+    // P1-7: the 4 finisher units are batched into one. Dispatcher
+    // must cite every finisher output path in evidence so the
+    // batched reviewer's all-or-nothing check passes.
+    const SCOPE_BY_NAME: Record<string, string | string[]> = {
       "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
       "ai-init-instruction-writer": "AGENTS.md",
       "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
       "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
-      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
-      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
-      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
-      "ai-init-quickstart-writer": "QUICKSTART.md",
+      "ai-init-finishers-batch": [
+        ".vibeflow/SETTINGS.json",
+        ".vibeflow/WORKFLOW_POLICY.md",
+        ".vibeflow/WORKFLOW_STATE.json",
+        "QUICKSTART.md",
+      ],
     };
     const scopes: Record<string, string[]> = {};
     const dispatcher: UnitDispatcher = async (unit) => {
       scopes[unit.name] = unit.scope ?? [];
+      const ev = SCOPE_BY_NAME[unit.name] ?? "src/cli.ts";
       return {
         status: "done",
         confidence: 1,
-        evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+        evidence: Array.isArray(ev) ? ev : [ev],
         gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
       };
     };
@@ -314,6 +328,7 @@ describe("defaultAiInitDispatcher — engine warning surfacing", () => {
         confidence: 0,
         scope: [".vibeflow/ai-context/stack-evidence.md"],
         acceptance: "stack-evidence.md written",
+        depends_on: [],
         gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
         resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       };
@@ -356,6 +371,7 @@ describe("defaultAiInitDispatcher — engine warning surfacing", () => {
         confidence: 0,
         scope: [".vibeflow/ai-context/stack-evidence.md"],
         acceptance: "stack-evidence.md written",
+        depends_on: [],
         gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
         resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       };

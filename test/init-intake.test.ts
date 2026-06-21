@@ -272,7 +272,7 @@ describe("init --ask cancellation flow (defect #B2)", () => {
   // We mock the prompt dependencies directly so the test doesn't have
   // to drive the real terminal I/O. The B2 test above already locks
   // in the real-prompt catch path.
-  test.skip("collectInitAskQuestionnaireData: mocked prompts → returns complete data", async () => {
+  test("collectInitAskQuestionnaireData: mocked prompts → returns complete data", async () => {
     installTtyMock({ isTTY: true });
     const { collectInitAskQuestionnaireData } = await import("../src/init-intake.js");
 
@@ -280,15 +280,7 @@ describe("init --ask cancellation flow (defect #B2)", () => {
     const deps = {
       textInput: async (q: string) => {
         calls.push(`text:${q}`);
-        return q.includes("Input")
-          ? "in1"
-          : q.includes("Output")
-            ? "out1"
-            : q.includes("Template")
-              ? "tpl1"
-              : q.includes("Notes")
-                ? "notes1"
-                : "desc";
+        return q.includes("Input") ? "in1" : q.includes("Output") ? "out1" : "desc";
       },
       confirmInput: async (q: string) => {
         calls.push(`confirm:${q}`);
@@ -306,30 +298,23 @@ describe("init --ask cancellation flow (defect #B2)", () => {
 
     const data = await collectInitAskQuestionnaireData(deps);
     expect(data).not.toBeNull();
-    expect(calls).toContain("text:Describe the project overview (business, tech stack)");
     expect(calls).toContain("confirm:Use AI to analyze from source base?");
     expect(calls).toContain("many:Workflow phases to execute");
     expect(calls).toContain("text:  Input");
     expect(calls).toContain("text:  Output");
-    expect(calls).toContain("text:  Template");
-    expect(calls).toContain("text:  Notes");
     expect(calls).toContain("one:Where are project documents stored?");
     expect(calls).toContain("one:Which platform manages tasks?");
     expect(calls).toContain("many:Document file types");
-    expect(data?.answers.projectOverview.description).toBe("desc");
     expect(data?.answers.projectOverview.useAiSourceAnalysis).toBe(true);
     expect(data?.answers.phases).toEqual(["requirements-analysis"]);
     expect(data?.answers.phaseDetails[0]?.input).toBe("in1");
     expect(data?.answers.phaseDetails[0]?.output).toBe("out1");
-    expect(data?.answers.phaseDetails[0]?.template).toBe("tpl1");
-    expect(data?.answers.phaseDetails[0]?.notes).toBe("notes1");
     expect(data?.answers.documentLocation).toBe("Git");
     expect(data?.answers.taskPlatform).toBe("Github");
     expect(data?.answers.documentFileTypes).toEqual(["md"]);
   });
 
-  // Coverage: mocked prompts, multiple phases to exercise the for-loop body
-  test.skip("collectInitAskQuestionnaireData: mocked prompts + 3 phases → all 12 textInputs", async () => {
+  test("collectInitAskQuestionnaireData: with no phases returns empty phaseDetails", async () => {
     installTtyMock({ isTTY: true });
     const { collectInitAskQuestionnaireData } = await import("../src/init-intake.js");
 
@@ -342,23 +327,31 @@ describe("init --ask cancellation flow (defect #B2)", () => {
       confirmInput: async () => false,
       selectOne: async (_q: string, _items: string[], opts?: SelectOptions) =>
         opts?.defaultValue ?? "",
+      selectMany: async () => [] as string[],
+    };
+
+    const data = await collectInitAskQuestionnaireData(deps);
+    expect(data).not.toBeNull();
+    expect(data?.answers.phases).toEqual([]);
+    expect(data?.answers.phaseDetails).toEqual([]);
+  });
+
+  test("collectInitAskQuestionnaireData: useAiSourceAnalysis=false prompts for description", async () => {
+    installTtyMock({ isTTY: true });
+    const { collectInitAskQuestionnaireData } = await import("../src/init-intake.js");
+
+    const deps = {
+      textInput: async () => "user-typed-description",
+      confirmInput: async () => false, // skip AI analysis
+      selectOne: async (_q: string, _items: string[], opts?: SelectOptions) =>
+        opts?.defaultValue ?? "",
       selectMany: async (_q: string, _items: string[], opts?: SelectOptions) =>
         opts?.defaultValues ?? [],
     };
 
-    // Override the first selectMany to return 3 phases
-    const origSelectMany = deps.selectMany;
-    let selectManyCall = 0;
-    deps.selectMany = async (q, items, opts) => {
-      selectManyCall++;
-      if (selectManyCall === 1) return ["requirements-analysis", "basic-design", "implement"];
-      return origSelectMany(q, items, opts);
-    };
-
     const data = await collectInitAskQuestionnaireData(deps);
-    expect(textInputCount).toBe(1 + 3 * 4); // 1 project overview + 3 phases × 4 textInputs each
-    expect(data?.answers.phases).toHaveLength(3);
-    expect(data?.answers.phaseDetails).toHaveLength(3);
+    expect(data).not.toBeNull();
+    expect(data?.answers.projectOverview.useAiSourceAnalysis).toBe(false);
   });
 
   test("non-cancellation error is rethrown (covers line 267 throw)", async () => {

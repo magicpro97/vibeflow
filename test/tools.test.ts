@@ -181,3 +181,76 @@ describe("tools registry", () => {
     expect(none.entries).toHaveLength(0);
   });
 });
+
+// `indexLooksHealthy` runs `codegraph status <base>` via a hard-coded
+// `spawnSync` (the StatusSpawner param is dead — kept for back-compat
+// with the registry descriptor's signature). To pin the "binary not
+// on PATH" short-circuit branch deterministically we temporarily
+// override `Bun.which` (the cache lives on the bun runtime) and
+// restore it after the call.
+describe("codegraph.indexLooksHealthy", () => {
+  test("returns true when the codegraph binary is not installed", async () => {
+    const origWhich = Bun.which;
+    // @ts-expect-error: assigning to a read-only-looking property is fine in bun.
+    Bun.which = (cmd: string) => (cmd === "codegraph" ? undefined : origWhich.call(Bun, cmd));
+    try {
+      const out = codegraph.indexLooksHealthy("/tmp", () => ({ status: 0, stdout: "" }));
+      expect(out).toBe(true);
+    } finally {
+      // @ts-expect-error: restore.
+      Bun.which = origWhich;
+    }
+  });
+
+  test("returns false when the binary reports 'Not initialized' (binary on PATH)", async () => {
+    // When the binary is on PATH, the function actually shells out to
+    // `codegraph status <base>`. We rely on the live binary to surface
+    // a "Not initialized" line for /tmp — which the previous test run
+    // proved empirically. If the binary is not installed this test is
+    // a no-op; skip in that case so it never breaks CI on a clean box.
+    const whichResult = Bun.which("codegraph");
+    if (!whichResult) {
+      // Skipping is fine — the "binary missing" path is already covered above.
+      return;
+    }
+    const out = codegraph.indexLooksHealthy("/tmp", () => ({ status: 0, stdout: "" }));
+    // The real binary outputs "Not initialized" for /tmp (no index),
+    // so the function should return false.
+    expect(out).toBe(false);
+  });
+
+  test("returns false when the binary is on PATH but spawnSync throws (catch branch)", () => {
+    // To exercise the `try/catch` in spawnStatus (line 87-89) we need
+    // the binary to exist (so hasCommand returns true) AND spawnSync
+    // to throw. The easiest way is to point Bun.which at a path that
+    // exists at lookup time but is later unlinked — however the
+    // simpler backstop is to override Bun.which to return a path that
+    // exists, then chmod 0 the file so spawnSync throws EACCES.
+    const origWhich = Bun.which;
+    // Use /dev/null on macOS (does not exist as an executable) — wait,
+    // that returns hasCommand=false. We need a real file. Create a
+    // tiny shell script in a temp dir, mark it as the codegraph path,
+    // then unlink it just before the call so spawnSync throws ENOENT.
+    const tmpScript = `/tmp/vf-codegraph-fake-${Date.now()}.sh`;
+    require("node:fs").writeFileSync(tmpScript, "#!/bin/sh\n");
+    require("node:fs").chmodSync(tmpScript, 0o755);
+    // @ts-expect-error: override for test.
+    Bun.which = (cmd: string) => (cmd === "codegraph" ? tmpScript : origWhich.call(Bun, cmd));
+    try {
+      // Unlink the file so spawnSync("codegraph", [...]) throws.
+      require("node:fs").unlinkSync(tmpScript);
+      const out = codegraph.indexLooksHealthy("/tmp", () => ({ status: 0, stdout: "" }));
+      // catch branch returns { status: 1, stdout: "" } → unhealthy=false
+      expect(out).toBe(false);
+    } finally {
+      // @ts-expect-error: restore.
+      Bun.which = origWhich;
+      // Best-effort cleanup (file may already be unlinked).
+      try {
+        require("node:fs").unlinkSync(tmpScript);
+      } catch {
+        // ignore
+      }
+    }
+  });
+});

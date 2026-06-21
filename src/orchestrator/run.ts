@@ -13,11 +13,22 @@ export const DEFAULT_CONCURRENCY = 3;
  * NOTE: overlap is only real when `worker` is genuinely async (a non-blocking spawn). A
  * synchronous `spawnSync` inside `worker` blocks the event loop and serializes the lanes —
  * the dispatcher passed in must use `runDispatchAsync` for the engine path to overlap.
+ *
+ * `interUnitDelayMs` (default 0) inserts a jittered pause BEFORE each
+ * item starts. The actual delay is `interUnitDelayMs + jitter*U(0,1)`
+ * where `jitter` defaults to `interUnitDelayMs` (so the effective
+ * range is `[min, min+min]` with full jitter). This staggers engine
+ * calls inside a wave so the upstream never sees a tight burst that
+ * triggers a rate-limit. The delay is applied per-item, NOT per-lane,
+ * so it does not multiply with `concurrency`. The first item in each
+ * wave starts immediately (no leading delay) to keep wave 0 snappy.
  */
 export async function runParallel<T, R>(
   items: T[],
   worker: (item: T, index: number) => Promise<R>,
   concurrency = DEFAULT_CONCURRENCY,
+  interUnitDelayMs = 0,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
@@ -26,6 +37,13 @@ export async function runParallel<T, R>(
     while (true) {
       const i = next++;
       if (i >= items.length) return;
+      // Per-item stagger: each item gets a fresh jittered delay
+      // before it starts. Items already running in other lanes are
+      // not affected (the delay is local to this item's start).
+      if (interUnitDelayMs > 0 && i > 0) {
+        const jittered = interUnitDelayMs + Math.floor(Math.random() * interUnitDelayMs);
+        await sleep(jittered);
+      }
       results[i] = await worker(items[i] as T, i);
     }
   };
@@ -107,6 +125,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   dispatcher: UnitDispatcher;
   reviewer: Reviewer;
   concurrency?: number;
+  /** Per-unit stagger delay (ms) — see {@link runParallel}. Default 0. */
+  interUnitDelayMs?: number;
   /** Engine/agent identifier written into dispatch markers for observability. */
   agent?: string;
 }): Promise<OrchestrationResult<U>> {
@@ -161,6 +181,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       return reviewed;
     },
     opts.concurrency ?? DEFAULT_CONCURRENCY,
+    opts.interUnitDelayMs,
   )) as U[];
   return { units, reviews };
 }
