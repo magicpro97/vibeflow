@@ -311,3 +311,26 @@ export {
   EXIT_PUSH,
   EXIT_PR_CREATE,
 } from "./commands/pr.js";
+
+// === Re-export the pr-queue cluster (issue #174, A8) ===
+// `vf pr queue <list|add|claim|release>` — single-writer JSONL queue +
+// `mkdirSync`-style atomic file lock. Foundation for A9 (merge-when-green).
+// Note: EXIT_OK and EXIT_USAGE are re-exported by the A7 pr cluster above,
+// so we only export the A8-specific ones.
+export {
+  prQueue,
+  addEntry,
+  readQueue,
+  listFree,
+  acquireLock,
+  releaseLock,
+  claimEntry,
+  releaseClaim,
+  formatRow,
+  QUEUE_PATH,
+  LOCK_DIR,
+  EXIT_NOT_FOUND,
+  EXIT_LOCK_HELD,
+  EXIT_IO,
+} from "./commands/pr-queue.js";
+export type { QueueEntry } from "./commands/pr-queue.js";
