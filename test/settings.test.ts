@@ -249,10 +249,10 @@ describe("settings.failureProtection", () => {
 });
 
 describe("settings.memory", () => {
-  test("defaults to true on an empty repo", () => {
+  test("defaults to false on an empty repo (PR #160: truth-tell default)", () => {
     const dir = tmpRepo();
     try {
-      expect(readSettings(dir).memory).toBe(true);
+      expect(readSettings(dir).memory).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -284,21 +284,21 @@ describe("settings.memory", () => {
     }
   });
 
-  test("a file missing memory is defaulted to true (forward-compat)", () => {
+  test("a file missing memory is defaulted to false (PR #160: truth-tell default)", () => {
     const dir = tmpRepo();
     try {
       writeRaw(dir, JSON.stringify({ tools: { codegraph: true } }));
-      expect(readSettings(dir).memory).toBe(true);
+      expect(readSettings(dir).memory).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("a wrong-typed memory field falls back to true", () => {
+  test("a wrong-typed memory field falls back to false", () => {
     const dir = tmpRepo();
     try {
       writeRaw(dir, JSON.stringify({ memory: "nope" }));
-      expect(readSettings(dir).memory).toBe(true);
+      expect(readSettings(dir).memory).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

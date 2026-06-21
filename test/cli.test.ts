@@ -327,7 +327,8 @@ describe("cli help routing", () => {
       const stderr = typeof r.stderr === "string" ? r.stderr : new TextDecoder().decode(r.stderr);
       expect(r.status ?? 1).toBe(0);
       expect(stderr).not.toContain("Unknown command");
-      expect(stdout).toContain("memory: on"); // default true on an empty repo
+      // PR #160: default is now `off` (was `on`).
+      expect(stdout).toContain("memory: off"); // default false on an empty repo
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
