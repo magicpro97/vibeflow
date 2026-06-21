@@ -67,9 +67,9 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
   },
   {
     id: "protect-secrets",
-    label: "Protect secrets",
+    label: "Protect secrets + .git",
     description:
-      "Reads/writes of .env, id_rsa/id_ed25519, *.pem, .ssh/, secret*/credential* paths.",
+      "Reads/writes of .env, id_rsa/id_ed25519, *.pem, .ssh/, secret*/credential*, and the .git/ directory.",
     maxRisk: "critical",
   },
   {

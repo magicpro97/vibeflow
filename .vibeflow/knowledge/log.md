@@ -262,3 +262,24 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
 - Verified: typecheck + lint + file-size + 100% per-file coverage + full
   suite; hook selftest 20/20 unchanged. Two independent review subagents
   signed off (security + UX/compat).
+
+## [2026-06-21] init-hooks | review round 2 — address 5 follow-up findings + copilot smoke
+- Decoupled Phase 1.65 from `--ai`: guardrails are independent of AI
+  enrichment, so `vf init --no-ai` now arms hooks too (was: silently skipped).
+- protect-secrets template now documents `.git/` in its label + description
+  (the gate covers .git/ writes, previously undisclosed → surprise on opt-out).
+- Collapsed CUSTOM_RISK_CHOICES + RISK_LABEL_TO_LEVEL into one
+  CUSTOM_RISK_OPTIONS source; lookup default raised to `critical` (safe).
+- Extracted isCancellation()/PROMPT_CANCEL_MESSAGES into terminal-prompts as
+  the single source; init-hooks + init-intake both use it (was: duplicated
+  string list, drift hazard).
+- all-off menu: confirmed safe-default (deselect-all → all-on floor) is the
+  RIGHT behavior for a security guardrail; documented it. True all-off is
+  `--no-hooks` or hand-edit SETTINGS.json.
+- Smoke-tested on a fresh empty repo with `--engine copilot`: 10 canonical +
+  copilot-instructions.md + .github/hooks/copilot.json (native preToolUse veto)
+  generated clean; `vf hooks emit --yes` MERGED an existing .claude/settings.json
+  (permissions/model/env preserved); live `vf hook` honored a custom policy
+  (block-destructive off → rm -rf allowed; custom "deploy prod" → blocked;
+  protect-secrets on → cat .env blocked).
+- Verified: bun run check green, 100% coverage (12116/12116), selftest 20/20.

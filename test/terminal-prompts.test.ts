@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import {
+  PROMPT_CANCEL_MESSAGES,
   type TerminalDeps,
   clampInput,
   confirmInput,
+  isCancellation,
   selectMany,
   selectOne,
   textInput,
@@ -717,5 +719,23 @@ describe("terminal prompts — setRawMode rollback (defect #B18)", () => {
     } finally {
       (process.stdout as unknown as { write: typeof process.stdout.write }).write = origStdoutWrite;
     }
+  });
+});
+
+describe("isCancellation / PROMPT_CANCEL_MESSAGES", () => {
+  test("recognizes the cancel + timeout sentinels thrown by the prompts", () => {
+    expect(isCancellation(new Error("cancelled"))).toBe(true);
+    expect(isCancellation(new Error("selection timed out"))).toBe(true);
+  });
+
+  test("rejects a real fault and non-Error values", () => {
+    expect(isCancellation(new Error("disk on fire"))).toBe(false);
+    expect(isCancellation("cancelled")).toBe(false);
+    expect(isCancellation(null)).toBe(false);
+    expect(isCancellation(undefined)).toBe(false);
+  });
+
+  test("the sentinel list matches what selectOne/selectMany throw", () => {
+    expect([...PROMPT_CANCEL_MESSAGES]).toEqual(["cancelled", "selection timed out"]);
   });
 });

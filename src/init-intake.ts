@@ -3,7 +3,13 @@ import type { IntakeAnswers } from "./commands.js";
 import { ENGINES, c, cwd, readState } from "./core.js";
 import { out } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
-import { confirmInput, selectMany, selectOne, textInput } from "./terminal-prompts.js";
+import {
+  confirmInput,
+  isCancellation,
+  selectMany,
+  selectOne,
+  textInput,
+} from "./terminal-prompts.js";
 import { panel } from "./ui.js";
 import type { WorkflowPhase } from "./workflow-artifacts.js";
 
@@ -290,7 +296,7 @@ export async function collectInitAskQuestionnaireData(
       documentFileTypes,
     });
   } catch (err) {
-    if (["cancelled", "selection timed out"].includes((err as Error).message)) return null;
+    if (isCancellation(err)) return null;
     throw err;
   }
 }

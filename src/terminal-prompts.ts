@@ -169,6 +169,18 @@ export async function textInput(
   return await (deps.readLine ?? readLineImpl)(question, defaultValue, deps);
 }
 
+/** The error messages the prompts throw when the user aborts (Ctrl+C / Esc) or a
+ *  selection times out. Exported as the single source so questionnaire callers
+ *  classify a cancellation the same way instead of duplicating the string list. */
+export const PROMPT_CANCEL_MESSAGES = ["cancelled", "selection timed out"] as const;
+
+/** True when an error is a user-cancellation / timeout from a prompt (vs a real fault). */
+export function isCancellation(err: unknown): boolean {
+  return (
+    err instanceof Error && (PROMPT_CANCEL_MESSAGES as readonly string[]).includes(err.message)
+  );
+}
+
 export async function confirmInput(
   question: string,
   defaultValue = false,
