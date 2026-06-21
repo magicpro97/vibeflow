@@ -283,3 +283,26 @@ export {
   defaultWorktreePath,
 } from "./commands/worktree.js";
 export type { WorktreeAction, WorktreeInject, RunCommandResult } from "./commands/worktree.js";
+
+// === Re-export the pr cluster (issue #173, A7) ===
+// `vf pr create <issue>` — MagicPro97 PR convention (Confidence +
+// Opus review evidence + DCO trailer + Fixes #N + magicpro97 account).
+// The dispatch is injected for testability.
+export {
+  pr,
+  verifyGhAccount,
+  findCommitsLackingDco,
+  pushBranch,
+  createPr,
+  addPrToProject,
+  detectActiveBranch,
+  readBodyFile,
+  defaultPrBody,
+  REQUIRED_GH_ACCOUNT,
+  EXIT_OK,
+  EXIT_USAGE,
+  EXIT_ACCOUNT,
+  EXIT_DCO,
+  EXIT_PUSH,
+  EXIT_PR_CREATE,
+} from "./commands/pr.js";
