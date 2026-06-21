@@ -270,19 +270,13 @@ function skillCuratorDescription(intake: AiInitIntake): string {
   const importCmd = `vf skills import ${ctx7ScratchDir}/<skill-name>`;
   const authInstruction =
     intake.ctx7Authenticated === true
-      ? `ctx7 is already authenticated from the CLI pre-check. ` +
-        `Use \`npx ctx7 library\`, \`npx ctx7 docs\`, and \`npx ctx7 skills install --yes --all ${ctx7ScratchFlag} <repo>\` ` +
-        `to populate the scratch mirror at ${ctx7ScratchDir}/. ` +
-        `ctx7 has NO --copilot flag — do not invent one. After ctx7 writes, ` +
-        `run \`${importCmd}\` to canonicalize, then sync to the selected engine mirror.`
+      ? `ctx7 is already authenticated from the CLI pre-check. Use \`npx ctx7 library\`, \`npx ctx7 docs\`, and \`npx ctx7 skills install --yes --all ${ctx7ScratchFlag} <repo>\` to populate the scratch mirror at ${ctx7ScratchDir}/. ctx7 has NO --copilot flag — do not invent one. After ctx7 writes, run \`${importCmd}\` to canonicalize, then sync to the selected engine mirror.`
       : "ctx7 is NOT authenticated or the user chose not to login. Do not run `npx ctx7 login` inside the engine. Use fallback discovery from `.vibeflow/ai-context/stack-evidence.md`, bundled skill standards, and any available docs; author fallback skills with `status: experimental` and cite the fallback source.";
 
   return [
     authInstruction,
     intake.ctx7ResolvedReposHint
-      ? `\n\n${intake.ctx7ResolvedReposHint}\n\n` +
-        "When the hint above lists verified repos, USE THOSE and only those. " +
-        "Do NOT spend turns probing other names. The CLI has already filtered them."
+      ? `\n\n${intake.ctx7ResolvedReposHint}\n\nWhen the hint above lists verified repos, USE THOSE and only those. Do NOT spend turns probing other names. The CLI has already filtered them.`
       : "",
     "Discover and install skills for the detected stack. Project-fit skills live under `.vibeflow/skills/<name>/SKILL.md` and must follow `.vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md`.",
     `After validating canonical skills, run \`${syncCmd}\` and \`${verifyCmd}\`.`,
@@ -579,8 +573,7 @@ export function buildPhaseSkillEnrichmentUnits(
   const spec = [
     `## ${unitName}`,
     "",
-    `Enrich ${phases.length} phase skill template(s) in a single pass. ` +
-      `Each section below is one phase — process them sequentially within this turn.`,
+    `Enrich ${phases.length} phase skill template(s) in a single pass. Each section below is one phase — process them sequentially within this turn.`,
     "",
     phaseSections,
     "",
@@ -611,9 +604,7 @@ export function buildPhaseSkillEnrichmentUnits(
       owner_agent: "skill-author",
       spec,
       scope: skillPaths,
-      acceptance:
-        `all ${skillPaths.length} phase skill file(s) exist and are non-empty: ` +
-        skillPaths.join(", "),
+      acceptance: `all ${skillPaths.length} phase skill file(s) exist and are non-empty: ${skillPaths.join(", ")}`,
       skills_injected: ["vf-skills", "skill-creator"],
       skills_required: ["ctx7:skill-authoring"],
       depends_on: ["ai-init-analyzer"],
@@ -685,10 +676,7 @@ export function buildFinisherBatchUnit(
   const sectionText = sections
     .map(
       (s, i) =>
-        `### Section ${i + 1}: ${s.title}\n\n` +
-        `**Output file**: \`${s.scope[0]}\`\n\n` +
-        `**Scope** (must exist on disk when you're done): ${s.scope.join(", ")}\n\n` +
-        s.body,
+        `### Section ${i + 1}: ${s.title}\n\n**Output file**: \`${s.scope[0]}\`\n\n**Scope** (must exist on disk when you're done): ${s.scope.join(", ")}\n\n${s.body}`,
     )
     .join("\n\n");
 
@@ -721,8 +709,7 @@ export function buildFinisherBatchUnit(
     owner_agent: "dispatch-runner",
     spec,
     scope: allScope,
-    acceptance:
-      `all ${allScope.length} finisher file(s) exist and are non-empty: ` + allScope.join(", "),
+    acceptance: `all ${allScope.length} finisher file(s) exist and are non-empty: ${allScope.join(", ")}`,
     skills_injected: ["vf-skills"],
     skills_required: [],
     depends_on: ["ai-init-analyzer", "ai-init-context-updater"],

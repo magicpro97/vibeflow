@@ -1,4 +1,5 @@
 // src/commands/init.ts
+// size-waiver: #137 — A8 init + phonnt's 8-adapter agent-team workflow (293 new lines); 400-line cap waived to ~700.
 //
 // The `vf init` CLI entry point (issue #80, phase 9/14). After the
 // facade split this file holds only the orchestration surface:
@@ -108,6 +109,20 @@ export async function init(
     // (commands.ts L1341-1371) without depending on TTY + stdin.
     // Production callers leave this undefined.
     answers?: IntakeAnswers;
+    // Test seam: forwarded to `ensureCtx7Auth` so unit tests can
+    // stub the ctx7 OAuth flow without spawning a real `npx ctx7`
+    // process. Production callers leave this undefined.
+    ctx7Inject?: Parameters<typeof ensureCtx7Auth>[0];
+    // Test seam: override `hasCommand(<binary>)` so unit tests can
+    // stub PATH lookups (e.g. make `codegraph`/`gh` look absent
+    // without the test depending on what's actually on PATH).
+    // Production callers leave this undefined.
+    hasCommandFn?: (cmd: string) => boolean;
+    // Test seam: override the per-step spawner used by
+    // provisionTool (codegraph install + index build) so unit tests
+    // can stub the full tool-install pipeline without spawning
+    // `npm` or `codegraph`. Production callers leave this undefined.
+    syncSpawner?: StepSpawner;
   } = {},
 ): Promise<number> {
   // A1 brief-surface gate (#167 + #194): `vf init` ALWAYS consults the
@@ -235,6 +250,13 @@ export async function init(
   // only `.github/skills/` is created; `.claude/skills/` and
   // `.agents/skills/` stay absent. Operators who want multi-engine
   // parity should re-run `vf init` with each engine explicitly.
+  // Single-engine scope: the deterministic workflow-artifact +
+  // skill-creator copy is locked to the engine the user selected
+  // (--engine / default copilot). Operators who want each engine's
+  // mirror populated must re-run `vf init --engine <name>` for
+  // every engine — the mirrors are not cross-mirrored from this
+  // single pass. Warn BEFORE the I/O so the user can abort.
+  out("vf", c.yellow("⚠ single-engine scope; re-run for each engine you want to mirror to"));
   const hasPhases = Boolean(answers.workflowPhases?.length);
   if (!dry && hasPhases) {
     const projectName = basename(cwd());
@@ -287,11 +309,14 @@ export async function init(
   // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
   // enable in settings, write MCP config, and build index.
   if (!dry) {
-    const syncSpawner: StepSpawner = (cmd, args) => {
-      const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
-      return { status: result.status ?? 1 };
-    };
-    if (hasCommand("codegraph")) {
+    const syncSpawner: StepSpawner =
+      inject.syncSpawner ??
+      ((cmd, args) => {
+        const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
+        return { status: result.status ?? 1 };
+      });
+    const hasCodegraph = (inject.hasCommandFn ?? hasCommand)("codegraph");
+    if (hasCodegraph) {
       const curSettings = readSettings(cwd());
       if (!curSettings.tools?.codegraph) {
         writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
@@ -323,7 +348,7 @@ export async function init(
   if (ai && !dry && !result.refused && process.stdin.isTTY) {
     out("vf");
     out("vf", c.bold("ctx7 Auth"));
-    ctx7Auth = await ensureCtx7Auth();
+    ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject);
   }
 
   // Phase 1.8: find-skills fallback — when ctx7 not authenticated, search
@@ -346,27 +371,37 @@ export async function init(
     out("vf");
     out("vf", c.bold("ctx7 Resolve"));
     try {
-      const { resolveCtx7Repos, formatResolvedReposHint } = await import(
-        "../discovery/ctx7-resolve.js"
-      );
-      // Build the candidate list from the same whitelist the
-      // deterministic curator would use + any repos the user has
-      // explicitly mentioned in their intake answers.
-      const { DEFAULT_WHITELIST } = await import("../skills/whitelist.js");
-      const candidates = DEFAULT_WHITELIST.map((w) => w.repo);
-      const r = resolveCtx7Repos(candidates, { timeoutMs: 4_000 });
-      if (r.ghUnavailable) {
-        out("vf", c.dim(`  gh unavailable: ${r.reason ?? "unknown"} — letting engine try`));
+      // Test seam: when inject.hasCommandFn is set (e.g. unit tests),
+      // honor its "gh not on PATH" verdict instead of trying resolveCtx7Repos
+      // — which would shell out to `gh` for every candidate repo. The
+      // production path (no inject.hasCommandFn) falls through to the
+      // real resolveCtx7Repos which uses `gh api ...` per candidate.
+      const ghAvailable = (inject.hasCommandFn ?? hasCommand)("gh");
+      if (!ghAvailable) {
+        out("vf", c.dim("  gh unavailable: gh not on PATH — letting engine try"));
+        ctx7ResolvedReposHint = undefined;
       } else {
-        out(
-          "vf",
-          c.dim(
-            `  resolved ${r.found.length}/${candidates.length} repos: ` +
-              (r.found.length > 0 ? r.found.join(", ") : "(none)"),
-          ),
+        const { resolveCtx7Repos, formatResolvedReposHint } = await import(
+          "../discovery/ctx7-resolve.js"
         );
+        // Build the candidate list from the same whitelist the
+        // deterministic curator would use + any repos the user has
+        // explicitly mentioned in their intake answers.
+        const { DEFAULT_WHITELIST } = await import("../skills/whitelist.js");
+        const candidates = DEFAULT_WHITELIST.map((w) => w.repo);
+        const r = resolveCtx7Repos(candidates, { timeoutMs: 4_000 });
+        if (r.ghUnavailable) {
+          out("vf", c.dim(`  gh unavailable: ${r.reason ?? "unknown"} — letting engine try`));
+        } else {
+          out(
+            "vf",
+            c.dim(
+              `  resolved ${r.found.length}/${candidates.length} repos: ${r.found.length > 0 ? r.found.join(", ") : "(none)"}`,
+            ),
+          );
+        }
+        ctx7ResolvedReposHint = formatResolvedReposHint(r);
       }
-      ctx7ResolvedReposHint = formatResolvedReposHint(r);
     } catch (err) {
       // Resolve is best-effort. A failure here should not block
       // the workflow — the engine has its own try-fail fallback.
@@ -497,8 +532,7 @@ export async function init(
             out(
               "vf",
               c.dim(
-                `  Re-run \`vf init\` to retry only the remaining unit(s): ` +
-                  `${passed.length}/${total} done.`,
+                `  Re-run \`vf init\` to retry only the remaining unit(s): ${passed.length}/${total} done.`,
               ),
             );
           } else {

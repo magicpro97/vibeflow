@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { hasCommand } from "../core.js";
 
 /**
  * P1-10: resolve a list of candidate "owner/name" GitHub repos
@@ -108,6 +109,15 @@ export function resolveCtx7Repos(candidates: string[], opts: ResolveOpts = {}): 
   // not. A 404 here means `gh` is installed but the user is not
   // logged in (treat as "unavailable" — the engine should be told
   // to use ctx7 docs HTTP API instead).
+  if (!hasCommand("gh")) {
+    return {
+      ok: false,
+      found: [],
+      notFound: clean,
+      ghUnavailable: true,
+      reason: "gh not on PATH",
+    };
+  }
   const authCheck = run("gh", ["auth", "status"]);
   if (authCheck.status !== 0) {
     return {
@@ -167,7 +177,7 @@ export function formatResolvedReposHint(result: ResolveResult): string {
   }
   return [
     "## ctx7 repo resolve — VERIFIED (CLI pre-checked)",
-    `The following repos are confirmed to exist (gh API 200):`,
+    "The following repos are confirmed to exist (gh API 200):",
     ...result.found.map((r) => `  - ${r}`),
     ...(result.notFound.length > 0
       ? ["", "Skipped (404 or no remote):", ...result.notFound.map((r) => `  - ${r}`)]

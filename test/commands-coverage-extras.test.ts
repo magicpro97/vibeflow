@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Engine, type EngineReadiness } from "../src/core.js";
+import type { Engine } from "../src/core.js";
+import type { EngineReadiness } from "../src/preflight.js";
 
 function allReady(engines: Engine[]): EngineReadiness[] {
   return engines.map((e) => ({ engine: e, level: "ready" as const, detail: "ok", checkedAt: "" }));
@@ -56,8 +57,13 @@ describe("commands.init — codegraph install path (line 445-459)", () => {
       const code = await init({ "no-ai": true }, { preflight: allReady });
       expect(typeof code).toBe("number");
     } finally {
-      // @ts-expect-error: restore.
       Bun.which = origWhich;
+      // Restore the real node:child_process so subsequent tests
+      // (file-size-gate, etc.) can use cpSpawnSync normally.
+      mock.module("node:child_process", () => {
+        // Re-export the real module
+        return require("node:child_process");
+      });
     }
   });
 });

@@ -81,7 +81,7 @@ function chosenEngines(engines?: string[]): Engine[] {
 // Kept as `const` rather than `function` to preserve the original
 // shape: callers compare `engine === DEFAULT_ENGINE` or fall through
 // to it via `[...ENGINES]` when `engines` is empty.
-export const DEFAULT_ENGINE: Engine = "claude";
+export const DEFAULT_ENGINE: Engine = "copilot";
 
 function contextFrom(answers: IntakeAnswers): ProjectContext {
   const base = defaultContext();

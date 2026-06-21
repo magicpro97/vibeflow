@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { buildFinisherBatchUnit } from "../src/ai-init-workflow.js";
+import type { WorkUnit } from "../src/core.js";
+import { formatResolvedReposHint, resolveCtx7Repos } from "../src/discovery/ctx7-resolve.js";
+import { orchestrateUnits, runParallel } from "../src/orchestrator/run.js";
 import {
   curatorCacheKey,
   curatorCacheKeyForProject,
@@ -9,10 +13,6 @@ import {
   readCuratorCache,
   writeCuratorCache,
 } from "../src/skills/curator-cache.js";
-import { resolveCtx7Repos, formatResolvedReposHint } from "../src/discovery/ctx7-resolve.js";
-import { runParallel, orchestrateUnits } from "../src/orchestrator/run.js";
-import { buildFinisherBatchUnit } from "../src/ai-init-workflow.js";
-import type { WorkUnit } from "../src/core.js";
 
 let tmp: string;
 beforeEach(() => {
@@ -320,7 +320,7 @@ describe("P1-10: resolveCtx7Repos", () => {
   });
 
   test("returns found/notFound partition based on the API response", () => {
-    let probed: string[] = [];
+    const probed: string[] = [];
     const runner = (
       cmd: string,
       args: string[],
@@ -349,7 +349,7 @@ describe("P1-10: resolveCtx7Repos", () => {
   });
 
   test("filters out malformed slugs before probing", () => {
-    let probed: string[] = [];
+    const probed: string[] = [];
     const runner = (
       cmd: string,
       args: string[],

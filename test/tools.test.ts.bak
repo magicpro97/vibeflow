@@ -201,13 +201,7 @@ describe("codegraph.indexLooksHealthy", () => {
     }
   });
 
-  // SKIP (2026-06-21, phonnt's test — flakes under full CI load):
-  // The previous test (binary missing) passes. This test depends on the
-  // real codegraph binary returning a "Not initialized" line for /tmp —
-  // empirically true on the test author's box, but on CI / clean boxes
-  // the binary output is different. The test is a no-op when the
-  // binary is missing, but when present it flakes under load.
-  test.skip("returns false when the binary reports 'Not initialized' (binary on PATH)", async () => {
+  test("returns false when the binary reports 'Not initialized' (binary on PATH)", async () => {
     // When the binary is on PATH, the function actually shells out to
     // `codegraph status <base>`. We rely on the live binary to surface
     // a "Not initialized" line for /tmp — which the previous test run
@@ -224,10 +218,7 @@ describe("codegraph.indexLooksHealthy", () => {
     expect(out).toBe(false);
   });
 
-  // SKIP (2026-06-21, phonnt's test — flakes under full CI load):
-  // Race between unlink and spawnSync is fragile; passes on dev box,
-  // fails under full CI load (100+ tests racing on file system I/O).
-  test.skip("returns false when the binary is on PATH but spawnSync throws (catch branch)", () => {
+  test("returns false when the binary is on PATH but spawnSync throws (catch branch)", () => {
     // To exercise the `try/catch` in spawnStatus (line 87-89) we need
     // the binary to exist (so hasCommand returns true) AND spawnSync
     // to throw. The easiest way is to point Bun.which at a path that

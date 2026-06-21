@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join } from "node:path";
 import { detectRolesForRepo } from "./agents/detect-roles.js";
 import {
+  AI_INIT_FINISHER_NAMES,
   type AiInitAdapterName,
   type AiInitIntake,
   type AiInitUnit,
-  AI_INIT_FINISHER_NAMES,
   ENGINE_INSTRUCTION_SCOPE,
   ENGINE_SKILL_DIR,
   aiInitReviewer,
@@ -18,12 +18,10 @@ import {
   CTX_DIR,
   ENGINES,
   type Engine,
-  type WorkflowState,
   type WorkUnit,
+  type WorkflowState,
   writeState,
 } from "./core.js";
-import { type QuotaStatus } from "./engine-quota.js";
-import { DEFAULT_CONCURRENCY } from "./orchestrator/run.js";
 import {
   type AsyncSpawner,
   type EngineCommandResult,
@@ -32,10 +30,12 @@ import {
   makeAsyncSpawner,
   materializePrompt,
 } from "./dispatch.js";
+import type { QuotaStatus } from "./engine-quota.js";
+import { DEFAULT_CONCURRENCY } from "./orchestrator/run.js";
 import { type UnitDispatcher, type UnitOutcome, orchestrateUnits } from "./orchestrator/run.js";
 import { type EngineReadiness, preflightAll } from "./preflight.js";
-import { type ProjectProfile, renderFindingsTable, scanRepo } from "./scanner.js";
 import { backoffPlan, detectQuota } from "./safety/quota.js";
+import { type ProjectProfile, renderFindingsTable, scanRepo } from "./scanner.js";
 import { curateSkillsFromEvidence } from "./skills/curator.js";
 
 /**

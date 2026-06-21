@@ -100,9 +100,7 @@ export function validateSkillDir(
     const taskLeaks = body.match(new RegExp(TASK_ID_PATTERN.source, "g"));
     if (taskLeaks && taskLeaks.length > 0) {
       warnings.push(
-        `task-specific content leak: skill body contains ${taskLeaks.length} concrete requirement ID(s) ` +
-          `(e.g. ${taskLeaks.slice(0, 3).join(", ")}). A reusable skill should use placeholders ` +
-          `like {{task.requirement_ids}} instead of embedded IDs from a sample task.`,
+        `task-specific content leak: skill body contains ${taskLeaks.length} concrete requirement ID(s) (e.g. ${taskLeaks.slice(0, 3).join(", ")}). A reusable skill should use placeholders like {{task.requirement_ids}} instead of embedded IDs from a sample task.`,
       );
     }
   }

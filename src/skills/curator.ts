@@ -1,11 +1,18 @@
+import { type SpawnSyncOptions, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+
+/** The 3-arg form of spawnSync used by the curator (command, args, options). */
+type SpawnSyncFn = (
+  command: string,
+  args: readonly string[],
+  options: SpawnSyncOptions,
+) => ReturnType<typeof spawnSync>;
 import { CTX_DIR, type Engine } from "../core.js";
+import { pruneUnselectedEngineFolders } from "../workflow-artifacts.js";
 import { curatorCacheKeyForProject, readCuratorCache, writeCuratorCache } from "./curator-cache.js";
 import { importSkillsFromParent } from "./importer.js";
 import { syncSkillMirrors } from "./sync.js";
-import { pruneUnselectedEngineFolders } from "../workflow-artifacts.js";
 import { DEFAULT_WHITELIST } from "./whitelist.js";
 import type { WhitelistEntry } from "./whitelist.js";
 
@@ -27,8 +34,8 @@ function matchWhitelist(rawName: string, whitelist: WhitelistEntry[]): Whitelist
   // Prefix match: "spring boot 3.3.10" -> "spring boot"
   for (const entry of whitelist) {
     if (
-      lower.startsWith(entry.keyword.toLowerCase() + " ") ||
-      lower.startsWith(entry.keyword.toLowerCase() + ".")
+      lower.startsWith(`${entry.keyword.toLowerCase()} `) ||
+      lower.startsWith(`${entry.keyword.toLowerCase()}.`)
     ) {
       return entry;
     }
@@ -112,10 +119,13 @@ export function curateSkillsFromEvidence(
     scratchDir?: string;
     /** Bypass the cache even on a hit (test seam + manual `--no-cache`). */
     skipCache?: boolean;
+    /** Injectable child-process spawner (test seam). Defaults to node:child_process#spawnSync. */
+    inject?: { spawnSync?: SpawnSyncFn };
   } = {},
 ): CurateResult {
   const whitelist = options.whitelist ?? DEFAULT_WHITELIST;
   const scratch = options.scratchDir ?? join(".agents", "skills");
+  const _spawnSync = options.inject?.spawnSync ?? spawnSync;
 
   // 0. Cache short-circuit. The deterministic curator is purely a
   //    function of (stack-evidence.md + project-profile.json) — a
@@ -206,14 +216,12 @@ export function curateSkillsFromEvidence(
       for (const entry of entries) {
         const skillDir = join(base, scratch, entry.skill);
         if (existsSync(skillDir)) continue; // already installed
-        const result = spawnSync(
+        const result = _spawnSync(
           "npx",
           ["ctx7", "skills", "install", "--yes", "--universal", repo, entry.skill],
           { cwd: base, timeout: 60_000, stdio: "pipe" },
         );
         if (result.status !== 0) {
-          // ctx7 install failed — skip (non-fatal, AI can fallback)
-          continue;
         }
       }
     }

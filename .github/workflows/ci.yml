@@ -38,6 +38,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The self-hosted runner accumulates stale uncommitted
+          # deletions across runs (e.g. `.agents/skills/*` from a
+          # prior WIP). `clean: true` forces a fresh checkout on
+          # every CI run so tests that depend on tracked files
+          # (e.g. `copySkillCreator` looking for
+          # `.agents/skills/skill-creator/`) see a clean state.
+          clean: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -67,6 +75,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: true
       - name: release-please action
         # Token priority:
         # 1. VIBEFLOW_BOT_TOKEN (PAT, no repo setting required)
