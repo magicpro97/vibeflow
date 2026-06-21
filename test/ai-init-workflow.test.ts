@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   AI_INIT_UNIT_NAMES,
   type AiInitIntake,
   type AiInitUnit,
   aiInitReviewer,
+  buildFinisherBatchUnit,
   buildPhaseSkillEnrichmentUnits,
   planAiInitUnits,
 } from "../src/ai-init-workflow.js";
@@ -1003,5 +1004,228 @@ describe("aiInitReviewer — batched enrichment gate", () => {
     expect(r.pass).toBe(false);
     expect(r.reason).toContain("missing");
     expect(r.reason).toContain("test");
+  });
+});
+
+// ── buildFinisherBatchUnit + finisher-batch validator branches (L641-720, L965-981) ──
+
+describe("buildFinisherBatchUnit (PR137 round 2)", () => {
+  const baseProfile: ProjectProfile = {
+    name: "demo",
+    summary: "demo project",
+    languages: ["TypeScript"],
+    packageManager: "bun",
+    buildCommand: "bun run build",
+    testCommand: "bun test",
+    lintCommand: "bun run lint",
+    frameworks: ["React"],
+    hasCI: true,
+    manifests: [],
+    findings: [],
+  };
+
+  test("builds a unit named ai-init-finishers-batch with 4 scope files (the standard finisher set)", () => {
+    const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
+    const u = buildFinisherBatchUnit(baseProfile, intake, ["doc-writer"]);
+    expect(u.name).toBe("ai-init-finishers-batch");
+    expect(u.scope).toEqual([
+      ".vibeflow/SETTINGS.json",
+      ".vibeflow/WORKFLOW_POLICY.md",
+      ".vibeflow/WORKFLOW_STATE.json",
+      "QUICKSTART.md",
+    ]);
+  });
+
+  test("uses detectedRoles when provided, falls back to ROLE_NAMES when empty", () => {
+    const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
+    const u1 = buildFinisherBatchUnit(baseProfile, intake, ["doc-writer", "skill-author"]);
+    expect(u1.spec).toContain("doc-writer, skill-author");
+    const u2 = buildFinisherBatchUnit(baseProfile, intake, []);
+    expect(u2.spec).toContain("Active roles in this repo:");
+    // The fallback list contains at least the standard roles.
+    expect(u2.spec).toMatch(/doc-writer|skill-author|tester/);
+  });
+
+  test("default goal + engines when intake omits them", () => {
+    const intake: AiInitIntake = {};
+    const u = buildFinisherBatchUnit(baseProfile, intake, []);
+    expect(u.spec).toContain("Set up VibeFlow AI guidance for this repository");
+    expect(u.spec).toContain("(default: copilot)");
+  });
+
+  test("aiInitReviewer: finisher-batch with all 4 files written + evidence → pass", () => {
+    const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
+    const tmp = mkdtempSync(join(tmpdir(), "vf-fin-batch-all-"));
+    const u = buildFinisherBatchUnit(baseProfile, intake, []);
+    mkdirSync(join(tmp, ".vibeflow"), { recursive: true });
+    for (const scope of u.scope ?? []) {
+      mkdirSync(join(tmp, dirname(scope)), { recursive: true });
+      writeFileSync(join(tmp, scope), "# content\n");
+    }
+    const r = aiInitReviewer(
+      u,
+      {
+        status: "verifying",
+        confidence: 1,
+        evidence: u.scope ?? [],
+      },
+      tmp,
+    );
+    expect(r.pass).toBe(true);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("aiInitReviewer: finisher-batch missing one file → fail with reason", () => {
+    const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
+    // Use a temp cwd so the test doesn't pick up the real
+    // QUICKSTART.md / .vibeflow/SETTINGS.json etc. that exist in
+    // the repo root. The validator's checkFileExists would otherwise
+    // see those real files and report pass.
+    const tmp = mkdtempSync(join(tmpdir(), "vf-fin-batch-missing-"));
+    const u = buildFinisherBatchUnit(baseProfile, intake, []);
+    mkdirSync(join(tmp, ".vibeflow"), { recursive: true });
+    for (const scope of u.scope?.slice(0, 3) ?? []) {
+      mkdirSync(join(tmp, dirname(scope)), { recursive: true });
+      writeFileSync(join(tmp, scope), "# content\n");
+    }
+    const r = aiInitReviewer(
+      u,
+      {
+        status: "verifying",
+        confidence: 1,
+        evidence: u.scope ?? [],
+      },
+      tmp,
+    );
+    expect(r.pass).toBe(false);
+    // Either the "missing evidence" or "file doesn't exist" path
+    // may fire (validator's checkFileExists iterates evidence).
+    expect(r.reason).toMatch(/missing|exists/);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("aiInitReviewer: finisher-batch evidence missing a path → fail with reason", () => {
+    const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
+    const tmp = mkdtempSync(join(tmpdir(), "vf-fin-batch-ev-missing-"));
+    const u = buildFinisherBatchUnit(baseProfile, intake, []);
+    mkdirSync(join(tmp, ".vibeflow"), { recursive: true });
+    for (const scope of u.scope ?? []) {
+      mkdirSync(join(tmp, dirname(scope)), { recursive: true });
+      writeFileSync(join(tmp, scope), "# content\n");
+    }
+    // Evidence omits the 4th path → fail.
+    const r = aiInitReviewer(
+      u,
+      {
+        status: "verifying",
+        confidence: 1,
+        evidence: u.scope?.slice(0, 3) ?? [],
+      },
+      tmp,
+    );
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("missing");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("aiInitReviewer: finisher-batch with empty scope → fail with no-scope reason", () => {
+    const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
+    const u = buildFinisherBatchUnit(baseProfile, intake, []);
+    // Construct a pathological unit with empty scope to exercise the
+    // early-return guard in the finisher-batch validator. Non-empty
+    // evidence is needed so we don't trip the upstream
+    // "no evidence recorded" check at L794 first.
+    const uEmpty: AiInitUnit = { ...u, scope: [] };
+    const r = aiInitReviewer(
+      uEmpty,
+      { status: "verifying", confidence: 1, evidence: ["dummy"] },
+      "/tmp",
+    );
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("no scope paths");
+  });
+
+  // ── Sibling branches in aiInitReviewer: skill-enrich empty-scope + missing-evidence, ctx7 auth hint ──
+  // Pre-existing residual gaps (273, 1036, 1042-1045) — covered here
+  // so the file reaches 100% line coverage.
+
+  test("aiInitReviewer: skill-enrich unit with empty scope → fail with no-scope reason", () => {
+    const u: AiInitUnit = {
+      name: "ai-init-skill-enrich-batch",
+      status: "pending",
+      confidence: 1,
+      scope: [],
+      acceptance: "",
+      depends_on: [],
+      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      evidence: [],
+    };
+    const r = aiInitReviewer(
+      u,
+      { status: "verifying", confidence: 1, evidence: ["dummy"] },
+      "/tmp",
+    );
+    expect(r.pass).toBe(false);
+    expect(r.reason).toContain("no scope paths");
+  });
+
+  test("aiInitReviewer: skill-enrich unit missing evidence path → fail with missing reason", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "vf-enrich-missing-"));
+    try {
+      const slugs = ["detail-design", "implement", "test"];
+      for (const s of slugs) {
+        writeFileSync(join(tmp, `${s}.md`), "# body\n");
+      }
+      const u: AiInitUnit = {
+        name: "ai-init-skill-enrich-batch",
+        status: "pending",
+        confidence: 1,
+        scope: slugs.map((s) => join(tmp, `${s}.md`)),
+        acceptance: "",
+        depends_on: [],
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        evidence: [],
+      };
+      // Non-empty evidence that omits one scope path → L1042-1045 fires.
+      const r = aiInitReviewer(
+        u,
+        { status: "verifying", confidence: 1, evidence: [join(tmp, "detail-design.md")] },
+        tmp,
+      );
+      expect(r.pass).toBe(false);
+      expect(r.reason).toContain("missing");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("planAiInitUnits: ctx7 authenticated branch (L273)", () => {
+  const baseProfile: ProjectProfile = {
+    name: "demo",
+    summary: "demo project",
+    languages: ["TypeScript"],
+    packageManager: "bun",
+    buildCommand: "bun run build",
+    testCommand: "bun test",
+    lintCommand: "bun run lint",
+    frameworks: ["React"],
+    hasCI: true,
+    manifests: [],
+    findings: [],
+  };
+
+  test("skill-curator spec includes ctx7 auth hint when intake.ctx7Authenticated=true", () => {
+    const intake: AiInitIntake = {
+      goal: "init",
+      engines: ["claude"],
+      ctx7Authenticated: true,
+    };
+    const units = planAiInitUnits(baseProfile, intake, []);
+    const curator = units.find((u) => u.name === "ai-init-skill-curator");
+    expect(curator).toBeDefined();
+    expect(curator?.spec).toContain("ctx7 is already authenticated from the CLI pre-check");
   });
 });
