@@ -83,7 +83,10 @@ describe("config memory status", () => {
     try {
       const { code, out } = await capture(() => config("memory", [], dir));
       expect(code).toBe(0);
-      expect(out).toContain("memory: on"); // default true
+      // MUST-FIX (PR #160 review): default is now `off` (was `on`).
+      // Operators opt-in explicitly via `vf config memory on` or
+      // interactively during `vf init --ai` (Phase 1.55).
+      expect(out).toContain("memory: off"); // default false
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

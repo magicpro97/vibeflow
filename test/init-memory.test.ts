@@ -144,8 +144,11 @@ describe("runMemoryPhase — prompt + skip", () => {
       await runMemoryPhase(dir, {}, ["claude"], inject);
       expect(calls.wired).toEqual([]);
       expect(calls.append).toBe(0);
-      // readSettings returns the default (memory:true) but nothing was persisted.
-      expect(readSettings(dir).memory).toBe(true);
+      // MUST-FIX (PR #160 review): readSettings returns the default
+      // (memory:false). Nothing was persisted because non-TTY
+      // cannot ask. The previous default (memory:true) was a
+      // lie — the setting claimed on but init never asked.
+      expect(readSettings(dir).memory).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

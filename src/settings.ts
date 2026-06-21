@@ -55,7 +55,13 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   tools: { codegraph: false, lsp: false },
   toolPriority: [...TIERS],
   failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
-  memory: true,
+  // MUST-FIX (PR #160 review): default to `false` so the setting
+  // truth-tells on `vf config memory status`. Users opt-in
+  // interactively during `vf init --ai` (Phase 1.55 prompts) or
+  // explicitly via `vf config memory on`. A "true" default with a
+  // no-TTY non-interactive init that silently skips the prompt was
+  // a lie (settings said on, but init never asked).
+  memory: false,
   updatedAt: "",
 };
 

@@ -68,9 +68,10 @@ describe("defaultAskFn", () => {
 });
 
 describe("defaultRunSkillFn", () => {
-  test("returns empty string when skill file is missing", async () => {
+  test("returns SKIPPED verdict block when skill file is missing (MUST-FIX PR #160: no more silent no-op)", async () => {
     const text = await defaultRunSkillFn(baseUnit, "/nonexistent/path");
-    expect(text).toBe("");
+    expect(text).toContain("verdict: skipped");
+    expect(text).toContain("skill source not found");
   });
 });
 
@@ -120,13 +121,69 @@ describe("runSecurityCheckpoint", () => {
     expect(r.items_failed).toEqual([1, 2]);
   });
 
-  test("error when skill path missing", async () => {
+  test("parseSecurityVerdict: unknown verdict values fall through to 'error' (MUST-FIX PR #160)", () => {
+    // The verdict field is user-controlled (a skill's output). The
+    // type assertion used to be unchecked, so a planted SKILL.md
+    // that says `verdict: lol` would pass type checks. Now: only the
+    // 5 SecurityVerdict values are accepted; anything else is "error".
+    const cases = ["lol", "pass-with-exceptions", "", "PASS", "Fail", "rand-om"];
+    for (const v of cases) {
+      const r = parseSecurityVerdict(
+        `\`\`\`\nSECURITY_CHECK_RESULT\nverdict: ${v}\nitems_checked: 1\nitems_failed: none\n\`\`\``,
+      );
+      expect(r.verdict).toBe("error");
+    }
+  });
+
+  test("parseSecurityVerdict: each allowed verdict is preserved verbatim", () => {
+    for (const v of ["pass", "fail", "needs-review", "skipped", "error"] as const) {
+      const r = parseSecurityVerdict(
+        `\`\`\`\nSECURITY_CHECK_RESULT\nverdict: ${v}\nitems_checked: 0\nitems_failed: none\n\`\`\``,
+      );
+      expect(r.verdict).toBe(v);
+    }
+  });
+
+  test("defaultSecurityAskFn: non-TTY returns 'skip' without blocking (PR #160: CI-safe)", async () => {
+    // Save and override isTTY
+    const origIsTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: undefined, configurable: true });
+    try {
+      const ask = defaultSecurityAskFn();
+      const result = await ask("Run security check?");
+      expect(result).toBe("skip");
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTty, configurable: true });
+    }
+  });
+
+  test("runSecurityCheckpoint: catch block returns abstain+error (PR #160: error isolation)", async () => {
+    // Pass a runSkillFn that throws — the catch should return consent:abstain,
+    // verdict:error, with the error message in notes. The orchestrator
+    // should never throw out of runSecurityCheckpoint.
+    const ask = () => async () => "run" as const;
+    const r = await runSecurityCheckpoint(baseUnit, "/tmp", {
+      askFn: ask,
+      runSkillFn: async () => {
+        throw new Error("skill exploded (test)");
+      },
+    });
+    expect(r.consent).toBe("abstain");
+    expect(r.verdict).toBe("error");
+    expect(r.notes).toContain("skill exploded");
+  });
+
+  test("verdict is skipped (not error) when skill path missing (PR #160: honest no-op reporting)", async () => {
     const ask = () => async () => "run" as const;
     const r = await runSecurityCheckpoint(baseUnit, "/no/such/dir", {
       askFn: ask,
       runSkillFn: defaultRunSkillFn,
     });
-    expect(r.verdict).toBe("error");
-    expect(r.notes).toContain("not found");
+    // PR #160 review: previously this returned "error" but downstream
+    // ignored it and the unit was never blocked. Now: the default
+    // runner returns a SKIPPED verdict so the operator knows the gate
+    // is unimplemented (instead of silently passing).
+    expect(r.verdict).toBe("skipped");
+    expect(r.notes).toContain("not implemented");
   });
 });

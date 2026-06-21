@@ -113,6 +113,7 @@ ${c.bold("Options:")}
   --concurrency <n>   max units dispatched in parallel
   --risk <class>      docs | simple-code | feature | architecture | security | deploy
   --auto-wip / --require-git / --rollback-on-fail   source-protection toggles
+  --security-check    opt-in to the post-coding security checkpoint (PR #160)
 
 ${c.bold("Examples:")}
   vf orchestrate

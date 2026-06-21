@@ -73,6 +73,36 @@ describe("memory.installForEngine", () => {
     ]);
   });
 
+  test("pins claude-mem version when opts.version is set (MUST-FIX PR #160: supply-chain hardening)", () => {
+    const calls: { args: readonly string[] }[] = [];
+    installForEngine("claude", {
+      version: "1.2.3",
+      spawner: ((cmd: string, args: readonly string[]) => {
+        calls.push({ args });
+        return { status: 0 };
+      }) as never,
+    });
+    expect(calls[0]?.args[1]).toBe("claude-mem@1.2.3");
+  });
+
+  test("uses VF_CLAUDE_MEM_VERSION env var when opts.version is unset", () => {
+    const orig = process.env.VF_CLAUDE_MEM_VERSION;
+    process.env.VF_CLAUDE_MEM_VERSION = "2.0.0";
+    try {
+      const calls: { args: readonly string[] }[] = [];
+      installForEngine("claude", {
+        spawner: ((cmd: string, args: readonly string[]) => {
+          calls.push({ args });
+          return { status: 0 };
+        }) as never,
+      });
+      expect(calls[0]?.args[1]).toBe("claude-mem@2.0.0");
+    } finally {
+      if (orig === undefined) process.env.VF_CLAUDE_MEM_VERSION = undefined;
+      else process.env.VF_CLAUDE_MEM_VERSION = orig;
+    }
+  });
+
   test("inherits stdio so the installer streams live (no perceived hang)", () => {
     let seenStdio: unknown;
     installForEngine("claude", {

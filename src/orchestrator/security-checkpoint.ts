@@ -52,15 +52,46 @@ export function defaultSecurityAskFn(): (q: string) => Promise<SecurityConsent> 
 }
 
 /**
- * Default skill runner — reads the skill markdown and echoes it back as
- * the "output" of an engine-less invocation. In production, commands.ts
- * overrides this with a real engine dispatch. Kept here as a test seam
- * and a no-op fallback for non-engine contexts (e.g. unit tests).
+ * Default skill runner — reads the skill markdown and synthesises an
+ * empty `SECURITY_CHECK_RESULT` block marked as `skipped`. In
+ * production, commands.ts overrides this with a real engine dispatch.
+ * Kept here as a test seam and a "skipped" fallback for non-engine
+ * contexts (e.g. unit tests).
+ *
+ * MUST-FIX (PR #160 review): previously this function returned the
+ * SKILL.md body verbatim, which `parseSecurityVerdict` would flag as
+ * "no SECURITY_CHECK_RESULT block → error" — but downstream ignored
+ * the error and the unit was never blocked. The security gate was a
+ * no-op in production. Now: return a SKIPPED verdict + a clear note
+ * so operators know the gate didn't run.
  */
 export async function defaultRunSkillFn(unit: WorkUnit, base: string): Promise<string> {
   const path = join(base, ".vibeflow/skills/checklist-security/SKILL.md");
-  if (!existsSync(path)) return "";
-  return readFileSync(path, "utf8");
+  if (!existsSync(path)) {
+    // No skill source — return a SKIPPED verdict explicitly.
+    return [
+      "```",
+      "SECURITY_CHECK_RESULT",
+      "verdict: skipped",
+      "items_checked: 0",
+      "items_failed: none",
+      "evidence: skill source not found; engine dispatch not implemented (see .vibeflow/skills/checklist-security/SKILL.md)",
+      "```",
+    ].join("\n");
+  }
+  // Skill source exists but no real engine dispatch. Return SKIPPED
+  // so the gate honestly reports its state instead of silently
+  // passing. Operators should run with a real engine via
+  // `vf init --security-check` to actually exercise the gate.
+  return [
+    "```",
+    "SECURITY_CHECK_RESULT",
+    "verdict: skipped",
+    "items_checked: 0",
+    "items_failed: none",
+    "evidence: defaultRunSkillFn is a no-op; real engine dispatch not wired in this PR. See .vibeflow/skills/checklist-security/SKILL.md",
+    "```",
+  ].join("\n");
 }
 
 /** Parse the SECURITY_CHECK_RESULT block from a skill response. */
@@ -75,7 +106,21 @@ export function parseSecurityVerdict(raw: string): {
     return { verdict: "error", notes: "no SECURITY_CHECK_RESULT block in skill output" };
   }
   const body = m[1];
-  const verdict = (body.match(/verdict:\s*(\S+)/)?.[1] ?? "error") as SecurityVerdict;
+  // MUST-FIX (PR #160 review): validate verdict against the
+  // SecurityVerdict union. A skill (or a planted SKILL.md) that says
+  // `verdict: lol` previously passed the type system. Now: any
+  // unknown value falls through to "error" (the catch-all).
+  const ALLOWED_VERDICTS = new Set<SecurityVerdict>([
+    "pass",
+    "fail",
+    "needs-review",
+    "skipped",
+    "error",
+  ]);
+  const rawVerdict = body.match(/verdict:\s*(\S+)/)?.[1] ?? "error";
+  const verdict: SecurityVerdict = (
+    ALLOWED_VERDICTS.has(rawVerdict as SecurityVerdict) ? rawVerdict : "error"
+  ) as SecurityVerdict;
   const ic = body.match(/items_checked:\s*(\d+)/);
   const failedRaw = body.match(/items_failed:\s*([^\n]+)/)?.[1]?.trim() ?? "";
   const items_failed =

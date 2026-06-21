@@ -48,6 +48,15 @@ export interface MemoryBackendOpts {
   spawner?: typeof spawnSync;
   /** Injectable PATH check. Defaults to the real {@link hasCommand}. */
   has?: (cmd: string) => boolean;
+  /**
+   * Pinned claude-mem version (e.g. `"1.2.3"`, `"@1.2.3"`, or `"latest"`).
+   * MUST-FIX (PR #160 review): default `npx -y claude-mem` always
+   * fetches the latest, which is a supply-chain risk. Operators can
+   * pin via `VF_CLAUDE_MEM_VERSION` env var or the `memory.version`
+   * field in `.vibeflow/SETTINGS.json`. Default is `"latest"` for
+   * backward compatibility; production deployments should pin.
+   */
+  version?: string;
 }
 
 /** True when the `claude-mem` binary is resolvable on PATH. */
@@ -75,10 +84,16 @@ export function installForEngine(
 ): { ok: boolean; reason?: string } {
   const spawn = opts.spawner ?? spawnSync;
   const ide = ENGINE_IDE[engine];
+  // MUST-FIX (PR #160 review): allow pinning claude-mem version.
+  // `npx -y claude-mem@<version>` installs a specific version;
+  // `npx -y claude-mem` (the original) always fetches latest. The
+  // version is read from the env first, then opts, then "latest".
+  const version = opts.version ?? process.env.VF_CLAUDE_MEM_VERSION ?? "latest";
+  const pkg = version === "latest" ? "claude-mem" : `claude-mem@${version}`;
   try {
     const r = spawn(
       "npx",
-      ["-y", "claude-mem", "install", "--ide", ide, "--provider", "claude", "--no-auto-start"],
+      ["-y", pkg, "install", "--ide", ide, "--provider", "claude", "--no-auto-start"],
       { stdio: "inherit", timeout: opts.timeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS, cwd: opts.cwd },
     );
     if (r.status === 0) return { ok: true };
