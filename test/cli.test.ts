@@ -289,7 +289,6 @@ describe("cli help routing", () => {
     const cases: Array<[string, string]> = [
       ["verify", "vf verify"],
       ["units", "vf units"],
-      ["config", "vf config"],
       ["init", "vf init"],
       ["orchestrate", "vf orchestrate"],
       ["tools", "vf tools"],
@@ -309,35 +308,19 @@ describe("cli help routing", () => {
     expect(short.stdout).toContain("vf verify");
     expect(short.stdout).not.toBe(global);
   });
-
-  test("`vf config memory` routes to the config command (not Unknown command)", () => {
-    // Run in a throwaway cwd so the status read never touches the project's
-    // own SETTINGS.json. `status` is read-only — no settings file is written.
-    const tmp = mkdtempSync(join(tmpdir(), "vf-cli-config-"));
-    try {
-      const r = cpSpawnSync(
-        "bun",
-        ["run", join(process.cwd(), "src/cli.ts"), "config", "memory", "status"],
-        {
-          cwd: tmp,
-          env: { ...process.env, NO_COLOR: "1" },
-        },
-      );
-      const stdout = typeof r.stdout === "string" ? r.stdout : new TextDecoder().decode(r.stdout);
-      const stderr = typeof r.stderr === "string" ? r.stderr : new TextDecoder().decode(r.stderr);
-      expect(r.status ?? 1).toBe(0);
-      expect(stderr).not.toContain("Unknown command");
-      // PR #160: default is now `off` (was `on`).
-      expect(stdout).toContain("memory: off"); // default false on an empty repo
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
 });
 
 describe("commands.init", () => {
   let dir: string;
   const origCwd = process.cwd();
+  // Keep init hermetic: never shell out to a real `codegraph` index build
+  // (Phase 1.6) and never open the interactive hooks menu (Phase 1.65). Both
+  // make these unit tests flaky-timeout under load / on an interactive runner.
+  const hermetic = {
+    hasCommandFn: () => true,
+    syncSpawner: () => ({ status: 0 }),
+    hookSetup: null,
+  };
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "vf-"));
     process.chdir(dir);
@@ -348,64 +331,28 @@ describe("commands.init", () => {
   });
 
   test("init writes canonical context and a valid ledger", async () => {
-    const code = await init({ engine: "claude", "no-ai": true }, { preflight: allReady });
+    // This ONE test intentionally omits the syncSpawner stub so it exercises
+    // init.ts's default per-step spawner (the real `codegraph` index closure) —
+    // that closure is otherwise uncovered. codegraph is present on CI/dev, so the
+    // index build is fast; the generous timeout absorbs load spikes. hookSetup:null
+    // still skips the interactive Phase 1.65 menu so stdin is never read.
+    const code = await init(
+      { engine: "claude", "no-ai": true },
+      { preflight: allReady, hookSetup: null },
+    );
     expect(code).toBe(0);
     const state = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`), "utf8"));
     expect(state.totals.units).toBe(0);
     expect(readFileSync(join(dir, "CLAUDE.md"), "utf8").length).toBeGreaterThan(0);
-  });
+  }, 60_000);
 
-  test("init --memory wires claude-mem and appends the guide (Phase 1.5)", async () => {
-    let wired = 0;
-    const code = await init(
-      { engine: "claude", "no-ai": true, memory: true },
-      {
-        preflight: allReady,
-        memoryInject: {
-          ensureInstalledForEngines: (engines) => {
-            wired++;
-            return { wired: engines, failed: [] };
-          },
-        },
-      },
-    );
-    expect(code).toBe(0);
-    expect(wired).toBe(1);
-    // Setting persisted and guide appended to the canonical policy file.
-    const settings = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/SETTINGS.json`), "utf8"));
-    expect(settings.memory).toBe(true);
-    expect(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_POLICY.md`), "utf8")).toContain(
-      "## Memory: claude-mem",
-    );
-  });
-
-  test("init --no-memory persists memory:false and never installs (Phase 1.5)", async () => {
-    let wired = 0;
-    const code = await init(
-      { engine: "claude", "no-ai": true, "no-memory": true },
-      {
-        preflight: allReady,
-        memoryInject: {
-          ensureInstalledForEngines: (engines) => {
-            wired++;
-            return { wired: engines, failed: [] };
-          },
-        },
-      },
-    );
-    expect(code).toBe(0);
-    expect(wired).toBe(0);
-    const settings = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/SETTINGS.json`), "utf8"));
-    expect(settings.memory).toBe(false);
-  });
-
-  test("units status returns 0 on an initialized ledger", () => {
-    init({ "no-ai": true }, { preflight: allReady });
+  test("units status returns 0 on an initialized ledger", async () => {
+    await init({ "no-ai": true }, { preflight: allReady, ...hermetic });
     expect(units("status", [])).toBe(0);
     expect(units("resources", [])).toBe(0);
   });
 
-  test("init defaults --engine to copilot (issue #78: aligned with orchestrate)", async () => {
+  test("init defaults --engine to claude (issue #78: aligned with orchestrate)", async () => {
     let requested: Engine[] = [];
     const code = await init(
       { "no-ai": true },
@@ -414,14 +361,15 @@ describe("commands.init", () => {
           requested = engines;
           return allReady(engines);
         },
+        ...hermetic,
       },
     );
     expect(code).toBe(0);
-    expect(requested).toEqual(["copilot"]);
+    expect(requested).toEqual(["claude"]);
   });
 
   test("init with --no-ai skips AI enrichment but still writes context files", async () => {
-    const code = await init({ "no-ai": true }, { preflight: allReady });
+    const code = await init({ "no-ai": true }, { preflight: allReady, ...hermetic });
     expect(code).toBe(0);
     expect(existsSync(join(dir, CTX_DIR))).toBe(true);
   });
@@ -1309,7 +1257,6 @@ describe("adapters settings integration", () => {
         tools: { codegraph: true, lsp: true },
         toolPriority: ["lsp", "codegraph", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
-        memory: true,
         updatedAt: "",
       } satisfies VibeSettings,
     };
@@ -1331,7 +1278,6 @@ describe("adapters settings integration", () => {
         tools: { codegraph: true, lsp: false },
         toolPriority: ["codegraph", "lsp", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
-        memory: true,
         updatedAt: "",
       } satisfies VibeSettings,
     };

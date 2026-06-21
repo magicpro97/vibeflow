@@ -558,5 +558,5 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
     // ran (i.e. spawnSync was called).
     const result = verifyGhAccount({});
     expect(typeof result.ok).toBe("boolean");
-  });
+  }, 30_000);
 });

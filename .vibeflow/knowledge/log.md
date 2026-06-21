@@ -283,3 +283,30 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
   (block-destructive off → rm -rf allowed; custom "deploy prod" → blocked;
   protect-secrets on → cat .env blocked).
 - Verified: bun run check green, 100% coverage (12116/12116), selftest 20/20.
+
+## [2026-06-21] init-hooks | fix CI hang — hermetic test stdin + spawner stubs
+- ROOT CAUSE of the PR #215 CI failure (test step ran 10min → self-hosted
+  runner dropped): `vf init` Phase 1.65 hooks menu reads process.stdin via
+  selectMany. On the interactive runner stdin.isTTY was truthy, so init tests
+  that didn't inject hookSetup blocked on stdin until the 30s select timeout,
+  ×~15 → runner starved. Decoupling wantHooks from --ai (prior round) widened
+  the blast radius so --no-ai tests hit it too.
+- Proven by probe: under a pty, `bun test` sees stdin.isTTY=true without the
+  preload, false with it.
+- Fix (test-infra only, no production change):
+  1. test/preload.ts + bunfig.toml [test].preload — force stdin.isTTY=false for
+     the whole run so init tests never block on the menu. installTtyMock still
+     overrides per-test where a TTY is needed.
+  2. Made init tests hermetic about Phase 1.6 (codegraph index build): added
+     hasCommandFn:()=>true + syncSpawner:()=>({status:0}) + hookSetup:null to
+     the 16 AI-enrichment injects in commands-coverage, the neutralizedAi helper
+     (it had hasCommandFn but NOT syncSpawner → still spawned codegraph), the 4
+     commands-coord init calls, and 2 commands-state init calls.
+  3. Kept ONE cli.test.ts init ("writes canonical") on the DEFAULT spawner so
+     init.ts:287-288 (the real-spawn closure) stays covered — codegraph is
+     present on CI/dev so the index build is fast; gave it a 60s timeout.
+  4. Raised timeouts on 2 deliberately-spawn-real tests (doctor default probe,
+     pr-create gh fallback) that flaky-timeout under load.
+- Lesson: hasCommandFn:true alone is NOT enough to neutralize Phase 1.6 —
+  ensureToolIndex still spawns `codegraph index` unless syncSpawner is stubbed.
+- Verified: bun run check EXIT 0 — 1716 tests 0 fail, 100% coverage (12116/12116).

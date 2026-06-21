@@ -172,6 +172,13 @@ describe("coord shim (A1 #167 + #194)", () => {
           { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
         ],
         aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+        // Keep init hermetic under load: pretend codegraph is already present and
+        // stub the per-step spawner so Phase 1.6 never shells out to a real
+        // `npm i -g codegraph` (which made this test flaky-timeout in the full
+        // suite). hookSetup:null skips the interactive Phase 1.65 menu.
+        hasCommandFn: () => true,
+        syncSpawner: () => ({ status: 0 }),
+        hookSetup: null,
       },
     );
     // --no-coord bypasses the gate. With no-ai + ready engine, init
@@ -197,6 +204,9 @@ describe("coord shim (A1 #167 + #194)", () => {
           { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
         ],
         aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+        hasCommandFn: () => true,
+        syncSpawner: () => ({ status: 0 }),
+        hookSetup: null,
       },
     );
     // Even with a STALE brief, the auto-coord consults it first, so
@@ -341,6 +351,9 @@ describe("coord shim (A1 #167 + #194)", () => {
           { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
         ],
         aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+        hasCommandFn: () => true,
+        syncSpawner: () => ({ status: 0 }),
+        hookSetup: null,
       },
     );
     // The deprecated flag is accepted; the new auto-coord runs.
@@ -373,6 +386,9 @@ describe("coord shim (A1 #167 + #194)", () => {
           { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
         ],
         aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+        hasCommandFn: () => true,
+        syncSpawner: () => ({ status: 0 }),
+        hookSetup: null,
       },
     );
     // The brief-gate does not refuse. Other init phases may return

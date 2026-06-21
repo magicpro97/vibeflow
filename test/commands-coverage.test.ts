@@ -106,9 +106,10 @@ describe("commands.doctor branches", () => {
 
   test("missing required tool returns 1 (line 203-204)", async () => {
     // Inject hasCommand → false for node and git → missingRequired = 2
-    // → out + return 1.
+    // → out + return 1. readiness:[] skips the real engine preflight probe
+    // (a subprocess spawn that flaky-timeouts under load).
     const { doctor } = require("../src/commands.js");
-    const code = await doctor({}, { hasCommand: () => false });
+    const code = await doctor({}, { hasCommand: () => false, readiness: [] });
     expect(code).toBe(1);
   });
 
@@ -145,10 +146,11 @@ describe("commands.doctor branches", () => {
 
   test("probe with no inject: skipped when engines all not-ready is unreachable; reach the path", async () => {
     // Default path runs the preflight sync (probe=false) which can be slow but always
-    // returns a numeric exit code.
+    // returns a numeric exit code. It spawns real engine probes, so give it a generous
+    // timeout — under CI/local load the default 5s can be exceeded.
     const code = await doctor({});
     expect([0, 1]).toContain(code);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -590,6 +592,10 @@ describe("commands.init branches", () => {
       timedOut: false,
     }),
     hasCommandFn: () => true,
+    // hasCommandFn:true sends Phase 1.6 down the "codegraph present" branch,
+    // which still calls ensureToolIndex → a REAL `codegraph` subprocess unless
+    // the per-step spawner is stubbed. Without this the init tests flaky-timeout.
+    syncSpawner: () => ({ status: 0 }),
   };
 
   test("init: inject.hookSetup arms SETTINGS.json + engine hook configs", async () => {
@@ -2903,6 +2909,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -2949,6 +2958,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -2988,6 +3000,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3072,6 +3087,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           // NO aiSpawner injected — factory path is used
           preflight: () => [
             {
@@ -3155,6 +3173,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3201,6 +3222,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
         await init(
           { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
           {
+            hasCommandFn: () => true,
+            syncSpawner: () => ({ status: 0 }),
+            hookSetup: null,
             preflight: () => [
               { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-15" },
             ],
@@ -3244,6 +3268,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { engine: "claude", "no-ai": true },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3289,6 +3316,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "copilot", autopilot: true },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
             { engine: "copilot", level: "no-binary" as const, detail: "x", checkedAt: "now" },
@@ -3319,6 +3349,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "copilot" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
             { engine: "copilot", level: "no-binary" as const, detail: "x", checkedAt: "now" },
@@ -3348,6 +3381,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3398,6 +3434,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3457,6 +3496,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3512,6 +3554,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3574,6 +3619,9 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3633,6 +3681,9 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude", "dry-run": true },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3686,6 +3737,9 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       const code = await init(
         { ai: false, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           // All engines refused — gates the workflow to
           // deterministic output only.
           preflight: () => [
