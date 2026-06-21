@@ -386,3 +386,96 @@ describe("defaultAiInitDispatcher — engine warning surfacing", () => {
     }
   });
 });
+
+describe("runAiInitWorkflow: quota-aware finisher skip (top-level)", () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "vf-quota-"));
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "demo", version: "0.0.0" }));
+    writeFileSync(join(repo, "src", "cli.ts"), "// cli");
+    mkdirSync(join(repo, ".vibeflow", "ai-context"), { recursive: true });
+    mkdirSync(join(repo, ".github"), { recursive: true });
+    writeFileSync(join(repo, ".vibeflow/ai-context/stack-evidence.md"), "# stack\n");
+    writeFileSync(join(repo, "CLAUDE.md"), "# claude\n");
+    writeFileSync(join(repo, "AGENTS.md"), "# agents\n");
+    writeFileSync(join(repo, ".github/copilot-instructions.md"), "# copilot\n");
+    mkdirSync(join(repo, ".vibeflow", "skills"), { recursive: true });
+    writeFileSync(join(repo, ".vibeflow/SKILL_INDEX.md"), "# index\n");
+    writeFileSync(join(repo, ".vibeflow/PROJECT_CONTEXT.md"), "# ctx\n");
+    writeFileSync(join(repo, ".vibeflow/SETTINGS.json"), "{}");
+    writeFileSync(join(repo, ".vibeflow/WORKFLOW_POLICY.md"), "# policy\n");
+    writeFileSync(join(repo, ".vibeflow/WORKFLOW_STATE.json"), "{}");
+    writeFileSync(join(repo, "QUICKSTART.md"), "# quickstart\n");
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("skips finisher batch when quota is below threshold", async () => {
+    const dispatcherNames: string[] = [];
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "skip-test" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      quotaStatus: { level: "ready" as const, percentRemaining: 5 },
+      quotaSkipFinisherBelowPct: 10,
+      dispatcher: async (unit) => {
+        dispatcherNames.push(unit.name);
+        return {
+          status: "done",
+          confidence: 1,
+          evidence: unit.scope ?? [".vibeflow/ai-context/stack-evidence.md"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        };
+      },
+    });
+    expect(dispatcherNames).not.toContain("ai-init-finishers-batch");
+    expect(dispatcherNames).toContain("ai-init-analyzer");
+  });
+
+  test("keeps finisher batch when quota is above threshold", async () => {
+    const dispatcherNames: string[] = [];
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "keep-test" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      quotaStatus: { level: "ready" as const, percentRemaining: 50 },
+      quotaSkipFinisherBelowPct: 20,
+      dispatcher: async (unit) => {
+        dispatcherNames.push(unit.name);
+        return {
+          status: "done",
+          confidence: 1,
+          evidence: unit.scope ?? [".vibeflow/ai-context/stack-evidence.md"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        };
+      },
+    });
+    expect(dispatcherNames).toContain("ai-init-finishers-batch");
+    expect(result.goalMet).toBe(true);
+  });
+
+  test("skips nothing when no quotaStatus is provided", async () => {
+    const dispatcherNames: string[] = [];
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "no-quota-test" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      dispatcher: async (unit) => {
+        dispatcherNames.push(unit.name);
+        return {
+          status: "done",
+          confidence: 1,
+          evidence: unit.scope ?? [".vibeflow/ai-context/stack-evidence.md"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        };
+      },
+    });
+    expect(dispatcherNames).toContain("ai-init-finishers-batch");
+    expect(result.goalMet).toBe(true);
+  });
+});

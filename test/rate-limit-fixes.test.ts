@@ -420,3 +420,108 @@ describe("P1-10: formatResolvedReposHint", () => {
     expect(s).toContain("Do NOT call");
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1-10: resolveCtx7Repos: gh auth fail + defaultRunner error path
+// ---------------------------------------------------------------------------
+
+describe("P1-10: resolveCtx7Repos gh-auth-fail branch", () => {
+  test("returns ghUnavailable when gh auth status exits non-zero", () => {
+    const runner = (
+      _cmd: string,
+      args: string[],
+    ): { status: number; stdout: string; stderr: string } => {
+      if (args[0] === "auth") {
+        return { status: 1, stdout: "", stderr: "not logged in" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    const r = resolveCtx7Repos(["upstash/context7"], { runner });
+    expect(r.ghUnavailable).toBe(true);
+    expect(r.reason).toContain("gh auth status failed");
+    expect(r.reason).toContain("not logged in");
+    expect(r.found).toEqual([]);
+    expect(r.notFound).toEqual(["upstash/context7"]);
+  });
+
+  test("passes includePrivate flag to gh api", () => {
+    let lastArgs: string[] = [];
+    const runner = (
+      _cmd: string,
+      args: string[],
+    ): { status: number; stdout: string; stderr: string } => {
+      if (args[0] === "auth") return { status: 0, stdout: "ok", stderr: "" };
+      if (args[0] === "api") {
+        lastArgs = args;
+        return { status: 0, stdout: "name", stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    resolveCtx7Repos(["upstash/context7"], { runner, includePrivate: true });
+    expect(lastArgs).toContain("--include-private");
+  });
+});
+
+describe("P0-1: curator cache edge cases", () => {
+  test("readCuratorCache returns undefined when file contains invalid JSON", () => {
+    const dir = join(tmp, ".vibeflow", "cache");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "curator-deadbeef.json");
+    writeFileSync(path, "not-json{{{");
+    const entry = readCuratorCache(tmp, "deadbeef");
+    expect(entry).toBeUndefined();
+  });
+
+  test("readCuratorCache returns undefined when version != 1", () => {
+    writeContextInputs(tmp, "stack-v2", "profile-v2");
+    const h = curatorCacheKeyForProject(tmp);
+    if (!h) throw new Error("hash missing");
+    writeCuratorCache(tmp, h, [], []);
+    // Patch the version to 2
+    const path = join(tmp, ".vibeflow", "cache", `curator-${h}.json`);
+    const entry = JSON.parse(readFileSync(path, "utf8"));
+    entry.version = 2;
+    writeFileSync(path, JSON.stringify(entry));
+    // Now read returns undefined
+    const result = readCuratorCache(tmp, h);
+    expect(result).toBeUndefined();
+  });
+
+  test("pruneCuratorCache skips non-curator files", () => {
+    writeContextInputs(tmp, "stack-v3", "profile-v3");
+    const dir = join(tmp, ".vibeflow", "cache");
+    mkdirSync(dir, { recursive: true });
+    // Write a non-curator file
+    writeFileSync(join(dir, "other.json"), "{}");
+    const pruned = pruneCuratorCache(tmp, 7 * 24 * 60 * 60 * 1000);
+    expect(pruned).toBe(0);
+    expect(existsSync(join(dir, "other.json"))).toBe(true);
+  });
+});
+
+function writeContextInputs(base: string, stack: string, profile: string): void {
+  const dir = join(base, ".vibeflow", "ai-context");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "stack-evidence.md"), stack);
+  writeFileSync(join(dir, "project-profile.json"), profile);
+}
+
+describe("P1-10: resolveCtx7Repos defaultRunner error path", () => {
+  test("handles gh API returning non-zero status (repo not found)", () => {
+    const probed: string[] = [];
+    const runner = (_cmd: string, args: string[]) => {
+      if (args[0] === "auth") return { status: 0, stdout: "ok", stderr: "" };
+      if (args[0] === "api") {
+        probed.push(args[1] ?? "");
+        return { status: 1, stdout: "", stderr: "Not Found" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    const r = resolveCtx7Repos(["upstash/context7"], { runner });
+    expect(r.ok).toBe(true);
+    expect(r.ghUnavailable).toBe(false);
+    expect(r.found).toEqual([]);
+    expect(r.notFound).toEqual(["upstash/context7"]);
+    expect(probed.length).toBe(1);
+  });
+});

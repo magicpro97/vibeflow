@@ -155,3 +155,27 @@ describe("validateSkillDir: error branches", () => {
 //   exercised in unit tests without mocking node:fs.
 // All three are defensive try/catch blocks for network FS / symlink-loop
 // errors. The production code path is exercised manually.
+
+describe("validateSkillDir: task-ID leak detection", () => {
+  test("warns when body contains BR-1234 style requirement IDs", () => {
+    const dir = tmpSkill("with-task-ids");
+    writeSkill(
+      dir,
+      [
+        "---",
+        "name: plan-skill",
+        "description: plans work",
+        "---",
+        "# Plan",
+        "This skill fulfills BR-122 and FR-3456 requirements.",
+        "It also handles AC-789.",
+      ].join("\n"),
+    );
+    mkdirSync(join(dir, "references"), { recursive: true });
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings.some((w) => w.includes("BR-122"))).toBe(true);
+    expect(result.warnings.some((w) => w.includes("task-specific content leak"))).toBe(true);
+  });
+});

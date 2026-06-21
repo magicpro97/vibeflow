@@ -15,7 +15,7 @@
  *   messages. Style: terse, one assertion per test where practical.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -315,5 +315,63 @@ describe("ENGINE_CONFIGS parity (issue #75)", () => {
     const { ENGINE_CONFIGS } = await import("../src/workflow-artifacts.js");
     expect(ENGINE_CONFIGS.claude.instructionFiles).toEqual(["CLAUDE.md", "AGENTS.md"]);
     expect(ENGINE_CONFIGS.copilot.instructionFiles).toEqual([".github/copilot-instructions.md"]);
+  });
+});
+
+// ── copyCommonTemplateSkill (DI for fs paths) ──────────────────────────────
+
+describe("copyCommonTemplateSkill", () => {
+  test("returns empty and warns when template is missing", async () => {
+    const { copyCommonTemplateSkill } = await import("../src/workflow-artifacts.js");
+    const base = mkdtempSync(join(tmpdir(), "vf-cts-"));
+    try {
+      let warnMsg = "";
+      const written = copyCommonTemplateSkill("Plan", base, ["claude"], {
+        exists: () => false,
+        onWarn: (msg: string) => {
+          warnMsg = msg;
+        },
+      });
+      expect(written).toEqual([]);
+      expect(warnMsg).toContain("common template skill not found");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── pruneUnselectedEngineFolders ────────────────────────────────────────────
+
+describe("pruneUnselectedEngineFolders", () => {
+  test("removes unselected engine mirrors (keeps the selected one)", () => {
+    const { pruneUnselectedEngineFolders } =
+      require("../src/workflow-artifacts.js") as typeof import("../src/workflow-artifacts.js");
+    const base = mkdtempSync(join(tmpdir(), "vf-prune-"));
+    try {
+      mkdirSync(join(base, ".claude", "skills"), { recursive: true });
+      writeFileSync(join(base, ".claude", "skills", "test.md"), "# test");
+      mkdirSync(join(base, ".claude", "agents"), { recursive: true });
+      writeFileSync(join(base, ".claude", "agents", "test.md"), "# test");
+
+      const removed = pruneUnselectedEngineFolders(base, "copilot");
+      expect(removed).toContain(".claude/skills");
+      expect(removed).toContain(".claude/agents");
+      expect(removed).not.toContain(".github/skills");
+      expect(existsSync(join(base, ".claude", "skills"))).toBe(false);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("returns empty list when no stale folders exist", () => {
+    const { pruneUnselectedEngineFolders } =
+      require("../src/workflow-artifacts.js") as typeof import("../src/workflow-artifacts.js");
+    const base = mkdtempSync(join(tmpdir(), "vf-prune-empty-"));
+    try {
+      const removed = pruneUnselectedEngineFolders(base, "copilot");
+      expect(removed).toEqual([]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });
