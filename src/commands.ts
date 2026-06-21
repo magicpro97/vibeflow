@@ -334,13 +334,3 @@ export {
   EXIT_IO,
 } from "./commands/pr-queue.js";
 export type { QueueEntry } from "./commands/pr-queue.js";
-
-// === Re-export the merge-when-green cluster (issue #175, A9) ===
-// `vf pr merge-when-green [--head <branch>]` — claims queue head,
-// polls CI, merges on green, requeues on red, escalates on timeout.
-export {
-  mergeWhenGreen,
-  EXIT_MERGE_FAIL,
-  EXIT_TIMEOUT,
-} from "./commands/pr-merge-when-green.js";
-export type { MergeWhenGreenInject } from "./commands/pr-merge-when-green.js";
