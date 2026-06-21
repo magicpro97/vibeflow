@@ -18,6 +18,7 @@ import { out } from "./logbus.js";
 import {
   type SelectOptions,
   confirmInput,
+  isCancellation,
   selectMany,
   selectOne,
   textInput,
@@ -47,14 +48,20 @@ function labelsToIds(labels: string[]): HookTemplateId[] {
   return HOOK_TEMPLATE_IDS.filter((id) => picked.has(id));
 }
 
-/** Risk levels offered for a custom rule, strongest first so `block` is the obvious default. */
-const CUSTOM_RISK_CHOICES = ["block (critical)", "require approval (high)", "warn (medium)"];
+/** Risk levels offered for a custom rule, strongest first so `block` is the obvious default.
+ *  Single source of truth: the menu labels AND the label→level lookup both derive from this,
+ *  so a label edit can never silently desync into a downgraded guardrail. */
+const CUSTOM_RISK_OPTIONS: { label: string; level: CustomHookRule["risk"] }[] = [
+  { label: "block (critical)", level: "critical" },
+  { label: "require approval (high)", level: "high" },
+  { label: "warn (medium)", level: "medium" },
+];
+const CUSTOM_RISK_CHOICES = CUSTOM_RISK_OPTIONS.map((o) => o.label);
 
-const RISK_LABEL_TO_LEVEL: Record<string, CustomHookRule["risk"]> = {
-  "block (critical)": "critical",
-  "require approval (high)": "high",
-  "warn (medium)": "medium",
-};
+/** Resolve a menu label back to its risk level; defaults to the strongest (block) on no match. */
+function riskForLabel(label: string): CustomHookRule["risk"] {
+  return CUSTOM_RISK_OPTIONS.find((o) => o.label === label)?.level ?? "critical";
+}
 
 /** How many custom rules a single init run will collect, to bound the loop. */
 const MAX_CUSTOM_RULES = 10;
@@ -85,7 +92,7 @@ async function promptCustomRule(deps: CustomPromptDeps): Promise<CustomHookRule 
   const riskLabel = await deps.askSelectOne("  Risk when matched", CUSTOM_RISK_CHOICES, {
     defaultValue: CUSTOM_RISK_CHOICES[0],
   } as SelectOptions);
-  const risk = RISK_LABEL_TO_LEVEL[riskLabel] ?? "high";
+  const risk = riskForLabel(riskLabel);
   const reason = (await deps.askText("  Reason (optional)")).trim();
   return { name, kind, pattern, risk, reason: reason || undefined };
 }
@@ -137,6 +144,11 @@ export async function collectHookSetup(deps: HookSetupDeps = {}): Promise<HookCo
       { defaultValues: HOOK_TEMPLATES.map((t) => t.label) },
     );
     const templates = labelsToIds(labels);
+    // Note: selectMany returns its fallback (ALL options) when the user picks
+    // nothing, so the menu has an intentional safe floor — "deselect everything"
+    // resolves to all-on, NOT all-off. That is the right default for a security
+    // guardrail; a true all-off policy is reached via `--no-hooks` (skip) or by
+    // hand-editing SETTINGS.json, never by an ambiguous empty menu.
     if (templates.length < HOOK_TEMPLATE_IDS.length) {
       const dropped = HOOK_TEMPLATES.filter((t) => !templates.includes(t.id)).map((t) => t.label);
       write("vf", c.yellow(`  disabling: ${dropped.join(", ")}`));
@@ -144,7 +156,7 @@ export async function collectHookSetup(deps: HookSetupDeps = {}): Promise<HookCo
     const custom = await collectCustomRules({ askText, askConfirm, askSelectOne, write });
     return { templates, custom };
   } catch (err) {
-    if (["cancelled", "selection timed out"].includes((err as Error).message)) return null;
+    if (isCancellation(err)) return null;
     throw err;
   }
 }

@@ -243,63 +243,43 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
 - Deleted `20260613_120449_589ec6` Hermes session export (local, 3.6MB).
 - Working tree now clean apart from committed-knowledge staging.
 
-## [2026-06-17] fix | Phase 2 engine-scoping — stop generating all-engine files
-- **Root cause**: `vf init --engine X` Phase 2 (agent-team) still emitted
-  instruction files / skill dirs for ALL engines, not just X. Five
-  leak points found and patched:
-  1. `ADAPTER_DESCRIPTION["ai-init-instruction-writer"]` hardcoded
-     "Update all 3 instruction files (CLAUDE.md, AGENTS.md,
-     .github/copilot-instructions.md)" — the spec text the engine
-     received. Fixed: now says "engine-scoped instruction file(s)".
-     `buildAdapterSpec` already overrides this via
-     `instructionDescription(scope)`, so runtime was correct, but the
-     dead text was a latent leak if a refactor swapped the dispatch.
-  2. `ADAPTER_ACCEPTANCE["ai-init-instruction-writer"]` hardcoded
-     "all 3 instruction files … carry a fresh vibeflow:start block".
-     Fixed: now says "engine-scoped instruction file(s)".
-     `planAiInitUnits` already overrides via `instructionAcceptance(scope)`,
-     so this was dead-code but a latent leak.
-  3. `ADAPTER_SCOPE["ai-init-instruction-writer"]` hardcoded all 3
-     engine files. Used as the reviewer fallback when `unit.scope` is
-     empty. Fixed: reduced to copilot scope
-     (`["AGENTS.md", ".github/copilot-instructions.md"]`) — the widest
-     single-engine scope — so a missing scope can't be passed by
-     evidence citing an unselected engine's file. Reviewer fallback
-     also switched from `ADAPTER_SCOPE` to
-     `ENGINE_INSTRUCTION_SCOPE[INIT_DEFAULT_ENGINE]` for the same
-     reason.
-  4. `buildInstructionsBody` (ai-init.ts:78-86) fell back to
-     `[...ENGINES]` (all 3 engines) when `intake.engines` was empty.
-     This is the RAG-style `INSTRUCTIONS.md` file the engine reads —
-     so it told the engine to write all 3 instruction files + all 3
-     skill dirs. Fixed: falls back to `[CONTEXT_FALLBACK_ENGINE]`
-     (copilot, matching `INIT_DEFAULT_ENGINE`).
-     `instructionFilesForEngines` and `instructionFilesFor` had the
-     same all-engines fallback; fixed identically. Removed the now-
-     unused `ALL_INSTRUCTION_FILES` constant.
-  5. `ADAPTER_DESCRIPTION["ai-init-skill-curator"]` hardcoded
-     "Copy to .claude/skills/, .agents/skills/, .github/skills/".
-     Fixed: now says "the engine-scoped skill directory only".
-     `skillCuratorDescription(intake)` already overrides this, so
-     runtime was correct, but the dead text was a latent leak.
-  6. Skill-curator reviewer hardcoded the string check
-     `e.includes(".vibeflow/skills/") || e.includes("SKILL_INDEX")`
-     instead of consulting `unit.scope`. Fixed: now uses
-     `unit.scope` (falling back to `ADAPTER_SCOPE`) consistently with
-     the instruction-writer reviewer, so an out-of-scope skill path
-     (e.g. `.claude/skills/` when the engine is copilot) is rejected.
-- **Invariant tests added** (10 new tests in
-  `test/ai-init-workflow.test.ts` → "Phase 2 engine-scoping invariants"):
-  - instruction-writer spec never references "all 3"
-  - skill-curator spec never references unselected engine skill dirs
-  - instruction-writer acceptance follows the selected engine
-  - instruction-writer scope per engine (claude/codex/copilot)
-  - instruction-writer reviewer rejects an unselected engine's file
-  - skill-curator reviewer uses `unit.scope`
-  - skill-curator reviewer rejects an out-of-scope path
-  - empty `intake.engines` falls back to a single engine scope (copilot)
-- **Verification**: 63/63 ai-init-workflow tests pass; 44/44 ai-init
-  tests pass; full suite 1397 pass / 3 flaky (cli help routing —
-  pre-existing, pass when run in isolation). Lint clean on changed
-  files. Typecheck: no new errors (pre-existing unrelated errors in
-  test/commands-coverage-extras.test.ts and test/tools.test.ts).
+## [2026-06-21] init-hooks | vf init interactive guardrail-hook customization
+- New: `vf init` Phase 1.65 — TTY menu to pick which built-in hook
+  templates stay active + add custom rules; arms engine configs +
+  persists policy to SETTINGS.json `hooks`. `--no-hooks` opts out.
+- 5 built-in templates (block-destructive, flag-installs, protect-secrets,
+  protect-config, workspace-guard) wrap the existing risk.ts clusters;
+  scoreRisk gated by a resolved policy. Fail-safe: missing/corrupt config
+  => ALL templates on (byte-identical to pre-feature). Only an explicit
+  valid opt-out can drop a guardrail.
+- Custom rules: case-insensitive LITERAL SUBSTRING match (NOT regex).
+  Independent cross-review found regex => ReDoS holes (a blocklist for
+  nested quantifiers misses `(a|a)*`, `((a)+)+`, backrefs); switched to
+  String.includes to make CWE-1333 structurally impossible. Rules can
+  only RAISE risk, never weaken a built-in.
+- New files: src/hooks/templates.ts, src/init-hooks.ts. Reusable
+  emitHookFiles/armHooks extracted from `vf hooks emit`.
+- Verified: typecheck + lint + file-size + 100% per-file coverage + full
+  suite; hook selftest 20/20 unchanged. Two independent review subagents
+  signed off (security + UX/compat).
+
+## [2026-06-21] init-hooks | review round 2 — address 5 follow-up findings + copilot smoke
+- Decoupled Phase 1.65 from `--ai`: guardrails are independent of AI
+  enrichment, so `vf init --no-ai` now arms hooks too (was: silently skipped).
+- protect-secrets template now documents `.git/` in its label + description
+  (the gate covers .git/ writes, previously undisclosed → surprise on opt-out).
+- Collapsed CUSTOM_RISK_CHOICES + RISK_LABEL_TO_LEVEL into one
+  CUSTOM_RISK_OPTIONS source; lookup default raised to `critical` (safe).
+- Extracted isCancellation()/PROMPT_CANCEL_MESSAGES into terminal-prompts as
+  the single source; init-hooks + init-intake both use it (was: duplicated
+  string list, drift hazard).
+- all-off menu: confirmed safe-default (deselect-all → all-on floor) is the
+  RIGHT behavior for a security guardrail; documented it. True all-off is
+  `--no-hooks` or hand-edit SETTINGS.json.
+- Smoke-tested on a fresh empty repo with `--engine copilot`: 10 canonical +
+  copilot-instructions.md + .github/hooks/copilot.json (native preToolUse veto)
+  generated clean; `vf hooks emit --yes` MERGED an existing .claude/settings.json
+  (permissions/model/env preserved); live `vf hook` honored a custom policy
+  (block-destructive off → rm -rf allowed; custom "deploy prod" → blocked;
+  protect-secrets on → cat .env blocked).
+- Verified: bun run check green, 100% coverage (12116/12116), selftest 20/20.

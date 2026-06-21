@@ -332,10 +332,12 @@ export async function init(
   // Phase 1.65: Interactive guardrail-hooks setup. Lets the user pick which
   // built-in hook templates stay active and add custom rules, then arms the
   // engine configs (the live PreToolUse gate) + persists the policy to
-  // SETTINGS.json. TTY-gated and opt-out via --no-hooks; skipped on dry runs and
-  // when preflight refused. The default menu keeps every template on, so a user
-  // who just taps Enter ends up with the same all-on guardrail as before.
-  const wantHooks = ai && !dry && !result.refused && !flags["no-hooks"];
+  // SETTINGS.json. Guardrails are INDEPENDENT of AI enrichment, so this runs
+  // even under --no-ai; it is only gated on a TTY (or the test seam), opt-out
+  // via --no-hooks, and skipped on dry runs / when preflight refused. The
+  // default menu keeps every template on, so a user who just taps Enter ends
+  // up with the same all-on guardrail as before.
+  const wantHooks = !dry && !result.refused && !flags["no-hooks"];
   if (wantHooks && (inject.hookSetup !== undefined || process.stdin.isTTY)) {
     out("vf");
     const config = inject.hookSetup !== undefined ? inject.hookSetup : await collectHookSetup();

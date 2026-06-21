@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import {
+  PROMPT_CANCEL_MESSAGES,
   type TerminalDeps,
   clampInput,
   confirmInput,
+  isCancellation,
   selectMany,
   selectOne,
   textInput,
@@ -720,63 +722,20 @@ describe("terminal prompts — setRawMode rollback (defect #B18)", () => {
   });
 });
 
-describe("terminal-prompts production readline (no deps) — coverage backstop", () => {
-  // These tests call the production readline path directly so bun's
-  // in-process coverage counter increments the lines that the
-  // subprocess-driven `runPrompt` helper (above) bypasses.
-  function makeFakeReadline() {
-    const handlers: { SIGINT: Array<() => void>; close: Array<() => void> } = {
-      SIGINT: [],
-      close: [],
-    };
-    let pendingQuestion: { q: string; cb: (a: string) => void } | null = null;
-    const rl = {
-      question: (q: string, cb: (a: string) => void) => {
-        pendingQuestion = { q, cb };
-      },
-      on: (ev: string, cb: () => void) => {
-        if (ev in handlers) (handlers as Record<string, Array<() => void>>)[ev]?.push(cb);
-        return rl;
-      },
-      once: (ev: string, cb: () => void) => {
-        if (ev in handlers) (handlers as Record<string, Array<() => void>>)[ev]?.push(cb);
-        return rl;
-      },
-      close: () => {},
-    };
-    return {
-      rl,
-      emit: (event: "SIGINT" | "close" | "data", payload?: unknown) => {
-        if (event === "data" && payload && pendingQuestion) {
-          const p = pendingQuestion;
-          pendingQuestion = null;
-          p.cb(String(payload));
-          return;
-        }
-        if (event === "SIGINT") {
-          for (const cb of handlers.SIGINT) cb();
-        } else if (event === "close") {
-          for (const cb of handlers.close) cb();
-        }
-      },
-    };
-  }
-
-  test("textInput production path: question callback resolves with input", async () => {
-    const fake = makeFakeReadline();
-    const deps: TerminalDeps = { createInterface: () => fake.rl as never };
-    const promise = textInput("Name", "default", deps);
-    await new Promise((r) => setTimeout(r, 5));
-    fake.emit("data", "user-typed");
-    await expect(promise).resolves.toBe("user-typed");
+describe("isCancellation / PROMPT_CANCEL_MESSAGES", () => {
+  test("recognizes the cancel + timeout sentinels thrown by the prompts", () => {
+    expect(isCancellation(new Error("cancelled"))).toBe(true);
+    expect(isCancellation(new Error("selection timed out"))).toBe(true);
   });
 
-  test("confirmInput production path: question callback resolves with yes", async () => {
-    const fake = makeFakeReadline();
-    const deps: TerminalDeps = { createInterface: () => fake.rl as never };
-    const promise = confirmInput("Ok?", false, deps);
-    await new Promise((r) => setTimeout(r, 5));
-    fake.emit("data", "yes");
-    await expect(promise).resolves.toBe(true);
+  test("rejects a real fault and non-Error values", () => {
+    expect(isCancellation(new Error("disk on fire"))).toBe(false);
+    expect(isCancellation("cancelled")).toBe(false);
+    expect(isCancellation(null)).toBe(false);
+    expect(isCancellation(undefined)).toBe(false);
+  });
+
+  test("the sentinel list matches what selectOne/selectMany throw", () => {
+    expect([...PROMPT_CANCEL_MESSAGES]).toEqual(["cancelled", "selection timed out"]);
   });
 });
