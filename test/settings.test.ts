@@ -321,3 +321,66 @@ describe("settings.priorityRank", () => {
     expect(rank.lsp).toBeGreaterThan(rank.codegraph);
   });
 });
+
+describe("settings.hooks (guardrail policy)", () => {
+  test("a repo that never configured hooks keeps an ABSENT hooks block", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, {}, { now: fixedNow });
+      expect(readSettings(dir).hooks).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a present-but-garbage hooks block coerces to the all-on default", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ hooks: "nonsense" }));
+      const s = readSettings(dir);
+      expect(s.hooks?.templates).toEqual([
+        "block-destructive",
+        "flag-installs",
+        "protect-secrets",
+        "protect-config",
+        "workspace-guard",
+      ]);
+      expect(s.hooks?.custom).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit template subset round-trips through write→read", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(
+        dir,
+        {
+          hooks: {
+            templates: ["block-destructive", "protect-secrets"],
+            custom: [{ name: "no-prod", kind: "command", pattern: "deploy prod", risk: "high" }],
+          },
+        },
+        { now: fixedNow },
+      );
+      const s = readSettings(dir);
+      expect(s.hooks?.templates).toEqual(["block-destructive", "protect-secrets"]);
+      expect(s.hooks?.custom[0]?.name).toBe("no-prod");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("writeSettings preserves an existing hooks block when next omits it", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { hooks: { templates: [], custom: [] } }, { now: fixedNow });
+      // A later unrelated write (e.g. enabling a tool) must not re-expand hooks.
+      writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
+      expect(readSettings(dir).hooks?.templates).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

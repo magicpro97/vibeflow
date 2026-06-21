@@ -1,5 +1,6 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import type { HookInput, RiskLevel } from "../core.js";
+import { type ResolvedHookPolicy, applyCustomRules, resolveHookPolicy } from "./templates.js";
 
 /** Other destructive/irreversible command patterns — critical risk. */
 const DANGEROUS_COMMAND = [
@@ -227,43 +228,64 @@ function expandSubCommands(raw: string): string[] {
 
 /**
  * Score the risk of a hook event from its command, files, and declared scope.
- * Diff/scope/intent-aware to keep false positives low (HOOKS_AND_GUARDRAILS.md).
+ * The optional `policy` gates which guardrail clusters run and layers user custom
+ * rules on top; it DEFAULTS to all-on, so existing callers (and the self-test
+ * corpus) score exactly as before — a cluster is only silenced by a validated opt-out.
  */
-export function scoreRisk(input: HookInput): { risk: RiskLevel; reasons: string[] } {
+export function scoreRisk(
+  input: HookInput,
+  policy: ResolvedHookPolicy = resolveHookPolicy(undefined),
+): { risk: RiskLevel; reasons: string[] } {
   const reasons: string[] = [];
   let risk: RiskLevel = "none";
   const bump = (level: RiskLevel) => {
     if (RISK_ORDER.indexOf(level) > RISK_ORDER.indexOf(risk)) risk = level;
   };
 
-  scoreCommand(input, bump, reasons);
-  scoreFiles(input, bump, reasons);
+  scoreCommand(input, policy.enabled, bump, reasons);
+  scoreFiles(input, policy.enabled, bump, reasons);
+  // Custom rules layer on top of the built-ins (they can only raise risk).
+  for (const hit of applyCustomRules(policy.custom, input)) {
+    bump(hit.risk);
+    reasons.push(hit.reason);
+  }
 
   if (reasons.length === 0) reasons.push("no risk signals detected");
   return { risk, reasons };
 }
 
 /** Risk signals from the command string (destructive ops, secrets, workspace escape). */
-function scoreCommand(input: HookInput, bump: (l: RiskLevel) => void, reasons: string[]): void {
+function scoreCommand(
+  input: HookInput,
+  enabled: ResolvedHookPolicy["enabled"],
+  bump: (l: RiskLevel) => void,
+  reasons: string[],
+): void {
   const cmd = input.command ?? "";
   if (!cmd) return;
   const subs = expandSubCommands(cmd);
   const subTokens = subs.map((s) => tokenize(stripQuoteChars(s)));
 
-  scoreDestructive(cmd, subs, subTokens, bump, reasons);
-  scoreForcePush(subTokens, bump, reasons);
-
-  if (anyMatch(SECRET_CRITICAL, cmd)) {
-    bump("critical");
-    reasons.push("command reads/writes a sensitive secret");
-  } else if (anyMatch(SECRET_HIGH, cmd)) {
-    bump("high");
-    reasons.push("command touches secret material");
+  if (enabled.has("block-destructive")) {
+    scoreDestructive(cmd, subs, subTokens, bump, reasons);
+    scoreForcePush(subTokens, bump, reasons);
   }
 
-  scoreWorkspaceCommand(input, subTokens, bump, reasons);
+  if (enabled.has("protect-secrets")) {
+    if (anyMatch(SECRET_CRITICAL, cmd)) {
+      bump("critical");
+      reasons.push("command reads/writes a sensitive secret");
+    } else if (anyMatch(SECRET_HIGH, cmd)) {
+      bump("high");
+      reasons.push("command touches secret material");
+    }
+  }
 
-  if (anyMatch(INSTALL_COMMAND, cmd)) {
+  if (enabled.has("workspace-guard")) scoreWorkspaceCommand(input, subTokens, bump, reasons);
+
+  // Floor: any command is at least low risk (low never blocks, so this is not a
+  // guardrail and stays unconditional). Install detection only bumps when enabled.
+  if (enabled.has("flag-installs") && anyMatch(INSTALL_COMMAND, cmd)) {
     bump("medium");
     reasons.push("package install has side effects");
   } else {
@@ -335,32 +357,37 @@ function scoreWorkspaceCommand(
 }
 
 /** Risk signals from file targets (protected paths, scope/workspace escape). */
-function scoreFiles(input: HookInput, bump: (l: RiskLevel) => void, reasons: string[]): void {
+function scoreFiles(
+  input: HookInput,
+  enabled: ResolvedHookPolicy["enabled"],
+  bump: (l: RiskLevel) => void,
+  reasons: string[],
+): void {
   const files = input.files ?? [];
-
-  const protectedHits = files.filter((f) => anyMatch(PROTECTED_PATH, f));
-  if (protectedHits.length) {
-    bump("high");
-    reasons.push(`touches protected path(s): ${protectedHits.join(", ")}`);
-  }
-
-  const configHits = files.filter((f) => anyMatch(CONFIG_PROTECTED, f));
-  if (configHits.length) {
-    bump("high");
-    reasons.push(`edits build/lint/hook config (path-protected): ${configHits.join(", ")}`);
-  }
-
-  const escaped = outOfScope(files, input.scope);
-  if (escaped.length) {
-    bump("high");
-    reasons.push(`out of declared scope: ${escaped.join(", ")}`);
-  }
-
-  if (input.workspace) {
-    const outside = files.filter((f) => escapesWorkspace(f, input.workspace as string));
-    if (outside.length) {
+  const flag = (patterns: RegExp[], label: string) => {
+    const hits = files.filter((f) => anyMatch(patterns, f));
+    if (hits.length) {
       bump("high");
-      reasons.push(`write escapes workspace: ${outside.join(", ")}`);
+      reasons.push(`${label}: ${hits.join(", ")}`);
+    }
+  };
+  if (enabled.has("protect-secrets")) flag(PROTECTED_PATH, "touches protected path(s)");
+  if (enabled.has("protect-config"))
+    flag(CONFIG_PROTECTED, "edits build/lint/hook config (path-protected)");
+
+  if (enabled.has("workspace-guard")) {
+    const escaped = outOfScope(files, input.scope);
+    if (escaped.length) {
+      bump("high");
+      reasons.push(`out of declared scope: ${escaped.join(", ")}`);
+    }
+    if (input.workspace) {
+      const ws = input.workspace;
+      const outside = files.filter((f) => escapesWorkspace(f, ws));
+      if (outside.length) {
+        bump("high");
+        reasons.push(`write escapes workspace: ${outside.join(", ")}`);
+      }
     }
   }
 }

@@ -20,7 +20,7 @@
  *   - `terminal-prompts.textInput` already accepts `createInterface`
  *     injection via the `TerminalDeps` parameter.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -749,56 +749,9 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
     }
     globalThis.fetch = origFetch as typeof fetch;
     rmSync(dir, { recursive: true, force: true });
-
-    // Restore real node:child_process (mock leaks across files in
-    // the same test run; re-mock with real exports is the escape).
-    mock.module("node:child_process", () => {
-      return require("node:child_process");
-    });
   });
 
   test("codegraph-install-else + ctx7 in init + workflowResult.ok=true (hits 466-472, 481, 488-490, 556-562)", async () => {
-    // Per the A7 / PR137 closed loop: we use bun's mock.module to stub
-    // ALL node:child_process calls (spawnSync + spawn) so the init
-    // flow's many binary calls (codegraph, npm, npx, gh, etc.) don't
-    // shell out. Mock covers BOTH 3-arg (cmd, args, opts) and
-    // 2-arg shell (cmd, opts) forms.
-    const realModule = require("node:child_process");
-    mock.module("node:child_process", () => ({
-      ...realModule,
-      spawnSync: () => ({
-        status: 0,
-        stdout: Buffer.from(""),
-        stderr: Buffer.from(""),
-        pid: 0,
-        output: [Buffer.from(""), Buffer.from(""), Buffer.from("")],
-        signal: null,
-      }),
-      spawn: () => {
-        const { PassThrough } = require("node:stream");
-        const stdout = new PassThrough();
-        const stderr = new PassThrough();
-        const child: any = {
-          pid: 0,
-          stdout,
-          stderr,
-          stdin: new PassThrough(),
-          on: () => child,
-          once: () => child,
-          emit: () => true,
-          kill: () => true,
-          killed: false,
-          exitCode: 0,
-          signalCode: null,
-        };
-        setImmediate(() => {
-          stdout.end();
-          stderr.end();
-          child.emit("close", 0);
-        });
-        return child;
-      },
-    }));
     const { init } = await import("../src/commands.js");
     const { hasCommand } = await import("../src/core.js");
     type DispatcherUnit = { name: string; scope?: string[] };
@@ -833,21 +786,14 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       // Force the codegraph-install else-branch (L466-481): pretend
       // `codegraph` is NOT on PATH, then override the per-step spawner
       // so the fake `npm i -g codegraph` returns status 0.
-      // Mock hasCommand to refuse EVERY binary (codegraph, gh, etc.)
-      // so init's ctx7-resolve + provisionTool paths don't shell out
-      // to real CLIs. Earlier this only mocked "codegraph"; the
-      // ctx7-resolve path introduced by the PR #137 init flow
-      // calls `gh api` per-candidate which would shell out on a
-      // machine with `gh` installed (e.g. CI runners). Returning
-      // false unconditionally keeps the test fully mocked.
-      hasCommandFn: () => false,
+      hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
       syncSpawner: () => ({ status: 0 }),
       // Make the bare ensureCtx7Auth() call at L490 succeed immediately
       // — "Logged in" in stdout trips the alreadyAuth branch.
       ctx7Inject: { spawner: makeCtx7Spawner() as never },
-      // Phase 1.5 (claude-mem): force a non-TTY skip so init never shells
-      // out to the real `npx claude-mem install` (which would hang the test).
-      memoryInject: { isTTY: () => false },
+      // isTTY=true here would otherwise drive the real interactive hooks
+      // menu (Phase 1.65) and block on stdin; null no-ops that step.
+      hookSetup: null,
       // Skip the interactive questionnaire.
       answers: { goal: "test", engines: ["claude"] },
     } as never);
@@ -873,18 +819,10 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
         evidence: ["src/cli.ts"],
         gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
       }),
-      // Mock hasCommand to refuse EVERY binary (codegraph, gh, etc.)
-      // so init's ctx7-resolve + provisionTool paths don't shell out
-      // to real CLIs. Earlier this only mocked "codegraph"; the
-      // ctx7-resolve path introduced by the PR #137 init flow
-      // calls `gh api` per-candidate which would shell out on a
-      // machine with `gh` installed (e.g. CI runners). Returning
-      // false unconditionally keeps the test fully mocked.
-      hasCommandFn: () => false,
+      hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
       syncSpawner: () => ({ status: 1 }),
       ctx7Inject: { spawner: makeCtx7Spawner() as never },
-      // Phase 1.5 (claude-mem): force a non-TTY skip (see the sibling test).
-      memoryInject: { isTTY: () => false },
+      hookSetup: null,
       answers: { goal: "test", engines: ["claude"] },
     } as never);
     expect(typeof code).toBe("number");

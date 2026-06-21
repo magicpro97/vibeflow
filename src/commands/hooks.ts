@@ -22,10 +22,11 @@
 // (hot-reloads the agent, so consent is mandatory).
 
 import { spawnSync } from "node:child_process";
-import { chmodSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CTX_DIR,
+  type HookConfig,
   c,
   cwd,
   engineHookFiles,
@@ -35,8 +36,11 @@ import {
   out,
   parseHookInput,
   presentDecision,
+  readSettings,
+  resolveHookPolicy,
   runSelftest,
   writeFileSafe,
+  writeSettings,
 } from "./_shared.js";
 import type { SelftestReport } from "./_shared.js";
 
@@ -153,7 +157,11 @@ export async function hook(
     );
     return 2;
   }
-  const result = evaluateHook(input);
+  // Load the repo's stored hook policy so the live gate honors the templates the
+  // user kept (and any custom rules). readSettings is fail-safe: a missing/garbage
+  // SETTINGS.json yields the all-on default, so the gate never silently weakens.
+  const policy = resolveHookPolicy(readSettings(cwd()).hooks);
+  const result = evaluateHook(input, () => process.env, policy);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
   const { json, exitCode } = presentDecision(result, input);
@@ -229,6 +237,94 @@ function installHooks(): number {
   return status;
 }
 
+/** Project-relative path to Claude Code's shared settings file. */
+const CLAUDE_SETTINGS_REL = ".claude/settings.json";
+
+/**
+ * Merge the generated `hooks` block into an EXISTING `.claude/settings.json`,
+ * preserving every other key (permissions, model, env, …). Unlike the three
+ * VibeFlow-owned hook files (.codex/, .github/hooks/, .githooks/), this file is
+ * Claude Code's own user/project settings — a wholesale overwrite would silently
+ * destroy a user's unrelated config (the data-loss bug this guards against).
+ *
+ * Mirrors writeClaudeMcp's posture: a corrupt existing file is LEFT UNTOUCHED
+ * (returns null) so we never clobber JSON we can't safely read; the caller then
+ * skips that file and warns. `generated` is the full claudeHookConfig() string;
+ * only its top-level `hooks` key is taken.
+ */
+function mergeClaudeSettings(absPath: string, generated: string): string | null {
+  const incoming = JSON.parse(generated) as { hooks: unknown };
+  if (!existsSync(absPath)) return JSON.stringify(incoming, null, 2);
+  let existing: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(readFileSync(absPath, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    existing = parsed as Record<string, unknown>;
+  } catch {
+    return null; // not valid JSON — refuse to overwrite (fail-safe for user data)
+  }
+  return JSON.stringify({ ...existing, hooks: incoming.hooks }, null, 2);
+}
+
+/**
+ * Write every engine hook config into `base`, all delegating to `vf hook`, and
+ * chmod the shell git hooks executable. Returns the relative paths written.
+ *
+ * `.claude/settings.json` is Claude Code's SHARED settings file, so its `hooks`
+ * key is MERGED into any existing file (preserving permissions/model/env); a
+ * corrupt existing file is left untouched and skipped with a warning. The other
+ * files are VibeFlow-owned and written wholesale.
+ *
+ * Shared by `vf hooks emit --yes` and the `vf init` hooks step so the two paths
+ * can never drift. CALLER OWNS CONSENT: writing .claude/settings.json hot-reloads
+ * a PreToolUse hook into a running agent, so only invoke this after an explicit
+ * --yes / interactive opt-in.
+ */
+export function emitHookFiles(base: string): string[] {
+  const files = engineHookFiles();
+  const written: string[] = [];
+  for (const [rel, content] of Object.entries(files)) {
+    const dest = join(base, rel);
+    if (rel === CLAUDE_SETTINGS_REL) {
+      const merged = mergeClaudeSettings(dest, content);
+      if (merged === null) {
+        out("vf", c.yellow(`! ${rel} is not valid JSON — left untouched. Fix it, then re-run.`), {
+          level: "error",
+        });
+        continue;
+      }
+      writeFileSafe(dest, merged);
+      written.push(rel);
+      continue;
+    }
+    writeFileSafe(dest, content);
+    // Git only runs hooks under core.hooksPath if they're executable — chmod the shell hooks.
+    if (rel.startsWith(".githooks/")) {
+      try {
+        chmodSync(dest, 0o755);
+      } catch {
+        /* best-effort: non-POSIX filesystems may not support the bit */
+      }
+    }
+    written.push(rel);
+  }
+  return written;
+}
+
+/**
+ * Persist a chosen hook policy to SETTINGS.json AND write the engine hook configs
+ * that arm the live guardrail. Used by `vf init`'s interactive hooks step. Returns
+ * the engine config paths written so the caller can report them.
+ *
+ * Order matters: SETTINGS is written FIRST so that the instant the engine configs
+ * land (and a watching agent hot-reloads its PreToolUse hook), the very next
+ * `vf hook` invocation already reads the intended policy — never a stale all-on.
+ */
+export function armHooks(base: string, config: HookConfig): string[] {
+  writeSettings(base, { hooks: config });
+  return emitHookFiles(base);
+}
+
 export function hooks(
   sub: string | undefined,
   flags: Record<string, string | boolean> = {},
@@ -267,17 +363,7 @@ export function hooks(
         return 0;
       }
       // --yes: write per-engine hook configs into the active repo, all delegating to `vf hook`.
-      for (const [rel, content] of Object.entries(files)) {
-        const dest = join(cwd(), rel);
-        writeFileSafe(dest, content);
-        // Git only runs hooks under core.hooksPath if they're executable — chmod the shell hooks.
-        if (rel.startsWith(".githooks/")) {
-          try {
-            chmodSync(dest, 0o755);
-          } catch {
-            /* best-effort: non-POSIX filesystems may not support the bit */
-          }
-        }
+      for (const rel of emitHookFiles(cwd())) {
         out("vf", `${c.green("+")} ${rel}`);
       }
       return 0;

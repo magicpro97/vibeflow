@@ -32,6 +32,8 @@ export * from "../gates.js";
 export * from "../hooks/adapters.js";
 export * from "../hooks/runner.js";
 export * from "../hooks/selftest.js";
+export * from "../hooks/templates.js";
+export * from "../init-hooks.js";
 export * from "../init-intake.js";
 export * from "../journal.js";
 export * from "../orchestrator/investigate.js";
@@ -182,6 +184,12 @@ export type { Ctx7AuthResult } from "./init-ctx7.js";
 // under the 400-line cap. The cycle rule routes it through this barrel.
 export { runInitAiEnrichment } from "./init-ai.js";
 export type { InitAiEnrichmentOpts } from "./init-ai.js";
+
+// === Reusable hook-emit helper re-exported from hooks.ts ===
+// `vf init`'s interactive hooks step arms the engine guardrail configs via the
+// same writer `vf hooks emit --yes` uses. The cycle rule routes the cross-sibling
+// import through this barrel.
+export { armHooks, emitHookFiles } from "./hooks.js";
 
 // === Re-export the state cluster (issue #184, A0 brief surface) ===
 // `coord.ts` and `init.ts` use `isBriefFresh` to gate non-trivial

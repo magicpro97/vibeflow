@@ -161,7 +161,7 @@ export { discover } from "./commands/discover.js";
 // `hookSelftest` writes .vibeflow/knowledge/hook-selfcheck.json. `hooks`
 // is the small cluster CLI around `installHooks` (git config; surfaced
 // stderr on failure per PR28 audit Task 7 M3).
-export { hook, hookSelftest, hooks } from "./commands/hooks.js";
+export { armHooks, emitHookFiles, hook, hookSelftest, hooks } from "./commands/hooks.js";
 
 // === Re-export the tools cluster (issue #80, phase 8/14) ===
 // `vf tools` + `verify` + `repoLanguages` + `ensureToolIndex` +

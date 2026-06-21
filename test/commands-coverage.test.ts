@@ -569,6 +569,87 @@ describe("commands.init branches", () => {
   // preflight actually probes engines, which times out in the test
   // env. To make this testable we'd need to thread inject.preflight
   // into runAiInit as a test seam. Skipping for now.
+
+  // Phase 1.65 (interactive hooks). The inject.hookSetup seam drives the
+  // step without a TTY: a config arms SETTINGS + engine files; null leaves
+  // the policy untouched. aiPreflight/aiSpawner neutralize the real engine,
+  // hasCommandFn makes codegraph look present so no npm install fires.
+  const readyClaude = {
+    engine: "claude" as const,
+    level: "ready" as const,
+    detail: "ok",
+    checkedAt: "2026-06-15",
+  };
+  const neutralizedAi = {
+    preflight: () => [readyClaude],
+    aiPreflight: () => [readyClaude],
+    aiSpawner: async () => ({
+      status: 0,
+      stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+      stderr: "",
+      timedOut: false,
+    }),
+    hasCommandFn: () => true,
+  };
+
+  test("init: inject.hookSetup arms SETTINGS.json + engine hook configs", async () => {
+    const dir = freshDir("vf-init-hooks-");
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          ...neutralizedAi,
+          hookSetup: { templates: ["block-destructive"], custom: [] },
+        },
+      );
+      expect(code).toBe(0);
+      expect(readSettings(dir).hooks?.templates).toEqual(["block-destructive"]);
+      expect(existsSync(join(dir, ".claude", "settings.json"))).toBe(true);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init: hookSetup=null leaves the guardrail policy untouched", async () => {
+    const dir = freshDir("vf-init-hooks-null-");
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        { ...neutralizedAi, hookSetup: null },
+      );
+      expect(code).toBe(0);
+      // No hooks block written — fail-safe all-on still applies at scoring time.
+      expect(readSettings(dir).hooks).toBeUndefined();
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init: --no-hooks skips the hooks step even when hookSetup is supplied", async () => {
+    const dir = freshDir("vf-init-nohooks-");
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, "no-hooks": true, engine: "claude" },
+        { ...neutralizedAi, hookSetup: { templates: ["block-destructive"], custom: [] } },
+      );
+      expect(code).toBe(0);
+      expect(readSettings(dir).hooks).toBeUndefined();
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

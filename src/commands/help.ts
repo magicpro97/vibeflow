@@ -69,7 +69,7 @@ ${c.bold("Examples:")}
   vf doctor
   vf doctor --probe`,
 
-  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--no-ask] [--no-ai] [--dry-run]")}
+  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--no-ask] [--no-ai] [--no-hooks] [--dry-run]")}
 Generate the canonical context + engine instruction files and a workflow ledger.
 By default a hard creation gate refuses when no engine is ready; --dry-run previews
 offline (writes nothing). When --engine is omitted, init targets the centralized
@@ -80,12 +80,14 @@ ${c.bold("Options:")}
   --engine <e>   generate for a single engine (default: copilot)
   --no-ask       skip the intake questionnaire in TTY mode
   --no-ai        skip AI enrichment (deterministic context files only)
+  --no-hooks     skip the interactive guardrail-hooks setup (keeps all-on default)
   --dry-run      read-only preview — print what would be written, change nothing
 
 ${c.bold("Examples:")}
   vf init --engine claude
   vf init --no-ask
   vf init --no-ai
+  vf init --no-hooks
   vf init --dry-run`,
 
   run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot> [--yes]")}
