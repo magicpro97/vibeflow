@@ -97,6 +97,23 @@ export async function doctor(
   out("vf", `\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
   out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
 
+  // Issue #163 (F2): stale logbus lock detection
+  const lockFile = join(cwd(), ".vibeflow", "logs", "current", "current.log.lock");
+  if (existsSync(lockFile)) {
+    try {
+      const stat = statSync(lockFile);
+      const ageSec = (Date.now() - stat.mtimeMs) / 1000;
+      if (ageSec > 60) {
+        out(
+          "vf",
+          `  ${c.yellow("!")} logbus lock is stale (${Math.round(ageSec)}s old) — a prior session may have crashed`,
+        );
+      }
+    } catch {
+      // stat failed — ignore
+    }
+  }
+
   const probe = Boolean(flags.probe);
   const refresh = Boolean(flags.refresh);
   if (refresh) {

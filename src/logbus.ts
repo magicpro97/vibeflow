@@ -260,6 +260,11 @@ export class Logbus {
   async rotate(): Promise<void> {
     let release: (() => Promise<void>) | undefined;
     try {
+      // Issue #163 (F2): ensure the log dir exists BEFORE the lockfile
+      // call. The writeLocked path already does this (L191); rotate
+      // was missing it — when the dir was removed mid-run the lockfile
+      // would fail with ENOENT and the event would drop silently.
+      mkdirSync(this.dir, { recursive: true });
       release = await lockfile.lock(this.currentFile(), {
         realpath: false,
         lockfilePath: this.lockfilePath,

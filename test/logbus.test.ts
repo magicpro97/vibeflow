@@ -501,3 +501,34 @@ describe("Logbus ENOENT recovery (issue #145)", () => {
     }
   });
 });
+
+it("5 concurrent instances do not drop events via the cross-process lock", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-logbus-conc5-"));
+  const instances: Logbus[] = [0, 1, 2, 3, 4].map((i) => new Logbus({ runId: `inst${i}`, dir }));
+  const instanceIds = ["inst0", "inst1", "inst2", "inst3", "inst4"];
+  try {
+    await Promise.all(
+      instances.map((inst, idx) => {
+        for (let j = 0; j < 20; j++) {
+          inst.write({
+            channel: "vf",
+            level: "info" as const,
+            text: `i${idx} payload ${j}`,
+            runId: `id${String(idx)}`,
+          });
+        }
+        return Promise.resolve();
+      }),
+    );
+    // Drain the chains so the file is fully flushed
+    for (const inst of instances) {
+      if (typeof (inst as any).close === "function") await (inst as any).close();
+    }
+    const file = join(dir, "current.log");
+    const content = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const lines = content.split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(100);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
