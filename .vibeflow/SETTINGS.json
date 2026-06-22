@@ -1,6 +1,6 @@
 {
   "tools": {
-    "codegraph": false,
+    "codegraph": true,
     "lsp": true
   },
   "toolPriority": [
@@ -15,5 +15,5 @@
     "requireGit": false
   },
   "memory": false,
-  "updatedAt": "2026-06-22T02:22:01.314Z"
+  "updatedAt": "2026-06-22T03:40:47.246Z"
 }

@@ -58,4 +58,4 @@ Drive every task through this loop instead of free-handing it:
 - Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.
 
 ## Code Navigation Priority
-- For code navigation (definitions, references, callers, impact): prefer the language-server (LSP) MCP tools first; only fall back to grep/find/read if the others are unavailable.
+- For code navigation (definitions, references, callers, impact): prefer the codegraph_* MCP tools first; if unavailable or returns nothing, use the language-server (LSP) MCP tools; only fall back to grep/find/read if the others are unavailable.
