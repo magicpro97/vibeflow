@@ -212,32 +212,25 @@ describe("P0-2/P0-3: runParallel concurrency + inter-unit delay", () => {
 // ---------------------------------------------------------------------------
 
 describe("P0-4: buildFinisherBatchUnit shape", () => {
-  test("returns a single unit with all 4 finisher paths in scope", () => {
+  test("returns a single unit with the consolidated workflow-state finisher scope", () => {
     const u = buildFinisherBatchUnit(
       { name: "demo", languages: ["TS"] } as never,
       { goal: "init" },
       [],
     );
     expect(u.name).toBe("ai-init-finishers-batch");
-    expect(u.scope).toEqual([
-      ".vibeflow/SETTINGS.json",
-      ".vibeflow/WORKFLOW_POLICY.md",
-      ".vibeflow/WORKFLOW_STATE.json",
-      "QUICKSTART.md",
-    ]);
-    expect(u.scope).toHaveLength(4);
+    // PR #251 consolidated the finisher set to the single workflow-state writer.
+    expect(u.scope).toEqual([".vibeflow/WORKFLOW_STATE.json"]);
+    expect(u.scope).toHaveLength(1);
   });
 
-  test("spec mentions every section so the engine has the full context", () => {
+  test("spec mentions the workflow-state finisher section so the engine has full context", () => {
     const u = buildFinisherBatchUnit(
       { name: "demo", languages: ["TS"] } as never,
       { goal: "init" },
       [],
     );
-    expect(u.spec).toContain("ai-init-tool-configurator");
-    expect(u.spec).toContain("ai-init-workflow-policy-writer");
     expect(u.spec).toContain("ai-init-workflow-state-writer");
-    expect(u.spec).toContain("ai-init-quickstart-writer");
   });
 
   test("depends on the core adapters (analyzer + context-updater)", () => {
@@ -277,12 +270,12 @@ describe("P1-4: backoff options surface on the workflow opts", () => {
 
 // ---------------------------------------------------------------------------
 // P1-7: batched finisher — verified by buildFinisherBatchUnit tests
-// above + the integration tests in ai-init-workflow-runner.test.ts
-// (8 → 5 units). Smoke test the count here.
+// above + the integration tests in ai-init-workflow-runner.test.ts.
+// Smoke test the adapter set here (PR #251 consolidated 8 → 5 adapters).
 // ---------------------------------------------------------------------------
 
 describe("P1-7: batched finisher integration", () => {
-  test("planAiInitUnits still emits all 8 separate units (the batching is at workflow level)", async () => {
+  test("planAiInitUnits emits the 5 canonical adapter units (batching is at workflow level)", async () => {
     // The batching happens in runAiInitWorkflow, not in
     // planAiInitUnits — the latter is a pure builder used by tests
     // and the legacy single-shot path. This test pins the contract
@@ -290,10 +283,13 @@ describe("P1-7: batched finisher integration", () => {
     const { planAiInitUnits } = await import("../src/ai-init-workflow.js");
     const units = planAiInitUnits({ name: "demo", languages: ["TS"] } as never, { goal: "init" });
     const names = units.map((u) => u.name);
-    expect(names).toContain("ai-init-tool-configurator");
-    expect(names).toContain("ai-init-workflow-policy-writer");
-    expect(names).toContain("ai-init-workflow-state-writer");
-    expect(names).toContain("ai-init-quickstart-writer");
+    expect(names).toEqual([
+      "ai-init-analyzer",
+      "ai-init-instruction-writer",
+      "ai-init-skill-curator",
+      "ai-init-context-updater",
+      "ai-init-workflow-state-writer",
+    ]);
   });
 });
 

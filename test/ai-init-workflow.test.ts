@@ -156,7 +156,7 @@ describe("planAiInitUnits", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "../../../etc/passwd", description: "x", dod: "x" }],
     });
-    const phase = units[8];
+    const phase = units[5];
     expect(phase).toBeDefined();
     expect(phase?.name).not.toContain("..");
     expect(phase?.name).not.toContain("/");
@@ -200,9 +200,9 @@ describe("planAiInitUnits", () => {
         { name: "docs-update", description: "readme", ownerHint: "doc", dod: "ok" },
       ],
     });
-    expect(units[8]?.owner_agent).toBe("cli-engine");
-    expect(units[9]?.owner_agent).toBe("web-ui");
-    expect(units[10]?.owner_agent).toBe("doc-writer");
+    expect(units[5]?.owner_agent).toBe("cli-engine");
+    expect(units[6]?.owner_agent).toBe("web-ui");
+    expect(units[7]?.owner_agent).toBe("doc-writer");
   });
 
   // Branch coverage for resolveOwner: every regex branch in src/ai-init-workflow.ts:243-248
@@ -211,7 +211,7 @@ describe("planAiInitUnits", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "sk", description: "add new skill", ownerHint: "skill", dod: "ok" }],
     });
-    expect(units[8]?.owner_agent).toBe("skill-author");
+    expect(units[5]?.owner_agent).toBe("skill-author");
   });
 
   test("resolveOwner fuzzy-matches preflight/probe/quota keywords to preflight-engine", () => {
@@ -220,7 +220,7 @@ describe("planAiInitUnits", () => {
         { name: "pf", description: "add preflight probe", ownerHint: "preflight", dod: "ok" },
       ],
     });
-    expect(units[8]?.owner_agent).toBe("preflight-engine");
+    expect(units[5]?.owner_agent).toBe("preflight-engine");
   });
 
   test("resolveOwner fuzzy-matches dispatch/orchestrat/runner/workflow keywords to dispatch-runner", () => {
@@ -229,7 +229,7 @@ describe("planAiInitUnits", () => {
         { name: "dr", description: "add workflow runner", ownerHint: "dispatch", dod: "ok" },
       ],
     });
-    expect(units[8]?.owner_agent).toBe("dispatch-runner");
+    expect(units[5]?.owner_agent).toBe("dispatch-runner");
   });
 
   test("resolveOwner defaults to dispatch-runner when hint is empty/unknown", () => {
@@ -239,15 +239,15 @@ describe("planAiInitUnits", () => {
         { name: "u2", description: "no hint at all", dod: "ok" },
       ],
     });
-    expect(units[8]?.owner_agent).toBe("dispatch-runner");
-    expect(units[9]?.owner_agent).toBe("dispatch-runner");
+    expect(units[5]?.owner_agent).toBe("dispatch-runner");
+    expect(units[6]?.owner_agent).toBe("dispatch-runner");
   });
 
   test("phase unit carries skills_injected and skills_required from the resolved role", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "x", description: "x", ownerHint: "cli-engine", dod: "x" }],
     });
-    const phase = units[8];
+    const phase = units[5];
     expect(phase).toBeDefined();
     expect(phase?.skills_injected).toBeDefined();
     expect(phase?.skills_required).toBeDefined();
@@ -508,7 +508,7 @@ describe("aiInitReviewer", () => {
           dod: "build done",
         },
       ],
-    })[8];
+    })[5];
     expect(phase).toBeDefined();
     if (!phase) return;
     // Create the cited output file on disk so the file-exists check
@@ -533,7 +533,7 @@ describe("aiInitReviewer", () => {
           dod: "build done",
         },
       ],
-    })[8];
+    })[5];
     expect(phase).toBeDefined();
     if (!phase) return;
     const r = aiInitReviewer(phase, {
@@ -556,7 +556,7 @@ describe("aiInitReviewer", () => {
           dod: "ship done",
         },
       ],
-    })[8];
+    })[5];
     expect(phase).toBeDefined();
     if (!phase) return;
     // Do NOT create the cited file on disk. The reviewer must reject.
@@ -613,16 +613,17 @@ describe("Phase 2 engine-scoping invariants", () => {
     expect(u.spec).toContain("Update only these instruction file(s)");
   });
 
-  test("skill-curator spec never references unselected engine skill dirs", () => {
+  test("skill-curator spec never syncs/writes unselected engine skill dirs", () => {
     const units = planAiInitUnits(profile, { engines: ["claude"] });
     const u = units.find((u) => u.name === "ai-init-skill-curator");
     if (!u) throw new Error("skill-curator not in plan");
-    // For --engine claude, the spec must NOT mention the unselected
-    // engines' skill dirs (.agents/skills/, .github/skills/).
-    // .agents/skills/ is ALLOWED as a scratch dir name (ctx7 --universal
-    // writes there regardless of the selected engine), but it must NOT
-    // appear as a target engine mirror.
-    expect(u.spec).not.toContain(".github/skills/");
+    // For --engine claude, the spec must NOT target the unselected engines'
+    // skill dirs as a SYNC/WRITE destination. PR #251 added an explicit
+    // "DELETE unselected engine skill dirs" cleanup step that legitimately
+    // names `.github/skills/` — that serves the invariant (don't keep an
+    // unselected mirror), so we forbid it only as a sync target, not outright.
+    expect(u.spec).not.toMatch(/sync[^\n]*\.github\/skills\//i);
+    expect(u.spec).not.toMatch(/\.github\/skills\/[^\n]*(?:sync|mirror|write)/i);
     // And it must mention the selected engine's skill dir.
     expect(u.spec).toContain(".claude/skills/");
     // The sync/verify commands are scoped to the selected engine only.
@@ -919,16 +920,13 @@ describe("buildFinisherBatchUnit (PR137 round 2)", () => {
     findings: [],
   };
 
-  test("builds a unit named ai-init-finishers-batch with 4 scope files (the standard finisher set)", () => {
+  test("builds a unit named ai-init-finishers-batch with the workflow-state finisher scope", () => {
     const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
     const u = buildFinisherBatchUnit(baseProfile, intake, ["doc-writer"]);
     expect(u.name).toBe("ai-init-finishers-batch");
-    expect(u.scope).toEqual([
-      ".vibeflow/SETTINGS.json",
-      ".vibeflow/WORKFLOW_POLICY.md",
-      ".vibeflow/WORKFLOW_STATE.json",
-      "QUICKSTART.md",
-    ]);
+    // PR #251 consolidated the finisher set to the single workflow-state writer;
+    // SETTINGS.json / WORKFLOW_POLICY.md / QUICKSTART.md are seeded by other layers.
+    expect(u.scope).toEqual([".vibeflow/WORKFLOW_STATE.json"]);
   });
 
   test("uses detectedRoles when provided, falls back to ROLE_NAMES when empty", () => {
@@ -970,19 +968,16 @@ describe("buildFinisherBatchUnit (PR137 round 2)", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  test("aiInitReviewer: finisher-batch missing one file → fail with reason", () => {
+  test("aiInitReviewer: finisher-batch with its file missing on disk → fail with reason", () => {
     const intake: AiInitIntake = { goal: "init", engines: ["claude"] };
     // Use a temp cwd so the test doesn't pick up the real
-    // QUICKSTART.md / .vibeflow/SETTINGS.json etc. that exist in
-    // the repo root. The validator's checkFileExists would otherwise
-    // see those real files and report pass.
+    // .vibeflow/WORKFLOW_STATE.json that exists in the repo root.
+    // The validator's checkFileExists would otherwise see it and report pass.
     const tmp = mkdtempSync(join(tmpdir(), "vf-fin-batch-missing-"));
     const u = buildFinisherBatchUnit(baseProfile, intake, []);
     mkdirSync(join(tmp, ".vibeflow"), { recursive: true });
-    for (const scope of u.scope?.slice(0, 3) ?? []) {
-      mkdirSync(join(tmp, dirname(scope)), { recursive: true });
-      writeFileSync(join(tmp, scope), "# content\n");
-    }
+    // Deliberately do NOT write the scope file on disk — evidence cites it but
+    // the file is absent, so the reviewer must fail.
     const r = aiInitReviewer(
       u,
       {
@@ -1008,18 +1003,18 @@ describe("buildFinisherBatchUnit (PR137 round 2)", () => {
       mkdirSync(join(tmp, dirname(scope)), { recursive: true });
       writeFileSync(join(tmp, scope), "# content\n");
     }
-    // Evidence omits the 4th path → fail.
+    // Evidence cites none of the scope paths → fail.
     const r = aiInitReviewer(
       u,
       {
         status: "verifying",
         confidence: 1,
-        evidence: u.scope?.slice(0, 3) ?? [],
+        evidence: [],
       },
       tmp,
     );
     expect(r.pass).toBe(false);
-    expect(r.reason).toContain("missing");
+    expect(r.reason).toMatch(/missing|no evidence/);
     rmSync(tmp, { recursive: true, force: true });
   });
 
