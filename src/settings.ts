@@ -33,6 +33,13 @@ export interface VibeSettings {
   /** Guardrail hook policy: which built-in templates are active + custom rules.
    *  Absent (the common case) means the fail-safe all-on default applies. */
   hooks?: HookConfig;
+  /**
+   * When true (default), VibeFlow's memory feature is active: `vf init` records
+   * the claude-mem opt-in here, and a future orchestrate-side query reads it.
+   * Toggled via `vf config memory on|off`. Default: false (PR #160 review:
+   * truth-tell on `vf config memory status`).
+   */
+  memory: boolean;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -53,6 +60,9 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   tools: { codegraph: false, lsp: false },
   toolPriority: [...TIERS],
   failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+  // PR #160: default to `false` (was `true`). The previous default was a
+  // lie — settings said on but non-TTY init never asked.
+  memory: false,
   updatedAt: "",
 };
 
@@ -66,6 +76,7 @@ function defaults(): VibeSettings {
     tools: { ...DEFAULT_SETTINGS.tools },
     toolPriority: [...DEFAULT_SETTINGS.toolPriority],
     failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+    memory: DEFAULT_SETTINGS.memory,
     updatedAt: DEFAULT_SETTINGS.updatedAt,
   };
 }
@@ -159,6 +170,7 @@ export function writeSettings(
     tools: { ...current.tools, ...(next.tools ?? {}) },
     toolPriority: next.toolPriority ? normalizePriority(next.toolPriority) : current.toolPriority,
     failureProtection: { ...current.failureProtection, ...(next.failureProtection ?? {}) },
+    memory: next.memory ?? current.memory,
     updatedAt: now(),
   };
   // `hooks` is replace-on-write (the menu hands a complete policy), not a deep

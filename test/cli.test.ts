@@ -365,7 +365,7 @@ describe("commands.init", () => {
       },
     );
     expect(code).toBe(0);
-    expect(requested).toEqual(["claude"]);
+    expect(requested).toEqual(["copilot"]);
   });
 
   test("init with --no-ai skips AI enrichment but still writes context files", async () => {
@@ -1258,6 +1258,7 @@ describe("adapters settings integration", () => {
         toolPriority: ["lsp", "codegraph", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
         updatedAt: "",
+        memory: false,
       } satisfies VibeSettings,
     };
     const body = Object.values(engineFiles("claude", { ...ctx }, false)).join("\n");
@@ -1279,6 +1280,7 @@ describe("adapters settings integration", () => {
         toolPriority: ["codegraph", "lsp", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
         updatedAt: "",
+        memory: false,
       } satisfies VibeSettings,
     };
     const policy = canonicalFiles(ctx)[`${CTX_DIR}/WORKFLOW_POLICY.md`] as string;
