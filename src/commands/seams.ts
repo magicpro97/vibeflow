@@ -52,17 +52,12 @@ function liveGuardrailArmedClaude(base: string): boolean {
   try {
     const raw = readFileSync(join(base, ".claude", "settings.json"), "utf8");
     const parsed = JSON.parse(raw) as {
-      hooks?: { PreToolUse?: Array<{ hooks?: Array<{ command?: unknown }> }> };
+      hooks?: { PreToolUse?: Array<{ hooks?: Array<{ command?: unknown; args?: unknown }> }> };
     };
     const pre = parsed.hooks?.PreToolUse;
     if (!Array.isArray(pre)) return false;
     return pre.some((entry) =>
-      (entry.hooks ?? []).some((h) => {
-        if (typeof h.command !== "string") return false;
-        // Claude's generator emits `node "<abs>" hook` — match on the absolute-path
-        // marker (it always ends in dist/cli.js) so this works on real configs.
-        return commandDelegatesToVibeflow(h.command);
-      }),
+      (entry.hooks ?? []).some((h) => hookDelegatesToVibeflow(h.command, h.args)),
     );
   } catch {
     return false;
@@ -89,13 +84,27 @@ function liveGuardrailArmedCopilot(base: string): boolean {
 
 /** Returns true iff a shell command line was emitted by VibeFlow's hook generator.
  *  Matches on either the `# vibeflow-guardrail` sentinel (Copilot; bash/sh comment)
- *  or a trailing `dist/cli.js` argv token followed by `hook` (Claude). The path may be
- *  quoted (`node "<abs>/dist/cli.js" hook`) so an optional closing quote is allowed
- *  between the path and `hook`. Both are stable markers hand-written configs won't contain. */
+ *  or a trailing `dist/cli.js` argv token followed by `hook` (Claude shell-string variant).
+ *  The path may be quoted (`node "<abs>/dist/cli.js" hook`) so an optional closing quote is
+ *  allowed between the path and `hook`. Both are stable markers hand-written configs won't contain. */
 function commandDelegatesToVibeflow(cmd: string): boolean {
   if (cmd.includes(GUARDRAIL_SENTINEL)) return true;
   // Match Claude's pattern: `node /abs/path/dist/cli.js hook` or the quoted variant.
   return /dist\/cli\.js"?\s+hook\b/.test(cmd);
+}
+
+/** True iff a Claude hook entry delegates to `vf hook`, covering BOTH forms the generator
+ *  may emit: the exec form (`command:"node", args:["<abs>/dist/cli.js","hook"]`) and the
+ *  legacy shell-string form (`command:"node \"<abs>/dist/cli.js\" hook"`). Exec form is the
+ *  current generator output; the string check keeps older configs recognized. */
+function hookDelegatesToVibeflow(command: unknown, args: unknown): boolean {
+  // Exec form: the cli.js path is an element of args, with "hook" present too.
+  if (Array.isArray(args)) {
+    const strs = args.filter((a): a is string => typeof a === "string");
+    if (strs.some((a) => /dist\/cli\.js$/.test(a)) && strs.includes("hook")) return true;
+  }
+  // Shell-string form: everything is in the command string.
+  return typeof command === "string" && commandDelegatesToVibeflow(command);
 }
 
 /** A loud, actionable note when the live guardrail is OFF — silence reads as "protected". */

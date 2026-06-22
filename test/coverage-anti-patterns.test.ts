@@ -94,7 +94,13 @@ describe("coverage anti-patterns (test/ only)", () => {
     // not the actual gate. The whole point is to assert the shipped
     // script exits 0 on the shipped SKILL.md (and non-zero on a
     // malformed one). Using a fake would let a broken script pass.
-    .filter((p) => !p.endsWith("skills.test.ts"));
+    .filter((p) => !p.endsWith("skills.test.ts"))
+    // The hook path-robustness tests intentionally spawn real processes to
+    // prove the difference between exec form (argv spawned directly — a path
+    // with space/$/backtick survives) and a shell string (`sh -c` word-splits
+    // and expands the same path, crashing node). A fakeSpawner cannot
+    // reproduce the shell's tokenization, which is the entire point.
+    .filter((p) => !p.endsWith("hooks.test.ts"));
 
   test("no test uses raw Bun.spawn or spawnSync without fakeSpawner", () => {
     for (const f of testFiles) {

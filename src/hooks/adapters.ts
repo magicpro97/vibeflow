@@ -54,10 +54,13 @@ export function downgradeBannerText(engine: Engine): string {
  *  Uses absolute path so the subprocess always finds the CLI regardless of PATH. */
 export function claudeHookConfig(): string {
   const cmd = cliPath();
-  // Quote the path: Claude runs this via a shell, so an unquoted path with a space
-  // (e.g. `~/My Projects/...`) word-splits and `node` loads the wrong module — the hook
-  // crashes with no JSON, and Claude fail-closes the tool call (blocks Bash/Edit/Write).
-  const delegate = [{ type: "command", command: `node "${cmd}" hook` }];
+  // Exec form (`command` + `args`), NOT a shell string: Claude spawns argv directly with no
+  // shell, so an absolute path containing a space, `$`, or a backtick is passed verbatim.
+  // A shell-string `node "<path>" hook` only survives spaces — `$`/backtick still expand
+  // inside double quotes and make `node` load the wrong path (the hook then exits non-zero
+  // with no JSON; per the hooks spec that is a NON-blocking error, so the tool call still
+  // runs but the guardrail is silently skipped and a stack trace is shown).
+  const delegate = [{ type: "command", command: "node", args: [cmd, "hook"] }];
   const config = {
     hooks: {
       PreToolUse: [
@@ -71,7 +74,12 @@ export function claudeHookConfig(): string {
   return JSON.stringify(config, null, 2);
 }
 
-/** Codex `.codex/hooks.json` — DETECTION-ONLY (post-hoc events; no vetoing pre-* hooks). */
+/** Codex `.codex/hooks.json` — DETECTION-ONLY (post-hoc events; no vetoing pre-* hooks).
+ *  NOTE: this emits a VibeFlow-internal schema ({detectionOnly, hooks:{"post-command":…}}),
+ *  which does NOT match Codex's native hooks schema (PascalCase events + matcher, like Claude's).
+ *  Reconciling that is a separate change; here we only keep the path double-quoted so it at
+ *  least survives spaces. The quote does NOT survive `$`/backtick in the path — the robust
+ *  exec form used by claudeHookConfig isn't applied until the schema question is resolved. */
 export function codexHookConfig(): string {
   const cmd = cliPath();
   const config = {

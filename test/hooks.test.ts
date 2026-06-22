@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,26 +88,35 @@ describe("adapters: claude uses real hook events (defect 2)", () => {
   });
 });
 
-// --- Path-with-space quoting: every generator must double-quote the CLI path so a
-// project living at e.g. `~/My Projects/...` does not word-split when the engine runs
-// the hook via a shell. An unquoted path makes `node` load the wrong module, the hook
-// crashes with no JSON, and Claude fail-closes EVERY tool call (Bash/Edit/Write). ---
-describe("adapters: CLI path is quoted so spaces don't break the hook", () => {
-  test('claude PreToolUse/PostToolUse commands quote the path: `node "<abs>" hook`', () => {
+// --- Path robustness: a project may live at a path containing a space, `$`, or a
+// backtick (e.g. `~/My $Projects/a `b`/...`). Claude runs hooks through a shell when given
+// a command STRING, so the robust form is exec form (`command:"node", args:[path,"hook"]`) —
+// argv is spawned directly, no shell, no quoting needed. Git hooks are real shell scripts,
+// so they keep a double-quoted path (survives spaces; `$`/backtick are a documented limit).
+// A broken path makes `node` load the wrong module; the hook exits non-zero with no JSON,
+// which per the hooks spec is a NON-blocking error (the tool call still runs, the guardrail
+// is silently skipped) — except git pre-commit, which is fail-closed and blocks the commit. ---
+describe("adapters: hook delegation survives spaces and shell metachars in the path", () => {
+  test("claude uses EXEC form (command:node + args:[<abs>/dist/cli.js, hook]), not a shell string", () => {
     const cfg = JSON.parse(claudeHookConfig()) as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; args?: string[] }> }>>;
     };
-    const commands = Object.values(cfg.hooks)
+    const entries = Object.values(cfg.hooks)
       .flat()
-      .flatMap((entry) => entry.hooks.map((h) => h.command));
-    expect(commands.length).toBeGreaterThan(0);
-    for (const cmd of commands) {
-      // `node "<absolute path>" hook` — the path token is wrapped in double quotes.
-      expect(cmd).toMatch(/^node "[^"]*\/dist\/cli\.js" hook$/);
+      .flatMap((entry) => entry.hooks);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const h of entries) {
+      // Exec form: bare executable + path as a separate, untokenized arg.
+      expect(h.command).toBe("node");
+      expect(Array.isArray(h.args)).toBe(true);
+      expect(h.args?.[0]).toMatch(/\/dist\/cli\.js$/);
+      expect(h.args?.[1]).toBe("hook");
+      // The path must NOT be wrapped in shell quotes — exec form passes it verbatim.
+      expect(h.args?.[0]).not.toContain('"');
     }
   });
 
-  test("codex detection-only commands quote the path", () => {
+  test("codex commands quote the path (shell-string schema; spaces survive)", () => {
     const cfg = JSON.parse(codexHookConfig()) as { hooks: Record<string, string> };
     for (const cmd of Object.values(cfg.hooks)) {
       expect(cmd).toMatch(/^node "[^"]*\/dist\/cli\.js" hook$/);
@@ -618,12 +627,37 @@ describe("live guardrail detection", () => {
     }
   });
 
-  // --- Path-with-space: the quoted command must still be recognized by the probe.
-  // A config whose path contains a space writes `node "<.../a b/.../cli.js>" hook`;
-  // the probe regex must match the quoted form, otherwise `vf hooks status` would
-  // wrongly report OFF for a perfectly-armed guardrail at a spaced path. ---
-  test("ON when the delegated command path contains a space (quoted)", () => {
-    const dir = mkdtempSync(join(tmpdir(), "vf-gd-spaced-"));
+  // --- Path robustness: the probe must recognize the exec-form config the generator now
+  // emits, even when the path contains a space, `$`, or a backtick. Exec form keeps the path
+  // in args[], so a probe that only scanned the command string would wrongly report OFF. ---
+  test("ON for exec-form config whose path contains space/$/backtick", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-exec-"));
+    try {
+      const claudeDir = join(dir, ".claude");
+      mkdirSync(claudeDir, { recursive: true });
+      const weird = "/Users/My $Name/a `b`/proj/dist/cli.js";
+      writeFileSync(
+        join(claudeDir, "settings.json"),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: "Bash",
+                hooks: [{ type: "command", command: "node", args: [weird, "hook"] }],
+              },
+            ],
+          },
+        }),
+      );
+      expect(liveGuardrailArmed(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Back-compat: a legacy shell-string config (quoted path) is still recognized as armed.
+  test("ON for legacy shell-string config with a quoted spaced path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-legacy-"));
     try {
       const claudeDir = join(dir, ".claude");
       mkdirSync(claudeDir, { recursive: true });
@@ -645,44 +679,56 @@ describe("live guardrail detection", () => {
   });
 });
 
-// --- Integration: the generated command, run through a POSIX shell from a path that
-// contains a space, must still evaluate the hook (not crash). This is the regression
-// guard for the real bug: an unquoted `node /a b/cli.js hook` word-splits under
-// `sh -c`, `node` loads the wrong module, exits non-zero with no JSON, and Claude
-// fail-closes EVERY Bash/Edit/Write call. We stub a tiny cli.js (the bug is in the
-// shell quoting, not in the hook logic) so the test never depends on a built dist/. ---
-describe("adapters: generated command survives a space in the path (sh -c)", () => {
-  test('quoted `node "<.../a b/.../cli.js>" hook` runs; unquoted would crash', () => {
-    const base = mkdtempSync(join(tmpdir(), "vf-spc-"));
-    // Force a space into the directory the cli.js lives under.
-    const spacedDir = join(base, "a b", "dist");
-    mkdirSync(spacedDir, { recursive: true });
-    const stub = join(spacedDir, "cli.js");
-    // Minimal stub: only the `hook` arg matters here — echo a valid allow envelope
-    // and exit 0, exactly like the real hook does for a benign payload.
-    writeFileSync(
-      stub,
-      [
-        "const arg = process.argv[2];",
-        'if (arg !== "hook") { process.exit(3); }',
-        'process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } }));',
-        "process.exit(0);",
-      ].join("\n"),
-    );
+// --- Integration: Claude's exec form (argv spawned directly, no shell) must evaluate the
+// hook even when the path contains a space, `$`, AND a backtick. This is the regression
+// guard: a shell-string `node "<path>" hook` only survives spaces — `$`/backtick still
+// expand inside double quotes under `sh -c` and make `node` load the wrong path. We prove
+// BOTH halves: exec form works, the shell-string form crashes on the same path. A tiny stub
+// cli.js stands in for the real one so the test never depends on a built dist/. ---
+describe("adapters: exec form survives space/$/backtick in the path; shell-string does not", () => {
+  const STUB = [
+    "const arg = process.argv[2];",
+    'if (arg !== "hook") { process.exit(3); }',
+    'process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } }));',
+    "process.exit(0);",
+  ].join("\n");
+  const PAYLOAD =
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}';
 
-    // The exact command shape claudeHookConfig emits, with this spaced path.
-    const command = `node "${stub}" hook`;
-    expect(command).toContain(" "); // sanity: the path really has a space
+  test("exec form (spawnSync argv) evaluates the hook from a path with space/$/backtick", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-exec-"));
+    // A directory name with a space, a dollar sign, and a backtick — all hostile to a shell.
+    const weirdDir = join(base, "a b $x `y`", "dist");
+    mkdirSync(weirdDir, { recursive: true });
+    const stub = join(weirdDir, "cli.js");
+    writeFileSync(stub, STUB);
 
-    const out = execSync(command, {
-      input: '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}',
-      encoding: "utf8",
-      shell: "/bin/sh", // POSIX shell word-splits unquoted args — the bug's trigger
-    });
-    const parsed = JSON.parse(out) as {
-      hookSpecificOutput?: { permissionDecision?: string };
-    };
+    // Exec form = spawn the executable directly with the path as a separate arg. No shell,
+    // so the metacharacters are never interpreted. This is what Claude does for `args`.
+    const r = spawnSync("node", [stub, "hook"], { input: PAYLOAD, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout) as { hookSpecificOutput?: { permissionDecision?: string } };
     expect(parsed.hookSpecificOutput?.permissionDecision).toBe("allow");
+
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  test('shell-string `node "<path>" hook` CRASHES on the same $/backtick path (why exec form)', () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-shell-"));
+    const weirdDir = join(base, "a b $x `y`", "dist");
+    mkdirSync(weirdDir, { recursive: true });
+    const stub = join(weirdDir, "cli.js");
+    writeFileSync(stub, STUB);
+
+    // The OLD (quoted shell-string) form, run through a POSIX shell. `$x` expands to empty
+    // and the backtick opens a command substitution, so `node` never sees the real path.
+    const r = spawnSync("/bin/sh", ["-c", `node "${stub}" hook`], {
+      input: PAYLOAD,
+      encoding: "utf8",
+    });
+    // It does NOT cleanly allow: either node throws MODULE_NOT_FOUND or sh reports a syntax error.
+    const allowed = r.status === 0 && /"permissionDecision":"allow"/.test(r.stdout ?? "");
+    expect(allowed).toBe(false);
 
     rmSync(base, { recursive: true, force: true });
   });
