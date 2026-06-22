@@ -410,8 +410,8 @@ function scoreToolDeny(
   if (!denialEnv) return;
   const tool = input.tool;
   if (!tool) return;
-  const denied = new Set(denialEnv.split(",").map((s) => s.trim()).filter(Boolean));
-  if (denied.has(tool)) {
+  const denied = new Set(denialEnv.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  if (denied.has(tool.toLowerCase())) {
     bump("critical");
     reasons.push(
       `coord mode refuses mutation tool "${tool}"; the shim is a read-only consultation surface. ` +

@@ -235,13 +235,22 @@ export async function defaultEngineSpawner(
   _args: readonly string[],
   spawnEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
-  // A1 FU #198: arm the PreToolUse hook configs so tool deny-list
-  // enforcement is live when the engine runs. Best-effort — hook
-  // emission may fail in non-git/read-only environments.
+  // A1 FU #198 + cross-review #219: arm the PreToolUse hook configs so
+  // tool deny-list enforcement is live when the engine spawns.
+  // Best-effort: emit may fail in non-git/read-only environments.
+  // MUST log a warning so admin knows enforcement is not active.
   try {
     emitHookFiles(cwd());
-  } catch {
-    // Best-effort: emit succeeded or not, the engine still spawns.
+  } catch (err) {
+    out(
+      "vf",
+      c.yellow(
+        `coord: hook emission failed — tool deny-list NOT active in this session. ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+      { level: "warn" },
+    );
   }
   // Use a dynamic import so the node:child_process dependency is
   // not pulled into the test bundle (most unit tests inject a
@@ -250,7 +259,7 @@ export async function defaultEngineSpawner(
   return await new Promise<number>((resolve) => {
     const child = spawn(engine, _args, {
       stdio: "inherit",
-      env: { ...spawnEnv }, // deny-list hint (VF_DENY_TOOLS) + hook path in PATH
+      env: { ...spawnEnv },
     });
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));
