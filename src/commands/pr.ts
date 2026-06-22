@@ -16,8 +16,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { c, cwd, out } from "./_shared.js";
-import { prQueue } from "./pr-queue.js";
 import { mergeWhenGreen } from "./pr-merge-when-green.js";
+import { prQueue } from "./pr-queue.js";
 
 /** Default runCommandSync implementation. Used when no inject is
  *  passed. This is a top-level named function (not an IIFE in `??`)
@@ -276,9 +276,7 @@ export async function pr(
     default:
       out(
         "vf",
-        c.red(
-          `vf pr <create|queue|merge-when-green>: unknown subcommand "${subcommand ?? ""}"`,
-        ),
+        c.red(`vf pr <create|queue|merge-when-green>: unknown subcommand "${subcommand ?? ""}"`),
         { level: "error" },
       );
       return EXIT_USAGE;

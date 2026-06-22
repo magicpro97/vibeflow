@@ -43,8 +43,7 @@ function errnoException(code: string, message?: string): NodeJS.ErrnoException {
 
 beforeEach(() => {
   origCwd = process.cwd();
-  dir =
-    "/tmp/vf-pr-queue-test-" + String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8);
+  dir = `/tmp/vf-pr-queue-test-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`;
   mkdirSync(dir, { recursive: true });
   process.chdir(dir);
 });

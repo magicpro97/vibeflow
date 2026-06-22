@@ -257,7 +257,7 @@ export function claimEntry(
     };
     queue[idx] = updated;
     const path = join(cwd(), QUEUE_PATH);
-    const data = queue.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    const data = `${queue.map((e) => JSON.stringify(e)).join("\n")}\n`;
     const _write = inject.writeFileSync ?? writeFileSync;
     _write(path, data, "utf8");
     return { ok: true, entry: queue[idx] };
@@ -291,10 +291,10 @@ export function releaseClaim(
       return { ok: false, reason: "not-claimed" };
     }
     const updated: QueueEntry = { ...current, status: "free" };
-    delete updated.claimedAt;
+    updated.claimedAt = undefined;
     queue[idx] = updated;
     const path = join(cwd(), QUEUE_PATH);
-    const data = queue.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    const data = `${queue.map((e) => JSON.stringify(e)).join("\n")}\n`;
     const _write = inject.writeFileSync ?? writeFileSync;
     _write(path, data, "utf8");
     return { ok: true, entry: queue[idx] };

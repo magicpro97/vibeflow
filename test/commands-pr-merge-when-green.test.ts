@@ -7,17 +7,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  mergeWhenGreen,
   EXIT_MERGE_FAIL,
   EXIT_TIMEOUT,
+  mergeWhenGreen,
 } from "../src/commands/pr-merge-when-green.js";
 import {
+  EXIT_IO,
+  EXIT_LOCK_HELD,
+  EXIT_NOT_FOUND,
+  EXIT_OK,
   addEntry,
   readQueue,
-  EXIT_OK,
-  EXIT_NOT_FOUND,
-  EXIT_LOCK_HELD,
-  EXIT_IO,
 } from "../src/commands/pr-queue.js";
 
 let origCwd: string;
@@ -52,10 +52,7 @@ describe("vf pr merge-when-green (A9 #175)", () => {
 
   test("(b) --head branch not in queue → exit NOT_FOUND", async () => {
     addEntry({ pr: 1, branch: "feat/x" });
-    const code = await mergeWhenGreen(
-      { head: "nonexistent" },
-      { runCommandSync: fakeRun([]) },
-    );
+    const code = await mergeWhenGreen({ head: "nonexistent" }, { runCommandSync: fakeRun([]) });
     expect(code).toBe(EXIT_NOT_FOUND);
   });
 
@@ -75,7 +72,13 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       {},
       {
         runCommandSync: fakeRun([
-          { stdout: JSON.stringify({ statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }] }), stderr: "", status: 0 },
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
           { stdout: "Merged #3", stderr: "", status: 0 },
         ]),
         sleep: async () => {},
@@ -90,7 +93,13 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       {},
       {
         runCommandSync: fakeRun([
-          { stdout: JSON.stringify({ statusCheckRollup: [{ status: "COMPLETED", conclusion: "FAILURE" }] }), stderr: "", status: 0 },
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "FAILURE" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
         ]),
         sleep: async () => {},
       },
@@ -107,8 +116,20 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       {},
       {
         runCommandSync: fakeRun([
-          { stdout: JSON.stringify({ statusCheckRollup: [{ status: "IN_PROGRESS", conclusion: null }] }), stderr: "", status: 0 },
-          { stdout: JSON.stringify({ statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }] }), stderr: "", status: 0 },
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "IN_PROGRESS", conclusion: null }],
+            }),
+            stderr: "",
+            status: 0,
+          },
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
           { stdout: "Merged #5", stderr: "", status: 0 },
         ]),
         sleep: async () => {},
@@ -119,7 +140,11 @@ describe("vf pr merge-when-green (A9 #175)", () => {
 
   test("(g) timeout after MAX_POLLS → exit TIMEOUT", async () => {
     addEntry({ pr: 6, branch: "feat/slow" });
-    const pending = { stdout: JSON.stringify({ statusCheckRollup: [{ status: "IN_PROGRESS", conclusion: null }] }), stderr: "", status: 0 };
+    const pending = {
+      stdout: JSON.stringify({ statusCheckRollup: [{ status: "IN_PROGRESS", conclusion: null }] }),
+      stderr: "",
+      status: 0,
+    };
     const responses = Array(10).fill(pending);
     const code = await mergeWhenGreen(
       {},
@@ -137,7 +162,13 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       {},
       {
         runCommandSync: fakeRun([
-          { stdout: JSON.stringify({ statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }] }), stderr: "", status: 0 },
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
           { stdout: "", stderr: "Merge conflict", status: 1 },
         ]),
         sleep: async () => {},
@@ -164,7 +195,13 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       { head: "feat/b" },
       {
         runCommandSync: fakeRun([
-          { stdout: JSON.stringify({ statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }] }), stderr: "", status: 0 },
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
           { stdout: "Merged #11", stderr: "", status: 0 },
         ]),
         sleep: async () => {},
@@ -179,7 +216,16 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       {},
       {
         runCommandSync: fakeRun([
-          { stdout: JSON.stringify({ statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }, { status: "COMPLETED", conclusion: "FAILURE" }] }), stderr: "", status: 0 },
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [
+                { status: "COMPLETED", conclusion: "SUCCESS" },
+                { status: "COMPLETED", conclusion: "FAILURE" },
+              ],
+            }),
+            stderr: "",
+            status: 0,
+          },
         ]),
         sleep: async () => {},
       },

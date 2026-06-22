@@ -7,16 +7,16 @@
 import { spawnSync } from "node:child_process";
 import { c, out } from "./_shared.js";
 import {
-  readQueue,
-  listFree,
-  claimEntry,
-  releaseClaim,
-  addEntry,
+  EXIT_IO,
+  EXIT_LOCK_HELD,
+  EXIT_NOT_FOUND,
   EXIT_OK,
   EXIT_USAGE,
-  EXIT_NOT_FOUND,
-  EXIT_LOCK_HELD,
-  EXIT_IO,
+  addEntry,
+  claimEntry,
+  listFree,
+  readQueue,
+  releaseClaim,
 } from "./pr-queue.js";
 
 /** Sentinel: gh pr merge failed. */
@@ -42,15 +42,12 @@ const POLL_INTERVAL_MS = 30_000;
 /** gh pr view <pr> --json statusCheckRollup → "pass" | "fail" | "pending". */
 function checkCiStatus(
   pr: number,
-  runCommandSync: (cmd: string, args: string[]) => { stdout: string; stderr: string; status: number },
+  runCommandSync: (
+    cmd: string,
+    args: string[],
+  ) => { stdout: string; stderr: string; status: number },
 ): "pass" | "fail" | "pending" {
-  const result = runCommandSync("gh", [
-    "pr",
-    "view",
-    String(pr),
-    "--json",
-    "statusCheckRollup",
-  ]);
+  const result = runCommandSync("gh", ["pr", "view", String(pr), "--json", "statusCheckRollup"]);
   if (result.status !== 0) return "pending";
   try {
     const parsed = JSON.parse(result.stdout);
@@ -59,7 +56,11 @@ function checkCiStatus(
     if (checks.length === 0) return "pending";
     for (const chk of checks) {
       if (chk.status !== "COMPLETED") return "pending";
-      if (chk.conclusion === "FAILURE" || chk.conclusion === "CANCELLED" || chk.conclusion === "TIMED_OUT")
+      if (
+        chk.conclusion === "FAILURE" ||
+        chk.conclusion === "CANCELLED" ||
+        chk.conclusion === "TIMED_OUT"
+      )
         return "fail";
     }
     return "pass";
@@ -71,7 +72,10 @@ function checkCiStatus(
 /** gh pr merge --squash --delete-branch. */
 function mergePr(
   pr: number,
-  runCommandSync: (cmd: string, args: string[]) => { stdout: string; stderr: string; status: number },
+  runCommandSync: (
+    cmd: string,
+    args: string[],
+  ) => { stdout: string; stderr: string; status: number },
 ): { ok: boolean; stderr: string } {
   const result = runCommandSync("gh", ["pr", "merge", String(pr), "--squash", "--delete-branch"]);
   return { ok: result.status === 0, stderr: result.stderr };
@@ -94,7 +98,10 @@ function moveToBack(
 
 /** Shorthand for the full inject shape both fs + shell + timer. */
 export interface MergeWhenGreenInject {
-  runCommandSync?: (cmd: string, args: string[]) => { stdout: string; stderr: string; status: number };
+  runCommandSync?: (
+    cmd: string,
+    args: string[],
+  ) => { stdout: string; stderr: string; status: number };
   existsSync?: (p: string) => boolean;
   readFileSync?: (p: string, enc: string) => string;
   writeFileSync?: (p: string, data: string, enc: string) => void;
@@ -125,9 +132,7 @@ export async function mergeWhenGreen(
   const queue = readQueue(inject);
   const free = listFree(queue);
 
-  const target = headBranch
-    ? free.find((e) => e.branch === headBranch)
-    : free[0];
+  const target = headBranch ? free.find((e) => e.branch === headBranch) : free[0];
 
   if (!target) {
     out(
@@ -145,11 +150,9 @@ export async function mergeWhenGreen(
   // 2. Claim
   const claim = claimEntry(target.pr, inject);
   if (!claim.ok) {
-    out(
-      "vf",
-      c.red(`merge-when-green: could not claim #${target.pr}: ${claim.reason}`),
-      { level: "error" },
-    );
+    out("vf", c.red(`merge-when-green: could not claim #${target.pr}: ${claim.reason}`), {
+      level: "error",
+    });
     return EXIT_LOCK_HELD;
   }
   out("vf", c.cyan(`✓ claimed #${target.pr} (${target.branch}) — polling CI…`), {
@@ -166,11 +169,9 @@ export async function mergeWhenGreen(
       });
       const merge = mergePr(target.pr, run);
       if (!merge.ok) {
-        out(
-          "vf",
-          c.red(`merge-when-green: gh pr merge failed: ${merge.stderr.trim()}`),
-          { level: "error" },
-        );
+        out("vf", c.red(`merge-when-green: gh pr merge failed: ${merge.stderr.trim()}`), {
+          level: "error",
+        });
         releaseClaim(target.pr, inject);
         return EXIT_MERGE_FAIL;
       }
@@ -195,9 +196,7 @@ export async function mergeWhenGreen(
   // 4. Timeout
   out(
     "vf",
-    c.yellow(
-      `⚠ merge-when-green: timed out after 5 min for #${target.pr} — releasing claim`,
-    ),
+    c.yellow(`⚠ merge-when-green: timed out after 5 min for #${target.pr} — releasing claim`),
     {
       level: "warn",
       meta: { kind: "merge-when-green-timeout", pr: target.pr, branch: target.branch },
