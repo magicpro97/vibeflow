@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 
 export type MarkerStatus = "pending" | "running" | "done" | "failed" | "blocked";
 
@@ -22,7 +23,37 @@ export interface DispatchMarker {
   evidence: string[];
   agent?: string;
   exitCode?: number;
+  /** GitHub ProjectV2 item node ID (e.g. "PVTI_..."). Set after initial project linking. */
+  projectItemId?: string;
+  /** GitHub issue URL or number — used to auto-close when PR merge is detected. */
+  issueUrl?: string;
 }
+
+/**
+ * Project #6 status-field mapping. The IDs are hard-coded because they
+ * are project-specific and must match the schema queried from the API.
+ *
+ * Run `gh project field-list 6 --owner magicpro97` to refresh if the
+ * project schema changes.
+ */
+const PROJECT_SYNC = {
+  projectId: "PVT_kwHOAT2vsM4Ba5YF",
+  /** Status single-select field in ProjectV2 #6. */
+  statusFieldId: "PVTSSF_lAHOAT2vsM4Ba5YFzhVtrdA",
+  options: {
+    Todo: "f75ad846",
+    InProgress: "47fc9ee4",
+    Done: "98236657",
+  },
+} as const;
+
+const STATUS_TO_PROJECT_OPTION: Record<MarkerStatus, string | undefined> = {
+  running: PROJECT_SYNC.options.InProgress,
+  done: PROJECT_SYNC.options.Done,
+  blocked: PROJECT_SYNC.options.Done,
+  failed: PROJECT_SYNC.options.Done,
+  pending: undefined, // no sync on pending (marker is just created)
+};
 
 const MARKER_TTL_MS = 4 * 60 * 60 * 1000;
 
@@ -54,6 +85,76 @@ export function createMarker(unit: string, agent?: string): DispatchMarker {
   return marker;
 }
 
+/**
+ * Sync the marker's status to GitHub ProjectV2 #6 via `gh project item-edit`.
+ * Best-effort: warns on non-zero exit, never throws.
+ *
+ * Uses the hard-coded Status field + single-select option IDs matching
+ * Project #6's schema. No-op when the marker has no `projectItemId`.
+ */
+export function syncProjectStatus(marker: DispatchMarker): void {
+  if (!marker.projectItemId) return;
+  const optionId = STATUS_TO_PROJECT_OPTION[marker.status];
+  if (!optionId) return; // pending — nothing to sync
+
+  try {
+    execSync(
+      [
+        "gh",
+        "project",
+        "item-edit",
+        "--id",
+        marker.projectItemId,
+        "--project-id",
+        PROJECT_SYNC.projectId,
+        "--field-id",
+        PROJECT_SYNC.statusFieldId,
+        "--single-select-option-id",
+        optionId,
+      ].join(" "),
+      { stdio: "pipe", timeout: 10_000 },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `[vf:marker] syncProjectStatus failed for ${marker.unit}: ${msg}\n`,
+    );
+  }
+}
+
+/**
+ * Close the linked GitHub issue when a unit is `done` and a PR merge is
+ * detected. Best-effort: warns on non-zero exit, never throws.
+ *
+ * Merged-PR detection: scans `gh pr list --state merged --search <unit-name>`
+ * for a match — optimistic heuristic, not bulletproof.
+ */
+export function closeLinkedIssue(marker: DispatchMarker): void {
+  if (!marker.issueUrl) return;
+  // Only close when the unit is done — caller gates this.
+  if (marker.status !== "done") return;
+
+  // Heuristic: look for a merged PR whose branch/head-ref contains the
+  // unit name. If found, auto-close the issue.
+  try {
+    const merged = execSync(
+      `gh pr list --state merged --search "${marker.unit}" --json url --jq ". | length"`,
+      { encoding: "utf8", stdio: "pipe", timeout: 10_000 },
+    ).trim();
+    if (!merged || merged === "0") return; // no merged PR → don't close
+
+    execSync(`gh issue close ${marker.issueUrl} --reason "completed"`, {
+      stdio: "pipe",
+      timeout: 10_000,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `[vf:marker] closeLinkedIssue failed for ${marker.unit}: ${msg}\n`,
+    );
+  }
+}
+
 export function updateMarker(
   unit: string,
   update: Partial<Pick<DispatchMarker, "status" | "confidence" | "evidence" | "exitCode">>,
@@ -73,6 +174,13 @@ export function updateMarker(
   if (update.confidence !== undefined) marker.confidence = update.confidence;
   if (update.exitCode !== undefined) marker.exitCode = update.exitCode;
   writeFileSync(path, JSON.stringify(marker, null, 2));
+
+  // AC #176: every status transition syncs to ProjectV2 #6
+  if (update.status) {
+    syncProjectStatus(marker);
+    if (update.status === "done") closeLinkedIssue(marker);
+  }
+
   return marker;
 }
 
