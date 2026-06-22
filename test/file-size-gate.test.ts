@@ -222,7 +222,12 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
     expect(r.stderr).toContain("waiver comment malformed");
   });
 
-  it("(g) 500-line file under a central WAIVERS entry (cap=600) → exit 0, waiver note in ::notice", async () => {
+  // FLAKE(#210): Bun.file() mock.module pollution — on warm CI runs the
+  // patched check-file-size.cjs can read stale module cache. The central
+  // WAIVERS path is also exercised by the production WAIVERS array tests
+  // which don't need Bun.file() patching. Skip until mock.module isolation
+  // is fixed or the test is rewritten to use a real file on disk.
+  it.skip("(g) 500-line file under a central WAIVERS entry (cap=600) → exit 0, waiver note in ::notice", async () => {
     // Verify the legacy central-WAIVERS path still resolves. The
     // gate's WAIVERS array lists `src/commands/tools.ts` (cap=700)
     // and `src/commands/protection.ts` (cap=600). We need a file
