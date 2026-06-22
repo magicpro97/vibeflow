@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -10,7 +11,6 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
 
 export type MarkerStatus = "pending" | "running" | "done" | "failed" | "blocked";
 
@@ -116,9 +116,7 @@ export function syncProjectStatus(marker: DispatchMarker): void {
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `[vf:marker] syncProjectStatus failed for ${marker.unit}: ${msg}\n`,
-    );
+    process.stderr.write(`[vf:marker] syncProjectStatus failed for ${marker.unit}: ${msg}\n`);
   }
 }
 
@@ -149,9 +147,7 @@ export function closeLinkedIssue(marker: DispatchMarker): void {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `[vf:marker] closeLinkedIssue failed for ${marker.unit}: ${msg}\n`,
-    );
+    process.stderr.write(`[vf:marker] closeLinkedIssue failed for ${marker.unit}: ${msg}\n`);
   }
 }
 
