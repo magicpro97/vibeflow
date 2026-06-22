@@ -163,29 +163,22 @@ export { discover } from "./commands/discover.js";
 // stderr on failure per PR28 audit Task 7 M3).
 export { armHooks, emitHookFiles, hook, hookSelftest, hooks } from "./commands/hooks.js";
 
-// === Re-export the tools cluster (issue #80, phase 8/14) ===
-// `vf tools` + `verify` + `repoLanguages` + `ensureToolIndex` +
-// `toolsSync` + `detectToolchain` + `StepSpawner` + `ToolchainPlan` +
-// `toolsStatus` + `probeIndexHealth` + `writeToolConfigs` + `provisionTool`
-// now live in src/commands/tools.ts. The facade re-exports the public
-// surface so existing callers (`import { tools, verify, ... } from
-// "../commands.js"`) keep working. (Phase 9/14 moved `init` into
-// src/commands/init.ts, so the facade no longer imports
-// `writeToolConfigs`/`provisionTool`/`ensureToolIndex` for its own body —
-// init.ts now reaches them via the _shared barrel bridge.)
+// Split into three modules (issue #136): tools.ts (main CLI logic),
+// tools-detect.ts (engine detection), tools-mcp-config.ts (MCP config I/O).
+// The facade re-exports the public surface so existing callers
+// (`import { tools, verify, ... } from "../commands.js"`) keep working.
 export {
   tools,
   toolsSync,
   toolsStatus,
   probeIndexHealth,
-  verify,
-  repoLanguages,
   ensureToolIndex,
-  detectToolchain,
-  writeToolConfigs,
   provisionTool,
 } from "./commands/tools.js";
-export type { StepSpawner, ToolchainPlan } from "./commands/tools.js";
+export type { StepSpawner } from "./commands/tools.js";
+export { verify, detectToolchain } from "./commands/tools-detect.js";
+export type { ToolchainPlan } from "./commands/tools-detect.js";
+export { repoLanguages, writeToolConfigs } from "./commands/tools-mcp-config.js";
 // === Re-export the workflow cluster (issue #80, phase 8/14) ===
 // `vf workflow` + `printVersion` now live in src/commands/workflow.ts.
 // The facade re-exports them so the CLI dispatch keeps working.

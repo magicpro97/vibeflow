@@ -1,183 +1,36 @@
 // `vf tools` cluster extracted from src/commands.ts (issue #80, phase 8/14).
-// Pure byte-equivalent move: body preserved verbatim. Tools.ts is the final
-// big chunk and currently overshoots the 400-line target (~516 lines) — see
-// "tools.ts deviation" note in .vibeflow/plans/issue-80-split-commands.md.
+// Split into three modules (issue #136): tools.ts holds the main CLI logic;
+// tools-detect.ts holds engine detection; tools-mcp-config.ts holds MCP I/O.
 // All imports come through `./_shared.js` per the ESM cycle rule (no sibling
-// imports).
+// imports except the two extracted modules).
 //
 // Exported public surface (also re-exported by src/commands.ts facade):
-//   - ToolchainPlan (type)
-//   - detectToolchain
-//   - verify
 //   - StepSpawner (type, test seam)
-//   - repoLanguages
+//   - toolsStatus
+//   - probeIndexHealth
+//   - provisionTool
 //   - ensureToolIndex
 //   - tools
 //   - toolsSync
 //
 // Private helpers (file-scoped, not re-exported):
-//   - VALID_TOOLS, isToolName, renderPriority, toolsStatus
-//   - CLAUDE_MCP_FILE, CODEX_MCP_FILE, ClaudeMcpFile (interface)
-//   - managedClaudeServerNames, readClaudeMcp, writeClaudeMcp
-//   - tomlSection, gateCodexEntries, writeCodexMcp, printCopilotMcp
-//   - writeToolConfigs, toolsToggle, runToolSteps, provisionTool, toolsInstall
+//   - VALID_TOOLS, isToolName, renderPriority
+//   - toolsToggle, runToolSteps, toolsInstall
 
 import {
   TOOLS,
-  appendJournal,
   c,
   cwd,
-  e2eEvaluateDynamicImportWarning,
-  e2eUnicodeSelectorWarning,
-  existsSync,
-  hasCommand,
   join,
   out,
-  policyGates,
   priorityRank,
-  readFileSync,
   readSettings,
-  readState,
-  resolveTools,
-  rmSync,
-  scanRepo,
   settingsPath,
   spawnSync,
-  writeFileSafe,
   writeSettings,
 } from "./_shared.js";
-import type {
-  Engine,
-  JsonMcpEntry,
-  StdioServer,
-  TomlMcpEntry,
-  ToolName,
-  ToolTier,
-  VibeSettings,
-} from "./_shared.js";
-
-/** Plan which toolchain gates `vf verify` should run, by detecting the project's build system.
- * Pure + injectable (exists/readScripts) so it's testable without a real filesystem. */
-export type ToolchainPlan =
-  | { kind: "npm"; runner: string; gates: string[] }
-  | { kind: "gradle"; cmd: string }
-  | { kind: "monorepo"; runner: string; dir: string; gates: string[] }
-  | { kind: "none" };
-
-export function detectToolchain(
-  base: string,
-  opts: {
-    exists?: (p: string) => boolean;
-    readScripts?: (p: string) => string[];
-    runner?: string;
-  } = {},
-): ToolchainPlan {
-  const exists = opts.exists ?? existsSync;
-  const runner = opts.runner ?? (hasCommand("bun") ? "bun" : "npm");
-  const readScripts =
-    opts.readScripts ??
-    ((p: string) =>
-      Object.keys(
-        (JSON.parse(readFileSync(p, "utf8")) as { scripts?: Record<string, string> }).scripts ?? {},
-      ));
-  const root = join(base, "package.json");
-  if (exists(root)) {
-    const gates = readScripts(root).filter((s) => ["typecheck", "lint", "test"].includes(s));
-    return { kind: "npm", runner, gates };
-  }
-  if (
-    ["build.gradle.kts", "build.gradle", "settings.gradle.kts"].some((f) => exists(join(base, f)))
-  ) {
-    return { kind: "gradle", cmd: exists(join(base, "gradlew")) ? "./gradlew" : "gradle" };
-  }
-  for (const d of ["web", "app", "frontend"]) {
-    const p = join(base, d, "package.json");
-    if (exists(p)) {
-      const gates = readScripts(p).filter((s) =>
-        ["typecheck", "lint", "test", "build"].includes(s),
-      );
-      return { kind: "monorepo", runner, dir: join(base, d), gates };
-    }
-  }
-  return { kind: "none" };
-}
-
-export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean } = {}): number {
-  let failed = 0;
-  const base = cwd();
-  // `vf verify` is a READ-ONLY gate by default (issue #154): it must not
-  // mutate the tree it audits. The journal append is opt-in via
-  // `journal: true` (wired to a `--journal` flag) so the default invocation
-  // an agent is told to run before "claiming done" leaves git status clean.
-  const writeJournal = inject.journal === true;
-  const runGate = (label: string, cmd: string, args: string[], dir = base) => {
-    out("vf", c.cyan(`▶ ${label}`));
-    // Test seam: tests inject a fake spawner to avoid the 28s
-    // gradle download on CI. Production callers fall through to
-    // the real spawnSync.
-    const r = (inject.spawner ?? spawnSync)(cmd, args, { stdio: "inherit", cwd: dir });
-    if (r.status !== 0) {
-      failed++;
-      out("vf", c.red(`✗ ${label} failed`));
-    } else {
-      out("vf", c.green(`✓ ${label}`));
-    }
-  };
-
-  // Toolchain gates — detect the project's build system instead of assuming npm.
-  const plan = detectToolchain(base);
-  if (plan.kind === "npm") {
-    for (const gate of plan.gates)
-      runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
-    if (plan.gates.length === 0)
-      out("vf", c.dim("package.json has no typecheck/lint/test scripts."));
-  } else if (plan.kind === "gradle") {
-    runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
-  } else if (plan.kind === "monorepo") {
-    const label = plan.dir.split("/").pop();
-    for (const gate of plan.gates)
-      runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
-  } else {
-    out(
-      "vf",
-      c.yellow(
-        "⚠ no package.json or Gradle build found — skipping toolchain gates (unsupported build system)",
-      ),
-    );
-  }
-
-  // Policy gates (confidence / evidence / scope) over the workflow ledger.
-  const report = policyGates(readState());
-  for (const ok of report.passed) out("vf", c.green(`✓ ${ok}`));
-  for (const w of report.warnings) out("vf", c.yellow(`⚠ ${w}`));
-  for (const f of report.failures) {
-    failed++;
-    out("vf", c.red(`✗ ${f}`));
-  }
-
-  // e2e advisory gates — non-fatal warnings only.
-  for (const w of e2eUnicodeSelectorWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
-  for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
-
-  if (failed > 0) {
-    out("vf", c.red(`\n${failed} gate(s) failed.`));
-    if (writeJournal) {
-      appendJournal(base, "verify", "fail", [
-        `${failed} gate(s) failed`,
-        ...report.failures.map((f) => `- ${f}`),
-      ]);
-    }
-    return 1;
-  }
-  out("vf", c.green("\nAll configured gates passed."));
-  if (writeJournal) {
-    appendJournal(base, "verify", "pass", [
-      `${report.passed.length} gate(s) passed`,
-      ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
-    ]);
-  }
-  return 0;
-}
+import type { ToolName, ToolTier, VibeSettings } from "./_shared.js";
+import { CLAUDE_MCP_FILE, repoLanguages, writeToolConfigs } from "./tools-mcp-config.js";
 
 /** Spawn seam for tool installs — defaults to a real spawnSync, injectable for tests. */
 export type StepSpawner = (cmd: string, args: string[]) => { status: number };
@@ -185,21 +38,6 @@ const VALID_TOOLS: ToolName[] = ["codegraph", "lsp"];
 
 function isToolName(v: string | undefined): v is ToolName {
   return v === "codegraph" || v === "lsp";
-}
-
-/** Languages detected in the active repo, used to build LSP install plans + entries. */
-// Test seam: exported so unit tests can exercise the try/catch fallback
-// (line 2293-2294) by injecting a throwing scanRepo.
-export function repoLanguages(
-  base: string,
-  inject: { scanRepo?: (b: string) => { languages: string[] } } = {},
-): string[] {
-  const scan = inject.scanRepo ?? scanRepo;
-  try {
-    return scan(base).languages;
-  } catch {
-    return [];
-  }
 }
 
 /** Render the priority ladder (highest first) from settings for `vf tools status`. */
@@ -327,149 +165,6 @@ export function probeIndexHealth(
   // marker present but health check said no — distinguish "we couldn't verify" (no
   // health check ran) from "the tool itself reported unhealthy".
   return captured ? "unhealthy" : false;
-}
-
-/** Repo-relative MCP config files VibeFlow owns and may safely read+rewrite. */
-const CLAUDE_MCP_FILE = ".mcp.json";
-const CODEX_MCP_FILE = join(".codex", "config.toml");
-
-/** Claude `.mcp.json` shape (only the slice we touch). */
-interface ClaudeMcpFile {
-  mcpServers: Record<string, StdioServer>;
-}
-
-/** Every MCP server name VibeFlow manages, across BOTH tools — the keys we may remove. */
-function managedClaudeServerNames(base: string, languages: string[]): string[] {
-  const ctx = { workspace: base, languages };
-  const all = resolveTools({ codegraph: true, lsp: true }, "claude", ctx);
-  const names: string[] = [];
-  for (const entry of all.entries) {
-    for (const name of Object.keys((entry as JsonMcpEntry).servers)) names.push(name);
-  }
-  return names;
-}
-
-/** Read the repo-owned `.mcp.json` (safe: no secrets). `corrupt` is set when an existing file
- * cannot be parsed, so callers can refuse to overwrite it and avoid losing unrelated servers. */
-function readClaudeMcp(path: string): ClaudeMcpFile & { corrupt: boolean } {
-  if (!existsSync(path)) return { mcpServers: {}, corrupt: false };
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ClaudeMcpFile>;
-    return { mcpServers: parsed.mcpServers ?? {}, corrupt: false };
-  } catch {
-    return { mcpServers: {}, corrupt: true };
-  }
-}
-
-/**
- * Merge enabled-tool servers into the repo's `.mcp.json` (claude). Managed keys are first
- * stripped (so disabling removes them), then re-added for currently-enabled tools. Unrelated
- * servers are preserved. Returns true when the file changed.
- */
-function writeClaudeMcp(base: string, settings: VibeSettings, languages: string[]): boolean {
-  const path = join(base, CLAUDE_MCP_FILE);
-  const file = readClaudeMcp(path);
-  if (file.corrupt) {
-    out(
-      "vf",
-      c.yellow(`! ${CLAUDE_MCP_FILE} is not valid JSON — left untouched. Fix it, then re-run.`),
-    );
-    return false;
-  }
-  for (const name of managedClaudeServerNames(base, languages)) delete file.mcpServers[name];
-  const ctx = { workspace: base, languages };
-  const merged = resolveTools(settings.tools, "claude", ctx);
-  for (const entry of merged.entries) {
-    Object.assign(file.mcpServers, (entry as JsonMcpEntry).servers);
-  }
-  const hasServers = Object.keys(file.mcpServers).length > 0;
-  if (!hasServers && !existsSync(path)) return false;
-  writeFileSafe(path, JSON.stringify({ mcpServers: file.mcpServers }, null, 2));
-  return true;
-}
-
-/** Serialize one codex `[mcp_servers.x]` section (minimal, only the shapes we emit). */
-function tomlSection(entry: TomlMcpEntry): string {
-  const lines = [`[${entry.section}]`, `command = ${JSON.stringify(entry.command)}`];
-  lines.push(`args = ${JSON.stringify(entry.args)}`);
-  if (entry.disabledTools && entry.disabledTools.length > 0) {
-    lines.push(`disabled_tools = ${JSON.stringify(entry.disabledTools)}`);
-  }
-  return lines.join("\n");
-}
-
-/**
- * Apply structural gating on codex: when codegraph is enabled, disable the lower-priority
- * LSP servers' tools so the priority is structural, not just advisory in the instructions.
- */
-function gateCodexEntries(entries: TomlMcpEntry[], settings: VibeSettings): TomlMcpEntry[] {
-  if (!settings.tools.codegraph) return entries;
-  return entries.map((entry) =>
-    entry.section.startsWith("mcp_servers.lsp-") ? { ...entry, disabledTools: entry.tools } : entry,
-  );
-}
-
-/**
- * Write a repo-local `.codex/config.toml` for the enabled tools. We DO NOT merge the user's
- * `~/.codex/config.toml`: a zero-dep TOML round-trip of an arbitrary user file risks
- * corruption, so VibeFlow owns this scoped file instead. Returns true when written.
- */
-function writeCodexMcp(base: string, settings: VibeSettings, languages: string[]): boolean {
-  const ctx = { workspace: base, languages };
-  const merged = resolveTools(settings.tools, "codex", ctx);
-  const entries = gateCodexEntries(merged.entries as TomlMcpEntry[], settings);
-  const path = join(base, CODEX_MCP_FILE);
-  if (entries.length === 0) {
-    if (existsSync(path)) rmSync(path);
-    return false;
-  }
-  const header =
-    "# Managed by VibeFlow (`vf tools`). Repo-local codex MCP config — merge into\n" +
-    "# ~/.codex/config.toml or point codex at it. Edit `vf tools enable/disable` to regenerate.";
-  writeFileSafe(path, `${header}\n\n${entries.map(tomlSection).join("\n\n")}`);
-  return true;
-}
-
-/**
- * Copilot's MCP config (`~/.copilot/mcp-config.json`) holds a live secret, so VibeFlow NEVER
- * reads or writes it. Instead we PRINT the exact `copilot mcp add` command per enabled server
- * for the user to run themselves. Returns the printed command count.
- */
-function printCopilotMcp(base: string, settings: VibeSettings, languages: string[]): number {
-  const ctx = { workspace: base, languages };
-  const merged = resolveTools(settings.tools, "copilot", ctx);
-  if (merged.entries.length === 0) return 0;
-  out("vf", c.bold("\nCopilot (run these — VibeFlow won't touch your secret ~/.copilot):"));
-  let count = 0;
-  for (const entry of merged.entries) {
-    for (const [name, server] of Object.entries((entry as JsonMcpEntry).servers)) {
-      const args = server.args.map((a) => JSON.stringify(a)).join(" ");
-      out("vf", c.cyan(`  copilot mcp add ${name} -- ${server.command} ${args}`.trim()));
-      count++;
-    }
-  }
-  return count;
-}
-
-/**
- * Wire enabled tools into selected engines' MCP configs: write `.mcp.json` for claude and
- * copilot (both read the workspace-level file), `.codex/config.toml` for codex, and print
- * `copilot mcp add` commands for copilot's global config.
- * When `engines` is provided, only configs for those engines are written.
- * Pure tool modules build the entries; the WRITING lives here. Languages drive LSP entries.
- * Exported (not just used internally) because `vf init`'s SETTINGS ↔ MCP-config lockstep
- * needs to call it from src/commands.ts (see syncToolConfigs closure at line ~388).
- */
-export function writeToolConfigs(
-  base: string,
-  settings: VibeSettings,
-  engines?: readonly Engine[],
-): void {
-  const languages = repoLanguages(base);
-  const needsMcpJson = !engines || engines.includes("claude") || engines.includes("copilot");
-  if (needsMcpJson) writeClaudeMcp(base, settings, languages);
-  if (!engines || engines.includes("codex")) writeCodexMcp(base, settings, languages);
-  if (!engines || engines.includes("copilot")) printCopilotMcp(base, settings, languages);
 }
 
 /** `vf tools enable|disable <tool>` — flip the flag in SETTINGS.json and report. When enabling

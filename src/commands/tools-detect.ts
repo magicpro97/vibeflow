@@ -1,0 +1,142 @@
+// `vf verify` + `detectToolchain` — engine/toolchain detection extracted from
+// src/commands/tools.ts (issue #136, split-tools). Pure detection logic: no MCP
+// config, no tool installs. All imports through `./_shared.js`.
+
+import {
+  appendJournal,
+  c,
+  cwd,
+  e2eEvaluateDynamicImportWarning,
+  e2eUnicodeSelectorWarning,
+  existsSync,
+  hasCommand,
+  join,
+  out,
+  policyGates,
+  readFileSync,
+  readState,
+  spawnSync,
+} from "./_shared.js";
+
+/** Plan which toolchain gates `vf verify` should run, by detecting the project's build system.
+ * Pure + injectable (exists/readScripts) so it's testable without a real filesystem. */
+export type ToolchainPlan =
+  | { kind: "npm"; runner: string; gates: string[] }
+  | { kind: "gradle"; cmd: string }
+  | { kind: "monorepo"; runner: string; dir: string; gates: string[] }
+  | { kind: "none" };
+
+export function detectToolchain(
+  base: string,
+  opts: {
+    exists?: (p: string) => boolean;
+    readScripts?: (p: string) => string[];
+    runner?: string;
+  } = {},
+): ToolchainPlan {
+  const exists = opts.exists ?? existsSync;
+  const runner = opts.runner ?? (hasCommand("bun") ? "bun" : "npm");
+  const readScripts =
+    opts.readScripts ??
+    ((p: string) =>
+      Object.keys(
+        (JSON.parse(readFileSync(p, "utf8")) as { scripts?: Record<string, string> }).scripts ?? {},
+      ));
+  const root = join(base, "package.json");
+  if (exists(root)) {
+    const gates = readScripts(root).filter((s) => ["typecheck", "lint", "test"].includes(s));
+    return { kind: "npm", runner, gates };
+  }
+  if (
+    ["build.gradle.kts", "build.gradle", "settings.gradle.kts"].some((f) => exists(join(base, f)))
+  ) {
+    return { kind: "gradle", cmd: exists(join(base, "gradlew")) ? "./gradlew" : "gradle" };
+  }
+  for (const d of ["web", "app", "frontend"]) {
+    const p = join(base, d, "package.json");
+    if (exists(p)) {
+      const gates = readScripts(p).filter((s) =>
+        ["typecheck", "lint", "test", "build"].includes(s),
+      );
+      return { kind: "monorepo", runner, dir: join(base, d), gates };
+    }
+  }
+  return { kind: "none" };
+}
+
+export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean } = {}): number {
+  let failed = 0;
+  const base = cwd();
+  // `vf verify` is a READ-ONLY gate by default (issue #154): it must not
+  // mutate the tree it audits. The journal append is opt-in via
+  // `journal: true` (wired to a `--journal` flag) so the default invocation
+  // an agent is told to run before "claiming done" leaves git status clean.
+  const writeJournal = inject.journal === true;
+  const runGate = (label: string, cmd: string, args: string[], dir = base) => {
+    out("vf", c.cyan(`▶ ${label}`));
+    // Test seam: tests inject a fake spawner to avoid the 28s
+    // gradle download on CI. Production callers fall through to
+    // the real spawnSync.
+    const r = (inject.spawner ?? spawnSync)(cmd, args, { stdio: "inherit", cwd: dir });
+    if (r.status !== 0) {
+      failed++;
+      out("vf", c.red(`✗ ${label} failed`));
+    } else {
+      out("vf", c.green(`✓ ${label}`));
+    }
+  };
+
+  // Toolchain gates — detect the project's build system instead of assuming npm.
+  const plan = detectToolchain(base);
+  if (plan.kind === "npm") {
+    for (const gate of plan.gates)
+      runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
+    if (plan.gates.length === 0)
+      out("vf", c.dim("package.json has no typecheck/lint/test scripts."));
+  } else if (plan.kind === "gradle") {
+    runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
+  } else if (plan.kind === "monorepo") {
+    const label = plan.dir.split("/").pop();
+    for (const gate of plan.gates)
+      runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
+  } else {
+    out(
+      "vf",
+      c.yellow(
+        "⚠ no package.json or Gradle build found — skipping toolchain gates (unsupported build system)",
+      ),
+    );
+  }
+
+  // Policy gates (confidence / evidence / scope) over the workflow ledger.
+  const report = policyGates(readState());
+  for (const ok of report.passed) out("vf", c.green(`✓ ${ok}`));
+  for (const w of report.warnings) out("vf", c.yellow(`⚠ ${w}`));
+  for (const f of report.failures) {
+    failed++;
+    out("vf", c.red(`✗ ${f}`));
+  }
+
+  // e2e advisory gates — non-fatal warnings only.
+  for (const w of e2eUnicodeSelectorWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
+  for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
+
+  if (failed > 0) {
+    out("vf", c.red(`\n${failed} gate(s) failed.`));
+    if (writeJournal) {
+      appendJournal(base, "verify", "fail", [
+        `${failed} gate(s) failed`,
+        ...report.failures.map((f) => `- ${f}`),
+      ]);
+    }
+    return 1;
+  }
+  out("vf", c.green("\nAll configured gates passed."));
+  if (writeJournal) {
+    appendJournal(base, "verify", "pass", [
+      `${report.passed.length} gate(s) passed`,
+      ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
+    ]);
+  }
+  return 0;
+}
