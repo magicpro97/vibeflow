@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -47,6 +47,8 @@ const PROJECT_SYNC = {
   },
 } as const;
 
+// TODO(#176): blocked/failed map to "Done" per current acceptance criteria.
+// Revisit when the project gains dedicated "Blocked" / "Failed" columns.
 const STATUS_TO_PROJECT_OPTION: Record<MarkerStatus, string | undefined> = {
   running: PROJECT_SYNC.options.InProgress,
   done: PROJECT_SYNC.options.Done,
@@ -98,9 +100,9 @@ export function syncProjectStatus(marker: DispatchMarker): void {
   if (!optionId) return; // pending — nothing to sync
 
   try {
-    execSync(
+    execFileSync(
+      "gh",
       [
-        "gh",
         "project",
         "item-edit",
         "--id",
@@ -111,7 +113,7 @@ export function syncProjectStatus(marker: DispatchMarker): void {
         PROJECT_SYNC.statusFieldId,
         "--single-select-option-id",
         optionId,
-      ].join(" "),
+      ],
       { stdio: "pipe", timeout: 10_000 },
     );
   } catch (err) {
@@ -135,16 +137,18 @@ export function closeLinkedIssue(marker: DispatchMarker): void {
   // Heuristic: look for a merged PR whose branch/head-ref contains the
   // unit name. If found, auto-close the issue.
   try {
-    const merged = execSync(
-      `gh pr list --state merged --search "${marker.unit}" --json url --jq ". | length"`,
+    const merged = execFileSync(
+      "gh",
+      ["pr", "list", "--state", "merged", "--search", marker.unit, "--json", "url", "--jq", ". | length"],
       { encoding: "utf8", stdio: "pipe", timeout: 10_000 },
     ).trim();
     if (!merged || merged === "0") return; // no merged PR → don't close
 
-    execSync(`gh issue close ${marker.issueUrl} --reason "completed"`, {
-      stdio: "pipe",
-      timeout: 10_000,
-    });
+    execFileSync(
+      "gh",
+      ["issue", "close", marker.issueUrl, "--reason", "completed"],
+      { stdio: "pipe", timeout: 10_000 },
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[vf:marker] closeLinkedIssue failed for ${marker.unit}: ${msg}\n`);
@@ -153,7 +157,7 @@ export function closeLinkedIssue(marker: DispatchMarker): void {
 
 export function updateMarker(
   unit: string,
-  update: Partial<Pick<DispatchMarker, "status" | "confidence" | "evidence" | "exitCode">>,
+  update: Partial<Pick<DispatchMarker, "status" | "confidence" | "evidence" | "exitCode" | "projectItemId" | "issueUrl">>,
 ): DispatchMarker | null {
   const path = markerPath(unit);
   if (!existsSync(path)) return null;
@@ -169,6 +173,8 @@ export function updateMarker(
   if (update.status) marker.status = update.status;
   if (update.confidence !== undefined) marker.confidence = update.confidence;
   if (update.exitCode !== undefined) marker.exitCode = update.exitCode;
+  if (update.projectItemId !== undefined) marker.projectItemId = update.projectItemId;
+  if (update.issueUrl !== undefined) marker.issueUrl = update.issueUrl;
   writeFileSync(path, JSON.stringify(marker, null, 2));
 
   // AC #176: every status transition syncs to ProjectV2 #6
