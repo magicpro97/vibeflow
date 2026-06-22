@@ -244,6 +244,7 @@ export function scoreRisk(
 
   scoreCommand(input, policy.enabled, bump, reasons);
   scoreFiles(input, policy.enabled, bump, reasons);
+  scoreToolDeny(input, bump, reasons);
   // Custom rules layer on top of the built-ins (they can only raise risk).
   for (const hit of applyCustomRules(policy.custom, input)) {
     bump(hit.risk);
@@ -389,6 +390,33 @@ function scoreFiles(
         reasons.push(`write escapes workspace: ${outside.join(", ")}`);
       }
     }
+  }
+}
+
+/** Tool-deny-list enforcement (A1 FU #198). Reads VF_DENY_TOOLS from the
+ *  environment and BLOCKS any PreToolUse event whose tool name appears in
+ *  the comma-separated deny set. The env var is set by `vf coord` before
+ *  spawning an engine; the hook receives it via the inherited environment.
+ *
+ *  A1 FU #198: this is the production enforcement path — the deny-list is
+ *  no longer a test-only seam. When the engine's PreToolUse event routes
+ *  through `vf hook`, this scorer blocks the tool natively. */
+function scoreToolDeny(
+  input: HookInput,
+  bump: (l: RiskLevel) => void,
+  reasons: string[],
+): void {
+  const denialEnv = process.env.VF_DENY_TOOLS;
+  if (!denialEnv) return;
+  const tool = input.tool;
+  if (!tool) return;
+  const denied = new Set(denialEnv.split(",").map((s) => s.trim()).filter(Boolean));
+  if (denied.has(tool)) {
+    bump("critical");
+    reasons.push(
+      `coord mode refuses mutation tool "${tool}"; the shim is a read-only consultation surface. ` +
+        `Blocked by VF_DENY_TOOLS=${denialEnv}. Use the engine outside \`vf coord\` to mutate state.`,
+    );
   }
 }
 

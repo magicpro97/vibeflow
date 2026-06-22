@@ -117,6 +117,66 @@ describe("hooks", () => {
     );
     expect(evaluateHook({ event: "pre-write", files: ["src/a.ts"] }).decision).toBe("allow");
   });
+
+  // ---- A1 FU #198: tool deny-list wired to production ---
+  test("(deny-list-enforced) scoreRisk blocks a tool in VF_DENY_TOOLS", () => {
+    // Set the deny-list env var as coord() would.
+    const old = process.env.VF_DENY_TOOLS;
+    process.env.VF_DENY_TOOLS = "Write,Edit,Bash";
+    try {
+      // A denied tool → critical (block).
+      const r = scoreRisk({ event: "pre-tool-use", tool: "Write" });
+      expect(r.risk).toBe("critical");
+      expect(r.reasons[0] ?? "").toContain("refuses mutation tool");
+      // A denied tool with command context still blocked.
+      const r2 = scoreRisk({
+        event: "pre-tool-use",
+        tool: "Bash",
+        command: "echo hello",
+      });
+      expect(r2.risk).toBe("critical");
+      // An allowed tool passes through.
+      const r3 = scoreRisk({ event: "pre-tool-use", tool: "Read" });
+      expect(r3.risk).not.toBe("critical");
+      // No tool field → no deny-list match.
+      const r4 = scoreRisk({ event: "pre-tool-use", command: "rm -rf /" });
+      // Still evaluates command risks normally (rm → critical from block-destructive).
+      expect(r4.risk).toBe("critical");
+    } finally {
+      if (old === undefined) delete process.env.VF_DENY_TOOLS;
+      else process.env.VF_DENY_TOOLS = old;
+    }
+  });
+
+  test("(deny-list-enforced) evaluateHook blocks when VF_DENY_TOOLS is set", () => {
+    const old = process.env.VF_DENY_TOOLS;
+    process.env.VF_DENY_TOOLS = "Write,Edit,Bash,MultiEdit,NotebookEdit";
+    try {
+      // evaluateHook → scoreRisk → scoreToolDeny → critical → block
+      expect(evaluateHook({ event: "pre-tool-use", tool: "Write" }).decision).toBe("block");
+      expect(evaluateHook({ event: "pre-tool-use", tool: "Edit" }).decision).toBe("block");
+      expect(evaluateHook({ event: "pre-tool-use", tool: "Bash" }).decision).toBe("block");
+      // Read is NOT in the deny-list → allowed.
+      expect(evaluateHook({ event: "pre-tool-use", tool: "Read" }).decision).toBe("allow");
+      // Glob is NOT in the deny-list → allowed.
+      expect(evaluateHook({ event: "pre-tool-use", tool: "Glob" }).decision).toBe("allow");
+    } finally {
+      if (old === undefined) delete process.env.VF_DENY_TOOLS;
+      else process.env.VF_DENY_TOOLS = old;
+    }
+  });
+
+  test("(deny-list-enforced) no VF_DENY_TOOLS → deny-list is silent (no false blocks)", () => {
+    const old = process.env.VF_DENY_TOOLS;
+    delete process.env.VF_DENY_TOOLS;
+    try {
+      // Without VF_DENY_TOOLS, a pre-tool-use for Write is just low risk.
+      expect(evaluateHook({ event: "pre-tool-use", tool: "Write" }).decision).toBe("allow");
+      expect(evaluateHook({ event: "pre-tool-use", tool: "Bash" }).decision).toBe("allow");
+    } finally {
+      if (old !== undefined) process.env.VF_DENY_TOOLS = old;
+    }
+  });
 });
 
 describe("discovery/context7", () => {

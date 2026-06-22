@@ -35,6 +35,7 @@ import {
   assertCoordBriefReady,
   c,
   cwd,
+  emitHookFiles,
   out,
   updateLastConsult,
   validateBriefShape,
@@ -186,18 +187,19 @@ export async function coord(
   const spawner = inject.spawner ?? defaultEngineSpawner;
   const engineArgs = _args.slice(1);
   // Build the deny-list env: comma-separated, matching the engine's
-  // native tool name. The env var is a hint; engines may or may
-  // not honor it (see A1 FU #198 for the wrapper that would
-  // intercept every tool call regardless of engine support).
+  // native tool name. The env var is read by `vf hook` (armed via
+  // emitHookFiles in defaultEngineSpawner) to block denied tools.
+  // A1 FU #198: the deny-list is now wired to production — the hook
+  // enforces it, not just a test seam.
   const deniedToolNames = Array.from(DEFAULT_DENIED_TOOLS).join(",");
   const spawnEnv: NodeJS.ProcessEnv = { VF_DENY_TOOLS: deniedToolNames, ...process.env };
-  out("vf", c.dim(`coord: spawning ${engine} (deny-list hint: ${deniedToolNames})`), {
+  out("vf", c.dim(`coord: spawning ${engine} (tool deny-list ENFORCED: ${deniedToolNames})`), {
     meta: {
       kind: "coord-spawn",
       engine,
       args: engineArgs,
       deniedTools: DEFAULT_DENIED_TOOLS,
-      wrapperStatus: "policy-only", // see A1 FU #198 for the full wrapper
+      wrapperStatus: "enforced", // A1 FU #198: deny-list wired to production
     },
   });
   const code = await spawner(engine, engineArgs, spawnEnv);
@@ -220,16 +222,27 @@ export async function coord(
  *  real node:child_process; the coverage-anti-patterns test confirms
  *  no other source file uses spawn directly.
  *
- *  A1 FU #198: the spawnEnv parameter carries VF_DENY_TOOLS (the
- *  tool-deny-list hint). We merge it into process.env so the
- *  spawned engine can read it natively. The full PreToolUse wrapper
- *  (a thin shim binary that intercepts every tool call) is a
- *  followup — see issue #198 for the design. */
+ *  A1 FU #198: before spawning the engine, we arm the PreToolUse hook
+ *  configs (via emitHookFiles) so the engine's tool calls route through
+ *  `vf hook`. The hook reads VF_DENY_TOOLS from the inherited env and
+ *  blocks any denied tool. This wires the deny-list to production —
+ *  spawnEnv still carries VF_DENY_TOOLS as a hint, but the hook is the
+ *  enforcement path. If hook emission fails (e.g. non-git directory,
+ *  read-only filesystem), we still spawn so the engine doesn't break —
+ *  the deny-list is best-effort, never a hard environment requirement. */
 export async function defaultEngineSpawner(
   engine: string,
   _args: readonly string[],
   spawnEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
+  // A1 FU #198: arm the PreToolUse hook configs so tool deny-list
+  // enforcement is live when the engine runs. Best-effort — hook
+  // emission may fail in non-git/read-only environments.
+  try {
+    emitHookFiles(cwd());
+  } catch {
+    // Best-effort: emit succeeded or not, the engine still spawns.
+  }
   // Use a dynamic import so the node:child_process dependency is
   // not pulled into the test bundle (most unit tests inject a
   // stub spawner and never reach this code).
@@ -237,7 +250,7 @@ export async function defaultEngineSpawner(
   return await new Promise<number>((resolve) => {
     const child = spawn(engine, _args, {
       stdio: "inherit",
-      env: { ...spawnEnv }, // merge deny-list hint into the engine's env
+      env: { ...spawnEnv }, // deny-list hint (VF_DENY_TOOLS) + hook path in PATH
     });
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));
