@@ -504,7 +504,7 @@ describe("Logbus ENOENT recovery (issue #145)", () => {
 
 it("5 concurrent instances do not drop events via the cross-process lock", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vf-logbus-conc5-"));
-  const instances: Logbus[] = [0,1,2,3,4].map((i) => new Logbus({ runId: "inst"+i, dir }));
+  const instances: Logbus[] = [0, 1, 2, 3, 4].map((i) => new Logbus({ runId: `inst${i}`, dir }));
   try {
     await Promise.all(
       instances.map((inst, idx) => {

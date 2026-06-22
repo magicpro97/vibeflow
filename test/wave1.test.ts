@@ -143,7 +143,7 @@ describe("hooks", () => {
       // Still evaluates command risks normally (rm → critical from block-destructive).
       expect(r4.risk).toBe("critical");
     } finally {
-      if (old === undefined) delete process.env.VF_DENY_TOOLS;
+      if (old === undefined) process.env.VF_DENY_TOOLS = undefined;
       else process.env.VF_DENY_TOOLS = old;
     }
   });
@@ -161,14 +161,14 @@ describe("hooks", () => {
       // Glob is NOT in the deny-list → allowed.
       expect(evaluateHook({ event: "pre-tool-use", tool: "Glob" }).decision).toBe("allow");
     } finally {
-      if (old === undefined) delete process.env.VF_DENY_TOOLS;
+      if (old === undefined) process.env.VF_DENY_TOOLS = undefined;
       else process.env.VF_DENY_TOOLS = old;
     }
   });
 
   test("(deny-list-enforced) no VF_DENY_TOOLS → deny-list is silent (no false blocks)", () => {
     const old = process.env.VF_DENY_TOOLS;
-    delete process.env.VF_DENY_TOOLS;
+    process.env.VF_DENY_TOOLS = undefined;
     try {
       // Without VF_DENY_TOOLS, a pre-tool-use for Write is just low risk.
       expect(evaluateHook({ event: "pre-tool-use", tool: "Write" }).decision).toBe("allow");

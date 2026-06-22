@@ -37,7 +37,6 @@ describe("curator DI seam (curateSkillsFromEvidence inject.spawnSync)", () => {
     // Synthetic successful-install response. The curator code only
     // reads `status`, `stdout`, and `stderr`, so the cast is safe.
     const fakeSpawn = (cmd: string, args: readonly string[], options: SpawnSyncOptions): any => {
-      // biome-ignore lint/suspicious/noExplicitAny: test fake; SyncSubprocess type is hard to construct synthetically
       calls.push({ cmd, args, options });
       return {
         pid: 0,
