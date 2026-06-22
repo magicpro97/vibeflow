@@ -23,7 +23,7 @@ const INSTALL_COMMAND = [
 const SECRET_CRITICAL = [/(^|[\s/])\.env(\.[\w-]+)?($|[\s/])/, /\bid_rsa\b/, /\bid_ed25519\b/];
 
 /** Other secret-ish material — high risk (require approval). */
-const SECRET_HIGH = [/\.pem\b/, /(^|\/)\.ssh\//, /\bsecrets?\b/i, /\bcredentials?\b/i];
+const SECRET_HIGH = [/\.pem\b/, /(^|\/)\.ssh\//i, /\bsecrets?\b/i, /\bcredentials?\b/i];
 
 /** Paths that should never be edited without explicit approval (file-based events). */
 // All entries use the `i` flag for uniform case-insensitive matching: hooks
@@ -401,16 +401,17 @@ function scoreFiles(
  *  A1 FU #198: this is the production enforcement path — the deny-list is
  *  no longer a test-only seam. When the engine's PreToolUse event routes
  *  through `vf hook`, this scorer blocks the tool natively. */
-function scoreToolDeny(
-  input: HookInput,
-  bump: (l: RiskLevel) => void,
-  reasons: string[],
-): void {
+function scoreToolDeny(input: HookInput, bump: (l: RiskLevel) => void, reasons: string[]): void {
   const denialEnv = process.env.VF_DENY_TOOLS;
   if (!denialEnv) return;
   const tool = input.tool;
   if (!tool) return;
-  const denied = new Set(denialEnv.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const denied = new Set(
+    denialEnv
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
   if (denied.has(tool.toLowerCase())) {
     bump("critical");
     reasons.push(
