@@ -16,6 +16,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { c, cwd, out } from "./_shared.js";
+import { prQueue } from "./pr-queue.js";
+import { mergeWhenGreen } from "./pr-merge-when-green.js";
 
 /** Default runCommandSync implementation. Used when no inject is
  *  passed. This is a top-level named function (not an IIFE in `??`)
@@ -257,20 +259,30 @@ export async function pr(
     ) => { stdout: string; stderr: string; status: number };
     existsSync?: (p: string) => boolean;
     readFileSync?: (p: string, enc: string) => string;
+    writeFileSync?: (p: string, data: string, enc: string) => void;
+    mkdirSync?: (p: string, opts: { recursive: boolean }) => void;
+    rmSync?: (p: string, opts: { recursive: boolean }) => void;
+    sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<number> {
   const subcommand = args[0];
-  if (subcommand !== "create") {
-    out(
-      "vf",
-      c.red(
-        `vf pr <create>: unknown subcommand "${subcommand ?? ""}". Usage: vf pr create <issue> [--base main] [--head <branch>] [--title <t>] [--body-file <path>]`,
-      ),
-      { level: "error" },
-    );
-    return EXIT_USAGE;
+  switch (subcommand) {
+    case "create":
+      return prCreate(args.slice(1), flags, inject);
+    case "queue":
+      return prQueue(args.slice(1), flags, inject);
+    case "merge-when-green":
+      return mergeWhenGreen(flags, inject);
+    default:
+      out(
+        "vf",
+        c.red(
+          `vf pr <create|queue|merge-when-green>: unknown subcommand "${subcommand ?? ""}"`,
+        ),
+        { level: "error" },
+      );
+      return EXIT_USAGE;
   }
-  return prCreate(args.slice(1), flags, inject);
 }
 
 /** `vf pr create <issue> [...]`. */
@@ -284,6 +296,10 @@ async function prCreate(
     ) => { stdout: string; stderr: string; status: number };
     existsSync?: (p: string) => boolean;
     readFileSync?: (p: string, enc: string) => string;
+    writeFileSync?: (p: string, data: string, enc: string) => void;
+    mkdirSync?: (p: string, opts: { recursive: boolean }) => void;
+    rmSync?: (p: string, opts: { recursive: boolean }) => void;
+    sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<number> {
   const issue = args[0];

@@ -12,6 +12,7 @@ import {
   hooks,
   init,
   orchestrate,
+  pr,
   printCommandHelp,
   printHelp,
   printVersion,
@@ -170,6 +171,8 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === "help" || cmd === "--help" || cmd === "-h" || wantsHelp) return printHelp();
 
   switch (cmd) {
+    case "pr":
+      return await pr(positionals, flags);
     case undefined:
       return await ui({
         port: "7799",
