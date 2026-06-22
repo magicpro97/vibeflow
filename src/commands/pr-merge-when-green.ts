@@ -5,17 +5,19 @@
 // merges on green, releases+requeues on red, escalates on timeout.
 
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { c, cwd, out } from "./_shared.js";
 import {
   EXIT_IO,
   EXIT_NOT_FOUND,
   EXIT_OK,
   EXIT_USAGE,
+  QUEUE_PATH,
   acquireLock,
   claimEntry,
   claimReasonToExitCode,
   listFree,
-  QUEUE_PATH,
   readQueue,
   releaseClaim,
   releaseLock,
@@ -113,7 +115,11 @@ function moveToBack(
     for (const line of queueRaw.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      try { queue.push(JSON.parse(trimmed)); } catch { /* skip corrupt */ }
+      try {
+        queue.push(JSON.parse(trimmed));
+      } catch {
+        /* skip corrupt */
+      }
     }
     const idx = queue.findIndex((e) => e.pr === entry.pr);
     if (idx === -1) return; // entry not found — nothing to move
@@ -124,10 +130,10 @@ function moveToBack(
       addedAt: new Date().toISOString(),
       status: "free",
     };
-    delete freeEntry.claimedAt;
+    freeEntry.claimedAt = undefined;
     queue.push(freeEntry as { pr: number; branch: string });
     _mkdir(dirname(qpath), { recursive: true });
-    _write(qpath, queue.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+    _write(qpath, `${queue.map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
   } finally {
     releaseLock(fsInject);
   }
@@ -204,7 +210,7 @@ export async function mergeWhenGreen(
       out("vf", c.green(`✓ CI green for #${target.pr} — merging…`), {
         meta: { kind: "merge-when-green-ci", pr: target.pr, status: "pass" },
       });
-      const merge = mergePr(target.pr, run);
+      const merge = mergePr(target.pr, false, run);
       if (!merge.ok) {
         out("vf", c.red(`merge-when-green: gh pr merge failed: ${merge.stderr.trim()}`), {
           level: "error",
