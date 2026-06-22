@@ -3922,23 +3922,23 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
       /export\s*\{[^}]*\btoolsSync\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\bverify\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\bverify\b[^}]*\}\s*from\s*["']\.\/commands\/tools-detect\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\brepoLanguages\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\brepoLanguages\b[^}]*\}\s*from\s*["']\.\/commands\/tools-mcp-config\.js["']/,
     );
     expect(src).toMatch(
       /export\s*\{[^}]*\bensureToolIndex\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\bdetectToolchain\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\bdetectToolchain\b[^}]*\}\s*from\s*["']\.\/commands\/tools-detect\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\bwriteToolConfigs\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\bwriteToolConfigs\b[^}]*\}\s*from\s*["']\.\/commands\/tools-mcp-config\.js["']/,
     );
   });
 
-  test("src/commands.ts re-exports the StepSpawner + ToolchainPlan types from tools.js", () => {
+  test("src/commands.ts re-exports the StepSpawner + ToolchainPlan types from split modules", () => {
     const src = readFileSync("src/commands.ts", "utf8");
     expect(src).toMatch(
       /export\s+type\s+\{[^}]*\bStepSpawner\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
