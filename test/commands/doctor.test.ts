@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { detectRepo, doctor, resolveRepo } from "../../src/commands.js";
 import type { EngineReadiness } from "../../src/preflight.js";
-import { doctor, resolveRepo, detectRepo } from "../../src/commands.js";
 
 function r(
   engine: "claude" | "codex" | "copilot",

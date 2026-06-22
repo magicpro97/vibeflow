@@ -7,6 +7,18 @@
         "--mcp"
       ],
       "env": {}
+    },
+    "lsp-typescript": {
+      "command": "mcp-language-server",
+      "args": [
+        "--workspace",
+        "/Users/linhn/vf-wt-185",
+        "--lsp",
+        "typescript-language-server",
+        "--",
+        "--stdio"
+      ],
+      "env": {}
     }
   }
 }

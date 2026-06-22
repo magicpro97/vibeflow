@@ -1,18 +1,22 @@
 {
   "name": "@magicpro97/vibeflow",
-  "summary": "VibeFlow is a local-first npm CLI tool that opens a visual web UI and helps users run AI-assisted software development workflows using Claude Code, Codex CLI, and GitHub Copilot CLI out-of-the-box.",
+  "summary": "On a fresh clone, arm the guardrail before any human edit:",
   "languages": [
-    "TypeScript"
+    "TypeScript",
+    "Shell"
   ],
   "packageManager": "bun",
   "buildCommand": "bun run build",
   "testCommand": "bun run test",
   "lintCommand": "bun run lint",
-  "frameworks": [],
+  "frameworks": [
+    "Astro"
+  ],
   "hasCI": true,
   "manifests": [
     "package.json"
   ],
+  "walkTruncated": false,
   "findings": [
     {
       "component": "language",
@@ -30,11 +34,11 @@
     },
     {
       "component": "frameworks",
-      "value": "none detected",
+      "value": "Astro",
       "evidence": [
         "package.json"
       ],
-      "confidence": "low"
+      "confidence": "medium"
     },
     {
       "component": "ui",

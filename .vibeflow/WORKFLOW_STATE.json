@@ -1,15 +1,40 @@
 {
   "task_id": "T1",
-  "goal": "Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine.",
+  "goal": "test",
   "success_criteria": [],
-  "work_units": [],
+  "work_units": [
+    {
+      "name": "u1",
+      "status": "running",
+      "confidence": 0.5,
+      "gates": {
+        "build": "pending",
+        "lint": "pending",
+        "test": "pending",
+        "review": "pending"
+      },
+      "resources": {
+        "agents": 0,
+        "tokens": 0,
+        "cost_usd": 0,
+        "wall_seconds": 0
+      }
+    }
+  ],
   "totals": {
-    "units": 0,
+    "units": 1,
     "done": 0,
     "tokens": 0,
     "cost_usd": 0,
     "wall_seconds": 0
   },
-  "repo_path": "/Users/linhn/vibeflow-docs",
-  "attachments": []
+  "repo_path": "/Users/linhn/vf-wt-185",
+  "attachments": [
+    {
+      "name": "test.txt",
+      "size": 227,
+      "type": "txt",
+      "skill": "text-reader"
+    }
+  ]
 }

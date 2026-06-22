@@ -1,13 +1,14 @@
 # Project Context
 
-- Name: vibeflow-docs
-- Summary: VibeFlow is a local-first npm CLI tool that opens a visual web UI and helps users run AI-assisted software development workflows using Claude Code, Codex CLI, and GitHub Copilot CLI out-of-the-box.
+- Name: vf-wt-185
+- Summary: On a fresh clone, arm the guardrail before any human edit:
 - Documentation source: TODO
 - Task/issue source: TODO
 
 ## Detected stack
 
-- Languages: TypeScript
+- Languages: TypeScript, Shell
+- Frameworks: Astro
 - Package manager: bun
 - Build: `bun run build`
 - Test: `bun run test`
