@@ -98,7 +98,11 @@ export async function createFetchHandler(
             }
 
             const safeEnqueue = (chunk: Uint8Array) => {
-              try { controller.enqueue(chunk); } catch { /* client gone */ }
+              try {
+                controller.enqueue(chunk);
+              } catch {
+                /* client gone */
+              }
             };
             const heartbeat = setInterval(
               () => safeEnqueue(new TextEncoder().encode(": keepalive\\n\\n")),
@@ -106,15 +110,18 @@ export async function createFetchHandler(
             );
 
             const unsub = bus?.subscribe((ev: unknown) => {
-              safeEnqueue(
-                new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
-              );
+              safeEnqueue(new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`));
             });
 
-            cleanup = () => { clearInterval(heartbeat); if (unsub) unsub(); };
+            cleanup = () => {
+              clearInterval(heartbeat);
+              if (unsub) unsub();
+            };
             req.signal.addEventListener("abort", cleanup);
           },
-          cancel() { cleanup?.(); },
+          cancel() {
+            cleanup?.();
+          },
         }),
         {
           headers: {
@@ -137,10 +144,9 @@ export async function createFetchHandler(
 
     // --- GET /events (deprecated SSE) ---
     if (method === "GET" && path === "/events") {
-      return new Response(
-        new ReadableStream({ start() {}, cancel() {} }),
-        { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } },
-      );
+      return new Response(new ReadableStream({ start() {}, cancel() {} }), {
+        headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+      });
     }
 
     // --- POST (write routes) ---
@@ -148,20 +154,28 @@ export async function createFetchHandler(
       if (!ctx.guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
 
       const isWrite =
-        path === "/api/detect" || path === "/api/init" || path === "/api/dispatch" ||
-        path === "/api/orchestrate" || path === "/api/discover" || path === "/api/units" ||
-        path === "/api/preflight" || path === "/api/settings";
+        path === "/api/detect" ||
+        path === "/api/init" ||
+        path === "/api/dispatch" ||
+        path === "/api/orchestrate" ||
+        path === "/api/discover" ||
+        path === "/api/units" ||
+        path === "/api/preflight" ||
+        path === "/api/settings";
 
       if (!isWrite) {
         if (path === "/api/attachments") {
           const ct = req.headers.get("content-type") ?? "";
-          if (!ct.includes("multipart/form-data")) return Response.json({ error: "multipart expected" }, { status: 400 });
+          if (!ct.includes("multipart/form-data"))
+            return Response.json({ error: "multipart expected" }, { status: 400 });
           const fd = await req.formData();
           const file = fd.get("file") as File | null;
-          if (!file || !file.name) return Response.json({ error: "file required" }, { status: 400 });
+          if (!file || !file.name)
+            return Response.json({ error: "file required" }, { status: 400 });
           const safe = d.safeAttachName(file.name);
           if (!safe) return Response.json({ error: "invalid filename" }, { status: 400 });
-          if (file.size > (d.ATTACH_CAP as number)) return Response.json({ error: "file too large" }, { status: 413 });
+          if (file.size > (d.ATTACH_CAP as number))
+            return Response.json({ error: "file too large" }, { status: 413 });
           const dir = d.attachDir(repo());
           d.mkdirSync(dir, { recursive: true });
           const buf = Buffer.from(await file.arrayBuffer());
@@ -187,7 +201,10 @@ export async function createFetchHandler(
 
         if (path === "/api/init") {
           if (typeof payload.repoPath === "string") setRepo(d.resolveRepo(payload.repoPath));
-          const { files, state } = d.applyIntake(payload, { useAi: payload.useAi === true, base: repo() });
+          const { files, state } = d.applyIntake(payload, {
+            useAi: payload.useAi === true,
+            base: repo(),
+          });
           return Response.json({ ok: true, files, state });
         }
 
@@ -220,7 +237,8 @@ export async function createFetchHandler(
           }
           const unit = (payload.unit ?? {}) as { name?: string };
           const state = d.mutateUnits(repo(), action, unit);
-          if (!state) return Response.json({ error: "no workflow or unit not found" }, { status: 400 });
+          if (!state)
+            return Response.json({ error: "no workflow or unit not found" }, { status: 400 });
           return Response.json({ ok: true, state });
         }
 
@@ -239,9 +257,11 @@ export async function createFetchHandler(
     // --- GET /assets/* (static files) ---
     if (method === "GET" && path.startsWith("/assets/")) {
       const rel = path.slice("/assets/".length);
-      if (!rel || rel.includes("..") || rel.includes("\\0")) return new Response("not found", { status: 404 });
+      if (!rel || rel.includes("..") || rel.includes("\\0"))
+        return new Response("not found", { status: 404 });
       const fileUrl = new URL(rel, d.ASSETS_DIR as URL);
-      if (!fileUrl.href.startsWith((d.ASSETS_DIR as URL).href)) return new Response("not found", { status: 404 });
+      if (!fileUrl.href.startsWith((d.ASSETS_DIR as URL).href))
+        return new Response("not found", { status: 404 });
       const ext = rel.slice(rel.lastIndexOf("."));
       const types = d.ASSET_TYPES as Record<string, string>;
       const type = types[ext];
@@ -250,7 +270,11 @@ export async function createFetchHandler(
       const ok = await file.exists();
       if (!ok) return new Response("not found", { status: 404 });
       return new Response(file, {
-        headers: { "content-type": type, "x-content-type-options": "nosniff", "cache-control": "no-cache" },
+        headers: {
+          "content-type": type,
+          "x-content-type-options": "nosniff",
+          "cache-control": "no-cache",
+        },
       });
     }
 

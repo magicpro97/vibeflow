@@ -36,11 +36,11 @@ import { lookupDocsHttp, searchSkillsHttp } from "./discovery/context7.js";
 import { type LogEvent, getLogbus } from "./logbus.js";
 import { type EngineReadiness, type PreflightOpts, anyReady, preflightAll } from "./preflight.js";
 import { type ProjectProfile, scanRepo } from "./scanner.js";
+import { createFetchHandler } from "./server-handler.js";
 import { type VibeSettings, readSettings, writeSettings } from "./settings.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
 import { TOOLS, TOOL_ORDER } from "./tools/index.js";
-import { createFetchHandler } from "./server-handler.js";
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const ASSETS_DIR = new URL("./assets/", import.meta.url);
@@ -292,7 +292,9 @@ export function startServer(port = 0): Promise<{
       const handler = await createFetchHandler(
         {
           activeRepo,
-          setActiveRepo: (r) => { activeRepo = r; },
+          setActiveRepo: (r) => {
+            activeRepo = r;
+          },
           token,
           cachedHtml,
           isLoopback,
