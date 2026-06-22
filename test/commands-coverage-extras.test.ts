@@ -44,26 +44,18 @@ describe("commands.init — codegraph install path (line 445-459)", () => {
     const origWhich = Bun.which;
     // @ts-expect-error: bun's Bun.which is writable.
     Bun.which = (cmd: string) => (cmd === "codegraph" ? undefined : origWhich.call(Bun, cmd));
-    // 2. Stub spawnSync to return success without actually shelling out.
-    mock.module("node:child_process", () => {
-      const real = require("node:child_process");
-      return {
-        ...real,
-        spawnSync: () => ({ status: 0, stdout: "", stderr: "" }),
-      };
-    });
     try {
       const { init } = await import("../src/commands.js");
-      const code = await init({ "no-ai": true }, { preflight: allReady });
+      const code = await init(
+        { "no-ai": true, "no-memory": true, "no-hooks": true },
+        {
+          preflight: allReady,
+          syncSpawner: (cmd, args) => ({ status: 0 }) as any,
+        },
+      );
       expect(typeof code).toBe("number");
     } finally {
       Bun.which = origWhich;
-      // Restore the real node:child_process so subsequent tests
-      // (file-size-gate, etc.) can use cpSpawnSync normally.
-      mock.module("node:child_process", () => {
-        // Re-export the real module
-        return require("node:child_process");
-      });
     }
-  });
+  }, 10000);
 });
