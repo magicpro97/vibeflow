@@ -130,6 +130,11 @@ function coerce(raw: unknown): VibeSettings {
   out.toolPriority = normalizePriority(obj.toolPriority);
   out.failureProtection = coerceFailureProtection(obj.failureProtection);
 
+  // Read the `memory` field if the stored file carries it. PR #160 added
+  // this; without it, `readSettings` always returns the default (false)
+  // regardless of what's on disk — the setting would never read true.
+  if (typeof obj.memory === "boolean") out.memory = obj.memory;
+
   // Only materialize `hooks` when the stored file actually carries the key, so
   // repos that never configured hooks keep an absent block (fail-safe all-on at
   // scoring time) and SETTINGS.json stays free of churn. A present-but-garbage
