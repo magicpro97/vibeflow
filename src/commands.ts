@@ -106,7 +106,6 @@ export type { ProtectionRuntime } from "./commands/protection.js";
 // re-exports it so the CLI dispatch (cli.ts → main.ts) keeps
 // working with the same import path.
 export { run } from "./commands/run.js";
-export * from "./commands/_shared.js";
 
 /** Global state: the "watch live" tip prints at most once per process. */
 // `tipState` + `resolveMode` / `resolveEngine` / `resolveRisk` / `announceLaunch` / `readyStub` / `engineReady`
@@ -148,6 +147,7 @@ export * from "./commands/_shared.js";
 // dispatch on list/validate/search/resolve/sync/verify-sync/import/init;
 // the `init` subcommand refuses to overwrite an existing SKILL.md.
 export { skills } from "./commands/skills.js";
+export { skillForFile } from "./skills/resolver.js";
 
 // `vf discover` was extracted to src/commands/discover.ts (issue #80, phase 7/14).
 // Re-exported from this facade at `./commands/discover.js`. Network only,
@@ -213,11 +213,13 @@ export {
   state,
   updateLastConsult,
   validateBriefShape,
+  printCoordGatePassed,
 } from "./commands/state.js";
 // F0 review #3: atomic write extracted to its own module (state.ts
 // was over the 400-line cap). The facade re-exports it from here
 // so callers can `import { atomicWriteFileSync } from "commands"`.
 export { atomicWriteFileSync } from "./commands/atomic-write.js";
+export { assertCoordBriefReady } from "./commands/state-gate.js";
 export type { Brief, BriefInject, OutFn } from "./commands/state.js";
 // === Re-export the coord shim (issue #184 A0 stub, A1 #167+#194 real) ===
 // `vf coord` lives in src/commands/coord.ts. A0 shipped the brief-
