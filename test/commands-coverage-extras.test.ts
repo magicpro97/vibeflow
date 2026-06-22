@@ -57,5 +57,5 @@ describe("commands.init — codegraph install path (line 445-459)", () => {
     } finally {
       Bun.which = origWhich;
     }
-  }, 10000);
+  });
 });

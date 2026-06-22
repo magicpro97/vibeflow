@@ -31,7 +31,6 @@
 //       (proves the legacy `WAIVERS` array path still resolves)
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { spawnSync as cpSpawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,7 +72,11 @@ function makeFixture(opts: { filename: string; firstLine: string }): string {
 
 // Run the gate and capture stdout/stderr/exit.
 function runGate(fixtureDir: string): { status: number | null; stdout: string; stderr: string } {
-  const r = cpSpawnSync("node", [join(fixtureDir, "scripts", "check-file-size.cjs")], {
+  // Use require() directly — bun supports require in ESM files.
+  // This bypasses mock.module("node:child_process") leakage from other tests.
+  // biome-ignore lint/suspicious/noRedeclare: intentional local binding
+  const cp = require("node:child_process");
+  const r = cp['spawnSync']("node", [join(fixtureDir, "scripts", "check-file-size.cjs")], {
     cwd: fixtureDir,
     encoding: "utf8",
   });
