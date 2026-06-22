@@ -401,16 +401,17 @@ function scoreFiles(
  *  A1 FU #198: this is the production enforcement path — the deny-list is
  *  no longer a test-only seam. When the engine's PreToolUse event routes
  *  through `vf hook`, this scorer blocks the tool natively. */
-function scoreToolDeny(
-  input: HookInput,
-  bump: (l: RiskLevel) => void,
-  reasons: string[],
-): void {
+function scoreToolDeny(input: HookInput, bump: (l: RiskLevel) => void, reasons: string[]): void {
   const denialEnv = process.env.VF_DENY_TOOLS;
   if (!denialEnv) return;
   const tool = input.tool;
   if (!tool) return;
-  const denied = new Set(denialEnv.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const denied = new Set(
+    denialEnv
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
   if (denied.has(tool.toLowerCase())) {
     bump("critical");
     reasons.push(
