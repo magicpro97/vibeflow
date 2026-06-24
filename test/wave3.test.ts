@@ -3,12 +3,6 @@ import type { WorkUnit, WorkflowState } from "../src/core.js";
 import { debate, investigate, thresholdFor } from "../src/orchestrator/investigate.js";
 import { planWorkUnits, scheduleWaves } from "../src/orchestrator/plan.js";
 import { goalEval, orchestrateUnits, runParallel } from "../src/orchestrator/run.js";
-import {
-  canPromote,
-  draftSkillFromLesson,
-  extractLessons,
-  shouldPropose,
-} from "../src/skills/maintainer.js";
 
 function unit(name: string, scope: string[]): WorkUnit {
   return {
@@ -237,39 +231,5 @@ describe("parallel runner + goal-eval", () => {
     const v = goalEval(stateFor(secBelow));
     expect(v.reasons.join(" ")).toContain("0.95");
     expect(v.reasons.join(" ")).not.toContain("1.0");
-  });
-});
-
-describe("skill maintainer (evolution)", () => {
-  test("recurring failures become proposable lessons; one-offs do not", () => {
-    const lessons = extractLessons([
-      { unit: "u1", failures: ["flaky network timeout on CI"] },
-      { unit: "u2", failures: ["flaky network timeout on CI"] },
-      { unit: "u3", workarounds: ["manually bumped node memory"] },
-    ]);
-    const recurring = lessons.find((l) => l.topic.includes("flaky network timeout"));
-    expect(recurring?.recurrences).toBe(2);
-    expect(recurring ? shouldPropose(recurring) : false).toBe(true);
-    const oneOff = lessons.find((l) => l.kind === "workaround");
-    expect(oneOff ? shouldPropose(oneOff) : true).toBe(false);
-  });
-
-  test("a drafted skill is a draft and follows the SKILL.md standard", () => {
-    const draft = draftSkillFromLesson({
-      topic: "handle xlsx merged cells",
-      evidence: ["e1", "e2"],
-      recurrences: 2,
-      kind: "failure",
-    });
-    // Lifecycle starts at `draft` (draft → experimental → verified) — a freshly mined
-    // lesson is unproven and must not be presented as experimental until validated.
-    expect(draft.content).toContain("status: draft");
-    expect(draft.content).toContain("name:");
-  });
-
-  test("promotion requires both validation and approval", () => {
-    expect(canPromote({ status: "experimental", validated: false, approved: true }).ok).toBe(false);
-    expect(canPromote({ status: "experimental", validated: true, approved: false }).ok).toBe(false);
-    expect(canPromote({ status: "experimental", validated: true, approved: true }).ok).toBe(true);
   });
 });

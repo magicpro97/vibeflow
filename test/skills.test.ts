@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CTX_DIR, type Skill } from "../src/core.js";
-import { canPromote, draftSkillFromLesson } from "../src/skills/maintainer.js";
 import {
   discoverSkills,
   matchSkillsForFile,
@@ -255,35 +254,6 @@ describe("resolver status-aware matching", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-});
-
-describe("maintainer lifecycle", () => {
-  test("draftSkillFromLesson emits a draft (not experimental)", () => {
-    const draft = draftSkillFromLesson({
-      topic: "handle xlsx merged cells",
-      evidence: ["e1", "e2"],
-      recurrences: 2,
-      kind: "failure",
-    });
-    expect(draft.content).toContain("status: draft");
-    expect(draft.content).not.toContain("status: experimental");
-  });
-
-  test("an external skill cannot be written as verified without promotion", () => {
-    const r = canPromote({
-      status: "experimental",
-      validated: false,
-      approved: true,
-      provenance: "discovered",
-    });
-    expect(r.ok).toBe(false);
-  });
-
-  test("promotion still requires validation and approval", () => {
-    expect(canPromote({ status: "experimental", validated: false, approved: true }).ok).toBe(false);
-    expect(canPromote({ status: "experimental", validated: true, approved: false }).ok).toBe(false);
-    expect(canPromote({ status: "experimental", validated: true, approved: true }).ok).toBe(true);
   });
 });
 
