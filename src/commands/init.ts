@@ -49,6 +49,7 @@ import type {
   MemoryPhaseInject,
   PreflightFn,
   StepSpawner,
+  ToolName,
   UnitDispatcher,
 } from "./_shared.js";
 
@@ -100,6 +101,8 @@ export async function init(
     // `codegraph` binary to look missing so the else-branch (L445-460)
     // runs. Production callers leave this undefined.
     hasCommandFn?: (cmd: string) => boolean;
+    /** Override tool detection for Phase 1.6 (test seam). Defaults to TOOLS[name].detect(). */
+    detectTool?: (name: ToolName) => boolean;
     // Test seam: forwarded to the bare `ensureCtx7Auth()` call at
     // L469. Lets unit tests stub the whoami spawner / askConfirm so
     // the ctx7 path (L466-470) executes without blocking on stdin.

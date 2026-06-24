@@ -8,6 +8,8 @@
 import {
   CTX_DIR,
   ENGINES,
+  TOOLS,
+  VALID_TOOLS,
   armHooks,
   basename,
   c,
@@ -16,12 +18,12 @@ import {
   copyPhaseSkillTemplates,
   copySkillCreator,
   cwd,
+  defaultHookConfig,
   ensureContextDir,
   ensureCtx7Auth,
   ensureToolIndex,
   existsSync,
   generateWorkflowArtifacts,
-  hasCommand,
   join,
   out,
   panel,
@@ -46,6 +48,7 @@ import type {
   IntakeAnswers,
   MemoryPhaseInject,
   StepSpawner,
+  ToolName,
   UnitDispatcher,
   WorkflowPhase,
 } from "../_shared.js";
@@ -62,6 +65,8 @@ export async function writeInitArtifacts(params: {
   inject: {
     syncSpawner?: StepSpawner;
     hasCommandFn?: (cmd: string) => boolean;
+    /** Override tool detection for Phase 1.6 (test seam). Defaults to TOOLS[name].detect(). */
+    detectTool?: (name: ToolName) => boolean;
     hookSetup?: HookConfig | null;
     memoryInject?: MemoryPhaseInject;
     aiSpawner?: AsyncSpawner;
@@ -119,8 +124,8 @@ export async function writeInitArtifacts(params: {
     await runMemoryPhase(cwd(), flags, memoryEngines, inject.memoryInject);
   }
 
-  // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
-  // enable in settings, write MCP config, and build index.
+  // Phase 1.6: Tool provisioning — auto-install every enabled-but-missing tool
+  // (issue #333), write MCP config once, and build per-tool index.
   if (!dry) {
     const syncSpawner: StepSpawner =
       inject.syncSpawner ??
@@ -128,39 +133,51 @@ export async function writeInitArtifacts(params: {
         const r = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
         return { status: r.status ?? 1 };
       });
-    const hasCodegraph = (inject.hasCommandFn ?? hasCommand)("codegraph");
-    if (hasCodegraph) {
-      const curSettings = readSettings(cwd());
-      if (!curSettings.tools?.codegraph) {
-        writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
-        out("vf", c.green("+ enabled codegraph"));
-      }
-      writeToolConfigs(cwd(), readSettings(cwd()), engines);
-      ensureToolIndex(cwd(), "codegraph", syncSpawner);
-    } else {
-      out("vf", c.cyan("▶ Installing codegraph globally via npm..."));
-      const rc = provisionTool(cwd(), "codegraph", syncSpawner);
-      if (rc === 0) {
-        writeSettings(cwd(), { tools: { ...readSettings(cwd()).tools, codegraph: true } });
-        out("vf", c.green("+ enabled codegraph"));
-        writeToolConfigs(cwd(), readSettings(cwd()), engines);
+    const curSettings = readSettings(cwd());
+    let toolsEnabled = false;
+
+    for (const name of VALID_TOOLS) {
+      if (!curSettings.tools?.[name]) continue; // not enabled by user — skip
+      const detect = inject.detectTool ?? ((name: ToolName) => TOOLS[name].detect());
+      const installed = detect(name);
+      if (installed) {
+        ensureToolIndex(cwd(), name, syncSpawner);
+        toolsEnabled = true;
       } else {
-        out(
-          "vf",
-          c.yellow(
-            "! codegraph install failed — skipping. Run `vf tools install codegraph` manually.",
-          ),
-        );
+        out("vf", c.cyan(`▶ Installing ${TOOLS[name].title}...`));
+        const rc = provisionTool(cwd(), name, syncSpawner);
+        if (rc === 0) {
+          out("vf", c.green(`+ installed ${TOOLS[name].title}`));
+          ensureToolIndex(cwd(), name, syncSpawner);
+          toolsEnabled = true;
+        } else {
+          out(
+            "vf",
+            c.yellow(
+              `! ${TOOLS[name].title} install failed — skipping. Run \`vf tools install ${name}\` manually.`,
+            ),
+          );
+        }
       }
+    }
+
+    if (toolsEnabled) {
+      writeToolConfigs(cwd(), readSettings(cwd()), engines);
     }
   }
 
-  // Phase 1.65: Interactive guardrail-hooks setup.
+  // Phase 1.65: Guardrail-hooks setup — interactive on TTY, auto-arm with
+  // default all-on policy in headless/CI mode (issue #333).
   const wantHooks = !dry && !result.refused && !flags["no-hooks"];
-  if (wantHooks && (inject.hookSetup !== undefined || process.stdin.isTTY)) {
-    out("vf");
-    const config = inject.hookSetup !== undefined ? inject.hookSetup : await collectHookSetup();
+  if (wantHooks) {
+    const config =
+      inject.hookSetup !== undefined
+        ? inject.hookSetup
+        : process.stdin.isTTY
+          ? await collectHookSetup()
+          : defaultHookConfig(); // headless/CI: auto-arm with all-on default
     if (config) {
+      out("vf");
       const armed = armHooks(cwd(), config);
       out("vf", panel("Hooks", c.bold("armed")));
       out("vf", c.green(`+ ${CTX_DIR}/SETTINGS.json (hooks policy)`));

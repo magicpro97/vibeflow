@@ -34,7 +34,7 @@ import { CLAUDE_MCP_FILE, repoLanguages, writeToolConfigs } from "./tools-mcp-co
 
 /** Spawn seam for tool installs — defaults to a real spawnSync, injectable for tests. */
 export type StepSpawner = (cmd: string, args: string[]) => { status: number };
-const VALID_TOOLS: ToolName[] = ["codegraph", "lsp"];
+export const VALID_TOOLS: ToolName[] = ["codegraph", "lsp"];
 
 function isToolName(v: string | undefined): v is ToolName {
   return v === "codegraph" || v === "lsp";

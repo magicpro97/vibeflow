@@ -181,7 +181,7 @@ export { engineReady, readyStub } from "./orchestrate.js";
 // re-export the three values + the type through this barrel — the same
 // sibling-to-sibling bridge as resolveRepo / normalizeUnit / the
 // protection cluster above.
-export { ensureToolIndex, provisionTool } from "./tools.js";
+export { ensureToolIndex, provisionTool, VALID_TOOLS } from "./tools.js";
 export { writeToolConfigs } from "./tools-mcp-config.js";
 export type { StepSpawner } from "./tools.js";
 

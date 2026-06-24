@@ -4727,15 +4727,21 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
     const origIsTTY = process.stderr.isTTY;
     Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
     process.chdir(dir);
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "SETTINGS.json"),
+      JSON.stringify({ tools: { codegraph: true } }),
+    );
     try {
       const code = await init(
         { ai: false, "no-ask": true, "no-agent-team": true, "no-ai": true, engine: "claude" },
         {
           // NO syncSpawner inject → the default closure (spawnSync) is built and
-          // invoked. hasCommandFn:true routes to ensureToolIndex, which calls the
-          // default spawner with the real `codegraph` binary; on a runner without
-          // it, spawnSync returns ENOENT immediately (no hang).
+          // invoked. The detectTool inject makes the tool appear already installed,
+          // so ensureToolIndex runs via the real spawnSync (which will likely fail
+          // with ENOENT if codegraph isn't installed, but that's fine for coverage).
           hasCommandFn: () => true,
+          detectTool: () => true,
           hookSetup: null,
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-16" },
