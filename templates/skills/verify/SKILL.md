@@ -1,13 +1,16 @@
+---
+name: verify
+description: Audit all phase artifacts against acceptance criteria and produce a sign-off verification report.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:verify
+  - needs:sign-off
+  - transform:artifacts-to-verdict
+---
+
 # verify — {{PROJECT_NAME}}
-
-## Meta
-- **name**: verify
-- **description**: Audit all phase artifacts against acceptance criteria and produce a sign-off verification report.
-
-## Trigger / When to Read
-- workflow-phase:verify
-- needs:sign-off
-- transform:artifacts-to-verdict
 
 ## Purpose
 
@@ -109,7 +112,7 @@ When you know the full file path, use `read` directly. Use `codegraph_node` when
 
 - Templates: `.vibeflow/skills/verify/references/templates/`
 - Examples: `.vibeflow/skills/verify/references/examples/`
-- ANTHROPIC_SKILL_STANDARD.md — required skill format (## Meta section).
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
 - `.vibeflow/PROJECT_CONTEXT.md` — original requirements.
 - `.vibeflow/knowledge/log.md` — evidence log.
 - `.vibeflow/WORKFLOW_STATE.json` — per-phase DoD and success criteria.

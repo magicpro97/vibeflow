@@ -461,29 +461,6 @@ describe("copyPhaseSkillTemplates (hasPaths render branch)", () => {
     }
   });
 
-  test("generated phase skill uses Anthropic ## Meta format, not YAML frontmatter", async () => {
-    const { renderPhaseSkillToCanonical } = await import(
-      "../src/workflow-artifacts/phase-canonical.js"
-    );
-    // A phase WITHOUT a package template hits the fallback render. Use a
-    // made-up phase name so no shipped template matches.
-    const body = renderPhaseSkillToCanonical(
-      { name: "Custom Phase XYZ", description: "A custom phase" } as WorkflowPhase,
-      "demo-project",
-      "9.9.9",
-    );
-    // Anthropic format: ## Meta section, NO YAML frontmatter delimiter
-    expect(body).toContain("## Meta");
-    expect(body).toContain("- **name**: custom-phase-xyz");
-    expect(body).toContain("- **description**: A custom phase");
-    expect(body).toContain("## Trigger / When to Read");
-    expect(body.startsWith("---")).toBe(false);
-    // No leftover YAML frontmatter fields
-    expect(body).not.toMatch(/^status:/m);
-    expect(body).not.toMatch(/^requires:/m);
-    expect(body).not.toMatch(/^triggers:/m);
-  });
-
   test("copies package reference files when they exist (viewpoint_testing.md)", async () => {
     const { copyPhaseTemplateReferences } = await import(
       "../src/workflow-artifacts/phase-canonical.js"

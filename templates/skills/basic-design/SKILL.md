@@ -1,13 +1,16 @@
+---
+name: basic-design
+description: Transform structured requirements into a high-level functional design with modules, features, and data flow.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:basic-design
+  - needs:high-level-design
+  - transform:requirements-to-design
+---
+
 # basic-design — {{PROJECT_NAME}}
-
-## Meta
-- **name**: basic-design
-- **description**: Transform structured requirements into a high-level functional design with modules, features, and data flow.
-
-## Trigger / When to Read
-- workflow-phase:basic-design
-- needs:high-level-design
-- transform:requirements-to-design
 
 ## Purpose
 
@@ -111,7 +114,7 @@ When you know the full file path, use `read` directly. Use `codegraph_node` when
 
 - Templates: `.vibeflow/skills/basic-design/references/templates/`
 - Examples: `.vibeflow/skills/basic-design/references/examples/`
-- ANTHROPIC_SKILL_STANDARD.md — required skill format (## Meta section).
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
 - `.vibeflow/PROJECT_CONTEXT.md` — project domain and conventions.
 - `.vibeflow/ai-context/stack-evidence.md` — detected stack/framework list.
 - `.vibeflow/knowledge/log.md` — evidence log.

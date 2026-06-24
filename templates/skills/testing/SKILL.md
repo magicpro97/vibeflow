@@ -1,13 +1,16 @@
+---
+name: testing
+description: Transform code and design into executable test cases, run them, and report results with traceability.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:testing
+  - needs:test-coverage
+  - transform:code-to-tested
+---
+
 # testing — {{PROJECT_NAME}}
-
-## Meta
-- **name**: testing
-- **description**: Transform code and design into executable test cases, run them, and report results with traceability.
-
-## Trigger / When to Read
-- workflow-phase:testing
-- needs:test-coverage
-- transform:code-to-tested
 
 ## Purpose
 
@@ -110,7 +113,7 @@ When you know the full file path, use `read` directly. Use `codegraph_node` when
 - **Viewpoint** (common test base knowledge): `.vibeflow/skills/testing/references/viewpoint_testing.md` — read this BEFORE generating test cases; it defines the standard test viewpoints (CRUD, validation, permissions, data, abnormal operations).
 - Templates: `.vibeflow/skills/testing/references/templates/`
 - Examples: `.vibeflow/skills/testing/references/examples/`
-- ANTHROPIC_SKILL_STANDARD.md — required skill format (## Meta section).
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
 - `.vibeflow/PROJECT_CONTEXT.md` — test framework, conventions.
 - `.vibeflow/knowledge/log.md` — evidence log.
 

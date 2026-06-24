@@ -134,6 +134,7 @@ export function copyPhaseSkillTemplates(
       const body = template
         .replace(/\{\{PROJECT_NAME\}\}/g, projectName)
         .replace(/\{\{VERSION\}\}/g, VF_VERSION)
+        .replace(/^status: template$/m, "status: template")
         .replace(/\{\{phase\.inputs path\}\}/g, "_not provided_")
         .replace(/\{\{phase\.outputs path\}\}/g, "_not provided_")
         .replace(/\{\{template if provided\}\}/g, phase.template ?? "_not provided_");

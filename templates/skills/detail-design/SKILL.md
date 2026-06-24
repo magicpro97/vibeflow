@@ -1,13 +1,16 @@
+---
+name: detail-design
+description: Transform a high-level functional design into an implementation-ready specification with interfaces, schemas, and method signatures.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:detail-design
+  - needs:implementation-ready-spec
+  - transform:high-level-to-detail
+---
+
 # detail-design — {{PROJECT_NAME}}
-
-## Meta
-- **name**: detail-design
-- **description**: Transform a high-level functional design into an implementation-ready specification with interfaces, schemas, and method signatures.
-
-## Trigger / When to Read
-- workflow-phase:detail-design
-- needs:implementation-ready-spec
-- transform:high-level-to-detail
 
 ## Purpose
 
@@ -111,7 +114,7 @@ When you know the full file path, use `read` directly. Use `codegraph_node` when
 
 - Templates: `.vibeflow/skills/detail-design/references/templates/`
 - Examples: `.vibeflow/skills/detail-design/references/examples/`
-- ANTHROPIC_SKILL_STANDARD.md — required skill format (## Meta section).
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
 - `.vibeflow/PROJECT_CONTEXT.md` — project domain and conventions.
 - `.vibeflow/ai-context/stack-evidence.md` — detected stack/framework list.
 - `.vibeflow/knowledge/log.md` — evidence log.

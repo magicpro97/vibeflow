@@ -1,13 +1,16 @@
+---
+name: requirements-analysis
+description: Transform raw business needs and ambiguous inputs into a structured, testable requirements specification.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:requirements-analysis
+  - needs:structured-requirements
+  - transform:raw-needs-to-spec
+---
+
 # requirements-analysis — {{PROJECT_NAME}}
-
-## Meta
-- **name**: requirements-analysis
-- **description**: Transform raw business needs and ambiguous inputs into a structured, testable requirements specification.
-
-## Trigger / When to Read
-- workflow-phase:requirements-analysis
-- needs:structured-requirements
-- transform:raw-needs-to-spec
 
 ## Purpose
 
@@ -111,7 +114,7 @@ When you know the full file path, use `read` directly. Use `codegraph_node` when
 
 - Templates: `.vibeflow/skills/requirements-analysis/references/templates/`
 - Examples: `.vibeflow/skills/requirements-analysis/references/examples/`
-- ANTHROPIC_SKILL_STANDARD.md — required skill format (## Meta section).
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
 - `.vibeflow/PROJECT_CONTEXT.md` — project domain and conventions.
 - `.vibeflow/knowledge/log.md` — evidence log.
 
