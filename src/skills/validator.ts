@@ -15,20 +15,6 @@ export interface SkillValidationResult {
   warnings: string[];
 }
 
-/** Extract the content of a `## Meta` or `## Metadata` section from markdown text. */
-function extractMetaSection(text: string): string | null {
-  const m = text.match(/^##\s+Meta(?:data)?\s*\n((?:[ \t]*-(?:[^\n]*\n?))*)/m);
-  return m?.[1] ? m[1].trim() : null;
-}
-
-/** Extract a bullet value like `- **name**: value` from a section. */
-function extractBullet(section: string, key: string): string | null {
-  const m = section.match(
-    new RegExp(`-\\s+\\*\\*${key}\\*\\*\\s*:\\s*(.*?)(?:\\s*<!--.*-->)?$`, "m"),
-  );
-  return m?.[1] ? m[1].trim() : null;
-}
-
 function bodyAfterFrontmatter(text: string): string {
   if (!text.startsWith("---")) return text.trim();
   const end = text.indexOf("\n---", 3);
@@ -72,65 +58,22 @@ export function validateSkillDir(
   }
 
   const { data } = parseFrontmatter(text);
-  const hasYaml = text.startsWith("---");
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  const description = typeof data.description === "string" ? data.description.trim() : "";
 
-  // Extract name/description from ## Meta section (Anthropic standard)
-  // or fall back to YAML frontmatter (deprecated).
-  const metaSection = extractMetaSection(text);
-  let name = "";
-  let description = "";
-  let fromMeta = false;
-
-  if (metaSection) {
-    name = extractBullet(metaSection, "name") ?? "";
-    description = extractBullet(metaSection, "description") ?? "";
-    fromMeta = true;
-    if (hasYaml) {
-      warnings.push(
-        "SKILL.md has both ## Meta section and YAML frontmatter — prefer ## Meta only (see ANTHROPIC_SKILL_STANDARD.md)",
-      );
-    }
-  } else {
-    name = typeof data.name === "string" ? data.name.trim() : "";
-    description = typeof data.description === "string" ? data.description.trim() : "";
-    if (hasYaml && (data.name || data.description)) {
-      warnings.push(
-        "DEPRECATED: YAML frontmatter format. Migrate to ## Meta section (see ANTHROPIC_SKILL_STANDARD.md).",
-      );
-    }
+  if (!name) errors.push("frontmatter.name is required");
+  else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+    errors.push("frontmatter.name must be lowercase kebab-case");
   }
 
-  if (!name) {
-    errors.push(
-      fromMeta ? "## Meta section must contain **name**" : "frontmatter.name is required",
-    );
-  } else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
-    errors.push(
-      fromMeta
-        ? "## Meta name must be lowercase kebab-case"
-        : "frontmatter.name must be lowercase kebab-case",
-    );
-  }
-
-  if (!description) {
-    errors.push(
-      fromMeta
-        ? "## Meta section must contain **description**"
-        : "frontmatter.description is required",
-    );
-  } else if (description.length > 1024) {
-    errors.push(
-      fromMeta
-        ? "## Meta description must be <= 1024 chars"
-        : "frontmatter.description must be <= 1024 chars",
-    );
+  if (!description) errors.push("frontmatter.description is required");
+  else if (description.length > 1024) {
+    errors.push("frontmatter.description must be <= 1024 chars");
   }
 
   const folder = basename(dir);
   if (name && folder !== name) {
-    warnings.push(
-      `folder name (${folder}) differs from ${fromMeta ? "## Meta" : "frontmatter"}.name (${name})`,
-    );
+    warnings.push(`folder name (${folder}) differs from frontmatter.name (${name})`);
   }
 
   const body = bodyAfterFrontmatter(text);
