@@ -1,9 +1,0 @@
-{
-  "detectionOnly": true,
-  "events": [
-    "post-command",
-    "post-write",
-    "verify-result"
-  ],
-  "command": "node /Users/linhn/vibeflow-docs/dist/cli.js hook"
-}
