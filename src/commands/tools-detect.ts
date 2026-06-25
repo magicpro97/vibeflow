@@ -4,6 +4,7 @@
 
 import {
   appendJournal,
+  autoCrystallizeRun,
   c,
   cwd,
   e2eEvaluateDynamicImportWarning,
@@ -128,6 +129,7 @@ export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean }
         `${failed} gate(s) failed`,
         ...report.failures.map((f) => `- ${f}`),
       ]);
+      autoCrystallizeAndReport(base);
     }
     return 1;
   }
@@ -137,6 +139,22 @@ export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean }
       `${report.passed.length} gate(s) passed`,
       ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
     ]);
+    autoCrystallizeAndReport(base);
   }
   return 0;
+}
+
+/** Auto-crystallize this verify run's patterns into a DRAFT skill and report
+ *  it (issue #335). Only called on the `--journal` path so the default
+ *  read-only `vf verify` stays side-effect-free (issue #154). */
+function autoCrystallizeAndReport(base: string): void {
+  const cz = autoCrystallizeRun(base, `verify-${new Date().toISOString().slice(0, 10)}`);
+  if (cz.drafted) {
+    out(
+      "vf",
+      c.green(
+        `+ drafted skill ${cz.draftName} (${cz.patternCount} pattern(s)) — DRAFT, review before install`,
+      ),
+    );
+  }
 }

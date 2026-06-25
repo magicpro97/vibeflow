@@ -37,6 +37,7 @@ import {
   DEFAULT_CONCURRENCY,
   Spinner,
   appendJournal,
+  autoCrystallizeRun,
   c,
   cwd,
   defaultContext,
@@ -338,6 +339,20 @@ export async function orchestrate(
       ...ran.map((u) => `- ${u.name}: ${u.status} @ ${u.confidence}`),
       ...reviews.map((r) => `- review ${r.unit}: ${r.pass ? "pass" : "fail"} — ${r.reason}`),
     ]);
+    // Auto-crystallize: turn this run's repeated patterns into a DRAFT skill
+    // (never installed — review-then-`git add`). The deterministic backstop of
+    // the learning loop — fires regardless of which engine ran. issue #335.
+    const runId = `orchestrate-${engine}-${new Date().toISOString().slice(0, 10)}`;
+    const cz = autoCrystallizeRun(base, runId);
+    if (cz.drafted) {
+      out(
+        "vf",
+        c.green(
+          `+ drafted skill ${c.bold(cz.draftName ?? "")} from ${cz.patternCount} recurring pattern(s) → ${cz.draftPath}`,
+        ),
+      );
+      out("vf", c.dim("  DRAFT only — NOT installed. Review, then `git add` if useful."));
+    }
   }
   if (mode === "dry") {
     out(

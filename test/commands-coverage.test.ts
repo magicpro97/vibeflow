@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -499,6 +507,32 @@ describe("commands.orchestrate — gate branches", () => {
       spawner: async () => ({ status: 0, stdout: "{}" }),
     });
     expect(code).toBe(1);
+  });
+
+  test("orchestrate: cli mode auto-crystallizes a DRAFT skill when patterns recur (#335)", async () => {
+    const dir = freshDir("vf-orch-acz-");
+    writeFixture(dir);
+    // Seed the knowledge journal with a command repeated 3× so the
+    // end-of-orchestrate auto-crystallize crosses the command threshold.
+    mkdirSync(join(dir, CTX_DIR, "knowledge"), { recursive: true });
+    writeFileSync(
+      join(dir, CTX_DIR, "knowledge", "log.md"),
+      ['$ git commit -m "a"', '$ git commit -m "b"', '$ git commit -m "c"'].join("\n"),
+    );
+    const code = await orchestrate({ yes: true, engine: "claude", risk: "feature" }, dir, {
+      spawner: async () => ({ status: 0, stdout: '```json\n{"confidence": 0.5}\n```' }),
+      git: noGitRunner,
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "" },
+      ],
+    });
+    expect([0, 1]).toContain(code);
+    // A DRAFT skill was written under .vibeflow/skills/crystallized-*/
+    const skillsDir = join(dir, CTX_DIR, "skills");
+    const drafted = existsSync(skillsDir)
+      ? readdirSync(skillsDir).some((n) => n.startsWith("crystallized-"))
+      : false;
+    expect(drafted).toBe(true);
   });
 
   test("orchestrate: cli mode + engine ready passes the gate (line 599-601 else)", async () => {
@@ -1889,6 +1923,40 @@ describe("commands.verify branches", () => {
       // The journal entry was written (opt-in via journal:true; issue #154)
       const journal = existsSync(join(dir, CTX_DIR, "knowledge", "log.md"));
       expect(journal).toBe(true);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify --journal auto-crystallizes a DRAFT skill when patterns recur (#335)", () => {
+    const dir = freshDir("vf-verify-acz-");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    // Seed the knowledge journal with a command repeated 3× so crystallize
+    // crosses the command threshold → autoCrystallizeAndReport drafts a skill.
+    mkdirSync(join(dir, CTX_DIR, "knowledge"), { recursive: true });
+    writeFileSync(
+      join(dir, CTX_DIR, "knowledge", "log.md"),
+      ['$ git commit -m "a"', '$ git commit -m "b"', '$ git commit -m "c"'].join("\n"),
+    );
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = verify({ journal: true });
+      expect(code).toBe(0);
+      // A DRAFT skill file was written under .vibeflow/skills/crystallized-*/
+      const skillsDir = join(dir, CTX_DIR, "skills");
+      const drafted = existsSync(skillsDir)
+        ? readdirSync(skillsDir).some((n) => n.startsWith("crystallized-"))
+        : false;
+      expect(drafted).toBe(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
