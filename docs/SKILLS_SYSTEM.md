@@ -14,6 +14,7 @@ last_updated: 2026-06-24
 - [Skill Categories](#skill-categories)
 - [Skill Usage Rule](#skill-usage-rule)
 - [Skill Registry Priority](#skill-registry-priority)
+- [Learning Loop](#learning-loop--turning-runs-into-skills)
 - [No Silent Improvisation](#no-silent-improvisation)
 
 ## Skill standard
@@ -160,6 +161,35 @@ Canonical order (kept in sync with `MASTER_SPEC.md`, `SKILL_PROVIDERS.md`, and
 7. Community skills after review
 8. npm packages only after security verification
 ```
+
+## Learning loop — turning runs into skills
+
+VibeFlow self-improves by capturing what each run learns. Four mechanisms feed
+the loop, covering **mistake / learn / knowledge / decision**:
+
+| Dimension | Mechanism | Trigger |
+|-----------|-----------|---------|
+| mistake / learn | **auto-crystallize** | Automatic at the end of `vf orchestrate` (and `vf verify --journal`). Reads the run log + `knowledge/log.md`, counts recurring commands / skills / failures, and writes a DRAFT skill when a pattern crosses threshold. |
+| learn (agent-driven) | **`vf skills draft <name>`** | An agent (or you) captures a reusable procedure or worked-around mistake on the spot. Scaffolds a `status: draft` SKILL.md with a Why/Evidence skeleton. |
+| knowledge | **`knowledge/log.md`** | Append-only work journal (`## [YYYY-MM-DD] note | <title>`). Read before, append after. |
+| decision | **`vf decision add`** | Records a durable architecture/process decision in `knowledge/decisions.md` (ADR-lite), separate from the noisy journal. |
+
+### Safety model — DRAFT, never auto-installed
+
+Every captured skill lands as `status: draft` and is **never installed into the
+engine mirrors automatically**. A draft is an untracked file you review and
+`git add` if useful. This is deliberate: a wrong skill that auto-installed would
+poison every subsequent run. Promotion (draft → verified) is a human decision.
+
+`vf verify` stays **read-only by default** — the auto-crystallize tail only runs
+on the opt-in `--journal` flag, so the gate an agent runs before "claiming done"
+never mutates the tree it audits.
+
+### Dispatched agents know the loop
+
+The `VF_WORKFLOW` block injected into every engine's context tells dispatched
+agents to draft skills and record decisions as they work — so the loop runs
+whether or not the deterministic auto-crystallize backstop fires.
 
 ## No silent improvisation
 

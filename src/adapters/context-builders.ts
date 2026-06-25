@@ -93,6 +93,12 @@ Drive every task through this loop instead of free-handing it:
 
 **Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (\`vf skills\` to list/resolve). Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy work, and pull external library docs on demand with \`vf discover docs <lib> --yes\`. After acting, record what you did or learned: append an entry to \`${CTX_DIR}/knowledge/log.md\` (\`## [YYYY-MM-DD] note | <title>\`, append-only) and keep \`${CTX_DIR}/knowledge/index.md\` current.
 
+**Learn from this run so the next one is smarter.** The point of the journal is reuse, not paperwork:
+- A reusable procedure you discovered, or a mistake you had to work around → capture it as a skill: \`vf skills draft <name>\` (lands as \`status: draft\` for review — never auto-installed).
+- A non-obvious architecture/process decision → \`vf decision add --title "…" --context "…" --decision "…"\` (durable in \`${CTX_DIR}/knowledge/decisions.md\`, separate from the noisy journal).
+- Routine progress → the \`knowledge/log.md\` entry above.
+At the end of \`vf orchestrate\` (and \`vf verify --journal\`), recurring patterns are auto-crystallized into a DRAFT skill — review the untracked file and \`git add\` it if useful.
+
 **Tools.** \`vf tools enable codegraph|lsp\` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.
 
 **When \`vf verify\` fails.** A red gate is investigated, not worked around. (1) Read the \`✗\` lines — each names a failing gate (typecheck/lint/test) or a policy gate (\`confidence<1\`, \`no-evidence\`, scope overlap). (2) Fix the root cause. (3) For a unit stuck below the bar: record evidence (\`vf units evidence <u> --add "<proof>"\`) then close it (\`vf units update <u> --status done --confidence 1\`). (4) Re-run \`vf verify\`. \`vf verify\` is read-only by default; pass \`--journal\` only if you want the run appended to the work journal.
@@ -126,6 +132,7 @@ export const VF_COMMANDS_SLIM = `## VibeFlow commands (use these)
  * pitfalls, hooks) moves to the \`vf\` skill / {@link VF_WORKFLOW}. Issue #322.
  */
 export const VF_WORKFLOW_SLIM = `**Working with vf — Confidence gate:** nothing is "done" until \`vf verify\` passes at confidence 1.0 WITH evidence (command output, file path, or test result), within scope. No verification, no completion. Drive every task through vf; do not free-hand it.
+**Learn from the run:** capture a reusable procedure or worked-around mistake as a DRAFT skill (\`vf skills draft <name>\`), and record non-obvious decisions with \`vf decision add\`. \`vf orchestrate\` auto-crystallizes recurring patterns into a DRAFT for review.
 Full workflow guide: load the \`vf\` skill (or \`/vf\` in a CLI) — Flow A–D, pitfalls, and hooks live there.`;
 
 /**

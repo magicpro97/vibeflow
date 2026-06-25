@@ -172,9 +172,9 @@ ${c.bold("Examples:")}
   vf config memory on`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import | init <name> | draft <name> | crystallize <run-id>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
-and import external skills into the canonical store.
+import external skills, and capture new skills from real work.
 
 ${c.bold("Subcommands:")}
   list                       list discovered skills (default)
@@ -184,12 +184,16 @@ ${c.bold("Subcommands:")}
   sync [--mode pointer|full] [--engine <name>] sync .vibeflow/skills → engine mirror (--engine can repeat; default copilot)
   verify-sync                verify engine mirror has every canonical skill (defaults to selected engine)
   import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
+  init <name>                scaffold an empty SKILL.md stub
+  draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
+  crystallize <run-id>       mechanically draft a skill from a run's recurring patterns
 
 ${c.bold("Examples:")}
   vf skills list
   vf skills search "read a pdf"
   vf skills validate
   vf skills sync --mode pointer
+  vf skills draft fix-flaky-db-test
   vf skills import .vibeflow/skills/external-skill
   vf skills import context7:react-hooks`,
 
@@ -253,6 +257,19 @@ workflow ledger. Returns nonzero if any gate fails.
 
 ${c.bold("Examples:")}
   vf verify`,
+
+  decision:
+    () => `${c.bold("vf decision")} ${c.dim('[add --title "<t>" --context "<c>" --decision "<d>" [--consequences "<x>"] | list]')}
+Record durable architecture/process decisions (ADR-lite) in
+.vibeflow/knowledge/decisions.md — separate from the noisy work journal.
+
+${c.bold("Subcommands:")}
+  add   record a decision; --title, --context, --decision required (--consequences optional)
+  list  print the decision log (default)
+
+${c.bold("Examples:")}
+  vf decision add --title "Use YAML frontmatter" --context "Anthropic spec" --decision "Keep YAML"
+  vf decision list`,
 };
 
 /** True when `cmd` is a known subcommand that carries its own help block. */

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultContext } from "../src/adapters.js";
+import { VF_WORKFLOW, VF_WORKFLOW_SLIM } from "../src/adapters/context-builders.js";
 import { CTX_DIR } from "../src/core.js";
 
 function freshDir(prefix: string): string {
@@ -55,5 +56,19 @@ describe("adapters.defaultContext runtime guard (issue #92)", () => {
     // Sanity: even an empty dir under .vibeflow/ without the state file throws.
     mkdirSync(join(base, CTX_DIR), { recursive: true });
     expect(() => defaultContext({ base })).toThrow(/vf init/i);
+  });
+});
+
+describe("VF_WORKFLOW learning instructions (issue #335)", () => {
+  test("full workflow tells dispatched agents to draft skills + record decisions", () => {
+    expect(VF_WORKFLOW).toContain("vf skills draft");
+    expect(VF_WORKFLOW).toContain("vf decision add");
+    expect(VF_WORKFLOW).toContain("auto-crystallized");
+    expect(VF_WORKFLOW).toContain("knowledge/decisions.md");
+  });
+
+  test("slim workflow also surfaces the learning loop", () => {
+    expect(VF_WORKFLOW_SLIM).toContain("vf skills draft");
+    expect(VF_WORKFLOW_SLIM).toContain("vf decision add");
   });
 });

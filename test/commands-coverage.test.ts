@@ -1306,6 +1306,26 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("search", ["trigger-keyword"])).toBe(0);
   });
 
+  test("skills: draft scaffolds a status:draft skill (#335)", () => {
+    expect(skills("draft", ["fix-flaky-db-test"])).toBe(0);
+    const md = join(dir, CTX_DIR, "skills", "fix-flaky-db-test", "SKILL.md");
+    expect(existsSync(md)).toBe(true);
+    const body = readFileSync(md, "utf8");
+    expect(body).toContain("status: draft");
+    expect(body).toContain("## Why this exists");
+    expect(body).toContain("## Evidence");
+  });
+
+  test("skills: draft rejects a bad name (returns 2)", () => {
+    expect(skills("draft", ["Bad_Name"])).toBe(2);
+    expect(skills("draft", [])).toBe(2);
+  });
+
+  test("skills: draft refuses to overwrite an existing skill (returns 1)", () => {
+    expect(skills("draft", ["dup-skill"])).toBe(0);
+    expect(skills("draft", ["dup-skill"])).toBe(1);
+  });
+
   test("skills: resolve prints the needs table (line 1699-1712)", () => {
     applyIntake({ goal: "g" }, { useAi: false, base: dir });
     expect(skills("resolve", [])).toBe(0);
@@ -2158,6 +2178,7 @@ describe("commands.help branches", () => {
     expect(printCommandHelp("ui")).toBe(0);
     expect(printCommandHelp("hooks")).toBe(0);
     expect(printCommandHelp("verify")).toBe(0);
+    expect(printCommandHelp("decision")).toBe(0);
   });
 
   test("printCommandHelp for unknown subcommand falls back to printHelp (line 2943-2944)", () => {

@@ -214,6 +214,34 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     );
     return 0;
   }
+  if (sub === "draft") {
+    const name = rest[0]?.trim();
+    if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+      out(
+        "vf",
+        c.red("Usage: vf skills draft <name>  (lowercase-hyphen, e.g. fix-flaky-db-test)"),
+        {
+          level: "error",
+        },
+      );
+      return 2;
+    }
+    const dir = join(repo, CTX_DIR, "skills", name);
+    const skillMd = join(dir, "SKILL.md");
+    if (existsSync(skillMd)) {
+      out("vf", c.red(`Skill "${name}" already exists at ${skillMd}.`), { level: "error" });
+      return 1;
+    }
+    writeFileSafe(skillMd, draftSkillTemplate(name));
+    out("vf", c.green(`+ drafted skill ${c.bold(name)} → ${skillMd}`));
+    out(
+      "vf",
+      c.dim(
+        "status: draft — captured from a real task. Fill in Why/Evidence/Steps, then it stays a DRAFT for review (never auto-installed).",
+      ),
+    );
+    return 0;
+  }
   if (sub === "crystallize") {
     const runId = rest[0]?.trim();
     if (!runId) {
@@ -293,6 +321,42 @@ function skillTemplate(name: string): string {
     "",
     "## Verification",
     "How to prove the skill was applied correctly (command output, file check, test).",
+    "",
+  ].join("\n");
+}
+
+/** A DRAFT SKILL.md captured from a real task (issue #335). status:draft + a
+ *  Why/Evidence skeleton so the agent records WHY the skill exists and the
+ *  evidence behind it. Never auto-installed — review-then-promote. */
+function draftSkillTemplate(name: string): string {
+  return [
+    "---",
+    `name: ${name}`,
+    "description: One-line summary of the reusable procedure this skill captures.",
+    "status: draft",
+    "triggers:",
+    "  - trigger-keyword",
+    "---",
+    "",
+    `# ${name}`,
+    "",
+    "## Why this exists",
+    "What recurring task, mistake, or workaround prompted capturing this? (1-2 lines)",
+    "",
+    "## Evidence",
+    "- Concrete proof this approach worked (command output, file path, test result).",
+    "",
+    "## When to use",
+    "The task shape that should invoke this skill.",
+    "",
+    "## Steps",
+    "1. First concrete step.",
+    "2. Next step.",
+    "",
+    "## Verification",
+    "How to prove the skill was applied correctly.",
+    "",
+    "> DRAFT — captured from a real task. Review and refine before relying on it.",
     "",
   ].join("\n");
 }
