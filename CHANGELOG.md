@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1](https://github.com/magicpro97/vibeflow/compare/v0.9.0...v0.9.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **init:** stop tracking per-machine generated engine configs (PR-1) ([f5a9b06](https://github.com/magicpro97/vibeflow/commit/f5a9b0644f4d019c78262db22e9497f706f95e7a))
+* **tools:** portable relative workspace in .mcp.json; drop dead repo_path (PR-2) ([e84eb8a](https://github.com/magicpro97/vibeflow/commit/e84eb8a45152a8701ec22c5267e90d6c1c853d02))
+
+
+### Documentation
+
+* **ci:** parametrize self-hosted runner example paths (PR-4) ([7869989](https://github.com/magicpro97/vibeflow/commit/7869989e2b37d3e5acd3544f0f1befd7d440ae94))
+* regenerate context with vf init on v0.9.0 ([5bc7c37](https://github.com/magicpro97/vibeflow/commit/5bc7c370f50e14b5917c24b406fab23e624e8878))
+
 ## [0.9.0](https://github.com/magicpro97/vibeflow/compare/v0.8.0...v0.9.0) (2026-06-25)
 
 
