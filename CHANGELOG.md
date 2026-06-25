@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.9.0](https://github.com/magicpro97/vibeflow/compare/v0.8.0...v0.9.0) (2026-06-25)
+
+
+### Features
+
+* **adapters:** slim generated context block to a pointer to the vf skill ([2787fe9](https://github.com/magicpro97/vibeflow/commit/2787fe9d6eae4e6cbfea9cea3eb1d68a8db109d3))
+* **adapters:** slim generated context block to a pointer to the vf skill ([8d20fcd](https://github.com/magicpro97/vibeflow/commit/8d20fcd34fd3a18f87e501cc34522e920b56ea7e))
+* **cli:** vf demo runs a fixed corpus through orchestrate --dry --focus ([a8f79d5](https://github.com/magicpro97/vibeflow/commit/a8f79d5141977f1cd23a68bcaa08a2fb67db86ff))
+* **cli:** vf demo runs a fixed file corpus through orchestrate --dry --focus ([483dad5](https://github.com/magicpro97/vibeflow/commit/483dad5fdaa46964f80cb181d096a782ceb739ab))
+* **cli:** vf init update mechanism + version stamp + skill seeding ([c0a4120](https://github.com/magicpro97/vibeflow/commit/c0a4120f13386ea91d8fe7929732602a1d65ea16)), closes [#323](https://github.com/magicpro97/vibeflow/issues/323)
+* **cross-review:** add world-class review standard (Conventional Comments, spec-vs-code, understanding-first, staleness-repro, PII/authz, cited sources) ([#315](https://github.com/magicpro97/vibeflow/issues/315)) ([26334d3](https://github.com/magicpro97/vibeflow/commit/26334d314f6399b084fc847e4e89b4378c6e4f16))
+* **decision:** ADR-lite decision log + vf decision add/list ([#335](https://github.com/magicpro97/vibeflow/issues/335) PR-3) ([f9674f4](https://github.com/magicpro97/vibeflow/commit/f9674f4cc2865014a2a82c9cc980d14dafef64f1))
+* **init:** add version stamp, UPDATE mechanism, vf skill seeding ([#323](https://github.com/magicpro97/vibeflow/issues/323)) ([185aa0d](https://github.com/magicpro97/vibeflow/commit/185aa0d78096a39c7f06f2b6fd39296096d5be75))
+* **init:** auto-install enabled-but-missing tools + hooks on vf init ([faf016c](https://github.com/magicpro97/vibeflow/commit/faf016cf636dfd2732356527ceae544c0844ce27)), closes [#333](https://github.com/magicpro97/vibeflow/issues/333)
+* **init:** handle agent templates ([9472ff9](https://github.com/magicpro97/vibeflow/commit/9472ff97c4aba9bb8bd2e78d8270a749a9bf937e))
+* **init:** handle agent templates ([ef320b9](https://github.com/magicpro97/vibeflow/commit/ef320b9bbae955f34d7791133dd2b0a70ef9e580))
+* **landing:** real orchestration process as demo video ([c9d889f](https://github.com/magicpro97/vibeflow/commit/c9d889fc285ce77285a9a457e89d8bcb81689074))
+* **landing:** SEO polish + fix demo-video caching ([948fbe6](https://github.com/magicpro97/vibeflow/commit/948fbe64f577cacd8afbaf927d7945d95b608f44))
+* **landing:** SEO polish + fix demo-video caching ([b02ab80](https://github.com/magicpro97/vibeflow/commit/b02ab8007f547b557b26b44710e31e34f3dc3065))
+* **landing:** show the real orchestration process (engine plan→code→gate→verdict) as the demo video ([49e7725](https://github.com/magicpro97/vibeflow/commit/49e77250ed615aefd4f2a96fb87798ca91876206))
+* **landing:** showcase the vf demo phase timeline with an asciinema cast ([12728c9](https://github.com/magicpro97/vibeflow/commit/12728c93da847ac66e7c14cbbc1c317c060bc667))
+* **landing:** showcase the vf demo phase timeline with an asciinema cast ([3de8ea7](https://github.com/magicpro97/vibeflow/commit/3de8ea7eeb78041497badc3177b8507840ebb971))
+* **orchestrate:** --focus raises the terminal for screen-recorded demos ([9aabed0](https://github.com/magicpro97/vibeflow/commit/9aabed014d1d77485eca79e4b42a6af9f13e0161))
+* **orchestrate:** --focus raises the terminal for screen-recorded demos ([925d094](https://github.com/magicpro97/vibeflow/commit/925d0943bc61fcd0ec11a110e5d4c76397b08245))
+* **orchestrator:** documented coordination brief/result contract template ([3ca108b](https://github.com/magicpro97/vibeflow/commit/3ca108b6c27c3b20d0ca6b3984f6339d842ecd96))
+* **orchestrator:** documented coordination brief/result contract template (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)-followup) ([d3b19d1](https://github.com/magicpro97/vibeflow/commit/d3b19d179e88b7794edd4f6dbd45e6a60c9cd3ed))
+* **orchestrator:** live phase-timeline tracker over onProgress ([7af71d6](https://github.com/magicpro97/vibeflow/commit/7af71d6fd9e4be5d9330dc7b0f89567ea18a67d5))
+* **orchestrator:** live phase-timeline tracker over the onProgress seam ([b2de811](https://github.com/magicpro97/vibeflow/commit/b2de811d23b767d1004fb7ed1c0259c61d24ed76))
+* **skills:** agent learning instructions + vf skills draft + docs ([#335](https://github.com/magicpro97/vibeflow/issues/335) PR-4) ([8fad849](https://github.com/magicpro97/vibeflow/commit/8fad849c0ebd07bb4a9cc1c0eefe6c6e423aacbb))
+* **skills:** align validator with Anthropic ## Meta standard (no YAML frontmatter) ([85d31b9](https://github.com/magicpro97/vibeflow/commit/85d31b988d451bc0e864ca79c9c9c0104f065c3b))
+* **skills:** auto-crystallize DRAFT skill at end of orchestrate + verify ([#335](https://github.com/magicpro97/vibeflow/issues/335) PR-2) ([d8e1cd8](https://github.com/magicpro97/vibeflow/commit/d8e1cd8acbe920cfb21b9e7ffacdaea272a2ea10))
+* **skills:** convert phase templates + generator to Anthropic ## Meta format ([c795a09](https://github.com/magicpro97/vibeflow/commit/c795a091a201c0d615020ceb21f47d7b5f7b111f))
+* **skills:** split vf skill into slim SKILL.md + references (skill-creator + grill) ([4906740](https://github.com/magicpro97/vibeflow/commit/49067401233c9d21457fadd4cbfdfdc6f15f879e))
+* **skills:** split vf skill into slim SKILL.md + references (skill-creator + grill) ([3e84cb3](https://github.com/magicpro97/vibeflow/commit/3e84cb3a2739f835f6db067d029cd6f755dc4d24))
+* **wiki:** add architecture/orchestrate/skills SVG diagrams (Closes [#324](https://github.com/magicpro97/vibeflow/issues/324)) ([6c96114](https://github.com/magicpro97/vibeflow/commit/6c9611409d3f5fce686cb22be02f1018d056f1a8))
+* **wiki:** visual SVG diagrams (architecture/workflow/skills) ([c7514a1](https://github.com/magicpro97/vibeflow/commit/c7514a157f3a31a3769a36e8130667a1769224ca))
+
+
+### Bug Fixes
+
+* **landing:** add poster frame to demo video ([9e86fe8](https://github.com/magicpro97/vibeflow/commit/9e86fe82ffdabde798dde766c996706ee751617a))
+* **landing:** add poster frame to demo video so the player shows real terminal content before play ([e871a42](https://github.com/magicpro97/vibeflow/commit/e871a421eadb308154270ae73ef1af9d254ed0f7))
+
+
+### Refactors
+
+* **adapters:** split adapters.ts (399 LOC) into facade + 5 modules ([b65ce00](https://github.com/magicpro97/vibeflow/commit/b65ce00c673b7d0fe12bcaa0f561057aaf0a22a0))
+* **adapters:** split adapters.ts (399 LOC) into facade + 5 modules ([8f08edb](https://github.com/magicpro97/vibeflow/commit/8f08edbcfebeea4bd2ef4791eb05fd661f3be3f6))
+* **ai-init-workflow:** split ai-init-workflow.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([544d7b1](https://github.com/magicpro97/vibeflow/commit/544d7b11dcf944f8c40c98bc15377a80eaff6f09))
+* **ai-init-workflow:** split ai-init-workflow.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([3dcf309](https://github.com/magicpro97/vibeflow/commit/3dcf30967f0c204c2ee5bfc8f49acdf82aeaf5f8))
+* **ai-init:** split ai-init.ts under 400 LOC (closes [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([695a150](https://github.com/magicpro97/vibeflow/commit/695a150ce9f78fdc210747fb3ebee1111c5afebf))
+* **ai-init:** split ai-init.ts under 400 LOC (closes [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([601e6d6](https://github.com/magicpro97/vibeflow/commit/601e6d68a1f5b7202a2607781a8af4fa74c5bb96))
+* **core:** split core.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([ac5a471](https://github.com/magicpro97/vibeflow/commit/ac5a471d3629cfc2b4d8a85cc8f43fcb34d4b566))
+* **core:** split core.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([59850fa](https://github.com/magicpro97/vibeflow/commit/59850fa8e588e62f9f4d5de609ea5d9ac52845d1))
+* **dispatch:** split dispatch.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([16a9545](https://github.com/magicpro97/vibeflow/commit/16a954589621d0e5815141b0b34acd6044462910))
+* **dispatch:** split dispatch.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([5e8551b](https://github.com/magicpro97/vibeflow/commit/5e8551b3c4b32b9d1e417a376328e3682cb2e632))
+* **logbus:** split logbus.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([53a0f05](https://github.com/magicpro97/vibeflow/commit/53a0f05920570cda8d0aec923855ae4a593bdcf6))
+* **logbus:** split logbus.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([48c1f94](https://github.com/magicpro97/vibeflow/commit/48c1f9400c05fa327598f6a4c14652f03eb449b8))
+* **server:** split server.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([1f7342a](https://github.com/magicpro97/vibeflow/commit/1f7342a698e59bddc3779951aba93d826400b0a0))
+* **server:** split server.ts under 400 LOC (part of [#186](https://github.com/magicpro97/vibeflow/issues/186)) ([60ec574](https://github.com/magicpro97/vibeflow/commit/60ec57485e10d41673fb3acac6a758a9bfe2ee8a))
+* **skills:** delete dead maintainer.ts ([#335](https://github.com/magicpro97/vibeflow/issues/335) PR-1) ([736d84a](https://github.com/magicpro97/vibeflow/commit/736d84a99b751998f92ebb5922140b450cf8478f))
+
+
+### Documentation
+
+* international-standard docs (Diátaxis), landing wiki, README star chart, 4K demo video ([437213c](https://github.com/magicpro97/vibeflow/commit/437213c24f729903a156e8cf7d766b56a25f5598))
+* international-standard docs + landing wiki + README star chart + 4K demo ([36dd258](https://github.com/magicpro97/vibeflow/commit/36dd2585fbfdee2fd8dff77d6b4008a4f6d6f0c1))
+* **landing:** add "Use VibeFlow as a skill" onboarding section ([fe4b481](https://github.com/magicpro97/vibeflow/commit/fe4b481935b0aa5470037ad2b24756c8bf3370b8))
+* **landing:** add vf skill / /vf onboarding section ([d2cd4b9](https://github.com/magicpro97/vibeflow/commit/d2cd4b949e780c559e143b994ae49e692efed12b))
+* update VibeFlow version v0.7.0 to v0.8.0 in AGENTS.md ([0a425cd](https://github.com/magicpro97/vibeflow/commit/0a425cd83d3ae310bd9ea54d9209af63f8c9a8bd))
+* update VibeFlow version v0.7.0 to v0.8.0 in CLAUDE.md ([fade1e9](https://github.com/magicpro97/vibeflow/commit/fade1e96fccac8d51a7ee588a4592bfc7654e663))
+
+
+### Continuous Integration
+
+* **release:** publish with --ignore-scripts (dist already built in verify job) ([c8ae199](https://github.com/magicpro97/vibeflow/commit/c8ae199fcd1bd623bfa0cccf913468620dcfeb6b))
+* **release:** publish with --ignore-scripts (dist prebuilt in verify job) ([e8f5580](https://github.com/magicpro97/vibeflow/commit/e8f5580d674d0233435a96fb4395105d9bbcd966))
+* **release:** run publish on self-hosted runner to match CI environment ([54212a1](https://github.com/magicpro97/vibeflow/commit/54212a15b0fa9a45b8aaf0b2e50940d06293f68f))
+* **release:** run publish on self-hosted runner to match CI environment ([3aa9121](https://github.com/magicpro97/vibeflow/commit/3aa9121dc85fbf4c01bdb981e7f82ee6c2df3eb4))
+* **release:** split verify (self-hosted) + publish (github-hosted) to unblock provenance ([31e7bc0](https://github.com/magicpro97/vibeflow/commit/31e7bc02ed845cd826d35b4fc6cb5876aceec75b))
+* **release:** split verify (self-hosted) and publish (github-hosted) jobs ([c094c72](https://github.com/magicpro97/vibeflow/commit/c094c7295e8c7a4f35e62a0a75e8a10d3535065d))
+
+
+### Tests
+
+* **#326:** integration tests for skills sync references/ mirroring and init fat→slim migration ([2b0ea77](https://github.com/magicpro97/vibeflow/commit/2b0ea7759d361192ee65e2b3f3c687493d6eb9a3))
+* **cli:** integration tests for skills sync references/ + init fat→slim migration ([0f75829](https://github.com/magicpro97/vibeflow/commit/0f758298e9b2eb7111aa53c6aab767c29cee5a2b)), closes [#326](https://github.com/magicpro97/vibeflow/issues/326)
+* **workflow-artifacts:** cover agent-templates + phase-specs to 100% (fixes [#308](https://github.com/magicpro97/vibeflow/issues/308) coverage gate) ([7668b16](https://github.com/magicpro97/vibeflow/commit/7668b165813dcac6d9f3f416215352661b44180a))
+* **workflow-artifacts:** restore 100% coverage after [#308](https://github.com/magicpro97/vibeflow/issues/308) (fix red main) ([7ad2f74](https://github.com/magicpro97/vibeflow/commit/7ad2f74ccd974851fd4b2e2bdb5e46a1eaa5e079))
+
 ## [0.8.0](https://github.com/magicpro97/vibeflow/compare/v0.7.0...v0.8.0) (2026-06-23)
 
 
