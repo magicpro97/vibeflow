@@ -18,3 +18,8 @@ backup/
 dispatch/
 workunits/
 WORKFLOW_STATE.json
+# AI-enrichment output: non-deterministic (LLM + repo profile, varies per run /
+# engine / model). Listed AFTER !*.md so its AGENTS.md/CLAUDE.md are NOT
+# re-included by that allowlist. A static reviewed snapshot lives in
+# docs/examples/ai-context-sample/.
+ai-context/
