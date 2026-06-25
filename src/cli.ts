@@ -25,6 +25,7 @@ import {
   workflow,
 } from "./commands.js";
 import { config } from "./commands/config.js";
+import { decision } from "./commands/decision.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
 import { startServer } from "./server.js";
 
@@ -210,6 +211,8 @@ async function main(argv: string[]): Promise<number> {
       return hooks(positionals[0], flags);
     case "verify":
       return verify({ journal: flags.journal === true });
+    case "decision":
+      return decision(positionals[0], flags);
     default:
       out("vf", c.red(`Unknown command: ${cmd}`), {
         level: "error",
