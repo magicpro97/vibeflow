@@ -3500,16 +3500,34 @@ describe("commands.run (test seam)", () => {
 
   test("run: with engine unavailable (probe has=false) prints message and returns 0 (line 1433-1437)", async () => {
     // Inject a probe that makes engineCommand return unavailable
-    // for copilot (has("copilot") === false).
-    const code = await run(
-      "copilot",
-      { dry: true },
-      {
-        probe: { has: () => false },
-      },
-    );
-    // When engine is unavailable, run() prints a message and returns 0.
-    expect(code).toBe(0);
+    // for copilot (has("copilot") === false). Use an isolated tmpdir WITH a
+    // workflow state so run() reaches the engine-availability branch — NOT the
+    // earlier "no workflow state" guard (which returns 1). Previously this test
+    // relied on the repo's own tracked WORKFLOW_STATE.json at cwd; once that
+    // file became gitignored, a fresh CI checkout had no state and the test
+    // flaked. Inject base explicitly so the test is hermetic.
+    const dir = freshDir("vf-run-unavail-");
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "g",
+        success_criteria: [],
+        work_units: [],
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const code = await run(
+        "copilot",
+        { dry: true },
+        {
+          base: dir,
+          probe: { has: () => false },
+        },
+      );
+      // When engine is unavailable, run() prints a message and returns 0.
+      expect(code).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("launchEngine: streamSpawner factory onStderrChunk fires (line 1503-1506)", async () => {
