@@ -136,9 +136,15 @@ export function installPlan(languages: string[]): InstallPlan {
   return { steps };
 }
 
-/** Build the bridge args for one language server bound to a workspace. */
-function bridgeArgs(workspace: string, server: LanguageServer): string[] {
-  const args = [WORKSPACE_FLAG, workspace, LSP_FLAG, server.serverCmd];
+/** Build the bridge args for one language server. The workspace is emitted as
+ *  "." (relative to the MCP client's spawn cwd, which is the workspace root
+ *  where .mcp.json lives) so the generated config is PORTABLE across machines —
+ *  no absolute /Users/... path baked in. mcp-language-server resolves it via
+ *  filepath.Abs() from its own cwd (cmd main.go), so "." → the real root at
+ *  runtime. Verified: `--workspace .` from the repo root opens the workspace
+ *  correctly. */
+function bridgeArgs(server: LanguageServer): string[] {
+  const args = [WORKSPACE_FLAG, ".", LSP_FLAG, server.serverCmd];
   if (server.serverArgs.length > 0) args.push(ARG_SEPARATOR, ...server.serverArgs);
   return args;
 }
@@ -153,7 +159,7 @@ export function mcpServersFor(engine: Engine, ctx: ToolContext): McpEntry[] {
     const server = SERVERS[key];
     if (!server) continue;
     const name = `lsp-${server.key}`;
-    const stdio = { command: BRIDGE, args: bridgeArgs(ctx.workspace, server), env: {} };
+    const stdio = { command: BRIDGE, args: bridgeArgs(server), env: {} };
     entries.push(buildStdioEntry(engine, name, stdio, [name]));
   }
   return entries;

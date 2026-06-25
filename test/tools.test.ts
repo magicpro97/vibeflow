@@ -83,7 +83,11 @@ describe("lsp tool", () => {
     const ts = entries.find((e) => "lsp-typescript" in e.servers);
     const tsArgs = ts?.servers["lsp-typescript"]?.args ?? [];
     expect(tsArgs).toContain("--workspace");
-    expect(tsArgs).toContain(WORKSPACE);
+    // Portable: workspace is emitted as "." (resolved by mcp-language-server
+    // from its spawn cwd), NOT an absolute path baked into .mcp.json.
+    expect(tsArgs).toContain(".");
+    expect(tsArgs).not.toContain(WORKSPACE);
+    expect(tsArgs.some((a) => a.startsWith("/"))).toBe(false);
     expect(tsArgs).toContain("--lsp");
     expect(tsArgs).toContain("typescript-language-server");
     expect(tsArgs).toContain("--stdio");

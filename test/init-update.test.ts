@@ -98,6 +98,9 @@ describe("vf init version stamp", () => {
         { base: dir, dry: true, skipPreflight: true },
       );
       expect(result.state.vibeflow_version).toBe(VERSION);
+      // repo_path is no longer written — it was a per-machine absolute path
+      // with zero readers (kept the state non-portable). Must be absent.
+      expect(result.state.repo_path).toBeUndefined();
     } finally {
       cleanup(dir);
     }

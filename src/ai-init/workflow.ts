@@ -202,7 +202,6 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
               cost_usd: 0,
               wall_seconds: 0,
             },
-            repo_path: base,
           };
           writeState(base, partial);
           process.stderr.write(

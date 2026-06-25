@@ -67,6 +67,9 @@ export interface WorkflowState {
   success_criteria: string[];
   work_units: WorkUnit[];
   totals: { units: number; done: number; tokens: number; cost_usd: number; wall_seconds: number };
+  /** @deprecated No longer written (the absolute path was per-machine and had
+   *  zero readers; dropping it keeps WORKFLOW_STATE.json portable). Kept
+   *  optional so older state files still parse. */
   repo_path?: string;
   attachments?: Attachment[];
   /** The VibeFlow version that last initialized (or updated) this workflow. Absent on pre-#323 workflows. */

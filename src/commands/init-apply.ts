@@ -183,7 +183,6 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     success_criteria: ctx.expectedResult ? [ctx.expectedResult] : (prev?.success_criteria ?? []),
     work_units: prev?.work_units ?? [],
     totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
-    repo_path: base,
     attachments: prev?.attachments ?? [],
     // Stamp the current version so subsequent `vf init` calls can detect
     // whether a prior init has already run (issue #323, init-update).
