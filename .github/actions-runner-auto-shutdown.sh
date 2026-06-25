@@ -1,7 +1,8 @@
 #!/bin/bash
 # Auto-shutdown the MacBook after 30 min of CI idle.
-# Install via: `crontab -e` then add:
-#   */5 * * * * /Users/linhn/actions-runner-vibeflow/auto-shutdown.sh
+# Install via: `crontab -e` then add (replace __RUNNER_HOME__ with your
+# actions-runner install dir, e.g. ~/actions-runner-vibeflow):
+#   */5 * * * * __RUNNER_HOME__/auto-shutdown.sh
 #
 # The script checks if the runner is idle (no busy jobs in the last
 # 30 min) and shuts down the Mac. Safe to run every 5 min — it only

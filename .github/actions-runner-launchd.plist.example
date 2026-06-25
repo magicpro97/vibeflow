@@ -6,8 +6,16 @@
   This file is the canonical reference for new runners; the actual
   installed plist lives in ~/Library/LaunchAgents/.
 
+  PLACEHOLDERS — replace before use (the real plist that `./svc.sh install`
+  writes already has these filled in for your machine; this committed example
+  uses placeholders so it carries no one developer's absolute paths):
+    __USER__         your macOS username (e.g. the output of `whoami`)
+    __RUNNER_HOME__  the runner install dir (e.g. /Users/__USER__/actions-runner-vibeflow)
+    __USER_LOGS__    your log dir (e.g. /Users/__USER__/Library/Logs)
+    __RUNNER_NAME__  the runner name you registered (e.g. your-host-runner)
+
   Setup steps (one-time per runner):
-    1. mkdir -p ~/actions-runner-vibeflow && cd $_
+    1. mkdir -p __RUNNER_HOME__ && cd $_
     2. tar -xzf ~/actions-runner-osx-arm64-2.335.1.tar.gz
     3. Get a registration token from
        https://github.com/magicpro97/vibeflow/settings/actions/runners/new
@@ -15,7 +23,7 @@
          --url https://github.com/magicpro97/vibeflow \
          --token <token> \
          --labels "self-hosted,linux,x64" \
-         --name "MacBook-Pro-cua-mac-vibeflow"
+         --name "__RUNNER_NAME__"
     5. ./svc.sh install   # writes ~/Library/LaunchAgents/...plist
     6. ./svc.sh start
 
@@ -26,21 +34,21 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>actions.runner.magicpro97-vibeflow.MacBook-Pro-cua-mac-vibeflow</string>
+    <string>actions.runner.magicpro97-vibeflow.__RUNNER_NAME__</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/Users/linhn/actions-runner-vibeflow/runsvc.sh</string>
+      <string>__RUNNER_HOME__/runsvc.sh</string>
     </array>
     <key>UserName</key>
-    <string>linhn</string>
+    <string>__USER__</string>
     <key>WorkingDirectory</key>
-    <string>/Users/linhn/actions-runner-vibeflow</string>
+    <string>__RUNNER_HOME__</string>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/linhn/Library/Logs/actions.runner.magicpro97-vibeflow.MacBook-Pro-cua-mac-vibeflow/stdout.log</string>
+    <string>__USER_LOGS__/actions.runner.magicpro97-vibeflow.__RUNNER_NAME__/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/linhn/Library/Logs/actions.runner.magicpro97-vibeflow.MacBook-Pro-cua-mac-vibeflow/stderr.log</string>
+    <string>__USER_LOGS__/actions.runner.magicpro97-vibeflow.__RUNNER_NAME__/stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
       <key>ACTIONS_RUNNER_SVC</key>
