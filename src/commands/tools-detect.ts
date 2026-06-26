@@ -65,6 +65,51 @@ export function detectToolchain(
   return { kind: "none" };
 }
 
+/** Structured report shape returned by collectVerifyReport.
+ * Consumed by POST /api/verify (B1) and by the CLI verify() stdout printer. */
+export interface VerifyReport {
+  ok: boolean;
+  toolchain: { label: string; pass: boolean }[];
+  policy: { passed: string[]; warnings: string[]; failures: string[] };
+}
+
+/** Pure helper: runs toolchain + policy gates and returns a structured report.
+ * No stdout — callers decide how to render. Injectable spawner for tests.
+ * ponytail: extracted from verify() so /api/verify can call it without capturing stdout.
+ */
+export function collectVerifyReport(
+  base: string,
+  inject: {
+    spawner?: (cmd: string, args: string[], opts: object) => { status: number | null };
+  } = {},
+): VerifyReport {
+  const toolchain: { label: string; pass: boolean }[] = [];
+  const run: (cmd: string, args: string[], opts: object) => { status: number | null } =
+    inject.spawner ?? spawnSync;
+
+  const runGate = (label: string, cmd: string, args: string[], dir = base) => {
+    const r = run(cmd, args, { stdio: "pipe", cwd: dir });
+    toolchain.push({ label, pass: r.status === 0 });
+  };
+
+  const plan = detectToolchain(base);
+  if (plan.kind === "npm") {
+    for (const gate of plan.gates)
+      runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
+  } else if (plan.kind === "gradle") {
+    runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
+  } else if (plan.kind === "monorepo") {
+    const label = plan.dir.split("/").pop();
+    for (const gate of plan.gates)
+      runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
+  }
+
+  const policy = policyGates(readState(base));
+  const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
+
+  return { ok, toolchain, policy };
+}
+
 export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean } = {}): number {
   let failed = 0;
   const base = cwd();
