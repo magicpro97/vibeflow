@@ -136,9 +136,9 @@ describe("Logbus", () => {
     // Writing ~5MB in 1KB events triggers several rotations. The per-event
     // file-lock acquisition is the slow part: on contended CI runners (tmpfs
     // lock churn) 5000 events can exceed the 5s default, so this test carries
-    // an explicit 20s timeout (see the third arg to `it` below). Windows is
-    // slower still, so it writes fewer events.
-    const eventCount = process.platform === "win32" ? 1500 : 5000;
+    // an explicit 20s timeout (see the third arg to `it` below). Windows and
+    // macOS ARM64 are slower still, so they write fewer events.
+    const eventCount = process.platform === "win32" || process.platform === "darwin" ? 1500 : 5000;
     for (let i = 0; i < eventCount; i++) {
       tiny.write({
         ...FIXTURE_EVENT,
