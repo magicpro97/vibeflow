@@ -1088,14 +1088,14 @@ test("VIBEFLOW_UI_V2=1 serves shell-v2 with v2-marker (B2)", async () => {
       server.stop();
     }
   } finally {
-    if (orig === undefined) process.env.VIBEFLOW_UI_V2 = undefined as unknown as string;
+    if (orig === undefined) Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
     else process.env.VIBEFLOW_UI_V2 = orig;
   }
 });
 
 test("default (no flag) still serves v1 shell (B2)", async () => {
   const orig = process.env.VIBEFLOW_UI_V2;
-  process.env.VIBEFLOW_UI_V2 = undefined as unknown as string;
+  Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
   try {
     const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
     try {
@@ -1107,7 +1107,8 @@ test("default (no flag) still serves v1 shell (B2)", async () => {
       server.stop();
     }
   } finally {
-    if (orig !== undefined) process.env.VIBEFLOW_UI_V2 = orig;
+    if (orig === undefined) Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
+    else process.env.VIBEFLOW_UI_V2 = orig;
   }
 });
 

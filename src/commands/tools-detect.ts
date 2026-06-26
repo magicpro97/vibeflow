@@ -66,8 +66,9 @@ export function detectToolchain(
   return { kind: "none" };
 }
 
-/** Structured report shape returned by collectVerifyReport.
- * Consumed by POST /api/verify (B1) and by the CLI verify() stdout printer. */
+/** Structured report shape returned by collectVerifyReportAsync.
+ * Consumed by POST /api/verify (B1). The CLI verify() prints its own stdout
+ * and does NOT consume this type. */
 export interface VerifyReport {
   ok: boolean;
   toolchain: { label: string; pass: boolean }[];

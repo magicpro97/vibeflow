@@ -836,6 +836,7 @@
           this._sse = es;
           fetch('/api/logs/recent').then(r => r.json()).then(lines => {
             if (Array.isArray(lines)) this.logLines.unshift(...lines);
+            if (this.logLines.length > 500) this.logLines = this.logLines.slice(-500);
           }).catch(() => {});
         },
         clearLogs() { this.logLines = []; },
@@ -922,7 +923,7 @@
           this.openStep = 0;
           this.selectedPreset = '';
         },
-        dragStart(i, e) { this._drag = i; e.dataTransfer.effectAllowed = 'move'; },
+        dragStart(i, e) { this._drag = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); },
         dragDrop(target, e) {
           e.preventDefault();
           const src = this._drag;
