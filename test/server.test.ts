@@ -1023,6 +1023,12 @@ test("handleMutationRoute returns null for unmatched path (safety net)", async (
 });
 
 test("POST /api/verify via handleMutationRoute returns structured gate report (B1)", async () => {
+  // Point at an empty tmpdir: detectToolchain finds no package.json → no toolchain gates
+  // spawn, so the route returns fast instead of running the real (minutes-long) suite.
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-verify-"));
   const req = new Request("http://127.0.0.1/api/verify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1030,7 +1036,7 @@ test("POST /api/verify via handleMutationRoute returns structured gate report (B
   });
   const url = new URL(req.url);
   const result = await handleMutationRoute(
-    { getActiveRepo: () => process.cwd(), setActiveRepo: () => {} },
+    { getActiveRepo: () => tmp, setActiveRepo: () => {} },
     "POST",
     "/api/verify",
     req,
@@ -1048,7 +1054,7 @@ test("POST /api/verify via handleMutationRoute returns structured gate report (B
   expect(Array.isArray(body.policy.passed)).toBe(true);
   expect(Array.isArray(body.policy.warnings)).toBe(true);
   expect(Array.isArray(body.policy.failures)).toBe(true);
-}, 30000);
+});
 
 test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", async () => {
   const { server, url } = (await startServer()) as {
