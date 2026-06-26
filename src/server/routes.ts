@@ -9,7 +9,7 @@ import {
   resolveRepo,
   skillForFile,
 } from "../commands.js";
-import { collectVerifyReport } from "../commands/tools-detect.js";
+import { collectVerifyReportAsync } from "../commands/tools-detect.js";
 import { type Attachment, readState } from "../core.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import {
@@ -143,9 +143,10 @@ export async function handleMutationRoute(
   // biome-ignore format: keep compact so `}` is not a standalone line (bun:coverage gap)
   if (path === "/api/settings") { applySettings(ctx.getActiveRepo(), payload); return Response.json({ ok: true, ...settingsView(ctx.getActiveRepo()) }); }
 
-  // POST /api/verify — runs collectVerifyReport (B1 seam)
+  // POST /api/verify — runs collectVerifyReportAsync (B1 seam, non-blocking so Bun.serve
+  // keeps serving SSE/state while gates run)
   if (path === "/api/verify") {
-    const report = collectVerifyReport(ctx.getActiveRepo());
+    const report = await collectVerifyReportAsync(ctx.getActiveRepo());
     const gates = report.toolchain.map((g) => ({ label: g.label, pass: g.pass }));
     return Response.json({ ok: report.ok, gates, policy: report.policy });
   }

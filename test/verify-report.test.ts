@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { collectVerifyReport } from "../src/commands/tools-detect.js";
+import { collectVerifyReportAsync } from "../src/commands/tools-detect.js";
 
 // ponytail: minimal tests for the extracted seam — no framework, no fixtures.
+// Async-only: the route uses collectVerifyReportAsync (non-blocking); the old
+// sync collectVerifyReport was removed because spawnSync froze Bun.serve.
 
-// ponytail: fake spawner cast — avoids full spawnSync overload signature
-const fakeSpawner = (status: number) => (() => ({ status, signal: null })) as any;
+// ponytail: fake async spawner — resolves with the given exit status.
+const fakeSpawner = (status: number) => () => Promise.resolve({ status });
 
-describe("collectVerifyReport", () => {
-  test("runs toolchain gates and returns structured report", () => {
-    const report = collectVerifyReport(process.cwd(), { spawner: fakeSpawner(0) });
+describe("collectVerifyReportAsync", () => {
+  test("runs toolchain gates and returns structured report", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
     expect(report).toHaveProperty("toolchain");
     expect(report).toHaveProperty("policy");
     expect(Array.isArray(report.toolchain)).toBe(true);
@@ -19,20 +21,20 @@ describe("collectVerifyReport", () => {
     expect(typeof report.ok).toBe("boolean");
   });
 
-  test("marks failing gates in toolchain when spawner returns non-zero", () => {
-    const report = collectVerifyReport(process.cwd(), { spawner: fakeSpawner(1) });
+  test("marks failing gates in toolchain when spawner returns non-zero", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(1) });
     expect(report.ok).toBe(false);
     expect(report.toolchain.some((g) => !g.pass)).toBe(true);
   });
 
-  test("structure is correct regardless of pass/fail", () => {
-    const report = collectVerifyReport(process.cwd(), { spawner: fakeSpawner(0) });
+  test("structure is correct regardless of pass/fail", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
     expect(typeof report.ok).toBe("boolean");
     expect(Array.isArray(report.toolchain)).toBe(true);
   });
 
-  test("toolchain gates have label and pass fields", () => {
-    const report = collectVerifyReport(process.cwd(), { spawner: fakeSpawner(0) });
+  test("toolchain gates have label and pass fields", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
     for (const gate of report.toolchain) {
       expect(typeof gate.label).toBe("string");
       expect(typeof gate.pass).toBe("boolean");
