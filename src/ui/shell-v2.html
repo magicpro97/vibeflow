@@ -184,8 +184,10 @@
       <template x-for="s in stages" :key="s.n">
         <button class="rail-btn"
                 :aria-current="$store.vf.stage === s.n ? 'step' : undefined"
+                :disabled="isLocked(s.n)"
+                :aria-disabled="isLocked(s.n)"
                 @click="goStage(s.n)"
-                :title="s.label">
+                :title="isLocked(s.n) ? s.label + ' — generate first' : s.label">
           <span class="rail-icon" aria-hidden="true" x-text="s.icon"></span>
           <span x-text="s.n" aria-hidden="true"></span>
           <span class="sr-only" x-text="s.label + ' (stage ' + s.n + ')'"></span>
@@ -800,7 +802,16 @@
           this.connectLogs();
           this.$el.addEventListener('go-stage', (e) => this.goStage(e.detail));
         },
+        isLocked(n) {
+          // Stage 2+ locked until a workflow is generated (store.state), unless already reached.
+          const store = Alpine.store('vf');
+          return n > 1 && !store.state && n > store.stage;
+        },
         goStage(n) {
+          // Q2: prerequisite-gated forward, free back-nav. Stages 2+ need a generated
+          // workflow (store.state set by /api/init). Going back to an already-reached
+          // stage is always allowed (H3 user control); jumping forward past Generate is not.
+          if (this.isLocked(n)) return;
           Alpine.store('vf').stage = n;
           // Move focus to new stage heading for a11y (§7)
           this.$nextTick(() => {
