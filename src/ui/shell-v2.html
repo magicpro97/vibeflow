@@ -183,8 +183,7 @@
     <nav id="rail" aria-label="Workflow stages">
       <template x-for="s in stages" :key="s.n">
         <button class="rail-btn"
-                :disabled="!unlocked.includes(s.n)"
-                :aria-current="stage === s.n ? 'step' : undefined"
+                :aria-current="$store.vf.stage === s.n ? 'step' : undefined"
                 @click="goStage(s.n)"
                 :title="s.label"
                 :aria-label="s.label">
@@ -197,7 +196,7 @@
     <!-- Main content -->
     <main id="main" role="main">
       <!-- Stage 1: Describe -->
-      <div x-show="stage === 1" x-transition>
+      <div x-show="$store.vf.stage === 1" x-transition>
         <div x-data="stage1">
           <h2 style="margin:0 0 16px;font-size:16px">Describe your goal</h2>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -485,7 +484,7 @@
       </div>
 
       <!-- Stage 2: Generate -->
-      <div x-show="stage === 2" x-transition>
+      <div x-show="$store.vf.stage === 2" x-transition>
         <div x-data="stage2">
           <h2 style="margin:0 0 16px;font-size:16px">Generated files</h2>
           <div x-show="!state || !state.files || state.files.length === 0"
@@ -522,7 +521,7 @@
       </div>
 
       <!-- Stage 3: Orchestrate -->
-      <div x-show="stage === 3" x-transition>
+      <div x-show="$store.vf.stage === 3" x-transition>
         <div x-data="stage3">
           <h2 style="margin:0 0 16px;font-size:16px">Orchestrate</h2>
           <div x-show="!state || !state.units || state.units.length === 0"
@@ -606,7 +605,7 @@
       </div>
 
       <!-- Stage 4: Verify -->
-      <div x-show="stage === 4" x-transition>
+      <div x-show="$store.vf.stage === 4" x-transition>
         <div x-data="stage4">
           <h2 style="margin:0 0 16px;font-size:16px">Verify</h2>
           <div x-show="!ran" style="color:var(--vfs-muted);font-size:13px;margin-bottom:12px">
@@ -766,10 +765,18 @@
     }
 
     document.addEventListener('alpine:init', () => {
-      Alpine.data('app', () => ({
-        stage: 1,
-        unlocked: [1, 2, 3, 4], // ponytail: free nav unlocked; gate later if needed
+      // Shared store — avoids cross-component _x_dataStack hacks
+      // ponytail: Alpine.store is the idiomatic CSP-safe way to share state
+      Alpine.store('vf', {
         state: null,
+        stage: 1,
+        // builder form data (shared between stage1/builder/sources)
+        workflows: [makeWorkflow()],
+        docSources: [{ type: 'url', ref: '' }],
+        taskSources: [{ type: 'url', ref: '' }],
+      });
+
+      Alpine.data('app', () => ({
         showLogs: true,
         darkMode: document.documentElement.classList.contains('dark'),
         logLines: [],
@@ -780,30 +787,28 @@
           { n: 3, label: 'Orchestrate', icon: '🎯' },
           { n: 4, label: 'Verify', icon: '✅' },
         ],
+        get stage() { return Alpine.store('vf').stage; },
         get repoShort() {
-          const repo = this.state && this.state.activeRepo;
+          const repo = Alpine.store('vf').state && Alpine.store('vf').state.activeRepo;
           if (!repo) return '(no repo)';
           const parts = repo.replace(/\\/g, '/').split('/');
           return parts[parts.length - 1] || repo;
         },
         init() {
-          // Boot: load state + subscribe to logs SSE
           this.loadState();
           this.connectLogs();
-          // Listen for stage navigation events from child components
           this.$el.addEventListener('go-stage', (e) => this.goStage(e.detail));
         },
         goStage(n) {
-          if (!this.unlocked.includes(n)) return;
-          this.stage = n;
+          Alpine.store('vf').stage = n;
           // Move focus to new stage heading for a11y (§7)
           this.$nextTick(() => {
-            const h = this.$el.querySelector(`[x-show="stage === ${n}"] h2`);
+            const h = this.$el.querySelector(`[x-show="$store.vf.stage === ${n}"] h2, [x-show="stage === ${n}"] h2`);
             if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
           });
         },
         loadState() {
-          fetch('/state').then(r => r.json()).then(s => { this.state = s; }).catch(() => {});
+          fetch('/state').then(r => r.json()).then(s => { Alpine.store('vf').state = s; }).catch(() => {});
         },
         connectLogs() {
           const es = new EventSource('/api/logs/stream');
@@ -817,7 +822,6 @@
           };
           es.onerror = () => {};
           this._sse = es;
-          // Seed from recent
           fetch('/api/logs/recent').then(r => r.json()).then(lines => {
             if (Array.isArray(lines)) this.logLines.unshift(...lines);
           }).catch(() => {});
@@ -851,67 +855,58 @@
         async generate() {
           this.generating = true;
           this.genError = '';
-          // Build the /api/init body (§3 — byte-identical to v1)
-          const builderEl = this.$el.querySelector('[x-data="builder"]');
-          const builderData = builderEl ? builderEl._x_dataStack && builderEl._x_dataStack[0] : null;
-          const workflows = builderData ? builderData.workflows : [makeWorkflow()];
-          const sourcesEl = this.$el.querySelector('[x-data="sources"]');
-          const srcData = sourcesEl ? sourcesEl._x_dataStack && sourcesEl._x_dataStack[0] : null;
-          const docSources = srcData ? srcData.docSources : [];
-          const taskSources = srcData ? srcData.taskSources : [];
+          const store = Alpine.store('vf');
           const body = {
             repoPath: this.repoPath,
-            goal: buildContent(workflows),
+            goal: buildContent(store.workflows),
             engines: this.selectedEngines,
             useAi: this.useAi,
-            docSource: joinSources(docSources),
-            taskSource: joinSources(taskSources),
+            docSource: joinSources(store.docSources),
+            taskSource: joinSources(store.taskSources),
             fileTypes: this.fileTypesRaw.split(',').map(s => s.trim()).filter(Boolean),
-            expectedResult: collectExpectedResult(workflows),
+            expectedResult: collectExpectedResult(store.workflows),
           };
           const { ok, j } = await post('/api/init', body);
           this.generating = false;
-          if (!ok) {
-            this.genError = j.error || 'Generate failed';
-            return;
-          }
-          // Update root state + navigate to stage 2
+          if (!ok) { this.genError = j.error || 'Generate failed'; return; }
+          if (j.state) store.state = j.state;
+          else fetch('/state').then(r => r.json()).then(s => { store.state = s; }).catch(() => {});
           this.$dispatch('go-stage', 2);
-          // Reload state in parent
-          fetch('/state').then(r => r.json()).then(s => {
-            const appEl = document.querySelector('#shell');
-            if (appEl && appEl._x_dataStack) appEl._x_dataStack[0].state = s;
-          }).catch(() => {});
         },
       }));
 
       Alpine.data('sources', () => ({
-        docSources: [{ type: 'url', ref: '' }],
-        taskSources: [{ type: 'url', ref: '' }],
+        get docSources() { return Alpine.store('vf').docSources; },
+        get taskSources() { return Alpine.store('vf').taskSources; },
       }));
 
       Alpine.data('builder', () => ({
-        workflows: [makeWorkflow()],
+        get workflows() { return Alpine.store('vf').workflows; },
         activeWf: 0,
         openStep: 0,
         rawMode: false,
         selectedPreset: '',
         presets: PRESETS,
         _drag: null,
-        addWf() { this.workflows.push(makeWorkflow()); this.activeWf = this.workflows.length - 1; },
+        addWf() {
+          Alpine.store('vf').workflows.push(makeWorkflow());
+          this.activeWf = Alpine.store('vf').workflows.length - 1;
+        },
         removeWf(i) {
-          if (this.workflows.length <= 1) return;
-          this.workflows.splice(i, 1);
-          if (this.activeWf >= this.workflows.length) this.activeWf = this.workflows.length - 1;
+          const wfs = Alpine.store('vf').workflows;
+          if (wfs.length <= 1) return;
+          wfs.splice(i, 1);
+          if (this.activeWf >= wfs.length) this.activeWf = wfs.length - 1;
         },
         addStep() {
-          this.workflows[this.activeWf].steps.push(makeStep());
-          this.openStep = this.workflows[this.activeWf].steps.length - 1;
+          const wf = Alpine.store('vf').workflows[this.activeWf];
+          wf.steps.push(makeStep());
+          this.openStep = wf.steps.length - 1;
         },
         applyPreset() {
           const p = PRESETS.find(p => p.id === this.selectedPreset);
           if (!p) return;
-          this.workflows[this.activeWf].steps = presetStepData(p);
+          Alpine.store('vf').workflows[this.activeWf].steps = presetStepData(p);
           this.openStep = 0;
           this.selectedPreset = '';
         },
@@ -920,7 +915,7 @@
           e.preventDefault();
           const src = this._drag;
           if (src === null || src === target) return;
-          const steps = this.workflows[this.activeWf].steps;
+          const steps = Alpine.store('vf').workflows[this.activeWf].steps;
           const [removed] = steps.splice(src, 1);
           steps.splice(target, 0, removed);
           this.openStep = target;
@@ -929,10 +924,7 @@
       }));
 
       Alpine.data('stage2', () => ({
-        get state() {
-          const appEl = document.querySelector('#shell');
-          return appEl && appEl._x_dataStack && appEl._x_dataStack[0].state;
-        },
+        get state() { return Alpine.store('vf').state; },
       }));
 
       Alpine.data('stage3', () => ({
@@ -940,16 +932,18 @@
         previewing: false,
         previewError: '',
         copied: false,
-        get state() {
-          const appEl = document.querySelector('#shell');
-          return appEl && appEl._x_dataStack && appEl._x_dataStack[0].state;
-        },
+        get state() { return Alpine.store('vf').state; },
         get engines() {
           const s = this.state;
           return s && s.engines && s.engines.length ? s.engines : ['claude', 'codex', 'copilot'];
         },
         unitStatusColor(status) {
-          const map = { done: 'background:var(--vfs-success)', pending: 'background:var(--vfs-border)', in_progress: 'background:var(--vfs-accent);color:var(--vfs-accent-ink)', failed: 'background:var(--vfs-danger);color:#fff' };
+          const map = {
+            done: 'background:var(--vfs-success)',
+            pending: 'background:var(--vfs-border)',
+            in_progress: 'background:var(--vfs-accent);color:var(--vfs-accent-ink)',
+            failed: 'background:var(--vfs-danger);color:#fff',
+          };
           return (map[status] || 'background:var(--vfs-surface)') + ';color:var(--vfs-ink)';
         },
         async previewRun() {
@@ -958,13 +952,10 @@
           const { ok, j } = await post('/api/orchestrate', { engine: this.orchEngine });
           this.previewing = false;
           if (!ok) this.previewError = j.error || 'Orchestrate failed';
-          else {
-            const appEl = document.querySelector('#shell');
-            if (appEl && appEl._x_dataStack) appEl._x_dataStack[0].state = j.state || null;
-          }
+          else if (j.state) Alpine.store('vf').state = j.state;
         },
         async copyCmd() {
-          const cmd = 'vf orchestrate --engine ' + this.orchEngine + ' --yes';
+          const cmd = `vf orchestrate --engine ${this.orchEngine} --yes`;
           await navigator.clipboard.writeText(cmd).catch(() => {});
           this.copied = true;
           setTimeout(() => { this.copied = false; }, 1500);
