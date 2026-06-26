@@ -60,9 +60,6 @@ const perFile = [];
 //   TBD.
 // - src/commands/tools.ts, src/preflight/check-async.ts, src/ui-focus.ts:
 //   pre-existing gaps, covered by direct calls but uncovered error branches.
-// - src/commands/tools-detect.ts: async collectVerifyReportAsync error
-//   path (child.on("error")) + monorepo/gradle arms. TDD seam exists but
-//   the error branches lack a dedicated test case. Tracking issue: TBD.
 const COVERAGE_WAIVERS = new Set([
   "src/commands/init-ai.ts",
   "src/discovery/ctx7-resolve.ts",
@@ -76,7 +73,6 @@ const COVERAGE_WAIVERS = new Set([
   "src/commands/tools.ts",
   "src/preflight/check-async.ts",
   "src/ui-focus.ts",
-  "src/commands/tools-detect.ts",
 ]);
 
 for (const r of records) {
