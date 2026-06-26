@@ -81,10 +81,11 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
         if (inner && typeof inner.confidence === "number") confidence = inner.confidence;
       }
       // Fallback: engine ran successfully with tool calls but produced no JSON summary.
-      // 0.85 was the old hardcoded value — it was correct for productive sessions (15+ turns,
-      // $0.70+ in tool calls) but wrong because it masked ZERO-turn failed rounds. Use a
-      // graduated scale so a truly productive session still gets a reasonable confidence,
-      // while short/no-op dispatches get a low one that investigation must raise.
+      // Previously a single hardcoded 0.85 was used for every session, which was correct for
+      // productive sessions but masked zero-turn failed rounds. The graduated scale below
+      // (see @rationale + @provenance on MIN_PRODUCTIVE_TURNS, HIGH_PRODUCTIVE_TURNS,
+      // CONFIDENCE_PRODUCTIVE, and CONFIDENCE_MODERATE in types.ts) replaces it so short or
+      // no-op dispatches get a lower confidence that investigation must raise.
       if (confidence === 0 && turns >= MIN_PRODUCTIVE_TURNS) {
         confidence = turns >= HIGH_PRODUCTIVE_TURNS ? CONFIDENCE_PRODUCTIVE : CONFIDENCE_MODERATE;
       }
