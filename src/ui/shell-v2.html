@@ -25,7 +25,7 @@
       --vfs-bg: #ffffff;
       --vfs-surface: #f3f4f6;
       --vfs-ink: #111827;
-      --vfs-muted: #6b7280;
+      --vfs-muted: #4b5563; /* #4b5563 on #ffffff = 7.2:1 AA ✓ */
       --vfs-border: #e5e7eb;
       --vfs-accent: #4f46e5;
       --vfs-accent-ink: #ffffff;
@@ -185,10 +185,10 @@
         <button class="rail-btn"
                 :aria-current="$store.vf.stage === s.n ? 'step' : undefined"
                 @click="goStage(s.n)"
-                :title="s.label"
-                :aria-label="s.label">
-          <span class="rail-icon" x-text="s.icon"></span>
-          <span x-text="s.n"></span>
+                :title="s.label">
+          <span class="rail-icon" aria-hidden="true" x-text="s.icon"></span>
+          <span x-text="s.n" aria-hidden="true"></span>
+          <span class="sr-only" x-text="s.label + ' (stage ' + s.n + ')'"></span>
         </button>
       </template>
     </nav>
@@ -307,22 +307,23 @@
 
             <!-- Right col: builder -->
             <div x-data="builder">
-              <!-- Workflow tabs -->
-              <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap;align-items:center" role="tablist" aria-label="Workflows">
-                <template x-for="(wf, wi) in workflows" :key="wf.id">
-                  <button role="tab"
-                          :aria-selected="activeWf === wi"
-                          @click="activeWf = wi"
-                          :style="activeWf === wi ? 'background:var(--vfs-accent);color:var(--vfs-accent-ink);border-color:var(--vfs-accent)' : 'background:var(--vfs-surface);color:var(--vfs-ink)'"
-                          style="padding:4px 10px;border:1px solid var(--vfs-border);border-radius:4px;cursor:pointer;font-size:12px;transition:background 0.1s"
-                          :aria-label="'Workflow ' + wf.name">
-                    <span x-text="wf.name"></span>
-                    <span x-show="workflows.length > 1"
-                          @click.stop="removeWf(wi)"
-                          style="margin-left:6px;opacity:0.7"
-                          :aria-label="'Remove ' + wf.name"> ×</span>
-                  </button>
-                </template>
+              <!-- Workflow tabs — Add button is outside role=tablist to avoid aria-required-children violation -->
+              <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+                <div role="tablist" aria-label="Workflows" style="display:contents">
+                  <template x-for="(wf, wi) in workflows" :key="wf.id">
+                    <button role="tab"
+                            :aria-selected="activeWf === wi"
+                            @click="activeWf = wi"
+                            :style="activeWf === wi ? 'background:var(--vfs-accent);color:var(--vfs-accent-ink);border-color:var(--vfs-accent)' : 'background:var(--vfs-surface);color:var(--vfs-ink)'"
+                            style="padding:4px 10px;border:1px solid var(--vfs-border);border-radius:4px;cursor:pointer;font-size:12px;transition:background 0.1s"
+                            x-text="wf.name">
+                    </button>
+                  </template>
+                </div>
+                <button x-show="workflows.length > 1"
+                        @click="removeWf(activeWf)"
+                        style="padding:4px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-muted)"
+                        :aria-label="'Remove ' + (workflows[activeWf] ? workflows[activeWf].name : 'workflow')">×</button>
                 <button @click="addWf()"
                         style="padding:4px 8px;border:1px dashed var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-accent)"
                         aria-label="Add workflow">+</button>
