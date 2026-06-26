@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { collectVerifyReportAsync } from "../src/commands/tools-detect.js";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { collectVerifyReportAsync } from "../src/commands/tools-detect.js";
 
 // ponytail: minimal tests for the extracted seam — no framework, no fixtures.
 // Async-only: the route uses collectVerifyReportAsync (non-blocking); the old
