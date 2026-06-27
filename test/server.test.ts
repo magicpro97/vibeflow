@@ -1021,3 +1021,105 @@ test("handleMutationRoute returns null for unmatched path (safety net)", async (
   );
   expect(result).toBeNull();
 });
+
+test("POST /api/verify via handleMutationRoute returns structured gate report (B1)", async () => {
+  // Point at an empty tmpdir: detectToolchain finds no package.json → no toolchain gates
+  // spawn, so the route returns fast instead of running the real (minutes-long) suite.
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-verify-"));
+  const req = new Request("http://127.0.0.1/api/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => tmp, setActiveRepo: () => {} },
+    "POST",
+    "/api/verify",
+    req,
+    url,
+  );
+  expect(result).not.toBeNull();
+  expect((result as Response).status).toBe(200);
+  const body = (await (result as Response).json()) as {
+    ok: boolean;
+    gates: { label: string; pass: boolean }[];
+    policy: { passed: string[]; warnings: string[]; failures: string[] };
+  };
+  expect(typeof body.ok).toBe("boolean");
+  expect(Array.isArray(body.gates)).toBe(true);
+  expect(Array.isArray(body.policy.passed)).toBe(true);
+  expect(Array.isArray(body.policy.warnings)).toBe(true);
+  expect(Array.isArray(body.policy.failures)).toBe(true);
+});
+
+test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", async () => {
+  const { server, url } = (await startServer()) as {
+    server: { stop: () => void };
+    url: string;
+  };
+  try {
+    const res = await fetch(`${url}/api/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(403);
+  } finally {
+    server.stop();
+  }
+});
+
+// B2 serve seam tests
+test("VIBEFLOW_UI_V2=1 serves shell-v2 with v2-marker (B2)", async () => {
+  const orig = process.env.VIBEFLOW_UI_V2;
+  process.env.VIBEFLOW_UI_V2 = "1";
+  try {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const res = await fetch(`${url}/`);
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain("v2-marker");
+    } finally {
+      server.stop();
+    }
+  } finally {
+    if (orig === undefined) Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
+    else process.env.VIBEFLOW_UI_V2 = orig;
+  }
+});
+
+test("default (no flag) still serves v1 shell (B2)", async () => {
+  const orig = process.env.VIBEFLOW_UI_V2;
+  Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
+  try {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const res = await fetch(`${url}/`);
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).not.toContain("v2-marker");
+    } finally {
+      server.stop();
+    }
+  } finally {
+    if (orig === undefined) Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
+    else process.env.VIBEFLOW_UI_V2 = orig;
+  }
+});
+
+test("GET /assets/alpine.csp.min.js returns 200 application/javascript (B2)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/assets/alpine.csp.min.js`);
+    expect(res.status).toBe(200);
+    const ct = res.headers.get("content-type") || "";
+    expect(ct).toContain("javascript");
+  } finally {
+    server.stop();
+  }
+});

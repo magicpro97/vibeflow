@@ -16,6 +16,7 @@ import {
   policyGates,
   readFileSync,
   readState,
+  spawn,
   spawnSync,
 } from "./_shared.js";
 
@@ -65,6 +66,59 @@ export function detectToolchain(
   return { kind: "none" };
 }
 
+/** Structured report shape returned by collectVerifyReportAsync.
+ * Consumed by POST /api/verify (B1). The CLI verify() prints its own stdout
+ * and does NOT consume this type. */
+export interface VerifyReport {
+  ok: boolean;
+  toolchain: { label: string; pass: boolean }[];
+  policy: { passed: string[]; warnings: string[]; failures: string[] };
+}
+
+/** Async helper: runs toolchain + policy gates and returns a structured report.
+ * REQUIRED by POST /api/verify — the sync spawnSync version freezes Bun.serve (the whole
+ * server, incl. SSE + /state, hangs ~60s while typecheck/lint/test run, then can die on
+ * idleTimeout=0). This awaits each gate via async spawn so other requests keep flowing.
+ * Injectable async spawner for tests. */
+export async function collectVerifyReportAsync(
+  base: string,
+  inject: {
+    spawner?: (cmd: string, args: string[], opts: object) => Promise<{ status: number | null }>;
+  } = {},
+): Promise<VerifyReport> {
+  const toolchain: { label: string; pass: boolean }[] = [];
+  const run =
+    inject.spawner ??
+    ((cmd: string, args: string[], opts: object): Promise<{ status: number | null }> =>
+      new Promise((resolve) => {
+        const child = spawn(cmd, args, opts as object);
+        child.on("close", (code: number | null) => resolve({ status: code }));
+        child.on("error", () => resolve({ status: 1 }));
+      }));
+
+  const runGate = async (label: string, cmd: string, args: string[], dir = base) => {
+    const r = await run(cmd, args, { stdio: "ignore", cwd: dir });
+    toolchain.push({ label, pass: r.status === 0 });
+  };
+
+  const plan = detectToolchain(base);
+  if (plan.kind === "npm") {
+    for (const gate of plan.gates)
+      await runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
+  } else if (plan.kind === "gradle") {
+    await runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
+  } else if (plan.kind === "monorepo") {
+    const label = plan.dir.split(/[/\\]/).pop() ?? plan.dir;
+    for (const gate of plan.gates)
+      await runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
+  }
+
+  const policy = policyGates(readState(base));
+  const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
+
+  return { ok, toolchain, policy };
+}
+
 export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean } = {}): number {
   let failed = 0;
   const base = cwd();
@@ -97,7 +151,7 @@ export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean }
   } else if (plan.kind === "gradle") {
     runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
   } else if (plan.kind === "monorepo") {
-    const label = plan.dir.split("/").pop();
+    const label = plan.dir.split(/[/\\]/).pop() ?? plan.dir;
     for (const gate of plan.gates)
       runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   } else {

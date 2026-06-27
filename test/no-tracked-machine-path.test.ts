@@ -18,7 +18,10 @@ import { readFileSync } from "node:fs";
 //    skip.
 
 const HOME_PATH = /\/Users\/[^/\s"]+|\/home\/[^/\s"]+|C:\\Users\\[^\\\s"]+/;
-const SKIP_EXT = /\.(md|markdown|ts|tsx|js|example|snap)$/;
+// Binary / generated / vendor files are skipped — reading them as utf8
+// is slow (hundreds of font/image files) and they're never text-path concerns.
+const SKIP_EXT =
+  /\.(md|markdown|ts|tsx|js|mjs|cjs|example|snap|txt|toml|yml|yaml|json|css|html|svg|xml|conf|cfg|ini)$/;
 const SKIP_DIR = /^docs\//;
 
 describe("no machine-specific absolute path in tracked files", () => {

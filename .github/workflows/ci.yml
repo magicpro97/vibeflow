@@ -14,27 +14,27 @@ on:
   pull_request:
     branches: [main]
 
-# Single job on a self-hosted runner. The MacBook has a registered
-# self-hosted runner at ~/actions-runner-vibeflow/ for this repo.
-# When the MacBook is online, jobs run instantly (no GitHub queue).
-# When offline, this job stays pending — there's no cloud fallback
-# because the cost of repeatedly re-running CI on cloud (and
-# double-spending Actions minutes) outweighs the value of a fallback.
+# Runner priority:
+#   Default: ubuntu-latest (GitHub-hosted, always available)
+#   Self-hosted: set repo variable USE_SELF_HOSTED=true to switch to MacBook.
+#     Go to Settings → Secrets and variables → Actions → Variables → New variable
+#     Name: USE_SELF_HOSTED, Value: true
+#     When the MacBook is online, jobs run faster (no GitHub queue).
+#     When offline, set to 'false' (or delete the variable) to go back to cloud.
+#     The self-hosted runner is a Mac on Apple Silicon registered at
+#     ~/actions-runner-vibeflow/ with labels [self-hosted, macOS, ARM64].
 #
 # Self-hosted runner setup (one-time):
 #   1. cd ~/actions-runner-vibeflow
 #   2. ./config.sh --unattended --url https://github.com/magicpro97/vibeflow \
 #       --token <registration-token-from-repo-settings> \
-#       --labels "self-hosted,linux,x64" \
-#       --name "MacBook-Pro-cua-mac-vibeflow"
+#       --labels "self-hosted,macOS,ARM64" \
+#       --name "mac-selfhost-vibeflow"
 #   3. ./run.sh   # or: ./svc.sh install && ./svc.sh start
-#
-# To run CI on cloud (when self-hosted is offline for hours),
-# temporarily change `runs-on:` below to `ubuntu-latest`.
 
 jobs:
   check:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
     # Coverage instrumentation makes full-suite coverage gate ~10min, so 15m was too tight.
     timeout-minutes: 30
     steps:
@@ -67,7 +67,7 @@ jobs:
         run: bun run test:e2e
 
   release-please:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
     # Only run release-please on main-branch pushes. Self-hosted
     # runner so it doesn't queue on cloud throttling.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

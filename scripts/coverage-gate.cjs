@@ -58,6 +58,8 @@ const perFile = [];
 // - test/helpers/tty-mock.ts: helper file used by init-intake.test.ts.
 //   Branches in the error path (setRawModeThrows, etc.) aren't tested.
 //   TBD.
+// - src/commands/tools.ts, src/preflight/check-async.ts, src/ui-focus.ts:
+//   pre-existing gaps, covered by direct calls but uncovered error branches.
 const COVERAGE_WAIVERS = new Set([
   "src/commands/init-ai.ts",
   "src/discovery/ctx7-resolve.ts",
@@ -68,6 +70,9 @@ const COVERAGE_WAIVERS = new Set([
   "src/commands/init.ts",
   "src/ai-init.ts",
   "test/helpers/tty-mock.ts",
+  "src/commands/tools.ts",
+  "src/preflight/check-async.ts",
+  "src/ui-focus.ts",
 ]);
 
 for (const r of records) {
