@@ -108,7 +108,7 @@ export async function collectVerifyReportAsync(
   } else if (plan.kind === "gradle") {
     await runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
   } else if (plan.kind === "monorepo") {
-    const label = plan.dir.split("/").pop();
+    const label = plan.dir.split(/[/\\]/).pop() ?? plan.dir;
     for (const gate of plan.gates)
       await runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   }
@@ -151,7 +151,7 @@ export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean }
   } else if (plan.kind === "gradle") {
     runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
   } else if (plan.kind === "monorepo") {
-    const label = plan.dir.split("/").pop();
+    const label = plan.dir.split(/[/\\]/).pop() ?? plan.dir;
     for (const gate of plan.gates)
       runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   } else {
