@@ -44,8 +44,6 @@ const perFile = [];
 //   that init.ts wires in via import. The runner tests cover the
 //   module through init, but the standalone function is only partially
 //   covered. Tracking issue: TBD.
-//   per candidate (277 default whitelist). Covering all branches requires
-//   mocking `gh api` per response. Tracking issue: TBD.
 // - src/skills/curator-cache.ts, curator.ts, validator.ts, workflow-artifacts.ts:
 //   Phases of the skill curation pipeline. Each has a small number of
 //   uncovered error branches. Tracking issue: TBD.
