@@ -51,6 +51,15 @@ describe("scopedGate", () => {
     expect(g.detail).toBe("× lint error in src/a.ts");
   });
 
+  test("test step fails → failedGate=test", () => {
+    const run = (cmd: string): GateRunResult =>
+      cmd.includes("bun test") ? { status: 1, stdout: "FAIL test/foo.test.ts" } : ok;
+    const g = scopedGate({ scope: ["src/a.ts"], cwd: "/tmp/wt", run });
+    expect(g.pass).toBe(false);
+    expect(g.failedGate).toBe("test");
+    expect(g.detail).toBe("FAIL test/foo.test.ts");
+  });
+
   test("scopedGate does not shell out to coverage-gate.cjs (coverage owned by final gate)", () => {
     const cmds: string[] = [];
     const run = (cmd: string) => {
