@@ -25,7 +25,7 @@ on:
 jobs:
   verify:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, macOS, ARM64]
     outputs:
       exists: ${{ steps.remote.outputs.exists }}
       version: ${{ steps.local.outputs.version }}
