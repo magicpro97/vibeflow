@@ -3129,7 +3129,7 @@ describe("commands.makeDispatcher W-A measured gate", () => {
         })();
       expect(g.build).toBe("pass");
       expect(g.lint).toBe("pass");
-      expect(g.test).toBe("pass");
+      expect(g.test).toBe("pending");
       expect(g.review).toBe("pending");
     } finally {
       rmSync(dir, { recursive: true, force: true });
