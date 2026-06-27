@@ -14,7 +14,7 @@ import type { GateState } from "../core.js";
 /** The minimal shape of a scoped-gate verdict this mapper consumes. */
 export interface MeasuredGate {
   pass: boolean;
-  failedGate?: "typecheck" | "biome" | "coverage";
+  failedGate?: "typecheck" | "biome" | "test" | "coverage";
 }
 
 type Gates = Record<"build" | "lint" | "test" | "review", GateState>;
@@ -35,12 +35,12 @@ const ALL_PENDING: Gates = {
  */
 export function mapGateResult(measured: MeasuredGate | undefined): Gates {
   if (!measured) return { ...ALL_PENDING };
-  if (measured.pass) return { build: "pass", lint: "pass", test: "pass", review: "pending" };
+  if (measured.pass) return { build: "pass", lint: "pass", test: "pending", review: "pending" };
   const f = measured.failedGate;
   return {
     build: f === "typecheck" ? "fail" : "pass",
     lint: f === "typecheck" ? "pending" : f === "biome" ? "fail" : "pass",
-    test: f === "coverage" ? "fail" : "pending",
+    test: !f || f === "typecheck" || f === "biome" ? "pending" : "fail",
     review: "pending",
   };
 }
