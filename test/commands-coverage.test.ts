@@ -2235,14 +2235,15 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     try {
       expect(resolveMode({})).toBe("bridge");
     } finally {
-      if (orig === undefined) delete process.env.VIBEFLOW_AI;
+      if (orig === undefined)
+        process.env.VIBEFLOW_AI = ""; // biome-ignore lint/performance/noDelete: must remove env var for test
       else process.env.VIBEFLOW_AI = orig;
     }
   });
 
   test("resolveMode: no flags + no env returns 'dry' (line 537)", () => {
     const orig = process.env.VIBEFLOW_AI;
-    delete process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = ""; // biome-ignore lint/performance/noDelete: must remove env var for test
     try {
       expect(resolveMode({})).toBe("dry");
     } finally {
