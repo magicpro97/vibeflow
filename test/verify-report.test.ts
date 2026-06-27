@@ -127,4 +127,27 @@ describe("collectVerifyReportAsync", () => {
     const first = report.toolchain[0] as { label: string; pass: boolean };
     expect(first.pass).toBe(false);
   });
+
+  test("coverage gate runs when lcov.info exists and coverage=true", async () => {
+    const dir = tempProject({ typecheck: "exit 0", test: "exit 0" });
+    const covDir = join(dir, "coverage");
+    mkdirSync(covDir, { recursive: true });
+    writeFileSync(
+      join(covDir, "lcov.info"),
+      "TN:\nSF:src/index.ts\nDA:1,1\nLF:1\nLH:1\nend_of_record\n",
+    );
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0), coverage: true });
+    const covGate = report.toolchain.find((g) => g.label === "coverage:gate") as
+      | { label: string; pass: boolean }
+      | undefined;
+    expect(covGate).toBeDefined();
+    expect((covGate as { label: string; pass: boolean }).pass).toBe(true);
+  });
+
+  test("coverage gate skipped when lcov.info missing", async () => {
+    const dir = tempProject({ typecheck: "exit 0" });
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0), coverage: true });
+    const covGate = report.toolchain.find((g) => g.label === "coverage:gate");
+    expect(covGate).toBeUndefined();
+  });
 });

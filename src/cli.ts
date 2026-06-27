@@ -210,7 +210,7 @@ async function main(argv: string[]): Promise<number> {
     case "hooks":
       return hooks(positionals[0], flags);
     case "verify":
-      return verify({ journal: flags.journal === true });
+      return verify({ journal: flags.journal === true, coverage: flags.coverage === true });
     case "decision":
       return decision(positionals[0], flags);
     default:

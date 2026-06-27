@@ -84,6 +84,7 @@ export async function collectVerifyReportAsync(
   base: string,
   inject: {
     spawner?: (cmd: string, args: string[], opts: object) => Promise<{ status: number | null }>;
+    coverage?: boolean;
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
@@ -113,13 +114,23 @@ export async function collectVerifyReportAsync(
       await runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   }
 
+  // ponytail: coverage gate — check existing lcov.info when coverage=true.
+  if (inject.coverage) {
+    const lcovPath = join(base, "coverage", "lcov.info");
+    if (existsSync(lcovPath)) {
+      await runGate("coverage:gate", "node", ["scripts/coverage-gate.cjs"]);
+    }
+  }
+
   const policy = policyGates(readState(base));
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
 
   return { ok, toolchain, policy };
 }
 
-export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean } = {}): number {
+export function verify(
+  inject: { spawner?: typeof spawnSync; journal?: boolean; coverage?: boolean } = {},
+): number {
   let failed = 0;
   const base = cwd();
   // `vf verify` is a READ-ONLY gate by default (issue #154): it must not
@@ -170,6 +181,22 @@ export function verify(inject: { spawner?: typeof spawnSync; journal?: boolean }
   for (const f of report.failures) {
     failed++;
     out("vf", c.red(`✗ ${f}`));
+  }
+
+  // ponytail: coverage gate — check existing lcov.info when --coverage.
+  if (inject.coverage) {
+    const lcovPath = join(base, "coverage", "lcov.info");
+    if (existsSync(lcovPath)) {
+      const cov = spawnSync("node", ["scripts/coverage-gate.cjs"], { stdio: "inherit", cwd: base });
+      if (cov.status !== 0) {
+        failed++;
+        out("vf", c.red("✗ coverage gate failed"));
+      } else {
+        out("vf", c.green("✓ coverage gate"));
+      }
+    } else {
+      out("vf", c.yellow("⚠ coverage/lcov.info not found — run `bun run coverage` first"));
+    }
   }
 
   // e2e advisory gates — non-fatal warnings only.
