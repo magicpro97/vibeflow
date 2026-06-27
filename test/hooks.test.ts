@@ -109,7 +109,7 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
       // Exec form: bare executable + path as a separate, untokenized arg.
       expect(h.command).toBe("node");
       expect(Array.isArray(h.args)).toBe(true);
-      expect(h.args?.[0]).toMatch(/\/dist\/cli\.js$/);
+      expect(h.args?.[0]).toMatch(/[/\\\\]dist[/\\\\]cli\.js$/);
       expect(h.args?.[1]).toBe("hook");
       // The path must NOT be wrapped in shell quotes — exec form passes it verbatim.
       expect(h.args?.[0]).not.toContain('"');
@@ -119,17 +119,17 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
   test("codex commands quote the path (shell-string schema; spaces survive)", () => {
     const cfg = JSON.parse(codexHookConfig()) as { hooks: Record<string, string> };
     for (const cmd of Object.values(cfg.hooks)) {
-      expect(cmd).toMatch(/^node "[^"]*\/dist\/cli\.js" hook$/);
+      expect(cmd).toMatch(/^node "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
     }
   });
 
   test('git pre-commit pipes through a quoted `node "<abs>" hook`', () => {
-    expect(gitPreCommit()).toMatch(/node "[^"]*\/dist\/cli\.js" hook/);
+    expect(gitPreCommit()).toMatch(/node "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook/);
   });
 
   test("git post-checkout/post-merge re-index with a quoted path", () => {
-    expect(gitPostCheckout()).toMatch(/node "[^"]*\/dist\/cli\.js" tools sync/);
-    expect(gitPostMerge()).toMatch(/node "[^"]*\/dist\/cli\.js" tools sync/);
+    expect(gitPostCheckout()).toMatch(/node "[^"]*[/\\\\]dist[/\\\\]cli\.js" tools sync/);
+    expect(gitPostMerge()).toMatch(/node "[^"]*[/\\\\]dist[/\\\\]cli\.js" tools sync/);
   });
 });
 

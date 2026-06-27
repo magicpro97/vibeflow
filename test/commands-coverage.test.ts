@@ -2235,14 +2235,14 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     try {
       expect(resolveMode({})).toBe("bridge");
     } finally {
-      if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+      if (orig === undefined) delete process.env.VIBEFLOW_AI;
       else process.env.VIBEFLOW_AI = orig;
     }
   });
 
   test("resolveMode: no flags + no env returns 'dry' (line 537)", () => {
     const orig = process.env.VIBEFLOW_AI;
-    process.env.VIBEFLOW_AI = undefined;
+    delete process.env.VIBEFLOW_AI;
     try {
       expect(resolveMode({})).toBe("dry");
     } finally {
