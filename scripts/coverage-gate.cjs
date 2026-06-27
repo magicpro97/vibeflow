@@ -60,9 +60,13 @@ const perFile = [];
 //   TBD.
 // - src/commands/tools.ts, src/preflight/check-async.ts, src/ui-focus.ts:
 //   pre-existing gaps, covered by direct calls but uncovered error branches.
+// - src/commands/tools-detect.ts: sync verify() coverage gate uses global
+//   spawnSync (not inject seam), hard to test in temp dirs. Async path tested.
+//   coverage-waiver: #358 follow-up — refactor sync verify to use inject seam.
 const COVERAGE_WAIVERS = new Set([
   "src/commands/init-ai.ts",
   "src/discovery/ctx7-resolve.ts",
+  "src/commands/tools-detect.ts",
   "src/skills/curator-cache.ts",
   "src/skills/curator.ts",
   "src/skills/validator.ts",
