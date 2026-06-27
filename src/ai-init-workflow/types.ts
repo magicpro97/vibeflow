@@ -33,12 +33,8 @@ export interface AiInitIntake {
    *  user declined/failed login or init is non-interactive, so specs must
    *  use the documented fallback path without prompting again. */
   ctx7Authenticated?: boolean;
-  /** P1-10: pre-resolved ctx7 repo list, formatted as a hint block
-   *  (see `formatResolvedReposHint` in `discovery/ctx7-resolve.ts`).
-   *  Injected into the skill-curator spec so the engine never has to
-   *  try-fail candidate repo names one at a time. Empty/undefined
-   *  means the CLI did not run the pre-check; the engine should
-   *  fall back to its existing try-fail behaviour. */
+  /** P1-10: pre-resolved ctx7 repo list hint (formerly populated by
+   *  discovery/ctx7-resolve.ts, removed — 0 production callers). */
   ctx7ResolvedReposHint?: string;
 }
 
