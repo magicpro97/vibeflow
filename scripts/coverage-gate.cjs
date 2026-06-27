@@ -44,9 +44,6 @@ const perFile = [];
 //   that init.ts wires in via import. The runner tests cover the
 //   module through init, but the standalone function is only partially
 //   covered. Tracking issue: TBD.
-// - src/discovery/ctx7-resolve.ts: ctx7 repo resolution — calls `gh api`
-//   per candidate (277 default whitelist). Covering all branches requires
-//   mocking `gh api` per response. Tracking issue: TBD.
 // - src/skills/curator-cache.ts, curator.ts, validator.ts, workflow-artifacts.ts:
 //   Phases of the skill curation pipeline. Each has a small number of
 //   uncovered error branches. Tracking issue: TBD.
@@ -65,7 +62,6 @@ const perFile = [];
 //   coverage-waiver: #358 follow-up — refactor sync verify to use inject seam.
 const COVERAGE_WAIVERS = new Set([
   "src/commands/init-ai.ts",
-  "src/discovery/ctx7-resolve.ts",
   "src/commands/tools-detect.ts",
   "src/skills/curator-cache.ts",
   "src/skills/curator.ts",
