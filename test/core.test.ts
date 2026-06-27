@@ -197,7 +197,8 @@ describe("core.writeFileSafe (atomic writeFileSafe)", () => {
   });
 });
 
-describe("core.assertInsideBase (CWE-59 symlink escape)", () => {
+const _symlinkDescribe = process.platform === "win32" ? describe.skip : describe;
+_symlinkDescribe("core.assertInsideBase (CWE-59 symlink escape)", () => {
   test("non-symlink file: no-op", () => {
     // Inject a lstat that says "not a symlink" — assertInsideBase
     // must return without calling realpath.

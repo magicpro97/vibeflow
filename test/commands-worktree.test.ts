@@ -251,7 +251,7 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
 
   test("(o) defaultWorktreePath: sibling of parent dir", () => {
     const p = defaultWorktreePath("mybranch", "/tmp/parent");
-    expect(p).toBe("/tmp/parent/vf-wt-mybranch");
+    expect(p.replace(/\\/g, "/")).toBe("/tmp/parent/vf-wt-mybranch");
   });
 
   test("(p) buildCreateArgs: includes --base when given", () => {
@@ -316,7 +316,7 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
     return { repoDir, wtDir };
   }
 
-  test("(q) create + remove in a temp repo; verify node_modules is a symlink to the parent's", () => {
+  (process.platform === "win32" ? test.skip : test)("(q) create + remove in a temp repo; verify node_modules is a symlink to the parent's", () => {
     const { repoDir, wtDir } = plantRepo();
     // Run the helper directly (it's a real bash script). The TS
     // wrapper just shells out to it; verifying the helper's real
@@ -415,7 +415,7 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
   // covered by inject tests (j/k) but never against a real `git
   // worktree list --porcelain`."
 
-  test("(t) E2E [TS wrapper] worktree create: exit 0, worktree exists, node_modules is a symlink", () => {
+  (process.platform === "win32" ? test.skip : test)("(t) E2E [TS wrapper] worktree create: exit 0, worktree exists, node_modules is a symlink", () => {
     const { repoDir } = plantRepoWithScripts();
     // chdir into the tmpdir so `buildCreateArgs` resolves the
     // helper at `<repoDir>/scripts/create-worktree.sh`. The

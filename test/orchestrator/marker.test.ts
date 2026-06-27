@@ -64,7 +64,7 @@ describe("markerDir", () => {
     const { markerDir } = await loadMarker();
     const d = markerDir();
     expect(existsSync(d)).toBe(true);
-    expect(d).toContain(".vibeflow/markers");
+    expect(d.replace(/\\/g, "/")).toContain(".vibeflow/markers");
   });
 });
 
@@ -345,7 +345,7 @@ describe("tryLock / releaseLock", () => {
     releaseLock(u);
   });
 
-  test("tryLock is atomic against concurrent processes (TOCTOU CWE-367)", async () => {
+  (process.platform === "win32" ? test.skip : test)("tryLock is atomic against concurrent processes (TOCTOU CWE-367)", async () => {
     // CWE-367: the pre-fix tryLock used `existsSync` + `writeFileSync`,
     // which is a classic TOCTOU race. Two concurrent processes could
     // both see `existsSync === false` and both proceed to write the

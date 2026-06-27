@@ -35,6 +35,8 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// ponytail: normalize path separators for Windows
+const norm = (s: string) => s.replace(/\\/g, "/");
 const SCRIPT_PATH = join(import.meta.dir, "..", "scripts", "check-file-size.cjs");
 
 // Build a 500-line fixture file. `firstLine` is the leading line of
@@ -111,7 +113,7 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
     const r = runGate(dir);
 
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("::error file=src/big.ts");
+    expect(norm(r.stderr)).toContain("::error file=src/big.ts");
   });
 
   it("(b) 500-line file WITH valid waiver (#999) → exit 0, file-scoped ::warning on the waivered line", () => {
@@ -125,13 +127,13 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
 
     // A valid waiver means the file is exempted → the gate passes.
     expect(r.status).toBe(0);
-    expect(r.stderr).not.toContain("::error file=");
-    expect(r.stderr).not.toContain("waiver comment malformed");
+    expect(norm(r.stderr)).not.toContain("::error file=");
+    expect(norm(r.stderr)).not.toContain("waiver comment malformed");
     // F4 followup #190: an over-cap inline-waived file must surface
     // a file-scoped ::warning so the PR reviewer sees the waiver
     // in the diff annotations. The issue number is parsed from the
     // reason.
-    expect(r.stderr).toContain(
+    expect(norm(r.stderr)).toContain(
       "::warning file=src/waived.ts,line=1,col=1::inline waiver #999 active",
     );
   });
@@ -149,11 +151,11 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
     // un-waived, so the gate exits 1 (file is 500 lines > 400 cap).
     expect(r.status).toBe(1);
     // The gate emits a ::warning annotation for the malformed comment.
-    expect(r.stderr).toContain("::warning file=src/malformed.ts");
-    expect(r.stderr).toContain("waiver comment malformed");
+    expect(norm(r.stderr)).toContain("::warning file=src/malformed.ts");
+    expect(norm(r.stderr)).toContain("waiver comment malformed");
     // And the malformed file is reported as a real violation
     // (::error), because the cap is enforced.
-    expect(r.stderr).toContain("::error file=src/malformed.ts");
+    expect(norm(r.stderr)).toContain("::error file=src/malformed.ts");
   });
 
   it("(d) 500-line file with `/* @ts-check */` block on line 0 and valid waiver on line 2 → exit 0", () => {
@@ -172,8 +174,8 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
     // Waived → exit 0. The file-scoped ::warning should fire (the
     // waiver is doing work, the file is 500 lines > 400 cap).
     expect(r.status).toBe(0);
-    expect(r.stderr).not.toContain("::error file=src/blockwaived.ts");
-    expect(r.stderr).toContain(
+    expect(norm(r.stderr)).not.toContain("::error file=src/blockwaived.ts");
+    expect(norm(r.stderr)).toContain(
       "::warning file=src/blockwaived.ts,line=2,col=1::inline waiver #191 active",
     );
   });
@@ -191,8 +193,8 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
     const r = runGate(dir);
 
     expect(r.status).toBe(0);
-    expect(r.stderr).not.toContain("::error file=src/codegen.gen.ts");
-    expect(r.stderr).not.toContain("::warning file=src/codegen.gen.ts");
+    expect(norm(r.stderr)).not.toContain("::error file=src/codegen.gen.ts");
+    expect(norm(r.stderr)).not.toContain("::warning file=src/codegen.gen.ts");
   });
 
   it("(f) facade file (`src/commands.ts`-equivalent) with malformed waiver → exit 1 + ::warning on the facade path", () => {
@@ -221,8 +223,8 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
     // bad comment. The file is 500 lines, well under 1200, so the
     // cap check passes.
     expect(r.status).toBe(0);
-    expect(r.stderr).toContain("::warning file=src/commands.ts");
-    expect(r.stderr).toContain("waiver comment malformed");
+    expect(norm(r.stderr)).toContain("::warning file=src/commands.ts");
+    expect(norm(r.stderr)).toContain("waiver comment malformed");
   });
 
   // FLAKE(#210): Bun.file() mock.module pollution — on warm CI runs the
@@ -275,7 +277,7 @@ describe("file-size gate (scripts/check-file-size.cjs)", () => {
     // src/central.ts is 500 lines, cap 600 → under cap, exit 0.
     // The ::notice should include the waiver note.
     expect(r.status).toBe(0);
-    expect(r.stderr).not.toContain("::error file=src/central.ts");
+    expect(norm(r.stderr)).not.toContain("::error file=src/central.ts");
     expect(r.stdout).toContain("(waiver: #999)");
   });
 });
