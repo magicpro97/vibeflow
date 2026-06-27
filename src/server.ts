@@ -30,13 +30,18 @@ export function startServer(port = 0): Promise<{
 }> {
   const token = randomUUID();
 
-  const shellHtml = readFileSync(new URL("./ui/shell.html", import.meta.url), "utf8");
+  const shellV2Enabled = process.env.VIBEFLOW_UI_V2 === "1";
+  const shellHtmlSrc = shellV2Enabled ? "./ui/shell-v2.html" : "./ui/shell.html";
+  const shellHtml = readFileSync(new URL(shellHtmlSrc, import.meta.url), "utf8");
   const sectionsHtml = readFileSync(new URL("./ui/sections.html", import.meta.url), "utf8");
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
     version?: string;
   };
   const versionVal = pkgJson.version || "0.0.0";
-  const pageHtml = shellHtml.replace("<!-- SECTIONS -->", sectionsHtml);
+  // v1 embeds sections.html; v2 is self-contained
+  const pageHtml = shellV2Enabled
+    ? shellHtml
+    : shellHtml.replace("<!-- SECTIONS -->", sectionsHtml);
   const cachedHtml = pageHtml.replace(/__CSRF__/g, token).replace(/__VERSION__/g, versionVal);
 
   let activeRepo = cwd();
@@ -267,6 +272,7 @@ export function startServer(port = 0): Promise<{
             path === "/api/discover" ||
             path === "/api/preflight" ||
             path === "/api/settings" ||
+            path === "/api/verify" ||
             path === "/api/upload")) ||
         (method === "DELETE" && path === "/api/upload");
 

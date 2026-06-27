@@ -1,0 +1,130 @@
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { collectVerifyReportAsync } from "../src/commands/tools-detect.js";
+
+// ponytail: minimal tests for the extracted seam — no framework, no fixtures.
+// Async-only: the route uses collectVerifyReportAsync (non-blocking); the old
+// sync collectVerifyReport was removed because spawnSync froze Bun.serve.
+
+// ponytail: fake async spawner — resolves with the given exit status.
+const fakeSpawner = (status: number) => () => Promise.resolve({ status });
+
+// Helper: create a temp dir with a package.json containing the given scripts.
+function tempProject(scripts: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "vf-verify-test-"));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts }, null, 2));
+  return dir;
+}
+
+describe("collectVerifyReportAsync", () => {
+  test("runs toolchain gates and returns structured report", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
+    expect(report).toHaveProperty("toolchain");
+    expect(report).toHaveProperty("policy");
+    expect(Array.isArray(report.toolchain)).toBe(true);
+    expect(typeof report.policy).toBe("object");
+    expect(Array.isArray(report.policy.passed)).toBe(true);
+    expect(Array.isArray(report.policy.warnings)).toBe(true);
+    expect(Array.isArray(report.policy.failures)).toBe(true);
+    expect(typeof report.ok).toBe("boolean");
+  });
+
+  test("marks failing gates in toolchain when spawner returns non-zero", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(1) });
+    expect(report.ok).toBe(false);
+    expect(report.toolchain.some((g) => !g.pass)).toBe(true);
+  });
+
+  test("structure is correct regardless of pass/fail", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
+    expect(typeof report.ok).toBe("boolean");
+    expect(Array.isArray(report.toolchain)).toBe(true);
+  });
+
+  test("toolchain gates have label and pass fields", async () => {
+    const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
+    for (const gate of report.toolchain) {
+      expect(typeof gate.label).toBe("string");
+      expect(typeof gate.pass).toBe("boolean");
+    }
+  });
+
+  test("default spawner works with real spawn on temp project", async () => {
+    // Create a temp project with a typecheck script, then call
+    // collectVerifyReportAsync WITHOUT a fake spawner so the real
+    // default spawner runs (exercising lines 90-97).
+    const dir = tempProject({ typecheck: "exit 0", test: "exit 0" });
+    const report = await collectVerifyReportAsync(dir);
+    expect(report).toHaveProperty("ok");
+    expect(Array.isArray(report.toolchain)).toBe(true);
+  });
+
+  test("default spawner error handler on non-existent binary", async () => {
+    // Create a temp project with a script that calls a non-existent binary.
+    // The default spawner's "error" event handler (line 96) resolves { status: 1 }.
+    const dir = tempProject({ lint: "nonexistent-command-xyz-123", test: "exit 0" });
+    const report = await collectVerifyReportAsync(dir);
+    expect(report).toHaveProperty("ok");
+    expect(Array.isArray(report.toolchain)).toBe(true);
+    for (const gate of report.toolchain) {
+      expect(typeof gate.label).toBe("string");
+      expect(typeof gate.pass).toBe("boolean");
+    }
+  });
+
+  test("gradle toolchain with empty build.gradle (real spawner)", async () => {
+    // detectToolchain returns { kind: "gradle" } when build.gradle exists
+    // and no package.json is present. The gradle check is the gradle binary
+    // which doesn't exist in a temp dir, so verify the function handles it.
+    const dir = mkdtempSync(join(tmpdir(), "vf-gradle-test-"));
+    writeFileSync(join(dir, "build.gradle"), "");
+    const report = await collectVerifyReportAsync(dir);
+    expect(report).toHaveProperty("ok");
+    expect(report.toolchain.length).toBeGreaterThanOrEqual(1);
+    const first = report.toolchain[0] as { label: string; pass: boolean };
+    // The "gradle check" gate should have pass=false since gradle isn't installed
+    expect(first.pass).toBe(false);
+  });
+
+  test("gradle toolchain with fakeSpawner", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gradle-test-"));
+    writeFileSync(join(dir, "build.gradle"), "");
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0) });
+    expect(report).toHaveProperty("ok");
+    expect(report.toolchain.length).toBe(1);
+    const first = report.toolchain[0] as { label: string; pass: boolean };
+    expect(first.label).toMatch(/gradle|check/);
+    expect(first.pass).toBe(true);
+  });
+
+  test("monorepo toolchain with fakeSpawner", async () => {
+    // detectToolchain returns { kind: "monorepo" } when a subdirectory
+    // (web/app/frontend) contains a package.json with typecheck/lint/test scripts.
+    const dir = mkdtempSync(join(tmpdir(), "vf-monorepo-test-"));
+    const webDir = join(dir, "web");
+    mkdirSync(webDir, { recursive: true });
+    writeFileSync(
+      join(webDir, "package.json"),
+      JSON.stringify({ scripts: { typecheck: "tsc", lint: "biome", test: "vitest" } }, null, 2),
+    );
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0) });
+    expect(report).toHaveProperty("ok");
+    expect(report.toolchain.length).toBe(3);
+    for (const gate of report.toolchain) {
+      expect(gate.label).toContain("(web)");
+      expect(gate.pass).toBe(true);
+    }
+  });
+
+  test("returns ok=false when gradle check fails", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gradle-fail-"));
+    writeFileSync(join(dir, "build.gradle"), "");
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(1) });
+    expect(report.ok).toBe(false);
+    expect(report.toolchain.length).toBe(1);
+    const first = report.toolchain[0] as { label: string; pass: boolean };
+    expect(first.pass).toBe(false);
+  });
+});

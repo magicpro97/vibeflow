@@ -88,7 +88,11 @@ describe("coverage anti-patterns (test/ only)", () => {
     // tryLock TOCTOU test intentionally spawns child bun processes to
     // exercise real cross-process lock contention — using a fakeSpawner
     // would defeat the test's purpose (CWE-367 is a real-process race).
-    .filter((p) => !p.endsWith("orchestrator/marker.test.ts"))
+    .filter(
+      (p) =>
+        !p.endsWith("orchestrator/marker.test.ts") &&
+        !p.replace(/\\/g, "/").endsWith("orchestrator/marker.test.ts"),
+    )
     // The coordinator-skill validator tests intentionally exec the real
     // bash script — a fakeSpawner would just exercise bun's spawn API,
     // not the actual gate. The whole point is to assert the shipped

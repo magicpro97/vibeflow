@@ -19,7 +19,7 @@
 
 // Re-export Node.js builtins we need, but be explicit to avoid
 // `link`/`exists` collisions between node:fs and other modules.
-export { spawnSync } from "node:child_process";
+export { spawnSync, spawn } from "node:child_process";
 export { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 export { basename, isAbsolute, join, resolve } from "node:path";
 

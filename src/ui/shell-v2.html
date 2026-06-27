@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf" content="__CSRF__" />
+  <title>VibeFlow v2</title>
+  <!--
+    v2-marker: shell-v2 (VibeFlow UI v2 — built behind VIBEFLOW_UI_V2=1)
+    Version: __VERSION__
+  -->
+  <!-- Apply theme before paint — kills flash (effective-html pattern §5.0) -->
+  <script>
+    (function() {
+      var t = localStorage.getItem("vibeflow-theme");
+      if (t === "dark" || (!t && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+    })();
+  </script>
+  <script src="/assets/alpine.csp.min.js" defer></script>
+  <style>
+    /* ponytail: design tokens (--vfs-*) with WCAG AA ≥4.5 from birth */
+    :root {
+      --vfs-bg: #ffffff;
+      --vfs-surface: #f3f4f6;
+      --vfs-ink: #111827;
+      --vfs-muted: #4b5563; /* #4b5563 on #ffffff = 7.2:1 AA ✓ */
+      --vfs-border: #e5e7eb;
+      --vfs-accent: #4f46e5;
+      --vfs-accent-ink: #ffffff;
+      --vfs-danger: #dc2626;
+      --vfs-success: #16a34a;
+      --vfs-rail-w: 56px;
+      --vfs-log-w: 280px;
+    }
+    html.dark {
+      --vfs-bg: #0f172a;
+      --vfs-surface: #1e293b;
+      --vfs-ink: #f1f5f9;
+      --vfs-muted: #94a3b8;
+      --vfs-border: #334155;
+      --vfs-accent: #818cf8;
+      --vfs-accent-ink: #0f172a;
+      --vfs-danger: #f87171;
+      --vfs-success: #4ade80;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--vfs-bg);
+      color: var(--vfs-ink);
+      font-size: 14px;
+    }
+    /* 3-pane grid: rail | main | logs */
+    #shell {
+      display: grid;
+      grid-template-rows: 40px 1fr;
+      grid-template-columns: var(--vfs-rail-w) 1fr var(--vfs-log-w);
+      grid-template-areas:
+        "topbar topbar topbar"
+        "rail   main   logs";
+      height: 100vh;
+    }
+    /* Collapse log pane when hidden */
+    #shell.logs-hidden {
+      grid-template-columns: var(--vfs-rail-w) 1fr 0;
+    }
+    #topbar {
+      grid-area: topbar;
+      background: var(--vfs-surface);
+      border-bottom: 1px solid var(--vfs-border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      font-size: 13px;
+    }
+    #topbar strong { font-size: 14px; }
+    #topbar .spacer { flex: 1; }
+    #rail {
+      grid-area: rail;
+      background: var(--vfs-surface);
+      border-right: 1px solid var(--vfs-border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 8px 0;
+      gap: 4px;
+    }
+    #main {
+      grid-area: main;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    #logs {
+      grid-area: logs;
+      border-left: 1px solid var(--vfs-border);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      font-size: 12px;
+    }
+    .rail-btn {
+      width: 40px;
+      height: 40px;
+      border: none;
+      background: transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--vfs-muted);
+      font-size: 10px;
+      gap: 2px;
+      transition: background 0.12s;
+    }
+    .rail-btn:hover { background: var(--vfs-border); color: var(--vfs-ink); }
+    .rail-btn[aria-current="step"] {
+      background: var(--vfs-accent);
+      color: var(--vfs-accent-ink);
+    }
+    .rail-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .rail-icon { font-size: 16px; }
+    /* Theme toggle */
+    .theme-btn {
+      border: none; background: transparent; cursor: pointer;
+      color: var(--vfs-muted); font-size: 16px; padding: 4px 6px;
+      border-radius: 4px;
+    }
+    .theme-btn:hover { color: var(--vfs-ink); background: var(--vfs-border); }
+    /* Log pane */
+    .logs-header {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--vfs-border);
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .logs-header .spacer { flex: 1; }
+    .log-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 8px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--vfs-muted);
+    }
+    /* Smoke test visibility */
+    .stage-pane { display: none; }
+    .stage-pane.active { display: block; }
+    /* Stage transitions */
+    @media (prefers-reduced-motion: no-preference) {
+      .stage-pane { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="shell" x-data="app" :class="{ 'logs-hidden': !showLogs }">
+    <!-- Topbar -->
+    <header id="topbar" role="banner">
+      <strong>VibeFlow</strong>
+      <span x-text="repoShort" style="color:var(--vfs-muted)" aria-label="Active repository"></span>
+      <span class="spacer"></span>
+      <span style="color:var(--vfs-muted);font-size:11px">v__VERSION__</span>
+      <button class="theme-btn" @click="toggleTheme()" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'"
+              :aria-label="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
+        <span x-text="darkMode ? '☀️' : '🌙'"></span>
+      </button>
+      <button class="theme-btn" @click="showLogs = !showLogs"
+              :aria-label="showLogs ? 'Hide logs' : 'Show logs'"
+              :title="showLogs ? 'Hide logs' : 'Show logs'">
+        <span>📋</span>
+      </button>
+    </header>
+
+    <!-- Nav Rail -->
+    <nav id="rail" aria-label="Workflow stages">
+      <template x-for="s in stages" :key="s.n">
+        <button class="rail-btn"
+                :aria-current="$store.vf.stage === s.n ? 'step' : undefined"
+                :disabled="isLocked(s.n)"
+                :aria-disabled="isLocked(s.n)"
+                @click="goStage(s.n)"
+                :title="isLocked(s.n) ? s.label + ' — generate first' : s.label">
+          <span class="rail-icon" aria-hidden="true" x-text="s.icon"></span>
+          <span x-text="s.n" aria-hidden="true"></span>
+          <span class="sr-only" x-text="s.label + ' (stage ' + s.n + ')'"></span>
+        </button>
+      </template>
+    </nav>
+
+    <!-- Main content -->
+    <main id="main" role="main">
+      <!-- Stage 1: Describe -->
+      <div x-show="$store.vf.stage === 1" x-transition>
+        <div x-data="stage1">
+          <h2 style="margin:0 0 16px;font-size:16px">Describe your goal</h2>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <!-- Left col: repo + sources + engines -->
+            <div>
+              <div style="margin-bottom:12px">
+                <label for="repoPath" style="display:block;margin-bottom:4px;font-weight:600">Repository path</label>
+                <div style="display:flex;gap:6px">
+                  <input id="repoPath" type="text" x-model="repoPath"
+                         placeholder="/path/to/repo"
+                         style="flex:1;padding:6px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:13px"
+                         aria-label="Repository path" />
+                  <button @click="detectRepo()"
+                          :disabled="detecting"
+                          style="padding:6px 10px;background:var(--vfs-accent);color:var(--vfs-accent-ink);border:none;border-radius:4px;cursor:pointer;font-size:12px"
+                          :aria-busy="detecting">
+                    <span x-text="detecting ? '...' : 'Detect'"></span>
+                  </button>
+                </div>
+                <span x-show="detectError" x-text="detectError" style="color:var(--vfs-danger);font-size:12px"></span>
+              </div>
+
+              <!-- Sources -->
+              <div style="margin-bottom:12px" x-data="sources">
+                <fieldset style="border:1px solid var(--vfs-border);border-radius:6px;padding:10px">
+                  <legend style="padding:0 4px;font-weight:600;font-size:13px">Doc sources</legend>
+                  <template x-for="(src, i) in docSources" :key="i">
+                    <div style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
+                      <label :for="'docType-'+i" class="sr-only">Type</label>
+                      <select :id="'docType-'+i" x-model="src.type"
+                              style="padding:4px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px"
+                              :aria-label="'Doc source ' + (i+1) + ' type'">
+                        <option value="url">URL</option>
+                        <option value="file">File</option>
+                        <option value="text">Text</option>
+                      </select>
+                      <input :id="'docRef-'+i" type="text" x-model="src.ref"
+                             placeholder="reference"
+                             style="flex:1;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px"
+                             :aria-label="'Doc source ' + (i+1) + ' reference'" />
+                      <button @click="docSources.splice(i,1)"
+                              style="padding:2px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;color:var(--vfs-muted)"
+                              :aria-label="'Remove doc source ' + (i+1)">×</button>
+                    </div>
+                  </template>
+                  <button @click="docSources.push({type:'url',ref:''})"
+                          style="margin-top:4px;padding:4px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-accent)">
+                    + Add doc source
+                  </button>
+                </fieldset>
+                <fieldset style="border:1px solid var(--vfs-border);border-radius:6px;padding:10px;margin-top:8px">
+                  <legend style="padding:0 4px;font-weight:600;font-size:13px">Task sources</legend>
+                  <template x-for="(src, i) in taskSources" :key="i">
+                    <div style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
+                      <label :for="'taskType-'+i" class="sr-only">Type</label>
+                      <select :id="'taskType-'+i" x-model="src.type"
+                              style="padding:4px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px"
+                              :aria-label="'Task source ' + (i+1) + ' type'">
+                        <option value="url">URL</option>
+                        <option value="file">File</option>
+                        <option value="text">Text</option>
+                      </select>
+                      <input :id="'taskRef-'+i" type="text" x-model="src.ref"
+                             placeholder="reference"
+                             style="flex:1;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px"
+                             :aria-label="'Task source ' + (i+1) + ' reference'" />
+                      <button @click="taskSources.splice(i,1)"
+                              style="padding:2px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;color:var(--vfs-muted)"
+                              :aria-label="'Remove task source ' + (i+1)">×</button>
+                    </div>
+                  </template>
+                  <button @click="taskSources.push({type:'url',ref:''})"
+                          style="margin-top:4px;padding:4px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-accent)">
+                    + Add task source
+                  </button>
+                </fieldset>
+              </div>
+
+              <!-- File types -->
+              <div style="margin-bottom:12px">
+                <label for="fileTypes" style="display:block;margin-bottom:4px;font-weight:600;font-size:13px">File types</label>
+                <input id="fileTypes" type="text" x-model="fileTypesRaw"
+                       placeholder=".ts, .js, .py"
+                       style="width:100%;padding:6px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:13px"
+                       aria-label="File types (comma separated)" />
+              </div>
+
+              <!-- Engines -->
+              <div>
+                <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Engines</label>
+                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                  <template x-for="eng in availableEngines" :key="eng">
+                    <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+                      <input type="checkbox" :value="eng" x-model="selectedEngines"
+                             :id="'eng-'+eng" :aria-label="eng + ' engine'" />
+                      <span x-text="eng"></span>
+                    </label>
+                  </template>
+                </div>
+              </div>
+
+              <!-- AI toggle -->
+              <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+                <input type="checkbox" id="useAi" x-model="useAi" />
+                <label for="useAi" style="font-size:13px;cursor:pointer">Use AI for context</label>
+              </div>
+            </div>
+
+            <!-- Right col: builder -->
+            <div x-data="builder">
+              <!-- Workflow tabs — Add button is outside role=tablist to avoid aria-required-children violation -->
+              <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+                <div role="tablist" aria-label="Workflows" style="display:contents">
+                  <template x-for="(wf, wi) in workflows" :key="wf.id">
+                    <button role="tab"
+                            :aria-selected="activeWf === wi"
+                            @click="activeWf = wi"
+                            :style="activeWf === wi ? 'background:var(--vfs-accent);color:var(--vfs-accent-ink);border-color:var(--vfs-accent)' : 'background:var(--vfs-surface);color:var(--vfs-ink)'"
+                            style="padding:4px 10px;border:1px solid var(--vfs-border);border-radius:4px;cursor:pointer;font-size:12px;transition:background 0.1s"
+                            x-text="wf.name">
+                    </button>
+                  </template>
+                </div>
+                <button x-show="workflows.length > 1"
+                        @click="removeWf(activeWf)"
+                        style="padding:4px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-muted)"
+                        :aria-label="'Remove ' + (workflows[activeWf] ? workflows[activeWf].name : 'workflow')">×</button>
+                <button @click="addWf()"
+                        style="padding:4px 8px;border:1px dashed var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-accent)"
+                        aria-label="Add workflow">+</button>
+              </div>
+
+              <!-- Active workflow editor -->
+              <template x-if="workflows[activeWf]">
+                <div>
+                  <!-- wf meta -->
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+                    <div>
+                      <label :for="'wfName'" style="display:block;font-size:12px;font-weight:600;margin-bottom:2px">Name</label>
+                      <input :id="'wfName'" type="text" x-model="workflows[activeWf].name"
+                             style="width:100%;padding:5px 7px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px" />
+                    </div>
+                    <div>
+                      <label :for="'wfDod'" style="display:block;font-size:12px;font-weight:600;margin-bottom:2px">Definition of Done</label>
+                      <input :id="'wfDod'" type="text" x-model="workflows[activeWf].dod"
+                             style="width:100%;padding:5px 7px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px" />
+                    </div>
+                  </div>
+                  <div style="margin-bottom:10px">
+                    <label :for="'wfDesc'" style="display:block;font-size:12px;font-weight:600;margin-bottom:2px">Description</label>
+                    <input :id="'wfDesc'" type="text" x-model="workflows[activeWf].description"
+                           style="width:100%;padding:5px 7px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px" />
+                  </div>
+
+                  <!-- Preset picker -->
+                  <div style="margin-bottom:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                    <label for="presetSel" style="font-size:12px;font-weight:600">Preset:</label>
+                    <select id="presetSel" x-model="selectedPreset"
+                            style="padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px"
+                            aria-label="Select preset">
+                      <option value="">— none —</option>
+                      <template x-for="p in presets" :key="p.id">
+                        <option :value="p.id" x-text="p.name"></option>
+                      </template>
+                    </select>
+                    <button @click="applyPreset()"
+                            :disabled="!selectedPreset"
+                            style="padding:4px 8px;background:var(--vfs-accent);color:var(--vfs-accent-ink);border:none;border-radius:4px;cursor:pointer;font-size:12px">
+                      Apply
+                    </button>
+                  </div>
+
+                  <!-- Raw ↔ Builder toggle -->
+                  <div style="margin-bottom:10px;display:flex;gap:6px;align-items:center">
+                    <span style="font-size:12px;font-weight:600">Mode:</span>
+                    <button @click="rawMode = false"
+                            :style="!rawMode ? 'background:var(--vfs-accent);color:var(--vfs-accent-ink)' : 'background:var(--vfs-surface);color:var(--vfs-ink)'"
+                            style="padding:3px 8px;border:1px solid var(--vfs-border);border-radius:4px;cursor:pointer;font-size:12px"
+                            :aria-pressed="!rawMode">Builder</button>
+                    <button @click="rawMode = true"
+                            :style="rawMode ? 'background:var(--vfs-accent);color:var(--vfs-accent-ink)' : 'background:var(--vfs-surface);color:var(--vfs-ink)'"
+                            style="padding:3px 8px;border:1px solid var(--vfs-border);border-radius:4px;cursor:pointer;font-size:12px"
+                            :aria-pressed="rawMode">Raw</button>
+                  </div>
+
+                  <!-- Raw mode -->
+                  <div x-show="rawMode">
+                    <label for="rawGoal" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Goal (raw text)</label>
+                    <textarea id="rawGoal" x-model="workflows[activeWf].description"
+                              rows="6"
+                              style="width:100%;padding:6px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px;resize:vertical"
+                              aria-label="Raw goal text"></textarea>
+                  </div>
+
+                  <!-- Builder mode: accordion steps -->
+                  <div x-show="!rawMode">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                      <span style="font-size:12px;font-weight:600">Steps</span>
+                      <button @click="addStep()"
+                              style="padding:3px 8px;border:1px solid var(--vfs-accent);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-accent)">
+                        + Step
+                      </button>
+                    </div>
+
+                    <!-- Steps accordion -->
+                    <template x-for="(step, si) in workflows[activeWf].steps" :key="si">
+                      <div style="border:1px solid var(--vfs-border);border-radius:6px;margin-bottom:4px;overflow:hidden">
+                        <!-- Step header -->
+                        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--vfs-surface);cursor:pointer"
+                             @click="openStep = openStep === si ? -1 : si">
+                          <!-- Drag handle -->
+                          <span style="cursor:grab;color:var(--vfs-muted);font-size:14px;user-select:none"
+                                draggable="true"
+                                @dragstart="dragStart(si, $event)"
+                                @dragover.prevent
+                                @drop="dragDrop(si, $event)"
+                                :aria-label="'Drag step ' + (si+1)">⠿</span>
+                          <span style="font-size:11px;color:var(--vfs-muted);min-width:20px" x-text="si+1"></span>
+                          <span style="flex:1;font-size:12px;font-weight:500;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"
+                                x-text="step.title || '(untitled step)'"></span>
+                          <span style="color:var(--vfs-muted);font-size:12px" x-text="openStep === si ? '▲' : '▼'"></span>
+                          <button @click.stop="workflows[activeWf].steps.splice(si,1); if(openStep>=workflows[activeWf].steps.length) openStep=-1"
+                                  style="border:none;background:transparent;cursor:pointer;color:var(--vfs-muted);font-size:14px;padding:0 2px"
+                                  :aria-label="'Remove step ' + (si+1)">×</button>
+                        </div>
+                        <!-- Step body (accordion) -->
+                        <div x-show="openStep === si"
+                             style="padding:8px 10px;border-top:1px solid var(--vfs-border);display:grid;gap:6px">
+                          <div>
+                            <label :for="'stepTitle-'+si" style="display:block;font-size:11px;font-weight:600;margin-bottom:2px">Title</label>
+                            <input :id="'stepTitle-'+si" type="text" x-model="step.title"
+                                   style="width:100%;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px" />
+                          </div>
+                          <div>
+                            <label :for="'stepDesc-'+si" style="display:block;font-size:11px;font-weight:600;margin-bottom:2px">Description</label>
+                            <textarea :id="'stepDesc-'+si" x-model="step.description" rows="2"
+                                      style="width:100%;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px;resize:vertical"></textarea>
+                          </div>
+                          <div>
+                            <label :for="'stepPrompt-'+si" style="display:block;font-size:11px;font-weight:600;margin-bottom:2px">Instructions for agent</label>
+                            <textarea :id="'stepPrompt-'+si" x-model="step.prompt" rows="3"
+                                      style="width:100%;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px;resize:vertical"></textarea>
+                          </div>
+                          <div>
+                            <label :for="'stepOutput-'+si" style="display:block;font-size:11px;font-weight:600;margin-bottom:2px">Expected output</label>
+                            <textarea :id="'stepOutput-'+si" x-model="step.output" rows="2"
+                                      style="width:100%;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px;resize:vertical"></textarea>
+                          </div>
+                          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                            <div>
+                              <label :for="'stepSiPath-'+si" style="display:block;font-size:11px;font-weight:600;margin-bottom:2px">Sample input path</label>
+                              <input :id="'stepSiPath-'+si" type="text" x-model="step.sampleInputPath"
+                                     style="width:100%;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px" />
+                            </div>
+                            <div>
+                              <label :for="'stepSoPath-'+si" style="display:block;font-size:11px;font-weight:600;margin-bottom:2px">Sample output path</label>
+                              <input :id="'stepSoPath-'+si" type="text" x-model="step.sampleOutputPath"
+                                     style="width:100%;padding:4px 6px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:12px" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <div x-show="workflows[activeWf].steps.length === 0"
+                         style="text-align:center;padding:20px;color:var(--vfs-muted);font-size:12px">
+                      No steps yet — add one above or apply a preset.
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Generate button -->
+          <div style="margin-top:16px;display:flex;gap:8px;align-items:center">
+            <button @click="generate()"
+                    :disabled="generating || !repoPath"
+                    style="padding:8px 20px;background:var(--vfs-accent);color:var(--vfs-accent-ink);border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600"
+                    :aria-busy="generating">
+              <span x-text="generating ? 'Generating…' : 'Generate →'"></span>
+            </button>
+            <span x-show="genError" x-text="genError" style="color:var(--vfs-danger);font-size:13px"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 2: Generate -->
+      <div x-show="$store.vf.stage === 2" x-transition>
+        <div x-data="stage2">
+          <h2 style="margin:0 0 16px;font-size:16px">Generated files</h2>
+          <div x-show="!state || !state.files || state.files.length === 0"
+               style="color:var(--vfs-muted);font-size:13px">
+            No files generated yet — go back to Describe and click Generate.
+          </div>
+          <div x-show="state && state.files && state.files.length > 0">
+            <p style="color:var(--vfs-muted);font-size:13px;margin:0 0 12px">
+              <span x-text="state && state.files ? state.files.length : 0"></span> file(s) generated.
+            </p>
+            <ul style="list-style:none;padding:0;margin:0;display:grid;gap:4px">
+              <template x-for="f in (state && state.files || [])" :key="f">
+                <li style="padding:6px 10px;background:var(--vfs-surface);border-radius:4px;font-family:monospace;font-size:12px"
+                    x-text="f"></li>
+              </template>
+            </ul>
+            <!-- Skills section (collapsed by default) -->
+            <details style="margin-top:16px" x-show="state && state.skills && state.skills.length > 0">
+              <summary style="cursor:pointer;font-weight:600;font-size:13px">Skills resolved</summary>
+              <ul style="list-style:none;padding:0;margin:8px 0 0">
+                <template x-for="sk in (state && state.skills || [])" :key="sk">
+                  <li style="padding:4px 8px;font-size:12px;color:var(--vfs-muted)" x-text="sk"></li>
+                </template>
+              </ul>
+            </details>
+            <div style="margin-top:16px">
+              <button @click="$dispatch('go-stage', 3)"
+                      style="padding:8px 20px;background:var(--vfs-accent);color:var(--vfs-accent-ink);border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600">
+                Orchestrate →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 3: Orchestrate -->
+      <div x-show="$store.vf.stage === 3" x-transition>
+        <div x-data="stage3">
+          <h2 style="margin:0 0 16px;font-size:16px">Orchestrate</h2>
+          <div x-show="!state || !state.units || state.units.length === 0"
+               style="color:var(--vfs-muted);font-size:13px">
+            Nothing to orchestrate yet — generate files first.
+          </div>
+          <div x-show="state && state.units && state.units.length > 0">
+            <!-- Engine selector -->
+            <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+              <label for="orchEngine" style="font-weight:600;font-size:13px">Engine:</label>
+              <select id="orchEngine" x-model="orchEngine"
+                      style="padding:5px 8px;border:1px solid var(--vfs-border);border-radius:4px;background:var(--vfs-bg);color:var(--vfs-ink);font-size:13px"
+                      aria-label="Orchestrate engine">
+                <template x-for="eng in engines" :key="eng">
+                  <option :value="eng" x-text="eng"></option>
+                </template>
+              </select>
+            </div>
+
+            <!-- Units table -->
+            <div style="overflow-x:auto;margin-bottom:16px">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead>
+                  <tr style="border-bottom:2px solid var(--vfs-border)">
+                    <th style="text-align:left;padding:6px 8px;font-weight:600">Unit</th>
+                    <th style="text-align:left;padding:6px 8px;font-weight:600">Status</th>
+                    <th style="text-align:left;padding:6px 8px;font-weight:600">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="u in (state && state.units || [])" :key="u.name || u.id">
+                    <tr style="border-bottom:1px solid var(--vfs-border)">
+                      <td style="padding:6px 8px" x-text="u.name || u.id"></td>
+                      <td style="padding:6px 8px">
+                        <span :style="unitStatusColor(u.status)"
+                              style="padding:2px 6px;border-radius:3px;font-size:11px"
+                              x-text="u.status || 'pending'"></span>
+                      </td>
+                      <td style="padding:6px 8px">
+                        <span x-text="u.confidence != null ? u.confidence.toFixed(2) : '—'"></span>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Terminal handoff card -->
+            <div style="border:1px solid var(--vfs-border);border-radius:6px;padding:12px;background:var(--vfs-surface);margin-bottom:12px">
+              <p style="margin:0 0 8px;font-weight:600;font-size:13px">Terminal handoff</p>
+              <p style="margin:0 0 8px;font-size:12px;color:var(--vfs-muted)">
+                Preview run (dry) — no engine spawned. To run for real, copy this command:
+              </p>
+              <div style="display:flex;gap:6px;align-items:center">
+                <code style="flex:1;padding:6px 8px;background:var(--vfs-bg);border:1px solid var(--vfs-border);border-radius:4px;font-size:12px;font-family:monospace"
+                      x-text="'vf orchestrate --engine ' + orchEngine + ' --yes'"></code>
+                <button @click="copyCmd()"
+                        style="padding:5px 10px;border:1px solid var(--vfs-border);border-radius:4px;background:transparent;cursor:pointer;font-size:12px;color:var(--vfs-accent)"
+                        :aria-label="'Copy orchestrate command'">
+                  <span x-text="copied ? '✓' : 'Copy'"></span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Preview run button -->
+            <div style="display:flex;gap:8px;align-items:center">
+              <button @click="previewRun()"
+                      :disabled="previewing"
+                      style="padding:8px 20px;background:var(--vfs-accent);color:var(--vfs-accent-ink);border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600"
+                      :aria-busy="previewing">
+                <span x-text="previewing ? 'Running…' : 'Preview run (dry)'"></span>
+              </button>
+              <button @click="$dispatch('go-stage', 4)"
+                      style="padding:8px 20px;background:transparent;color:var(--vfs-accent);border:1px solid var(--vfs-accent);border-radius:6px;cursor:pointer;font-size:14px;font-weight:600">
+                Verify →
+              </button>
+              <span x-show="previewError" x-text="previewError" style="color:var(--vfs-danger);font-size:13px"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 4: Verify -->
+      <div x-show="$store.vf.stage === 4" x-transition>
+        <div x-data="stage4">
+          <h2 style="margin:0 0 16px;font-size:16px">Verify</h2>
+          <div x-show="!ran" style="color:var(--vfs-muted);font-size:13px;margin-bottom:12px">
+            Run the verify gate to check toolchain + policy.
+          </div>
+
+          <!-- Gate chips -->
+          <div x-show="ran" style="margin-bottom:16px">
+            <p style="margin:0 0 8px;font-weight:600;font-size:13px">Toolchain gates</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+              <template x-for="g in gates" :key="g.label">
+                <span :class="g.pass ? 'gate pass' : 'gate fail'"
+                      style="padding:3px 8px;border-radius:4px;font-size:12px"
+                      :style="g.pass ? 'background:var(--vfs-success);color:#fff' : 'background:var(--vfs-danger);color:#fff'"
+                      x-text="(g.pass ? '✓ ' : '✗ ') + g.label"></span>
+              </template>
+              <span x-show="gates.length === 0" style="color:var(--vfs-muted);font-size:12px">No toolchain gates ran.</span>
+            </div>
+
+            <p style="margin:0 0 8px;font-weight:600;font-size:13px">Policy gates</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+              <template x-for="p in policy.passed" :key="p">
+                <span style="padding:3px 8px;border-radius:4px;font-size:12px;background:var(--vfs-success);color:#fff"
+                      x-text="'✓ ' + p"></span>
+              </template>
+              <template x-for="w in policy.warnings" :key="w">
+                <span style="padding:3px 8px;border-radius:4px;font-size:12px;background:#f59e0b;color:#fff"
+                      x-text="'⚠ ' + w"></span>
+              </template>
+              <template x-for="f in policy.failures" :key="f">
+                <span style="padding:3px 8px;border-radius:4px;font-size:12px;background:var(--vfs-danger);color:#fff"
+                      x-text="'✗ ' + f"></span>
+              </template>
+            </div>
+            <p x-show="verifyOk" style="color:var(--vfs-success);font-weight:600;margin:0">✓ All gates passed.</p>
+            <p x-show="!verifyOk && ran" style="color:var(--vfs-danger);font-weight:600;margin:0">✗ Some gates failed — check above.</p>
+          </div>
+
+          <button @click="runVerify()"
+                  :disabled="running"
+                  style="padding:8px 20px;background:var(--vfs-accent);color:var(--vfs-accent-ink);border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600"
+                  :aria-busy="running">
+            <span x-text="running ? 'Running…' : 'Run verify'"></span>
+          </button>
+          <span x-show="verifyError" x-text="verifyError" style="color:var(--vfs-danger);font-size:13px;margin-left:8px"></span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Live logs pane -->
+    <aside id="logs" x-show="showLogs" role="log" aria-live="polite" aria-label="Live logs">
+      <div class="logs-header">
+        <span>Logs</span>
+        <span class="spacer"></span>
+        <button @click="clearLogs()"
+                style="border:none;background:transparent;cursor:pointer;font-size:11px;color:var(--vfs-muted)"
+                aria-label="Clear logs">Clear</button>
+      </div>
+      <div class="log-body" x-ref="logBody" id="logBody">
+        <template x-for="(line, i) in logLines" :key="i">
+          <div x-text="line"></div>
+        </template>
+        <div x-show="logLines.length === 0" style="color:var(--vfs-muted)">No logs yet.</div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- sr-only utility -->
+  <style>
+    .sr-only {
+      position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+      overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0;
+    }
+  </style>
+
+  <script>
+    // ponytail: Alpine components registered via Alpine.data() (CSP build requirement)
+    // CSRF token (injected server-side via __CSRF__ replacement)
+    const CSRF = document.querySelector('meta[name=csrf]').content;
+
+    // Verbatim port of v1 post() (shell.html:3635–3653) — R4 guard
+    function post(path, body) {
+      return fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": CSRF },
+        body: JSON.stringify(body),
+      }).then(r => r.json().then(j => ({ ok: r.ok, j }), () => ({ ok: false, j: {} })));
+    }
+
+    // Serializers — verbatim port from shell.html (§4)
+    // buildContent: serialize workflows to goal text (shell.html:3018–3030)
+    function buildContent(workflows) {
+      return workflows.filter(wf => wf.name || wf.description || wf.steps.length > 0)
+        .map(wf => {
+          const lines = [];
+          if (wf.name) lines.push('## ' + wf.name);
+          if (wf.description) lines.push(wf.description);
+          if (wf.dod) lines.push('\n**Definition of Done:** ' + wf.dod);
+          wf.steps.forEach((s, i) => {
+            lines.push('\n### Step ' + (i+1) + (s.title ? ': ' + s.title : ''));
+            if (s.description) lines.push(s.description);
+            if (s.prompt) lines.push('\n**Instructions:** ' + s.prompt);
+            if (s.output) lines.push('\n**Expected output:** ' + s.output);
+          });
+          return lines.join('\n');
+        }).join('\n\n---\n\n');
+    }
+
+    // collectExpectedResult: join workflow DoDs (shell.html:3031)
+    function collectExpectedResult(workflows) {
+      return workflows.map(wf => wf.dod).filter(Boolean).join('\n');
+    }
+
+    // joinSources: "type: ref; type: ref" (shell.html:2372)
+    function joinSources(sources) {
+      return sources.filter(s => s.ref).map(s => s.type + ': ' + s.ref).join('; ');
+    }
+
+    // makeWorkflow: factory (shell.html ~2884)
+    let _wfId = 0;
+    function makeWorkflow() {
+      return { id: ++_wfId, name: 'Workflow ' + _wfId, description: '', dod: '', steps: [] };
+    }
+
+    // makeStep: factory
+    function makeStep() {
+      return {
+        title: '', description: '', prompt: '', output: '',
+        sampleInputPath: '', sampleInputContent: '',
+        sampleOutputPath: '', sampleOutputContent: '',
+      };
+    }
+
+    // STAGE_LIBRARY + presets (verified shell.html 2496–2507, §4.3)
+    const STAGE_LIBRARY = {
+      plan:    { title: 'Plan', description: 'Break down the goal into actionable steps' },
+      code:    { title: 'Code', description: 'Implement the planned solution' },
+      test:    { title: 'Test', description: 'Write and run tests for the implementation' },
+      review:  { title: 'Review', description: 'Review and refine the code and docs' },
+      deploy:  { title: 'Deploy', description: 'Deploy or ship the implementation' },
+      docs:    { title: 'Docs', description: 'Write or update documentation' },
+      refactor:{ title: 'Refactor', description: 'Improve code quality and structure' },
+    };
+    const PRESETS = [
+      { id: 'full', name: 'Full lifecycle', stages: ['plan','code','test','review','deploy'] },
+      { id: 'quick', name: 'Quick ship', stages: ['code','test','deploy'] },
+      { id: 'docs-only', name: 'Docs only', stages: ['docs'] },
+      { id: 'refactor', name: 'Refactor + test', stages: ['refactor','test'] },
+    ];
+
+    function presetStepData(preset) {
+      if (preset.steps) return preset.steps;
+      return (preset.stages || []).map(code => {
+        const s = STAGE_LIBRARY[code] || { title: code, description: '' };
+        return { ...makeStep(), title: code + ' — ' + s.title, description: s.description };
+      });
+    }
+
+    document.addEventListener('alpine:init', () => {
+      // Shared store — avoids cross-component _x_dataStack hacks
+      // ponytail: Alpine.store is the idiomatic CSP-safe way to share state
+      Alpine.store('vf', {
+        state: null,
+        stage: 1,
+        // builder form data (shared between stage1/builder/sources)
+        workflows: [makeWorkflow()],
+        docSources: [{ type: 'url', ref: '' }],
+        taskSources: [{ type: 'url', ref: '' }],
+      });
+
+      Alpine.data('app', () => ({
+        showLogs: true,
+        darkMode: document.documentElement.classList.contains('dark'),
+        logLines: [],
+        _sse: null,
+        stages: [
+          { n: 1, label: 'Describe', icon: '✏️' },
+          { n: 2, label: 'Generate', icon: '⚡' },
+          { n: 3, label: 'Orchestrate', icon: '🎯' },
+          { n: 4, label: 'Verify', icon: '✅' },
+        ],
+        get stage() { return Alpine.store('vf').stage; },
+        get repoShort() {
+          const repo = Alpine.store('vf').state && Alpine.store('vf').state.activeRepo;
+          if (!repo) return '(no repo)';
+          const parts = repo.replace(/\\/g, '/').split('/');
+          return parts[parts.length - 1] || repo;
+        },
+        init() {
+          this.loadState();
+          this.connectLogs();
+          this.$el.addEventListener('go-stage', (e) => this.goStage(e.detail));
+        },
+        isLocked(n) {
+          // Stage 2+ locked until a workflow is generated (store.state), unless already reached.
+          const store = Alpine.store('vf');
+          return n > 1 && !store.state && n > store.stage;
+        },
+        goStage(n) {
+          // Q2: prerequisite-gated forward, free back-nav. Stages 2+ need a generated
+          // workflow (store.state set by /api/init). Going back to an already-reached
+          // stage is always allowed (H3 user control); jumping forward past Generate is not.
+          if (this.isLocked(n)) return;
+          Alpine.store('vf').stage = n;
+          // Move focus to new stage heading for a11y (§7)
+          this.$nextTick(() => {
+            const h = this.$el.querySelector(`[x-show="$store.vf.stage === ${n}"] h2, [x-show="stage === ${n}"] h2`);
+            if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+          });
+        },
+        loadState() {
+          fetch('/state').then(r => r.json()).then(s => { Alpine.store('vf').state = s; }).catch(() => {});
+        },
+        connectLogs() {
+          const es = new EventSource('/api/logs/stream');
+          es.onmessage = (e) => {
+            this.logLines.push(e.data);
+            if (this.logLines.length > 500) this.logLines.shift();
+            this.$nextTick(() => {
+              const lb = this.$refs.logBody;
+              if (lb) lb.scrollTop = lb.scrollHeight;
+            });
+          };
+          es.onerror = () => {};
+          this._sse = es;
+          fetch('/api/logs/recent').then(r => r.json()).then(lines => {
+            if (Array.isArray(lines)) this.logLines.unshift(...lines);
+            if (this.logLines.length > 500) this.logLines = this.logLines.slice(-500);
+          }).catch(() => {});
+        },
+        clearLogs() { this.logLines = []; },
+        toggleTheme() {
+          this.darkMode = !this.darkMode;
+          document.documentElement.classList.toggle('dark', this.darkMode);
+          localStorage.setItem('vibeflow-theme', this.darkMode ? 'dark' : 'light');
+        },
+      }));
+
+      Alpine.data('stage1', () => ({
+        repoPath: '',
+        detecting: false,
+        detectError: '',
+        fileTypesRaw: '.ts, .js',
+        selectedEngines: ['claude'],
+        availableEngines: ['claude', 'codex', 'copilot'],
+        useAi: true,
+        generating: false,
+        genError: '',
+        async detectRepo() {
+          if (!this.repoPath) return;
+          this.detecting = true;
+          this.detectError = '';
+          const { ok, j } = await post('/api/detect', { path: this.repoPath });
+          this.detecting = false;
+          if (!ok) this.detectError = j.error || 'Detect failed';
+        },
+        async generate() {
+          this.generating = true;
+          this.genError = '';
+          const store = Alpine.store('vf');
+          const body = {
+            repoPath: this.repoPath,
+            goal: buildContent(store.workflows),
+            engines: this.selectedEngines,
+            useAi: this.useAi,
+            docSource: joinSources(store.docSources),
+            taskSource: joinSources(store.taskSources),
+            fileTypes: this.fileTypesRaw.split(',').map(s => s.trim()).filter(Boolean),
+            expectedResult: collectExpectedResult(store.workflows),
+          };
+          const { ok, j } = await post('/api/init', body);
+          this.generating = false;
+          if (!ok) { this.genError = j.error || 'Generate failed'; return; }
+          if (j.state) store.state = j.state;
+          else fetch('/state').then(r => r.json()).then(s => { store.state = s; }).catch(() => {});
+          this.$dispatch('go-stage', 2);
+        },
+      }));
+
+      Alpine.data('sources', () => ({
+        get docSources() { return Alpine.store('vf').docSources; },
+        get taskSources() { return Alpine.store('vf').taskSources; },
+      }));
+
+      Alpine.data('builder', () => ({
+        get workflows() { return Alpine.store('vf').workflows; },
+        activeWf: 0,
+        openStep: 0,
+        rawMode: false,
+        selectedPreset: '',
+        presets: PRESETS,
+        _drag: null,
+        addWf() {
+          Alpine.store('vf').workflows.push(makeWorkflow());
+          this.activeWf = Alpine.store('vf').workflows.length - 1;
+        },
+        removeWf(i) {
+          const wfs = Alpine.store('vf').workflows;
+          if (wfs.length <= 1) return;
+          wfs.splice(i, 1);
+          if (this.activeWf >= wfs.length) this.activeWf = wfs.length - 1;
+        },
+        addStep() {
+          const wf = Alpine.store('vf').workflows[this.activeWf];
+          wf.steps.push(makeStep());
+          this.openStep = wf.steps.length - 1;
+        },
+        applyPreset() {
+          const p = PRESETS.find(p => p.id === this.selectedPreset);
+          if (!p) return;
+          Alpine.store('vf').workflows[this.activeWf].steps = presetStepData(p);
+          this.openStep = 0;
+          this.selectedPreset = '';
+        },
+        dragStart(i, e) { this._drag = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); },
+        dragDrop(target, e) {
+          e.preventDefault();
+          const src = this._drag;
+          if (src === null || src === target) return;
+          const steps = Alpine.store('vf').workflows[this.activeWf].steps;
+          const [removed] = steps.splice(src, 1);
+          steps.splice(target, 0, removed);
+          this.openStep = target;
+          this._drag = null;
+        },
+      }));
+
+      Alpine.data('stage2', () => ({
+        get state() { return Alpine.store('vf').state; },
+      }));
+
+      Alpine.data('stage3', () => ({
+        orchEngine: 'claude',
+        previewing: false,
+        previewError: '',
+        copied: false,
+        get state() { return Alpine.store('vf').state; },
+        get engines() {
+          const s = this.state;
+          return s && s.engines && s.engines.length ? s.engines : ['claude', 'codex', 'copilot'];
+        },
+        unitStatusColor(status) {
+          const map = {
+            done: 'background:var(--vfs-success)',
+            pending: 'background:var(--vfs-border)',
+            in_progress: 'background:var(--vfs-accent);color:var(--vfs-accent-ink)',
+            failed: 'background:var(--vfs-danger);color:#fff',
+          };
+          return (map[status] || 'background:var(--vfs-surface)') + ';color:var(--vfs-ink)';
+        },
+        async previewRun() {
+          this.previewing = true;
+          this.previewError = '';
+          const { ok, j } = await post('/api/orchestrate', { engine: this.orchEngine });
+          this.previewing = false;
+          if (!ok) this.previewError = j.error || 'Orchestrate failed';
+          else if (j.state) Alpine.store('vf').state = j.state;
+        },
+        async copyCmd() {
+          const cmd = `vf orchestrate --engine ${this.orchEngine} --yes`;
+          await navigator.clipboard.writeText(cmd).catch(() => {});
+          this.copied = true;
+          setTimeout(() => { this.copied = false; }, 1500);
+        },
+      }));
+
+      Alpine.data('stage4', () => ({
+        ran: false,
+        running: false,
+        verifyOk: false,
+        verifyError: '',
+        gates: [],
+        policy: { passed: [], warnings: [], failures: [] },
+        async runVerify() {
+          this.running = true;
+          this.verifyError = '';
+          const { ok, j } = await post('/api/verify', {});
+          this.running = false;
+          this.ran = true;
+          if (!ok && !j.gates) { this.verifyError = j.error || 'Verify failed'; return; }
+          this.verifyOk = j.ok;
+          this.gates = j.gates || [];
+          this.policy = j.policy || { passed: [], warnings: [], failures: [] };
+        },
+      }));
+    });
+  </script>
+</body>
+</html>
