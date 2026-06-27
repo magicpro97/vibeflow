@@ -1,6 +1,6 @@
 // src/orchestrator/scoped-gate.ts
 //
-// W4: a per-unit gate that runs typecheck + scoped biome for
+// W4: a per-unit gate that runs typecheck + scoped biome + test for
 // just ONE work unit's declared file scope — instead of the whole-repo
 // `bun run check`. The full check still runs ONCE at the end of orchestration
 // as the integration signal; this scoped gate is the fast per-unit belt-and-

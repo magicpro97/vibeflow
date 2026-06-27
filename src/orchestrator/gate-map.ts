@@ -2,12 +2,12 @@
 //
 // W-A: map a scoped-gate result onto the four-slot unit gate object.
 //
-// scopedGate runs typecheck → biome → coverage and SHORT-CIRCUITS on the first
+// scopedGate runs typecheck → biome → test and SHORT-CIRCUITS on the first
 // failure, so the gates AFTER the failing one never ran. A gate that did not
 // execute must be reported "pending", NOT "pass" — claiming "pass" for a gate
 // that never ran is the exact theater-gate bug W-A exists to fix.
 //
-// pass-order: build(typecheck) → lint(biome) → test(coverage).
+// pass-order: build(typecheck) → lint(biome) → test(bun test).
 
 import type { GateState } from "../core.js";
 
@@ -35,7 +35,7 @@ const ALL_PENDING: Gates = {
  */
 export function mapGateResult(measured: MeasuredGate | undefined): Gates {
   if (!measured) return { ...ALL_PENDING };
-  if (measured.pass) return { build: "pass", lint: "pass", test: "pending", review: "pending" };
+  if (measured.pass) return { build: "pass", lint: "pass", test: "pass", review: "pending" };
   const f = measured.failedGate;
   return {
     build: f === "typecheck" ? "fail" : "pass",

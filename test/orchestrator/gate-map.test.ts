@@ -12,11 +12,11 @@ describe("mapGateResult", () => {
     });
   });
 
-  test("pass → build/lint pass, test pending (tests not yet run by scopedGate)", () => {
+  test("pass → build/lint/test pass, review pending", () => {
     expect(mapGateResult({ pass: true })).toEqual({
       build: "pass",
       lint: "pass",
-      test: "pending",
+      test: "pass",
       review: "pending",
     });
   });
