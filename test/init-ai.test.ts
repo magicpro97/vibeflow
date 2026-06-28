@@ -15,10 +15,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runInitAiEnrichment } from "../src/commands/init-ai.js";
+import { makeEnrichmentSpawner, runInitAiEnrichment } from "../src/commands/init-ai.js";
 import type { IntakeAnswers } from "../src/commands/init-apply.js";
 import type { Ctx7AuthResult } from "../src/commands/init-ctx7.js";
 import type { Engine } from "../src/core.js";
+import { type LogEvent, getLogbus, installLogbus } from "../src/logbus.js";
 import type { EngineReadiness } from "../src/preflight.js";
 
 const FIXED = "2026-06-20T00:00:00.000Z";
@@ -376,6 +377,35 @@ describe("runInitAiEnrichment (extracted Phase 2 in init-ai.ts)", () => {
     });
   });
 
+  test("legacy path autopilot fallback: forced engine not ready, falls back, reports fallback", async () => {
+    // initEngine=copilot is forced but not ready; autopilot picks claude.
+    // runAiInit sets aiResult.fallback → covers the fallback success branch.
+    await runInitAiEnrichment({
+      ai: true,
+      dry: false,
+      refused: false,
+      initEngine: "copilot",
+      useAgentTeam: false,
+      hasPhases: false,
+      answers: answers(),
+      ctx7Auth: { authenticated: false, fallback: true } as Ctx7AuthResult,
+      autopilot: true,
+      inject: {
+        aiPreflight: () => [
+          readiness("claude", "ready"),
+          readiness("copilot", "no-binary"),
+          readiness("codex", "no-binary"),
+        ],
+        aiSpawner: async () => ({
+          status: 0,
+          stdout: '{"confidence":1,"files_changed":[]}',
+          stderr: "",
+          timedOut: false,
+        }),
+      },
+    });
+  });
+
   test("legacy path ok=false: surfaces AI-skipped message", async () => {
     await runInitAiEnrichment({
       ai: true,
@@ -425,5 +455,40 @@ test("legacy path: useAgentTeam=false with autopilot=true covers autopilot=true 
         timedOut: false,
       }),
     },
+  });
+});
+
+describe("makeEnrichmentSpawner", () => {
+  let dir: string;
+  let unsubscribe: (() => void) | undefined;
+  let events: { channel: string; text: string }[];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "vf-enrich-spawner-"));
+    installLogbus({ dir });
+    events = [];
+    const bus = getLogbus();
+    if (bus) {
+      unsubscribe = bus.subscribe((ev: LogEvent) => {
+        events.push({ channel: ev.channel, text: ev.text });
+      });
+    }
+  });
+
+  afterEach(async () => {
+    if (unsubscribe) unsubscribe();
+    const bus = getLogbus();
+    if (bus) await bus.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("relays multiline stdout and stderr to the bus, prefixed and trimmed", async () => {
+    const spawner = makeEnrichmentSpawner("[claude]");
+    // Two stdout lines + one stderr line; blank lines must be dropped.
+    await spawner("sh", ["-c", "printf 'one\\n\\ntwo\\n'; printf 'err-line\\n' 1>&2"], "");
+    const stdout = events.filter((e) => e.channel === "engine-stdout").map((e) => e.text);
+    const stderr = events.filter((e) => e.channel === "engine-stderr").map((e) => e.text);
+    expect(stdout).toEqual(["[claude] one", "[claude] two"]);
+    expect(stderr).toEqual(["[claude] err-line"]);
   });
 });
