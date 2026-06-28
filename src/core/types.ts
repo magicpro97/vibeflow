@@ -140,6 +140,10 @@ export interface HookInput {
   scope?: string[];
   /** Free-text intent of the action, used to keep risk scoring intent-aware. */
   intent?: string;
+  /** Body text of a Write/Edit (new file content or replacement string).
+   *  Populated by the native payload parsers so content-aware secret scanning
+   *  can see secrets hard-coded into an otherwise-allowed file. */
+  content?: string;
 }
 
 export interface HookResult {
