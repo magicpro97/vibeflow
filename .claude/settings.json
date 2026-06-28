@@ -23,7 +23,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["-e", "const t=JSON.parse(process.env.CLAUDE_TOOL_INPUT||'{}'); if(t.command&&/rm\s+-rf/.test(t.command)){console.error('Blocked: rm -rf'); process.exit(2)}"]
+            "args": ["-e", "const t=JSON.parse(process.env.CLAUDE_TOOL_INPUT||'{}'); if(t.command&&/rm\\s+-rf/.test(t.command)){console.error('Blocked: rm -rf'); process.exit(2)}"]
           }
         ]
       }
