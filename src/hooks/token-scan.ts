@@ -5,9 +5,11 @@
  *  leak slips past the anchored patterns (issue #357 Task 4, deferred). */
 
 export interface SecretHit {
+  /** The credential type (e.g. "AWS access key id"). NEVER carries any
+   *  substring of the matched secret — reasons are surfaced verbatim via
+   *  presentDecision, so leaking even a redacted excerpt would echo secret
+   *  material back into agent/UI logs. Report the type only. */
   label: string;
-  /** A short, non-leaking excerpt for the reason string (redacted middle). */
-  preview: string;
 }
 
 /** Known credential token shapes. Anchored where the shape allows so a stray
@@ -25,19 +27,11 @@ const TOKEN_PATTERNS: Array<{ label: string; re: RegExp }> = [
   { label: "JWT", re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
 ];
 
-// Shortest token shape is Slack (xox?-+10 chars = 15), so every match is well
-// over 8 — no short-string branch is needed (it would be dead code and fail
-// 100% line coverage).
-function redact(s: string): string {
-  return `${s.slice(0, 4)}…${s.slice(-2)}`;
-}
-
 export function scanSecrets(content: string | undefined): SecretHit[] {
   if (!content) return [];
   const hits: SecretHit[] = [];
   for (const { label, re } of TOKEN_PATTERNS) {
-    const m = re.exec(content);
-    if (m) hits.push({ label, preview: redact(m[0]) });
+    if (re.test(content)) hits.push({ label });
   }
   return hits;
 }

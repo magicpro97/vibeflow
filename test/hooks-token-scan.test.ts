@@ -52,10 +52,11 @@ describe("token-scan: known token patterns", () => {
     expect(hits.some((h) => h.label === "JWT")).toBe(true);
   });
 
-  test("preview redacts the middle of the token", () => {
+  test("hit carries label only — never any secret substring", () => {
     const [hit] = scanSecrets(GH) as SecretHit[];
-    expect(hit?.preview).toBe("ghp_…00");
-    expect(hit?.preview).not.toContain(GH);
+    expect(hit?.label).toBe("GitHub token");
+    // No field may carry a slice of the secret (it surfaces in hook logs).
+    expect(JSON.stringify(hit)).not.toContain("ghp_");
   });
 
   test("clean code produces no hits", () => {

@@ -260,9 +260,9 @@ function scoreContent(
   const hits = scanSecrets(input.content);
   if (hits.length) {
     bump("critical");
-    reasons.push(
-      `secret in file content: ${hits.map((h) => `${h.label} (${h.preview})`).join(", ")}`,
-    );
+    // Report token TYPE only — never the secret substring (it surfaces verbatim
+    // via presentDecision into agent/UI logs). Labels are non-leaking.
+    reasons.push(`secret in file content: ${hits.map((h) => h.label).join(", ")}`);
   }
 }
 
