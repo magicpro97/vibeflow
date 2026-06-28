@@ -22,18 +22,18 @@ export function thresholdFor(rc: RiskClass): number {
   return THRESHOLDS[rc];
 }
 
-/** One research step: given the open question, return new findings + a confidence estimate. */
-export type Researcher = (
-  round: number,
-  question: string,
-) => {
+/** Return value from a single research round. */
+export interface ResearchResult {
   findings: string[];
   confidence: number;
   /** Set when the round cannot progress without input the agent cannot obtain. */
   blocked?: boolean;
   /** Verifiable evidence (command output, file paths). Confidence may only rise when present. */
   artifacts?: string[];
-};
+}
+
+/** One research step: given the open question, return new findings + a confidence estimate. */
+export type Researcher = (round: number, question: string) => ResearchResult;
 
 export type StoppedBy =
   | "threshold-met"
@@ -122,10 +122,7 @@ export function investigate(opts: {
 }
 
 /** Async research step (real research spawns read-only engine agents — same injectable seam). */
-export type AsyncResearcher = (
-  round: number,
-  question: string,
-) => Promise<{ findings: string[]; confidence: number; blocked?: boolean; artifacts?: string[] }>;
+export type AsyncResearcher = (round: number, question: string) => Promise<ResearchResult>;
 
 export interface InvestigateUnitOptions {
   research: AsyncResearcher;

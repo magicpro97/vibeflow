@@ -688,13 +688,23 @@ describe("Phase 2 engine-scoping invariants", () => {
       (candidate) => candidate.name === "ai-init-skill-curator",
     );
     if (!u) throw new Error("skill-curator not in plan");
-    // Evidence cites SKILL_INDEX.md which is in the scope.
-    const r = aiInitReviewer(u, {
-      status: "done",
-      confidence: 1,
-      evidence: ["regenerated .vibeflow/SKILL_INDEX.md"],
-    });
-    expect(r.pass).toBe(true);
+    // ponytail: create .vibeflow/SKILL_INDEX.md so statSync passes on CI
+    const dir = mkdtempSync(join(tmpdir(), "vf-scope-"));
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    writeFileSync(join(dir, ".vibeflow/SKILL_INDEX.md"), "# fixture\n");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const r = aiInitReviewer(u, {
+        status: "done",
+        confidence: 1,
+        evidence: ["regenerated .vibeflow/SKILL_INDEX.md"],
+      });
+      expect(r.pass).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("skill-curator reviewer rejects evidence citing an out-of-scope path", () => {
