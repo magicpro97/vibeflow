@@ -133,6 +133,75 @@ describe("runner: presentDecision post-tool-use branches", () => {
   });
 });
 
+// --- parseHookInput: content passthrough (issue #357) ---
+describe("runner: parseHookInput content passthrough", () => {
+  const dummy = `AKIA${"IOSFODNN7EXAMPLE"}`;
+
+  test("Claude Write content populates content", () => {
+    const parsed = parseHookInput(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: "src/a.ts", content: `const k='${dummy}'` },
+      }),
+    );
+    expect(parsed?.content).toBe(`const k='${dummy}'`);
+  });
+
+  test("Claude Edit new_string populates content", () => {
+    const parsed = parseHookInput(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: "src/a.ts", new_string: "secret body" },
+      }),
+    );
+    expect(parsed?.content).toBe("secret body");
+  });
+
+  test("Claude MultiEdit joins edits[].new_string", () => {
+    const parsed = parseHookInput(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "MultiEdit",
+        tool_input: {
+          file_path: "src/a.ts",
+          edits: [{ new_string: "first" }, { new_string: "second" }],
+        },
+      }),
+    );
+    expect(parsed?.content).toContain("first");
+    expect(parsed?.content).toContain("second");
+  });
+
+  test("Claude payload with no content leaves content undefined", () => {
+    const parsed = parseHookInput(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "ls" },
+      }),
+    );
+    expect(parsed?.content).toBeUndefined();
+  });
+
+  test("Copilot toolArgs.content populates content", () => {
+    const parsed = parseHookInput(
+      JSON.stringify({
+        hookEventName: "preToolUse",
+        toolName: "write",
+        toolArgs: { path: "a.ts", content: "body" },
+      }),
+    );
+    expect(parsed?.content).toBe("body");
+  });
+
+  test("legacy {event} shape carries content", () => {
+    const parsed = parseHookInput(JSON.stringify({ event: "pre-tool-use", content: "body" }));
+    expect(parsed?.content).toBe("body");
+  });
+});
+
 // --- presentDecision: workspace passthrough from parseClaudeNative → pre-tool-use ---
 describe("runner: parseHookInput Claude-native workspace passthrough", () => {
   test("workspace and cwd fallbacks populate workspace field", () => {

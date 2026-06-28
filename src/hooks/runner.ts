@@ -133,12 +133,20 @@ function parseClaudeNative(obj: Record<string, unknown>): HookInput | null {
   const filePath = typeof toolInput.file_path === "string" ? [toolInput.file_path] : undefined;
   const fileList = Array.isArray(toolInput.files) ? toolInput.files.map(String) : undefined;
   const files = filePath || fileList ? [...(filePath ?? []), ...(fileList ?? [])] : undefined;
+  const edits = Array.isArray(toolInput.edits)
+    ? toolInput.edits
+        .map((e) => (e as Record<string, unknown>)?.new_string)
+        .filter((s): s is string => typeof s === "string")
+        .join("\n")
+    : undefined;
+  const content = asStr(toolInput.content) ?? asStr(toolInput.new_string) ?? edits;
   return {
     event: mapClaudeEvent(eventName),
     tool: asStr(obj.tool_name),
     workspace: asStr(obj.workspace ?? obj.cwd),
     command: asStr(toolInput.command),
     files,
+    content,
   };
 }
 
@@ -163,6 +171,7 @@ function parseCopilotNative(obj: Record<string, unknown>): HookInput | null {
     workspace: asStr(obj.cwd),
     command: asStr(toolArgs.command),
     files: pathStr ? [pathStr] : undefined,
+    content: asStr(toolArgs.content),
   };
 }
 
@@ -194,6 +203,7 @@ export function parseHookInput(raw: string): HookInput | null {
       taskId: asStr(obj.taskId),
       scope: asStrArr(obj.scope),
       intent: asStr(obj.intent),
+      content: asStr(obj.content),
     };
   }
   // No usable legacy `event` field — try Claude Code's native payload shape.
