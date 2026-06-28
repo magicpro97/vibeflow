@@ -62,6 +62,8 @@ const perFile = [];
 //   coverage-waiver: #358 follow-up — refactor sync verify to use inject seam.
 const COVERAGE_WAIVERS = new Set([
   "src/commands/init-ai.ts",
+  // coverage-waiver: #348 — defaultDiffReader catch block (spawnSync rarely throws)
+  "src/commands/dispatch-runtime.ts",
   "src/commands/tools-detect.ts",
   "src/skills/curator-cache.ts",
   "src/skills/curator.ts",
