@@ -129,11 +129,12 @@ export {
 
 export {
   computeKnowledgeHeavySource,
+  defaultDiffReader,
   makeDispatcher,
   makeResearcher,
   makeReviewer,
 } from "./dispatch-runtime.js";
-export type { WorktreeOps } from "./dispatch-runtime.js";
+export type { DiffReader, WorktreeOps } from "./dispatch-runtime.js";
 
 // === init subcommand helpers re-exported from init-apply.ts ===
 // (issue #80, phase 6/14 + 9/14) The orchestrate subcommand uses

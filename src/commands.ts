@@ -100,14 +100,16 @@ export {
 export type { ProtectionRuntime } from "./commands/protection.js";
 
 export {
-  makeReviewer,
+  computeKnowledgeHeavySource,
+  analyzeDiff,
+  defaultDiffReader,
   makeDispatcher,
+  makeReviewer,
   makeWorktreeOps,
   defaultWorktreeOps,
-  computeKnowledgeHeavySource,
   makeResearcher,
 } from "./commands/dispatch-runtime.js";
-export type { WorktreeOps } from "./commands/dispatch-runtime.js";
+export type { DiffReader, WorktreeOps } from "./commands/dispatch-runtime.js";
 // `vf run` was extracted to src/commands/run.ts. The facade
 // re-exports it so the CLI dispatch (cli.ts → main.ts) keeps
 // working with the same import path.

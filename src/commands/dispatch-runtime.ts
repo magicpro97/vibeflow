@@ -4,7 +4,7 @@
 // reviewer, and worktree isolation seam. Extracted from
 // src/commands/protection.ts (issue #131).
 
-import { spawnSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
@@ -50,6 +50,66 @@ import {
   skippedByQuota,
 } from "./_shared.js";
 import type { ProtectionRuntime } from "./_shared.js";
+
+// ── Diff reader (inject seam) ──────────────────────────────────────────────────
+
+/** Reads the git diff for a unit's scoped files. Inject seam for testing. */
+export type DiffReader = (scope: readonly string[], cwd: string) => string;
+
+/** Default: git diff HEAD for the scoped files. Returns empty string on error or empty scope. */
+export function defaultDiffReader(scope: readonly string[], cwd: string): string {
+  if (scope.length === 0) return "";
+  try {
+    return execSync(`git diff HEAD -- ${scope.join(" ")}`, {
+      cwd,
+      encoding: "utf8",
+      timeout: 5000,
+    }).toString();
+  } catch {
+    return "";
+  }
+}
+
+interface DiffAnalysis {
+  fail: boolean;
+  reason: string;
+}
+
+const UNSAFE_PATTERNS = [
+  /eval\s*\(/,
+  /rm\s+-rf/,
+  /process\.env\.\w+\s*=/, // writing to env (not reading)
+  /password|secret|token/i,
+];
+
+export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysis {
+  if (!diff) return { fail: false, reason: "" };
+
+  // ponytail: extract changed files from diff headers
+  const changedFiles = [...diff.matchAll(/^diff --git a\/(.+?) b\//gm)]
+    .map((m) => m[1])
+    .filter((f): f is string => !!f);
+
+  // Scope creep: files outside unit scope changed
+  const outOfScope = changedFiles.filter(
+    (f) => !scope.some((s) => f.startsWith(s) || s.startsWith(f)),
+  );
+  if (outOfScope.length > 0) {
+    return { fail: true, reason: `scope creep: ${outOfScope.join(", ")} outside unit scope` };
+  }
+
+  // Unsafe edits: check added lines for dangerous patterns
+  const addedLines = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+  for (const line of addedLines) {
+    for (const pat of UNSAFE_PATTERNS) {
+      if (pat.test(line)) {
+        return { fail: true, reason: `unsafe edit detected: ${pat.source} in added line` };
+      }
+    }
+  }
+
+  return { fail: false, reason: "" };
+}
 
 export interface WorktreeOps {
   /** Create a worktree for `branch` off `base` (git ref), return absolute path. */
@@ -370,8 +430,14 @@ export function makeDispatcher(
  * the investigation loop ran end-to-end (i.e. the unit was investigated + blocked, not silently
  * closed).
  */
-export function makeReviewer(mode: "cli" | "bridge" | "dry", threshold: number): Reviewer {
-  return (_u, outcome) => {
+export function makeReviewer(
+  mode: "cli" | "bridge" | "dry",
+  threshold: number,
+  inject?: { diffReader?: DiffReader },
+): Reviewer {
+  const readDiff = inject?.diffReader ?? defaultDiffReader;
+
+  return (unit, outcome) => {
     if (mode === "dry") {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
@@ -388,6 +454,15 @@ export function makeReviewer(mode: "cli" | "bridge" | "dry", threshold: number):
       };
     }
     if (!outcome.evidence?.length) return { pass: false, reason: "no recorded evidence" };
-    return { pass: true, reason: `confidence ${outcome.confidence} ≥ ${threshold} with evidence` };
+
+    // Read and analyze the unit's actual diff
+    const diff = readDiff(unit.scope ?? [], process.cwd());
+    const analysis = analyzeDiff(diff, unit.scope ?? []);
+    if (analysis.fail) return { pass: false, reason: analysis.reason };
+
+    return {
+      pass: true,
+      reason: `confidence ${outcome.confidence} ≥ ${threshold} with evidence, diff clean`,
+    };
   };
 }

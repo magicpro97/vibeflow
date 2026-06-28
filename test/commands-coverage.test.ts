@@ -11,10 +11,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  analyzeDiff,
   announceLaunch,
   applyDispatch,
   applyIntake,
   computeKnowledgeHeavySource,
+  defaultDiffReader,
   detectRepo,
   detectToolchain,
   discover,
@@ -47,7 +49,14 @@ import {
   verify,
   workflow,
 } from "../src/commands.js";
-import { CTX_DIR, type Engine, type WorkflowState, readState, writeState } from "../src/core.js";
+import {
+  CTX_DIR,
+  type Engine,
+  type WorkUnit,
+  type WorkflowState,
+  readState,
+  writeState,
+} from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import { claudeHookConfig } from "../src/hooks/adapters.js";
 import { type LogEvent, Logbus, getLogbus, setLogbusForTests } from "../src/logbus.js";
@@ -3322,6 +3331,158 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.reason).toBe("measured gate failed: lint");
   });
 });
+
+// ---- analyzeDiff ----------------------------------------------------------------
+describe("analyzeDiff", () => {
+  test("detects scope creep -- files outside unit scope", () => {
+    const diff = "diff --git a/src/other.ts b/src/other.ts\n+added line";
+    const result = analyzeDiff(diff, ["src/target.ts"]);
+    expect(result.fail).toBe(true);
+    expect(result.reason).toContain("scope creep");
+  });
+
+  test("detects unsafe edit -- eval(", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n+eval(userInput)";
+    const result = analyzeDiff(diff, ["src/a.ts"]);
+    expect(result.fail).toBe(true);
+    expect(result.reason).toContain("unsafe");
+  });
+
+  test("detects unsafe edit -- rm -rf", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n+rm -rf /";
+    const result = analyzeDiff(diff, ["src/a.ts"]);
+    expect(result.fail).toBe(true);
+    expect(result.reason).toContain("unsafe");
+  });
+
+  test("detects unsafe edit -- process.env write", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n+process.env.API_KEY=leak";
+    const result = analyzeDiff(diff, ["src/a.ts"]);
+    expect(result.fail).toBe(true);
+    expect(result.reason).toContain("unsafe");
+  });
+
+  test("detects unsafe edit -- password literal", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n+const SECRET='password'";
+    const result = analyzeDiff(diff, ["src/a.ts"]);
+    expect(result.fail).toBe(true);
+    expect(result.reason).toContain("unsafe");
+  });
+
+  test("passes clean diff", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n+normal change";
+    const result = analyzeDiff(diff, ["src/a.ts"]);
+    expect(result.fail).toBe(false);
+  });
+
+  test("passes on empty diff string", () => {
+    expect(analyzeDiff("", ["src/a.ts"]).fail).toBe(false);
+    expect(analyzeDiff("", []).fail).toBe(false);
+  });
+
+  test("passes on empty scope (no diff analysis needed)", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n+normal change";
+    // With scope=[], every changed file is out of scope -> fail.
+    const result = analyzeDiff(diff, []);
+    expect(result.fail).toBe(true);
+    expect(result.reason).toContain("scope creep");
+  });
+
+  test("scope is prefix-matched (in-scope)", () => {
+    const diff = "diff --git a/src/core/sub.ts b/src/core/sub.ts\n+ok";
+    const result = analyzeDiff(diff, ["src/core"]);
+    expect(result.fail).toBe(false);
+  });
+});
+
+// ---- defaultDiffReader ----------------------------------------------------------
+describe("defaultDiffReader", () => {
+  test("returns empty string for empty scope", () => {
+    expect(defaultDiffReader([], "/tmp")).toBe("");
+  });
+
+  test("returns empty string on error (non-existent cwd)", () => {
+    const result = defaultDiffReader(["src/a.ts"], "/nonexistent/path");
+    expect(result).toBe("");
+  });
+});
+
+// ---- makeReviewer diff injection --------------------------------------------------
+describe("makeReviewer diff injection", () => {
+  test("blocks on scope creep even at high confidence", () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      "diff --git a/src/other.ts b/src/other.ts\n+line";
+    const r = makeReviewer("cli", 0.85, { diffReader });
+    const unit = { scope: ["src/target.ts"] } as WorkUnit;
+    const outcome = {
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+      confidence: 0.95,
+      evidence: ["checked"],
+      status: "done" as const,
+    };
+    const result = r(unit, outcome);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain("scope creep");
+  });
+
+  test("blocks on unsafe edit", () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      "diff --git a/src/x.ts b/src/x.ts\n+eval(danger)";
+    const r = makeReviewer("cli", 0.85, { diffReader });
+    const unit = { scope: ["src/x.ts"] } as WorkUnit;
+    const outcome = {
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+      confidence: 0.95,
+      evidence: ["checked"],
+      status: "done" as const,
+    };
+    const result = r(unit, outcome);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain("unsafe");
+  });
+
+  test("passes on clean diff", () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      "diff --git a/src/x.ts b/src/x.ts\n+clean change";
+    const r = makeReviewer("cli", 0.85, { diffReader });
+    const unit = { scope: ["src/x.ts"] } as WorkUnit;
+    const outcome = {
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+      confidence: 0.95,
+      evidence: ["checked"],
+      status: "done" as const,
+    };
+    const result = r(unit, outcome);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toContain("diff clean");
+  });
+
+  test("passes when scope is empty (no diff read)", () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () => "";
+    const r = makeReviewer("cli", 0.85, { diffReader });
+    const unit = { scope: [] } as unknown as WorkUnit;
+    const outcome = {
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+      confidence: 0.95,
+      evidence: ["checked"],
+      status: "done" as const,
+    };
+    const result = r(unit, outcome);
+    expect(result.pass).toBe(true);
+  });
+
+  test("bypasses diff check in dry mode", () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      "diff --git a/src/other.ts b/src/other.ts\n+evil";
+    const r = makeReviewer("dry", 0.85, { diffReader });
+    const unit = { scope: ["src/target.ts"] } as WorkUnit;
+    const outcome = { confidence: 0.95, evidence: ["checked"], status: "done" as const };
+    const result = r(unit, outcome);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toContain("dry");
+  });
+});
+
 // W1: defaultWorktreeOps/makeWorktreeOps — inject a fake spawn (NOT mock.module,
 // which pollutes node:child_process for the whole suite).
 describe("commands.makeWorktreeOps (injectable spawn seam)", () => {
