@@ -203,7 +203,11 @@ describe("investigateUnit — bounded async investigation (defect #5)", () => {
       riskClass: "security",
       maxRounds: 3,
       // Confidence rises each round but never reaches 0.95 → exhausts the round budget.
-      research: async (round) => ({ findings: [`new${round}`], confidence: 0.2 + round * 0.1 }),
+      research: async (round) => ({
+        findings: [`new${round}`],
+        confidence: 0.2 + round * 0.1,
+        artifacts: [`evidence-${round}.log`],
+      }),
     });
     expect(r.rounds.length).toBe(3);
     expect(r.stoppedBy).toBe("max-rounds");
@@ -231,7 +235,11 @@ describe("investigateUnit — bounded async investigation (defect #5)", () => {
   test("records rounds + evidence and proceeds when threshold met", async () => {
     const r = await investigateUnit(unit("u", { confidence: 0.5 }), {
       riskClass: "docs", // threshold 0.7
-      research: async (round) => ({ findings: [`f${round}`], confidence: 0.5 + round * 0.2 }),
+      research: async (round) => ({
+        findings: [`f${round}`],
+        confidence: 0.5 + round * 0.2,
+        artifacts: [`cmd-output-${round}.log`],
+      }),
     });
     expect(r.stoppedBy).toBe("threshold-met");
     expect(r.proceed).toBe(true);
@@ -252,6 +260,39 @@ describe("investigateUnit — bounded async investigation (defect #5)", () => {
     expect(r.stoppedBy).toBe("blocked-by-missing-input");
     expect(r.proceed).toBe(true); // confidence 0.9 >= 0.7 — blocked status doesn't change proceed
     expect(r.finalConfidence).toBe(0.9);
+  });
+
+  // issue #354: prose-only findings (no verifiable artifacts) must NOT raise confidence
+  test("self-reported-only rounds keep confidence below threshold (issue #354)", async () => {
+    const r = await investigateUnit(unit("u", { confidence: 0.2 }), {
+      riskClass: "docs", // threshold 0.7
+      maxRounds: 4,
+      // Researcher reports high confidence but produces only prose findings — no artifacts.
+      research: async (round) => ({
+        findings: [`round ${round}: looks good to me`],
+        confidence: 0.95,
+        // no artifacts → confidence must not rise
+      }),
+    });
+    expect(r.finalConfidence).toBe(0.2); // unchanged — no verifiable evidence
+    expect(r.proceed).toBe(false);
+    expect(r.met).toBe(false);
+  });
+
+  // issue #354: verifiable artifacts (command output) DO allow confidence to rise
+  test("rounds with verifiable artifacts raise confidence (issue #354)", async () => {
+    const r = await investigateUnit(unit("u", { confidence: 0.2 }), {
+      riskClass: "docs", // threshold 0.7
+      maxRounds: 2,
+      research: async (round) => ({
+        findings: [`round ${round}: tests passed`],
+        confidence: 0.8,
+        artifacts: [`test-output-${round}.log`],
+      }),
+    });
+    expect(r.finalConfidence).toBe(0.8);
+    expect(r.proceed).toBe(true);
+    expect(r.met).toBe(true);
   });
 
   test("threshold-aware reviewer passes at-confidence and blocks below (B4 pattern)", async () => {

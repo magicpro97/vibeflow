@@ -154,6 +154,8 @@ export interface InvestigationRound {
   question: string;
   findings: string[];
   confidence: number;
+  /** Verifiable evidence (command output, file paths) — presence required for confidence raises. */
+  artifacts?: string[];
 }
 
 export interface DebatePosition {

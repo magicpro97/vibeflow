@@ -205,7 +205,13 @@ export function makeResearcher(
     if (findings.length === 0) {
       findings.push(result.ok ? `round ${round}: research dispatched` : "research failed");
     }
-    return { findings, confidence, blocked: !result.ok };
+    // Verifiable artifacts: command output and file evidence from the engine.
+    // Only these allow confidence to rise — prose findings alone are self-report (issue #354).
+    const artifacts: string[] = [];
+    if (result.summary?.commands_run?.length) artifacts.push(...result.summary.commands_run);
+    if (result.summary?.files_changed?.length) artifacts.push(...result.summary.files_changed);
+    if (result.summary?.tests_run?.length) artifacts.push(...result.summary.tests_run);
+    return { findings, confidence, blocked: !result.ok, artifacts };
   };
 }
 

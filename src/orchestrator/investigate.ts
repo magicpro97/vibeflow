@@ -31,6 +31,8 @@ export type Researcher = (
   confidence: number;
   /** Set when the round cannot progress without input the agent cannot obtain. */
   blocked?: boolean;
+  /** Verifiable evidence (command output, file paths). Confidence may only rise when present. */
+  artifacts?: string[];
 };
 
 export type StoppedBy =
@@ -91,10 +93,13 @@ export function investigate(opts: {
   let stoppedBy: StoppedBy = "max-rounds";
 
   for (let r = 1; r <= maxRounds; r++) {
-    const { findings, confidence: c, blocked } = opts.research(r, opts.question);
-    rounds.push({ round: r, question: opts.question, findings, confidence: c });
+    const { findings, confidence: c, blocked, artifacts } = opts.research(r, opts.question);
+    rounds.push({ round: r, question: opts.question, findings, confidence: c, artifacts });
     const prev = confidence;
-    if (!blocked && findings.length > 0) {
+    // Only accept the researcher's self-reported confidence when the round produced
+    // verifiable artifacts (command output, file evidence). Pure prose findings do
+    // NOT raise confidence — see issue #354.
+    if (!blocked && findings.length > 0 && (artifacts?.length ?? 0) > 0) {
       confidence = c;
     }
     const reason = stopReason(prev, confidence, findings, Boolean(blocked), threshold);
@@ -120,7 +125,7 @@ export function investigate(opts: {
 export type AsyncResearcher = (
   round: number,
   question: string,
-) => Promise<{ findings: string[]; confidence: number; blocked?: boolean }>;
+) => Promise<{ findings: string[]; confidence: number; blocked?: boolean; artifacts?: string[] }>;
 
 export interface InvestigateUnitOptions {
   research: AsyncResearcher;
@@ -155,10 +160,13 @@ export async function investigateUnit(
   let stoppedBy: StoppedBy = "max-rounds";
 
   for (let r = 1; r <= maxRounds; r++) {
-    const { findings, confidence: c, blocked } = await opts.research(r, question);
-    rounds.push({ round: r, question, findings, confidence: c });
+    const { findings, confidence: c, blocked, artifacts } = await opts.research(r, question);
+    rounds.push({ round: r, question, findings, confidence: c, artifacts });
     const prev = confidence;
-    if (!blocked && findings.length > 0) {
+    // Only accept the researcher's self-reported confidence when the round produced
+    // verifiable artifacts (command output, file evidence). Pure prose findings do
+    // NOT raise confidence — see issue #354.
+    if (!blocked && findings.length > 0 && (artifacts?.length ?? 0) > 0) {
       confidence = c;
     }
     const reason = stopReason(prev, confidence, findings, Boolean(blocked), threshold);
