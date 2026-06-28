@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(bun run *)",
+      "Bash(bun test *)",
+      "Bash(bunx *)",
+      "Bash(git *)",
+      "Bash(gh *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Read(.env)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write(*.ts)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx biome format --write $CLAUDE_FILE_PATHS 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit(*.ts)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx biome format --write $CLAUDE_FILE_PATHS 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
