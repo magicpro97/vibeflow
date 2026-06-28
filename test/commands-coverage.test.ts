@@ -3457,7 +3457,7 @@ describe("makeReviewer diff injection", () => {
     expect(result.reason).toContain("diff clean");
   });
 
-  test("passes when scope is empty (no diff read)", () => {
+  test("passes when scope is empty and diff is empty (no scope creep possible)", () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () => "";
     const r = makeReviewer("cli", 0.85, { diffReader });
     const unit = { scope: [] } as unknown as WorkUnit;

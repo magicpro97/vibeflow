@@ -4,7 +4,7 @@
 // reviewer, and worktree isolation seam. Extracted from
 // src/commands/protection.ts (issue #131).
 
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
@@ -60,11 +60,13 @@ export type DiffReader = (scope: readonly string[], cwd: string) => string;
 export function defaultDiffReader(scope: readonly string[], cwd: string): string {
   if (scope.length === 0) return "";
   try {
-    return execSync(`git diff HEAD -- ${scope.join(" ")}`, {
+    // ponytail: use spawnSync with array args to avoid shell injection
+    const r = spawnSync("git", ["diff", "HEAD", "--", ...scope], {
       cwd,
       encoding: "utf8",
       timeout: 5000,
-    }).toString();
+    });
+    return r.stdout ?? "";
   } catch {
     return "";
   }
@@ -79,7 +81,7 @@ const UNSAFE_PATTERNS = [
   /eval\s*\(/,
   /rm\s+-rf/,
   /process\.env\.\w+\s*=/, // writing to env (not reading)
-  /password|secret|token/i,
+  /\bpassword\b|\bsecret\b|\btoken\b/i,
 ];
 
 export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysis {
@@ -91,8 +93,9 @@ export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysi
     .filter((f): f is string => !!f);
 
   // Scope creep: files outside unit scope changed
+  // ponytail: file is in-scope if it IS the scope entry or is under that directory
   const outOfScope = changedFiles.filter(
-    (f) => !scope.some((s) => f.startsWith(s) || s.startsWith(f)),
+    (f) => !scope.some((s) => f === s || f.startsWith(`${s}/`) || s.startsWith(`${f}/`)),
   );
   if (outOfScope.length > 0) {
     return { fail: true, reason: `scope creep: ${outOfScope.join(", ")} outside unit scope` };
@@ -433,9 +436,10 @@ export function makeDispatcher(
 export function makeReviewer(
   mode: "cli" | "bridge" | "dry",
   threshold: number,
-  inject?: { diffReader?: DiffReader },
+  inject?: { diffReader?: DiffReader; cwd?: string },
 ): Reviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
+  const cwd = inject?.cwd ?? process.cwd();
 
   return (unit, outcome) => {
     if (mode === "dry") {
