@@ -74,17 +74,18 @@ describe("collectVerifyReportAsync", () => {
     }
   });
 
-  test("gradle toolchain with empty build.gradle (real spawner)", async () => {
+  test("gradle toolchain reports pass=false when the check fails", async () => {
     // detectToolchain returns { kind: "gradle" } when build.gradle exists
-    // and no package.json is present. The gradle check is the gradle binary
-    // which doesn't exist in a temp dir, so verify the function handles it.
+    // and no package.json is present. A failing gradle check (status 1) must
+    // surface pass=false. Uses fakeSpawner(1): the real-spawner default path is
+    // already covered by "default spawner error handler on non-existent binary",
+    // and GitHub runners ship gradle, so a real `gradle check` hangs >30s (flaky).
     const dir = mkdtempSync(join(tmpdir(), "vf-gradle-test-"));
     writeFileSync(join(dir, "build.gradle"), "");
-    const report = await collectVerifyReportAsync(dir);
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(1) });
     expect(report).toHaveProperty("ok");
     expect(report.toolchain.length).toBeGreaterThanOrEqual(1);
     const first = report.toolchain[0] as { label: string; pass: boolean };
-    // The "gradle check" gate should have pass=false since gradle isn't installed
     expect(first.pass).toBe(false);
   });
 
