@@ -12,7 +12,7 @@ const GOOGLE = `AIza${"B".repeat(35)}`;
 const PRIVKEY = `${"-".repeat(5)}BEGIN RSA PRIVATE KEY${"-".repeat(5)}`;
 const JWT = `eyJ${"a".repeat(12)}.${"b".repeat(12)}.${"c".repeat(12)}`;
 
-describe("secret-scan: known token patterns", () => {
+describe("token-scan: known token patterns", () => {
   test("flags AWS access key id", () => {
     const hits = scanSecrets(`const k='${AWS}'`);
     expect(hits.some((h) => h.label === "AWS access key id")).toBe(true);

@@ -25,8 +25,9 @@ const TOKEN_PATTERNS: Array<{ label: string; re: RegExp }> = [
   { label: "JWT", re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
 ];
 
-// All matched tokens are ≥16 chars, so no short-string branch is needed (it would
-// be dead code and fail 100% line coverage).
+// Shortest token shape is Slack (xox?-+10 chars = 15), so every match is well
+// over 8 — no short-string branch is needed (it would be dead code and fail
+// 100% line coverage).
 function redact(s: string): string {
   return `${s.slice(0, 4)}…${s.slice(-2)}`;
 }
