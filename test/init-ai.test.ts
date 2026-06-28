@@ -485,7 +485,11 @@ describe("makeEnrichmentSpawner", () => {
   test("relays multiline stdout and stderr to the bus, prefixed and trimmed", async () => {
     const spawner = makeEnrichmentSpawner("[claude]");
     // Two stdout lines + one stderr line; blank lines must be dropped.
-    await spawner("sh", ["-c", "printf 'one\\n\\ntwo\\n'; printf 'err-line\\n' 1>&2"], "");
+    await spawner(
+      "node",
+      ["-e", "process.stdout.write('one\\n\\ntwo\\n'); process.stderr.write('err-line\\n')"],
+      "",
+    );
     const stdout = events.filter((e) => e.channel === "engine-stdout").map((e) => e.text);
     const stderr = events.filter((e) => e.channel === "engine-stderr").map((e) => e.text);
     expect(stdout).toEqual(["[claude] one", "[claude] two"]);

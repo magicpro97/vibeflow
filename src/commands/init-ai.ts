@@ -43,7 +43,11 @@ import {
 export function makeEnrichmentSpawner(prefix: string): AsyncSpawner {
   let lineBuf = "";
   let errLineBuf = "";
-  return makeAsyncSpawner({
+  const flush = (buf: string, channel: "engine-stdout" | "engine-stderr") => {
+    const trimmed = buf.trim();
+    if (trimmed) out(channel, `${prefix} ${trimmed}`);
+  };
+  const inner = makeAsyncSpawner({
     timeoutMs: 30_000_000,
     idleTimeoutMs: 300_000,
     onChunk(text) {
@@ -65,6 +69,18 @@ export function makeEnrichmentSpawner(prefix: string): AsyncSpawner {
       }
     },
   });
+  // Flush the final partial line (no trailing newline) after each spawn and
+  // reset buffers so output never leaks across spawn calls.
+  return async (cmd, args, input) => {
+    try {
+      return await inner(cmd, args, input);
+    } finally {
+      flush(lineBuf, "engine-stdout");
+      flush(errLineBuf, "engine-stderr");
+      lineBuf = "";
+      errLineBuf = "";
+    }
+  };
 }
 
 /** Options for {@link runInitAiEnrichment}. These are the exact closure
