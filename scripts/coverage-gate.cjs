@@ -57,20 +57,7 @@ const perFile = [];
 //   TBD.
 // - src/commands/tools.ts, src/preflight/check-async.ts, src/ui-focus.ts:
 //   pre-existing gaps, covered by direct calls but uncovered error branches.
-const COVERAGE_WAIVERS = new Set([
-  "src/commands/init-ai.ts",
-  "src/commands/dispatch-runtime.ts",
-  "src/skills/curator-cache.ts",
-  "src/skills/curator.ts",
-  "src/skills/validator.ts",
-  "src/workflow-artifacts.ts",
-  "src/commands/init.ts",
-  "src/ai-init.ts",
-  "test/helpers/tty-mock.ts",
-  "src/commands/tools.ts",
-  "src/preflight/check-async.ts",
-  "src/ui-focus.ts",
-]); // ponytail: keep waivers for now, remove batch by batch in #351
+const COVERAGE_WAIVERS = new Set([]); // #351: all 12 waivers cleared — every src/ file at 100% line coverage
 
 for (const r of records) {
   const sf = /^SF:(.+)$/m.exec(r)?.[1]?.trim();
