@@ -69,15 +69,11 @@ describe("focusTerminal", () => {
   test("darwin + no inject.run → default spawnSync path (line 15)", () => {
     // Forces darwin path without injecting run so default spawnSync executes.
     // On non-darwin hosts osascript won't exist; spawnSync silently fails w/ stdio:ignore.
-    expect(() =>
-      focusTerminal({ platform: "darwin", termProgram: "iTerm.app" }),
-    ).not.toThrow();
+    expect(() => focusTerminal({ platform: "darwin", termProgram: "iTerm.app" })).not.toThrow();
   });
 
   test("darwin + no inject.run + undefined termProgram → default spawnSync + Terminal fallback", () => {
-    expect(() =>
-      focusTerminal({ platform: "darwin", termProgram: undefined }),
-    ).not.toThrow();
+    expect(() => focusTerminal({ platform: "darwin", termProgram: undefined })).not.toThrow();
   });
 });
 

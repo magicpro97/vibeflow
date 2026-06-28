@@ -1,9 +1,26 @@
 import { type Engine, hasCommand, resolveCommand, resolveEngineBinary } from "../core.js";
-import { GH_AUTH_TIMEOUT_MS, type ProbeInvocation, checkCopilotAuth, defaultSpawner, engineBinary, failedAuth, failedProbe, ghAuthInvocation, ghInstallHint, hasGh, installHint, probeInvocation, probeSucceeded, probeTimeoutMs, runProbe } from "./probe.js";
+import {
+  GH_AUTH_TIMEOUT_MS,
+  type ProbeInvocation,
+  checkCopilotAuth,
+  defaultSpawner,
+  engineBinary,
+  failedAuth,
+  failedProbe,
+  ghAuthInvocation,
+  ghInstallHint,
+  hasGh,
+  installHint,
+  probeInvocation,
+  probeSucceeded,
+  probeTimeoutMs,
+  runProbe,
+} from "./probe.js";
 import type { EngineReadiness, PreflightOpts, ProbeResult, ReadinessLevel } from "./types.js";
 /** Internal helper for gh auth check + engine probe sequence. */
 export function runAttempts(
-  engine: Engine, has: (cmd: string) => boolean,
+  engine: Engine,
+  has: (cmd: string) => boolean,
   probeSucceeded: (engine: Engine, status: number, stdout: string) => boolean,
   failedProbe: (engine: Engine, result: ProbeResult) => { level: ReadinessLevel; detail: string },
   resolve: (result: EngineReadiness) => void,
@@ -31,10 +48,18 @@ export function runAttempts(
     resolve(stamp(failed.level, failed.detail));
   });
 }
-export async function checkEngineAsync(engine: Engine, opts: PreflightOpts = {}): Promise<EngineReadiness> {
+export async function checkEngineAsync(
+  engine: Engine,
+  opts: PreflightOpts = {},
+): Promise<EngineReadiness> {
   const has = opts.has ?? hasCommand;
   const now = opts.now ?? (() => new Date().toISOString());
-  const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({ engine, level, detail, checkedAt: now() });
+  const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({
+    engine,
+    level,
+    detail,
+    checkedAt: now(),
+  });
   const cmd = engineBinary(engine);
   const usesDefaultHasAsync = opts.has === undefined;
   if (!has(cmd)) {
@@ -77,7 +102,11 @@ export async function checkEngineAsync(engine: Engine, opts: PreflightOpts = {})
   ): Promise<ProbeResult> =>
     new Promise((resolve) => {
       const spawnCmd = attempt.cmd === cmd ? resolvedCmd : attempt.cmd;
-      const child = Bun.spawn([spawnCmd, ...attempt.args], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn([spawnCmd, ...attempt.args], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       child.stdin?.write(attempt.input);
       child.stdin?.end();
       const timeout = setTimeout(() => {
@@ -103,8 +132,15 @@ export async function checkEngineAsync(engine: Engine, opts: PreflightOpts = {})
         }
       })();
       child.exited
-        .then((code) => { clearTimeout(timeout); resolve({ status: code ?? 1, stdout, stderr }); })
-        .catch((err: unknown) => { clearTimeout(timeout); const msg = err instanceof Error ? err.message : String(err); resolve({ status: 1, stdout, stderr: msg }); });
+        .then((code) => {
+          clearTimeout(timeout);
+          resolve({ status: code ?? 1, stdout, stderr });
+        })
+        .catch((err: unknown) => {
+          clearTimeout(timeout);
+          const msg = err instanceof Error ? err.message : String(err);
+          resolve({ status: 1, stdout, stderr: msg });
+        });
     });
   return new Promise((resolve) => {
     runAttempts(engine, has, probeSucceeded, failedProbe, resolve, runAttempt, stamp).catch(

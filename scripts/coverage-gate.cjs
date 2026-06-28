@@ -62,7 +62,6 @@ const perFile = [];
 //   coverage-waiver: #358 follow-up — refactor sync verify to use inject seam.
 const COVERAGE_WAIVERS = new Set([
   "src/commands/init-ai.ts",
-  // coverage-waiver: #348 — defaultDiffReader catch block (spawnSync rarely throws)
   "src/commands/dispatch-runtime.ts",
   "src/commands/tools-detect.ts",
   "src/skills/curator-cache.ts",
@@ -75,13 +74,14 @@ const COVERAGE_WAIVERS = new Set([
   "src/commands/tools.ts",
   "src/preflight/check-async.ts",
   "src/ui-focus.ts",
-]);
+]); // ponytail: keep waivers for now, remove batch by batch in #351
 
 for (const r of records) {
   const sf = /^SF:(.+)$/m.exec(r)?.[1]?.trim();
   if (!sf) continue;
   // Only enforce per-file for src/ — test/ and scripts/ can be partial.
-  if (!sf.includes("/src/") && !sf.startsWith("src/")) continue;
+  const norm = sf.replace(/\\/g, "/");
+  if (!norm.includes("/src/") && !norm.startsWith("src/")) continue;
   const lf = (r.match(/^LF:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
   const lh = (r.match(/^LH:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
   const brf = (r.match(/^BRF:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
@@ -96,7 +96,7 @@ for (const r of records) {
   // Files in COVERAGE_WAIVERS skip the per-file 100% check. They
   // are still reported in the output as a notice so reviewers
   // see the gap.
-  const waived = COVERAGE_WAIVERS.has(sf);
+  const waived = COVERAGE_WAIVERS.has(sf) || COVERAGE_WAIVERS.has(sf.replace(/\\/g, "/"));
   perFile.push({ sf, lf, lh, brf, brh, lpct, bpct, waived });
 }
 
