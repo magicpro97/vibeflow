@@ -12,6 +12,7 @@ import {
   tokenize,
 } from "./risk-shell.js";
 import { type ResolvedHookPolicy, applyCustomRules, resolveHookPolicy } from "./templates.js";
+import { scanSecrets } from "./token-scan.js";
 
 /** Other destructive/irreversible command patterns — critical risk. */
 const DANGEROUS_COMMAND = [
@@ -95,6 +96,7 @@ export function scoreRisk(
 
   scoreCommand(input, policy.enabled, bump, reasons);
   scoreFiles(input, policy.enabled, bump, reasons);
+  scoreContent(input, policy.enabled, bump, reasons);
   scoreToolDeny(input, bump, reasons);
   // Custom rules layer on top of the built-ins (they can only raise risk).
   for (const hit of applyCustomRules(policy.custom, input)) {
@@ -241,6 +243,26 @@ function scoreFiles(
         reasons.push(`write escapes workspace: ${outside.join(", ")}`);
       }
     }
+  }
+}
+
+/** Content-aware secret signal (issue #357). Scans the Write/Edit body for
+ *  known credential tokens; a hit is `critical` (writing a live secret into an
+ *  otherwise-allowed file is at least as bad as reading .env, already critical).
+ *  Gated by `protect-secrets` so the same opt-out silences path + content. */
+function scoreContent(
+  input: HookInput,
+  enabled: ResolvedHookPolicy["enabled"],
+  bump: (l: RiskLevel) => void,
+  reasons: string[],
+): void {
+  if (!enabled.has("protect-secrets")) return;
+  const hits = scanSecrets(input.content);
+  if (hits.length) {
+    bump("critical");
+    reasons.push(
+      `secret in file content: ${hits.map((h) => `${h.label} (${h.preview})`).join(", ")}`,
+    );
   }
 }
 

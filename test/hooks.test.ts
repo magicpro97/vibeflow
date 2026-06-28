@@ -25,6 +25,7 @@ import {
   parseHookInput,
   presentDecision,
 } from "../src/hooks/runner.js";
+import { resolveHookPolicy } from "../src/hooks/templates.js";
 
 // --- Defect 1 (issue #79): Copilot now joins the native enforcement tier ---
 describe("adapters: copilot native enforcement (issue #79)", () => {
@@ -366,6 +367,42 @@ describe("risk: reading secrets via command string (defect 4)", () => {
     expect(scoreRisk({ event: "pre-command", command: "cat ~/.ssh/id_rsa" }).risk).toBe("critical");
     const pem = scoreRisk({ event: "pre-command", command: "cat server.pem" }).risk;
     expect(["high", "critical"]).toContain(pem);
+  });
+});
+
+describe("risk: secret in write/edit content (issue #357)", () => {
+  // Dummy tokens built by concatenation so the literal never appears in source
+  // (else the PreToolUse hook self-blocks when writing this test file).
+  const ghToken = `ghp_${"0".repeat(36)}`;
+
+  test("known token in allowed-file content is critical", () => {
+    const r = scoreRisk({
+      event: "pre-write",
+      tool: "Write",
+      files: ["src/config.ts"],
+      content: `export const GH = "${ghToken}";`,
+    });
+    expect(r.risk).toBe("critical");
+    expect(r.reasons.some((x) => /secret in file content/i.test(x))).toBe(true);
+  });
+
+  test("clean content in allowed file stays low", () => {
+    const r = scoreRisk({
+      event: "pre-write",
+      tool: "Write",
+      files: ["src/config.ts"],
+      content: "export const N = 1;",
+    });
+    expect(r.risk).toBe("none");
+  });
+
+  test("content scan respects protect-secrets opt-out", () => {
+    const policy = resolveHookPolicy({ templates: ["block-destructive"], custom: [] });
+    const r = scoreRisk(
+      { event: "pre-write", tool: "Write", files: ["src/config.ts"], content: ghToken },
+      policy,
+    );
+    expect(r.reasons.some((x) => /secret in file content/i.test(x))).toBe(false);
   });
 });
 
