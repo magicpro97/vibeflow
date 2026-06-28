@@ -89,15 +89,28 @@ const UNSAFE_PATTERNS = [
 export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysis {
   if (!diff) return { fail: false, reason: "" };
 
-  // ponytail: extract changed files from diff headers
-  const changedFiles = [...diff.matchAll(/^diff --git a\/(.+?) b\//gm)]
-    .map((m) => m[1])
+  // ponytail: accept BOTH the reader's --name-only output (one bare path per line) and a full
+  // unified diff (diff --git headers). A bare path line IS the changed file; a diff --git header
+  // names it via the a/ prefix. Diff-metadata lines (@@, +, -, index, ---/+++) are not paths.
+  const changedFiles = diff
+    .split("\n")
+    .map((l) => {
+      const header = l.match(/^diff --git a\/(.+?) b\//);
+      if (header?.[1]) return header[1];
+      if (/^[@+\- ]|^index |^diff /.test(l)) return "";
+      return l.trim();
+    })
     .filter((f): f is string => !!f);
 
   // Scope creep: files outside unit scope changed
-  // ponytail: file is in-scope if it IS the scope entry or is under that directory
+  // ponytail: file is in-scope if it IS the scope entry or is under that directory.
+  // Strip trailing slash so a scope of "src/a/" matches "src/a/x.ts" (no `src/a//` mismatch).
   const outOfScope = changedFiles.filter(
-    (f) => !scope.some((s) => f === s || f.startsWith(`${s}/`) || s.startsWith(`${f}/`)),
+    (f) =>
+      !scope.some((raw) => {
+        const s = raw.replace(/\/+$/, "");
+        return f === s || f.startsWith(`${s}/`) || s.startsWith(`${f}/`);
+      }),
   );
   if (outOfScope.length > 0) {
     return { fail: true, reason: `scope creep: ${outOfScope.join(", ")} outside unit scope` };

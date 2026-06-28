@@ -3464,6 +3464,21 @@ describe("analyzeDiff", () => {
     const result = analyzeDiff(diff, ["src/core"]);
     expect(result.fail).toBe(false);
   });
+
+  // #359: reader now emits --name-only (bare path per line); parser must accept it.
+  test("reads --name-only path list and flags out-of-scope file (#359)", () => {
+    const r = analyzeDiff("src/a/keep.ts\nsrc/b/leak.ts\n", ["src/a/"]);
+    expect(r.fail).toBe(true);
+    expect(r.reason).toContain("src/b/leak.ts");
+  });
+
+  test("passes when every --name-only file is in scope (#359)", () => {
+    expect(analyzeDiff("src/a/keep.ts\n", ["src/a/"]).fail).toBe(false);
+  });
+
+  test("empty --name-only diff is clean (#359)", () => {
+    expect(analyzeDiff("", ["src/a/"]).fail).toBe(false);
+  });
 });
 
 // ---- defaultDiffReader ----------------------------------------------------------
