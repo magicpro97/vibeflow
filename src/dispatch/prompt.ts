@@ -1,13 +1,7 @@
 import type { ProjectContext, UnitBrief } from "../adapters.js";
 import { dispatchPrompt } from "../adapters.js";
 import type { Engine } from "../core.js";
-import {
-  CONFIDENCE_MODERATE,
-  CONFIDENCE_PRODUCTIVE,
-  type EngineSummary,
-  HIGH_PRODUCTIVE_TURNS,
-  MIN_PRODUCTIVE_TURNS,
-} from "./types.js";
+import type { EngineSummary } from "./types.js";
 
 /** Build the dispatch prompt and append the required JSON-summary contract. */
 export function buildEnginePrompt(engine: Engine, ctx: ProjectContext, units: UnitBrief[]): string {
@@ -80,15 +74,9 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
         const inner = parseEngineSummary(obj.result);
         if (inner && typeof inner.confidence === "number") confidence = inner.confidence;
       }
-      // Fallback: engine ran successfully with tool calls but produced no JSON summary.
-      // Previously a single hardcoded 0.85 was used for every session, which was correct for
-      // productive sessions but masked zero-turn failed rounds. The graduated scale below
-      // (see @rationale + @provenance on MIN_PRODUCTIVE_TURNS, HIGH_PRODUCTIVE_TURNS,
-      // CONFIDENCE_PRODUCTIVE, and CONFIDENCE_MODERATE in types.ts) replaces it so short or
-      // no-op dispatches get a lower confidence that investigation must raise.
-      if (confidence === 0 && turns >= MIN_PRODUCTIVE_TURNS) {
-        confidence = turns >= HIGH_PRODUCTIVE_TURNS ? CONFIDENCE_PRODUCTIVE : CONFIDENCE_MODERATE;
-      }
+      // ponytail: turn-count no longer raises confidence (issue #347).
+      // Confidence comes from verifiable evidence only (gate pass, tests run).
+      // Turn count may annotate activity level but cannot fabricate certainty.
       const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;
       return {
         confidence,

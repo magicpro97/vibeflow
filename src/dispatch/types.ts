@@ -71,13 +71,7 @@ const CONFIDENCE_PRODUCTIVE = 0.85;
  *   the ceiling.
  */
 const CONFIDENCE_MODERATE = 0.7;
-export {
-  bunSpawn,
-  MIN_PRODUCTIVE_TURNS,
-  HIGH_PRODUCTIVE_TURNS,
-  CONFIDENCE_PRODUCTIVE,
-  CONFIDENCE_MODERATE,
-};
+export { bunSpawn, MIN_PRODUCTIVE_TURNS, HIGH_PRODUCTIVE_TURNS };
 
 /** Structured summary an engine is asked to emit at the end of a dispatch. */
 export interface EngineSummary {

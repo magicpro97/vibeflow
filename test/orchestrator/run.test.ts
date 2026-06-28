@@ -152,6 +152,56 @@ describe("orchestrateUnits — quota-skip abort", () => {
   });
 });
 
+describe("orchestrateUnits — self-reported confidence cap (issue #349)", () => {
+  test("engine reports confidence 1.0 → capped at 0.5", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("cap-me")],
+      dispatcher: async () => ({
+        status: "done" as const,
+        confidence: 1.0,
+        evidence: ["e.log"],
+      }),
+      reviewer: passReviewer,
+      concurrency: 1,
+    });
+    const u = units.find((x) => x.name === "cap-me");
+    expect(u).toBeDefined();
+    expect(u?.confidence).toBe(0.5);
+  });
+
+  test("engine reports confidence 0.3 → stays 0.3 (below cap)", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("low-conf")],
+      dispatcher: async () => ({
+        status: "done" as const,
+        confidence: 0.3,
+        evidence: ["e.log"],
+      }),
+      reviewer: passReviewer,
+      concurrency: 1,
+    });
+    const u = units.find((x) => x.name === "low-conf");
+    expect(u).toBeDefined();
+    expect(u?.confidence).toBe(0.3);
+  });
+
+  test("engine reports confidence 0 → stays 0", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("zero-conf")],
+      dispatcher: async () => ({
+        status: "done" as const,
+        confidence: 0,
+        evidence: ["e.log"],
+      }),
+      reviewer: passReviewer,
+      concurrency: 1,
+    });
+    const u = units.find((x) => x.name === "zero-conf");
+    expect(u).toBeDefined();
+    expect(u?.confidence).toBe(0);
+  });
+});
+
 describe("orchestrateUnits — onProgress callback", () => {
   test("fires start then done for each unit with index/total/pass", async () => {
     const events: Array<{

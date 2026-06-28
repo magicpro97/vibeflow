@@ -94,6 +94,10 @@ export interface UnitOutcome {
 export type UnitDispatcher = (unit: WorkUnit) => Promise<UnitOutcome>;
 export type Reviewer = (unit: WorkUnit, outcome: UnitOutcome) => { pass: boolean; reason: string };
 
+/** Maximum confidence an engine's self-report can contribute.
+ *  Must be below the lowest close threshold so a measured gate is always required. */
+const SELF_REPORT_CAP = 0.5;
+
 /** A reviewer separate from the implementer (WORK_UNIT_ORCHESTRATION review gate). */
 function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
   // Dedupe evidence: a re-dispatched unit must not accumulate the same path (e.g.
@@ -102,7 +106,10 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
   return {
     ...unit,
     status: outcome.status,
-    confidence: outcome.confidence,
+    // ponytail: cap self-reported confidence (issue #349).
+    // Engine self-grade is an untrusted hint. Confidence can only reach
+    // the close threshold when corroborated by a measured gate.
+    confidence: Math.min(outcome.confidence, SELF_REPORT_CAP),
     evidence,
     gates: { ...unit.gates, ...(outcome.gates ?? {}) },
     resources: { ...unit.resources, ...(outcome.resources ?? {}) },

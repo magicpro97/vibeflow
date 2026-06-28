@@ -168,7 +168,7 @@ describe("parseEngineSummary — robust shapes (defect #2)", () => {
     expect(parseEngineSummary("just prose, no json here")).toBeUndefined();
   });
 
-  test("(b'') Claude envelope with no inner summary yields confidence 0.7 fallback (B3 fix)", () => {
+  test("(b'') Claude envelope with no inner summary yields confidence 0 (issue #347)", () => {
     const envelope = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -179,8 +179,36 @@ describe("parseEngineSummary — robust shapes (defect #2)", () => {
     });
     const s = parseEngineSummary(envelope);
     expect(s).toBeDefined();
-    expect(s?.confidence).toBe(0.7); // fallback for >=3 turns with no inner summary
+    expect(s?.confidence).toBe(0); // turn-count no longer raises confidence
     expect(s?.uncertainty).toContain("Ran 5 turns");
+  });
+
+  test("(b''') 15-turn envelope with no inner summary yields confidence 0 (issue #347)", () => {
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      session_id: "sess-789",
+      num_turns: 15,
+      total_cost_usd: 0.5,
+      result: "worked but never emitted a json summary",
+    });
+    const s = parseEngineSummary(envelope);
+    expect(s).toBeDefined();
+    expect(s?.confidence).toBe(0); // even many turns cannot fabricate confidence
+    expect(s?.uncertainty).toContain("Ran 15 turns");
+  });
+
+  test("(b'''') zero-turn envelope returns undefined (confidence stays 0)", () => {
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      session_id: "sess-000",
+      num_turns: 0,
+      total_cost_usd: 0,
+      result: "",
+    });
+    const s = parseEngineSummary(envelope);
+    expect(s).toBeUndefined();
   });
 
   test("(b''') Claude envelope WITH inner json block still extracts inner confidence (regression guard)", () => {
