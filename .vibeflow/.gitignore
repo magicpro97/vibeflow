@@ -1,25 +1,26 @@
-# Ignore transient + secret artifacts; keep curated knowledge and canonical context.
+# Ignore everything by default
 *
+
+# Shareable config
 !.gitignore
-!knowledge/
-!knowledge/**
+!SETTINGS.json
+!WORKFLOW_POLICY.md
+!REQUIREMENTS.md
+
+# Shareable skills
 !skills/
-!skills/plan-debate/
-!skills/plan-debate/**
+!skills/vf/
+!skills/vf/**
 !skills/cross-review/
 !skills/cross-review/**
-!skills/worktree-orchestrate/
-!skills/worktree-orchestrate/**
+!skills/plan-debate/
+!skills/plan-debate/**
 !skills/merge-when-green/
 !skills/merge-when-green/**
-!*.md
-!SETTINGS.json
-backup/
-dispatch/
-workunits/
-WORKFLOW_STATE.json
-# AI-enrichment output: non-deterministic (LLM + repo profile, varies per run /
-# engine / model). Listed AFTER !*.md so its AGENTS.md/CLAUDE.md are NOT
-# re-included by that allowlist. A static reviewed snapshot lives in
-# docs/examples/ai-context-sample/.
-ai-context/
+!skills/coordinator/
+!skills/coordinator/**
+
+# Machine-specific (explicit for clarity):
+# PROJECT_CONTEXT.md, TASK_CONTEXT.md, SKILL_INDEX.md
+# knowledge/**, backup/**
+# All other skills (brandkit, gsap-*, image*, taste*, etc.)
