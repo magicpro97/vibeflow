@@ -18,8 +18,9 @@ import type { Engine } from "../core.js";
 /** Resolve the absolute path to dist/cli.js (or src/cli.ts in dev). */
 function cliPath(): string {
   const self = fileURLToPath(import.meta.url);
-  // When bundled, self IS dist/cli.js — the entry point.
-  if (self.endsWith("/dist/cli.js")) return self;
+  // ponytail: normalize so both / and \ paths match
+  const normalized = self.replace(/\\/g, "/");
+  if (normalized.endsWith("/dist/cli.js")) return self;
   // In dev (bun test / ts-node): self is src/hooks/adapters.ts → walk up to root then dist/.
   const root = join(dirname(self), "..", "..");
   return join(root, "dist", "cli.js");
