@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.10.0](https://github.com/magicpro97/vibeflow/compare/v0.9.1...v0.10.0) (2026-06-28)
+
+
+### Features
+
+* **claude:** add .claude/ scaffolding — hooks, rules, project context ([669706f](https://github.com/magicpro97/vibeflow/commit/669706f1dd992d2593479a51b1b3cbdd65c9171b))
+* **reviewer:** read diff before verdict — scope creep + unsafe edit checks ([5ad6189](https://github.com/magicpro97/vibeflow/commit/5ad6189486ac33e234b6ae79115c1878fce370e7))
+* **scoped-gate:** add test step, fix gate-map test-pass lie ([6c348a1](https://github.com/magicpro97/vibeflow/commit/6c348a10571e9de39b4cb1674fcb1cab391c78f9))
+* **ui:** VibeFlow UI v2 — staged 3-pane remake behind VIBEFLOW_UI_V2 flag ([9da9aab](https://github.com/magicpro97/vibeflow/commit/9da9aabc608aa0b90c87d1116e0d36192c8cc679))
+* **verify:** add --coverage flag for local-CI parity ([414b10a](https://github.com/magicpro97/vibeflow/commit/414b10a89fa7eac056ebbe0fa62d9d9fbe6c4c7c)), closes [#358](https://github.com/magicpro97/vibeflow/issues/358)
+
+
+### Bug Fixes
+
+* **ci:** correct release verify runner labels to match self-hosted ([9a00cdd](https://github.com/magicpro97/vibeflow/commit/9a00cdd4f594556f9a80be6b94b02f19f2982f82))
+* enable codegraph+lsp by default + per-command Codex warning ([38340a7](https://github.com/magicpro97/vibeflow/commit/38340a7471b98d89d484a4b23b58ea5fc984c429))
+* **orchestrator:** investigation loop must not raise confidence from self-report ([ef4f383](https://github.com/magicpro97/vibeflow/commit/ef4f383fbab61232a24e6bcd40839f28a0d11b7e))
+* **quota:** return 'unknown' level on parse errors, handle in preflightDelegate ([4b9b013](https://github.com/magicpro97/vibeflow/commit/4b9b01368dd291bdf0c0b04d616c6142d6462e49))
+* **test:** Windows test failures — path separators, env vars, platform guards ([f2c1890](https://github.com/magicpro97/vibeflow/commit/f2c18909ef8783b4b8312a9eb643c9690229f834))
+
+
+### Refactors
+
+* **orchestrator:** delete dead agent.ts path ([ea95187](https://github.com/magicpro97/vibeflow/commit/ea951870a71f402f9490ccad573295e575bbac17))
+
+
+### Documentation
+
+* **dispatch:** document rationale and provenance for confidence fallback constants ([9e480b2](https://github.com/magicpro97/vibeflow/commit/9e480b20ac037e40367f253989a2237996d31c02)), closes [#360](https://github.com/magicpro97/vibeflow/issues/360)
+
 ## [0.9.1](https://github.com/magicpro97/vibeflow/compare/v0.9.0...v0.9.1) (2026-06-25)
 
 
