@@ -169,8 +169,8 @@ describe("pruneCuratorCache", () => {
     try {
       mkdirSync(join(dir, ".vibeflow", "cache"), { recursive: true });
       writeFileSync(join(dir, ".vibeflow", "cache", "curator-old.json"), "{}");
-      // maxAgeMs=0 => cutoff = Date.now(). Freshly-written file has mtime < now.
-      expect(pruneCuratorCache(dir, 0)).toBe(1);
+      // ponytail: maxAgeMs=1000 avoids timing flakiness on CI (fs granularity)
+      expect(pruneCuratorCache(dir, 1000)).toBe(1);
       expect(existsSync(join(dir, ".vibeflow", "cache", "curator-old.json"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
