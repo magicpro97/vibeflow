@@ -286,7 +286,7 @@ export async function orchestrate(
     concurrency,
     onProgress,
     dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate, gateFn),
-    reviewer: makeReviewer(mode, thresholdFor(riskClass)),
+    reviewer: makeReviewer(mode, thresholdFor(riskClass), { cwd: base }),
     // Post-coding security checkpoint. Opt-in via `--security-check`. When
     // on, the user is prompted (y/n/skip) after each unit finishes coding,
     // BEFORE the independent reviewer is consulted. A `fail` verdict blocks

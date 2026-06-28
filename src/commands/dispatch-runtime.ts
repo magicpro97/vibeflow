@@ -370,8 +370,10 @@ export function makeReviewer(
     }
     if (!outcome.evidence?.length) return { pass: false, reason: "no recorded evidence" };
 
-    // Read and analyze the unit's actual diff
-    const diff = readDiff(unit.scope ?? [], process.cwd());
+    // Read and analyze the unit's actual diff (cwd is the run dir, not the
+    // process cwd — #359: whole-tree diff now sees ALL changed files, so it
+    // must scope to the run dir or it catches the host repo's dirty files).
+    const diff = readDiff(unit.scope ?? [], cwd);
     const analysis = analyzeDiff(diff, unit.scope ?? []);
     if (analysis.fail) return { pass: false, reason: `unit ${unit.name}: ${analysis.reason}` };
 
