@@ -116,7 +116,7 @@ describe("runAiInitWorkflow", () => {
     expect(result.reviews).toHaveLength(5);
     expect(result.reviews.every((r) => r.pass)).toBe(true);
     expect(result.units.every((u) => u.status === "done")).toBe(true);
-    expect(result.units.every((u) => u.confidence === 1)).toBe(true);
+    expect(result.units.every((u) => u.confidence === 0.5)).toBe(true); // capped by SELF_REPORT_CAP;
   });
 
   test("uses the forced engine as instruction-writer scope when intake omits engines", async () => {
