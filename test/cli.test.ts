@@ -1249,8 +1249,8 @@ describe("server preflight + settings endpoints", () => {
         settings: VibeSettings;
         tools: { name: string; installed: boolean; plan: string[] }[];
       };
-      expect(initial.settings.tools.codegraph).toBe(false);
-      expect(initial.settings.tools.lsp).toBe(false);
+      expect(initial.settings.tools.codegraph).toBe(true);
+      expect(initial.settings.tools.lsp).toBe(true);
       expect(Array.isArray(initial.tools)).toBe(true);
       expect(initial.tools.length).toBe(2);
 
@@ -1461,8 +1461,8 @@ describe("commands.applyIntake preserves SETTINGS.json", () => {
       { base: dir, skipPreflight: true, useAi: false },
     );
     const s = readSettings(dir);
-    expect(s.tools.codegraph).toBe(false);
-    expect(s.tools.lsp).toBe(false);
+    expect(s.tools.codegraph).toBe(true);
+    expect(s.tools.lsp).toBe(true);
     expect(existsSync(join(dir, CTX_DIR, "SETTINGS.json"))).toBe(true);
   });
 
@@ -1544,7 +1544,7 @@ describe("commands.tools", () => {
   });
 
   test("enable then disable round-trips the codegraph flag in SETTINGS.json", () => {
-    expect(readSettings(dir).tools.codegraph).toBe(false);
+    expect(readSettings(dir).tools.codegraph).toBe(true);
     expect(tools("enable", ["codegraph"], {}, { base: dir })).toBe(0);
     expect(readSettings(dir).tools.codegraph).toBe(true);
     expect(tools("disable", ["codegraph"], {}, { base: dir })).toBe(0);

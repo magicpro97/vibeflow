@@ -30,16 +30,16 @@ const FIXED = "2026-01-02T03:04:05.000Z";
 const fixedNow = () => FIXED;
 
 describe("settings.defaults", () => {
-  test("readSettings on an empty repo returns the defaults (tools off, codegraph>lsp>native)", () => {
+  test("readSettings on an empty repo returns the defaults (tools on, codegraph>lsp>native)", () => {
     const dir = tmpRepo();
     try {
       const s = readSettings(dir);
-      expect(s.tools).toEqual({ codegraph: false, lsp: false });
+      expect(s.tools).toEqual({ codegraph: true, lsp: true });
       expect(s.toolPriority).toEqual(["codegraph", "lsp", "native"]);
       expect(s).toEqual(DEFAULT_SETTINGS);
       // returned object is a COPY — mutating it must not poison the shared default
       s.tools.codegraph = true;
-      expect(DEFAULT_SETTINGS.tools.codegraph).toBe(false);
+      expect(DEFAULT_SETTINGS.tools.codegraph).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -101,7 +101,7 @@ describe("settings.forwardCompat", () => {
       writeRaw(dir, JSON.stringify({ tools: { codegraph: true } }));
       const s = readSettings(dir);
       expect(s.tools.codegraph).toBe(true);
-      expect(s.tools.lsp).toBe(false); // filled from defaults
+      expect(s.tools.lsp).toBe(true); // filled from defaults
       expect(s.toolPriority).toEqual(["codegraph", "lsp", "native"]); // filled from defaults
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -160,7 +160,7 @@ describe("settings.resilience", () => {
     try {
       writeRaw(dir, JSON.stringify({ tools: { codegraph: "yes", lsp: 1 } }));
       const s = readSettings(dir);
-      expect(s.tools).toEqual({ codegraph: false, lsp: false });
+      expect(s.tools).toEqual({ codegraph: true, lsp: true });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

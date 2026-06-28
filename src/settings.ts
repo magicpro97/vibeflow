@@ -55,7 +55,7 @@ export const DEFAULT_FAILURE_PROTECTION: FailureProtection = {
   requireGit: false,
 };
 
-/** Off-by-default baseline. `readSettings` always returns a fresh copy, never this object. */
+/** Default baseline. `readSettings` always returns a fresh copy, never this object. */
 export const DEFAULT_SETTINGS: VibeSettings = {
   tools: { codegraph: true, lsp: true },
   toolPriority: [...TIERS],
