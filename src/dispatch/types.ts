@@ -9,7 +9,69 @@ import type { Engine } from "../core.js";
 const bunSpawn = ((...args: unknown[]) =>
   (Bun.spawn as (...a: any[]) => any)(...args)) as unknown as typeof Bun.spawn;
 
-export { bunSpawn };
+/**
+ * Minimum tool-call turns for an engine run to be considered productive.
+ * Sessions with at least this many turns (and no JSON summary) receive
+ * {@link CONFIDENCE_MODERATE} instead of zero, so the investigation loop
+ * does not discard the result of a session that clearly did work.
+ *
+ * @rationale A single turn could be a trivial exchange; 3 turns indicate
+ *   sustained tool-using work that likely produced meaningful changes even
+ *   without an explicit summary block.
+ * @provenance Introduced alongside the graduated-scale fallback in
+ *   `parseEngineSummary` (prompt.ts) to replace a single hardcoded 0.85
+ *   that masked zero-turn failures. 3 was chosen as the lowest count where
+ *   "something real probably happened" based on observational heuristics of
+ *   typical multi-turn Claude sessions.
+ */
+const MIN_PRODUCTIVE_TURNS = 3;
+
+/**
+ * Turn threshold above which a session is considered highly productive.
+ * Sessions at or above this threshold receive {@link CONFIDENCE_PRODUCTIVE}
+ * — the ceiling of the graduated scale.
+ *
+ * @rationale 10 turns represents a substantial interaction ($0.50–$1.00+
+ *   in tool-call tokens in typical Claude sessions), well past the moderate
+ *   boundary. Separating the bands prevents a short-but-legit session from
+ *   receiving the same confidence as a deeply investigative one.
+ * @provenance Derived from the original 0.85 confidence level, which was
+ *   noted as "correct for productive sessions (15+ turns, $0.70+ in tool
+ *   calls)". Lowered from ~15 to 10 during the graduated-scale refactor to
+ *   capture more sessions while keeping the top band reserved for clearly
+ *   expensive runs.
+ */
+const HIGH_PRODUCTIVE_TURNS = 10;
+
+/**
+ * Confidence value for sessions that meet or exceed
+ * {@link HIGH_PRODUCTIVE_TURNS} turns but produced no JSON summary.
+ *
+ * @rationale Matches the old universal fallback — it was correct for the
+ *   sessions it was designed for (genuinely productive, multi-turn runs).
+ *   Retained as the ceiling so existing behaviour is preserved for the
+ *   cases the old code handled well.
+ * @provenance Originally the single hardcoded fallback confidence in
+ *   VibeFlow prior to the graduated-scale refactor.
+ */
+const CONFIDENCE_PRODUCTIVE = 0.85;
+
+/**
+ * Confidence value for sessions with at least {@link MIN_PRODUCTIVE_TURNS}
+ * but fewer than {@link HIGH_PRODUCTIVE_TURNS} turns (no JSON summary).
+ *
+ * @rationale Short-to-intermediate sessions may have done real work but
+ *   haven't accumulated enough tool-call evidence to merit the top band.
+ *   0.7 is high enough that investigation doesn't immediately discard the
+ *   result but low enough that it still requires scrutiny before reaching
+ *   confidence 1.0.
+ * @provenance Introduced as the lower tier of the graduated scale to
+ *   differentiate clearly productive (0.85) from moderately active (0.7)
+ *   sessions. Chosen as a reasonable midpoint above "zero" but well below
+ *   the ceiling.
+ */
+const CONFIDENCE_MODERATE = 0.7;
+export { bunSpawn, MIN_PRODUCTIVE_TURNS, HIGH_PRODUCTIVE_TURNS };
 
 /** Structured summary an engine is asked to emit at the end of a dispatch. */
 export interface EngineSummary {
