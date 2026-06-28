@@ -2057,6 +2057,77 @@ describe("commands.verify branches", () => {
     }
   });
 
+  test("verify --coverage runs the coverage gate when lcov.info exists (pass path, line 2276-2283)", () => {
+    // The sync verify() coverage gate spawns `node scripts/coverage-gate.cjs`
+    // directly (NOT through the injectable spawner). To keep the test
+    // deterministic and CI-portable we drop a stub coverage-gate.cjs into the
+    // tmpdir base — `node` resolves it relative to cwd=base — that exits 0.
+    const dir = freshDir("vf-verify-cov-ok-");
+    mkdirSync(join(dir, "coverage"), { recursive: true });
+    writeFileSync(join(dir, "coverage", "lcov.info"), "TN:\nSF:src/x.ts\nend_of_record\n");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "coverage-gate.cjs"), "process.exit(0)\n");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(verify({ coverage: true })).toBe(0);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify --coverage fails when the coverage gate exits non-zero (fail path, line 2276-2281)", () => {
+    const dir = freshDir("vf-verify-cov-fail-");
+    mkdirSync(join(dir, "coverage"), { recursive: true });
+    writeFileSync(join(dir, "coverage", "lcov.info"), "TN:\nSF:src/x.ts\nend_of_record\n");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "coverage-gate.cjs"), "process.exit(1)\n");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      // coverage gate exits 1 → failed++ → verify returns 1
+      expect(verify({ coverage: true })).toBe(1);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify --coverage warns when lcov.info is missing (line 2285-2286)", () => {
+    const dir = freshDir("vf-verify-cov-nolcov-");
+    // No coverage/lcov.info written → the gate is skipped with a yellow hint.
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(verify({ coverage: true })).toBe(0);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("verify on workflow with missing evidence appends fail journal (line 2263-2268 fail branch)", () => {
     const dir = freshDir("vf-verify-fail-");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
@@ -3403,6 +3474,13 @@ describe("defaultDiffReader", () => {
 
   test("returns empty string on error (non-existent cwd)", () => {
     const result = defaultDiffReader(["src/a.ts"], "/nonexistent/path");
+    expect(result).toBe("");
+  });
+
+  test("returns empty string when spawnSync throws (bad cwd type)", () => {
+    // Non-string cwd makes spawnSync throw ERR_INVALID_ARG_TYPE synchronously,
+    // exercising the catch boundary in defaultDiffReader.
+    const result = defaultDiffReader(["src/a.ts"], {} as unknown as string);
     expect(result).toBe("");
   });
 });
