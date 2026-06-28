@@ -7,9 +7,10 @@ name: Release
 # workflow runs, verifies the label is still present, then publishes + tags.
 #
 # Two jobs:
-#   - verify  (self-hosted): the full `bun run check` gate needs the codegraph
-#     binary to reach 100% per-file coverage on src/commands/tools.ts; that binary
-#     only exists on the self-hosted runner. Builds dist/ and uploads it.
+#   - verify  (ubuntu-latest by default): runs the full `bun run check` gate and
+#     builds dist/. The coverage gate counts DA entries (executable lines), so it
+#     reaches 100% on ubuntu WITHOUT the codegraph binary. Switches to the
+#     self-hosted MacBook only when repo var USE_SELF_HOSTED=true.
 #   - publish (github-hosted): `npm publish --provenance` requires a github-hosted
 #     runner (sigstore rejects "self-hosted"). Downloads dist/ and publishes.
 #
