@@ -1,44 +1,11 @@
 import { type Engine, hasCommand, resolveCommand, resolveEngineBinary } from "../core.js";
-import {
-  GH_AUTH_TIMEOUT_MS,
-  type ProbeInvocation,
-  checkCopilotAuth,
-  defaultSpawner,
-  engineBinary,
-  failedAuth,
-  failedProbe,
-  ghAuthInvocation,
-  ghInstallHint,
-  hasGh,
-  installHint,
-  probeInvocation,
-  probeSucceeded,
-  probeTimeoutMs,
-  runProbe,
-} from "./probe.js";
+import { GH_AUTH_TIMEOUT_MS, type ProbeInvocation, checkCopilotAuth, defaultSpawner, engineBinary, failedAuth, failedProbe, ghAuthInvocation, ghInstallHint, hasGh, installHint, probeInvocation, probeSucceeded, probeTimeoutMs, runProbe } from "./probe.js";
 import type { EngineReadiness, PreflightOpts, ProbeResult, ReadinessLevel } from "./types.js";
-
-/** Async variant that runs a single probe via promise-wrapped spawn, parallel-ready. */
-/**
- * Internal helper: run the gh auth check + engine probe sequence.
- * Extracted to a named function so bun's coverage tool can track
- * its body lines (arrow function bodies inside `new Promise(...)`
- * callbacks were reported as 0 hits even when fired).
- */
-// Test seam: exported so unit tests can exercise the function body
-// (line 432-448) directly. Production callers use the closure
-// version inside checkEngineAsync.
+/** Internal helper for gh auth check + engine probe sequence. */
 export function runAttempts(
-  engine: Engine,
-  has: (cmd: string) => boolean,
+  engine: Engine, has: (cmd: string) => boolean,
   probeSucceeded: (engine: Engine, status: number, stdout: string) => boolean,
-  failedProbe: (
-    engine: Engine,
-    result: ProbeResult,
-  ) => {
-    level: ReadinessLevel;
-    detail: string;
-  },
+  failedProbe: (engine: Engine, result: ProbeResult) => { level: ReadinessLevel; detail: string },
   resolve: (result: EngineReadiness) => void,
   runAttempt: (attempt: ProbeInvocation, timeoutMs?: number) => Promise<ProbeResult>,
   stamp: (level: ReadinessLevel, detail: string) => EngineReadiness,
@@ -52,10 +19,8 @@ export function runAttempts(
         return;
       }
       resolve(stamp("ready", "copilot: GitHub auth OK"));
-      return;
     });
   }
-
   const attempt = probeInvocation(engine);
   return runAttempt(attempt).then((result) => {
     if (probeSucceeded(engine, result.status, result.stdout)) {
@@ -64,38 +29,23 @@ export function runAttempts(
     }
     const failed = failedProbe(engine, result);
     resolve(stamp(failed.level, failed.detail));
-    return;
   });
 }
-
-export async function checkEngineAsync(
-  engine: Engine,
-  opts: PreflightOpts = {},
-): Promise<EngineReadiness> {
+export async function checkEngineAsync(engine: Engine, opts: PreflightOpts = {}): Promise<EngineReadiness> {
   const has = opts.has ?? hasCommand;
   const now = opts.now ?? (() => new Date().toISOString());
-  const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({
-    engine,
-    level,
-    detail,
-    checkedAt: now(),
-  });
-
+  const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({ engine, level, detail, checkedAt: now() });
   const cmd = engineBinary(engine);
-  // Issue #87: bare-name `has` is insufficient on Windows (npm shims).
   const usesDefaultHasAsync = opts.has === undefined;
   if (!has(cmd)) {
     const shimCheck = usesDefaultHasAsync ? resolveEngineBinary(cmd) : undefined;
     if (shimCheck === undefined) return Promise.resolve(stamp("no-binary", installHint(engine)));
   }
   const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
-
   const spawner = opts.spawner;
-
   if (engine === "copilot" && !hasGh(has, usesDefaultHasAsync)) {
     return Promise.resolve(stamp("no-binary", ghInstallHint()));
   }
-
   if (engine === "copilot" && spawner !== undefined) {
     try {
       const auth = checkCopilotAuth(has, spawner, usesDefaultHasAsync);
@@ -105,10 +55,7 @@ export async function checkEngineAsync(
       return Promise.resolve(stamp("probe-failed", `${engine}: probe failed (${msg})`));
     }
   }
-
-  // copilot with no inject spawner → use defaultSpawner for gh auth
   if (engine === "copilot" && hasGh(has, usesDefaultHasAsync)) {
-    // Issue #87: use the shim-resolved gh binary name on Windows.
     const ghCmd = usesDefaultHasAsync ? (resolveEngineBinary("gh") ?? "gh") : "gh";
     const ghResult = defaultSpawner(ghCmd, ["auth", "status"], "", GH_AUTH_TIMEOUT_MS);
     if (ghResult.status === 0) {
@@ -117,37 +64,26 @@ export async function checkEngineAsync(
     const failed = failedAuth("copilot", ghResult);
     return Promise.resolve(stamp(failed.level, failed.detail));
   }
-
-  if (opts.probe === false)
+  if (opts.probe === false) {
     return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
-
-  // When a spawner is injected (tests), use it synchronously — still returns a promise for
-  // interface consistency so preflightAllAsync works with both sync and async spawners.
+  }
   if (spawner !== undefined) {
     const probe = runProbe(engine, spawner);
     return Promise.resolve(stamp(probe.level, probe.detail));
   }
-
-  // Real async spawn: runs the actual engine process in parallel.
   const runAttempt = (
     attempt: ProbeInvocation,
     timeoutMs = probeTimeoutMs(engine, opts.probeTimeoutMs),
   ): Promise<ProbeResult> =>
     new Promise((resolve) => {
       const spawnCmd = attempt.cmd === cmd ? resolvedCmd : attempt.cmd;
-      const child = Bun.spawn([spawnCmd, ...attempt.args], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+      const child = Bun.spawn([spawnCmd, ...attempt.args], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
       child.stdin?.write(attempt.input);
       child.stdin?.end();
-
       const timeout = setTimeout(() => {
         child.kill();
         resolve({ status: 124, stdout: "", stderr: `${attempt.cmd}: probe timed out` });
       }, timeoutMs);
-
       let stdout = "";
       let stderr = "";
       (async () => {
@@ -166,19 +102,10 @@ export async function checkEngineAsync(
           stderr += new TextDecoder().decode(value);
         }
       })();
-
       child.exited
-        .then((code) => {
-          clearTimeout(timeout);
-          resolve({ status: code ?? 1, stdout, stderr });
-        })
-        .catch((err: unknown) => {
-          clearTimeout(timeout);
-          const msg = err instanceof Error ? err.message : String(err);
-          resolve({ status: 1, stdout, stderr: msg });
-        });
+        .then((code) => { clearTimeout(timeout); resolve({ status: code ?? 1, stdout, stderr }); })
+        .catch((err: unknown) => { clearTimeout(timeout); const msg = err instanceof Error ? err.message : String(err); resolve({ status: 1, stdout, stderr: msg }); });
     });
-
   return new Promise((resolve) => {
     runAttempts(engine, has, probeSucceeded, failedProbe, resolve, runAttempt, stamp).catch(
       (err: unknown) => {
