@@ -11,6 +11,8 @@ test.describe("Settings round-trip", () => {
     await toggle.scrollIntoViewIfNeeded();
     await page.waitForTimeout(300);
 
+    // ponytail: default is now true; toggle to opposite state
+    const wasChecked = await toggle.isChecked();
     await toggle.click();
     await page.waitForTimeout(500);
 
@@ -18,7 +20,12 @@ test.describe("Settings round-trip", () => {
     await waitForPage(page);
 
     const afterReload = page.locator('.tool-toggle[data-tool="codegraph"]');
-    await expect(afterReload).toBeChecked();
+    // After reload, the toggle should be in the opposite state from before click
+    if (wasChecked) {
+      await expect(afterReload).not.toBeChecked();
+    } else {
+      await expect(afterReload).toBeChecked();
+    }
   });
 
   test("disabling all tools still renders priority section", async ({ page }) => {
