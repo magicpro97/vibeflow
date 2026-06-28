@@ -15,7 +15,7 @@
 
 ## Commits
 - Format: `type(scope): description`
-- Always include Signed-off-by line: `Signed-off-by: magicpro97 <magicpro97@users.noreply.github.com>`
+- Include `Signed-off-by` line matching your git identity
 - Stage explicit paths — never `git add -A`
 
 ## Code Style

@@ -16,13 +16,26 @@
     ]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["-e", "const t=JSON.parse(process.env.CLAUDE_TOOL_INPUT||'{}'); if(t.command&&/rm\s+-rf/.test(t.command)){console.error('Blocked: rm -rf'); process.exit(2)}"]
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write(*.ts)",
         "hooks": [
           {
             "type": "command",
-            "command": "bunx biome format --write $CLAUDE_FILE_PATHS 2>/dev/null || true"
+            "command": "bunx",
+            "args": ["biome", "format", "--write"]
           }
         ]
       },
@@ -31,7 +44,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bunx biome format --write $CLAUDE_FILE_PATHS 2>/dev/null || true"
+            "command": "bunx",
+            "args": ["biome", "format", "--write"]
           }
         ]
       }
