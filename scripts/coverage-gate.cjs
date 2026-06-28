@@ -96,7 +96,7 @@ for (const r of records) {
   // Files in COVERAGE_WAIVERS skip the per-file 100% check. They
   // are still reported in the output as a notice so reviewers
   // see the gap.
-  const waived = COVERAGE_WAIVERS.has(sf) || COVERAGE_WAIVERS.has(sf.replace(/\\/g, "/"));
+  const waived = COVERAGE_WAIVERS.has(norm);
   perFile.push({ sf, lf, lh, brf, brh, lpct, bpct, waived });
 }
 
