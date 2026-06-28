@@ -2,7 +2,8 @@
 //
 // Diff reading + worktree isolation seam. Extracted from
 // src/commands/dispatch-runtime.ts (issue #80) to keep both files under the
-// 400-line file-size cap. Pure mechanical move — no logic change.
+// 400-line file-size cap. The extraction also carries the #359 scope-enforcement
+// behaviour (whole-tree change list incl. untracked files) — NOT a pure move.
 
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
@@ -10,17 +11,18 @@ import { defaultWorktreePath, out } from "./_shared.js";
 
 // ── Diff reader (inject seam) ──────────────────────────────────────────────────
 
-/** Reads the git diff for a unit's scoped files. Inject seam for testing. */
+/** Reads the set of changed files for scope enforcement. Inject seam for testing. */
 export type DiffReader = (scope: readonly string[], cwd: string) => string;
 
-/** Default: whole-tree changed-file list (git diff HEAD --name-only). Returns empty string on
- *  error or empty scope. Diffs the WHOLE tree (not scope-filtered) so analyzeDiff can attribute
- *  out-of-scope writes — a scope pathspec would hide the very files the scope-creep check needs (#359). */
+/** Default: whole-tree changed-file list via `git status --porcelain`. Returns empty string on
+ *  error or empty scope. Porcelain lists tracked modifications AND untracked new files (a unit
+ *  creating a new out-of-scope file would be invisible to `git diff HEAD` — #359). Whole tree,
+ *  not scope-filtered, so analyzeDiff can attribute out-of-scope writes. */
 export function defaultDiffReader(scope: readonly string[], cwd: string): string {
   if (scope.length === 0) return "";
   try {
-    // ponytail: use spawnSync with array args to avoid shell injection
-    const r = spawnSync("git", ["diff", "HEAD", "--name-only"], {
+    // ponytail: spawnSync array args (no shell injection). --porcelain includes untracked (??).
+    const r = spawnSync("git", ["status", "--porcelain"], {
       cwd,
       encoding: "utf8",
       timeout: 5000,
@@ -36,30 +38,23 @@ interface DiffAnalysis {
   reason: string;
 }
 
-const UNSAFE_PATTERNS = [
-  /eval\s*\(/,
-  /rm\s+-rf/,
-  /process\.env\.\w+\s*=/, // writing to env (not reading)
-  /\bpassword\b|\bsecret\b|\btoken\b/i,
-];
-
 export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysis {
   if (!diff) return { fail: false, reason: "" };
 
-  // ponytail: accept BOTH the reader's --name-only output (one bare path per line) and a full
-  // unified diff (diff --git headers). A bare path line IS the changed file; a diff --git header
-  // names it via the a/ prefix. Diff-metadata lines (@@, +, -, index, ---/+++) are not paths.
+  // ponytail: parse `git status --porcelain` lines. Each is `XY <path>` (XY = 2-char status,
+  // e.g. ` M`, `??`, `A `). Strip the 3-char prefix when present; a bare path (test input) is
+  // taken as-is. Rename lines `R  old -> new` keep the new path (after `-> `).
   const changedFiles = diff
     .split("\n")
+    .map((l) => l.replace(/\r$/, ""))
+    .filter((l) => l.trim().length > 0)
     .map((l) => {
-      const header = l.match(/^diff --git a\/(.+?) b\//);
-      if (header?.[1]) return header[1];
-      if (/^[@+\- ]|^index |^diff /.test(l)) return "";
-      return l.trim();
-    })
-    .filter((f): f is string => !!f);
+      const body = /^[ MADRCU?!]{2} /.test(l) ? l.slice(3) : l.trim();
+      const arrow = body.lastIndexOf(" -> ");
+      return arrow >= 0 ? body.slice(arrow + 4) : body;
+    });
 
-  // Scope creep: files outside unit scope changed
+  // Scope creep: files outside unit scope changed.
   // ponytail: file is in-scope if it IS the scope entry or is under that directory.
   // Strip trailing slash so a scope of "src/a/" matches "src/a/x.ts" (no `src/a//` mismatch).
   const outOfScope = changedFiles.filter(
@@ -73,16 +68,9 @@ export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysi
     return { fail: true, reason: `scope creep: ${outOfScope.join(", ")} outside unit scope` };
   }
 
-  // Unsafe edits: check added lines for dangerous patterns
-  const addedLines = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
-  for (const line of addedLines) {
-    for (const pat of UNSAFE_PATTERNS) {
-      if (pat.test(line)) {
-        return { fail: true, reason: `unsafe edit detected: ${pat.source} in added line` };
-      }
-    }
-  }
-
+  // ponytail: content-safety (secrets/eval/rm-rf) is NOT checked here — that is the hook
+  // PreToolUse boundary's job (#357 token-scan + risk.ts scoreCommand). This function owns
+  // scope enforcement only. Add content checks here only if the hook boundary is bypassed.
   return { fail: false, reason: "" };
 }
 

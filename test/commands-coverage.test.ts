@@ -3406,43 +3406,29 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
 // ---- analyzeDiff ----------------------------------------------------------------
 describe("analyzeDiff", () => {
   test("detects scope creep -- files outside unit scope", () => {
-    const diff = "diff --git a/src/other.ts b/src/other.ts\n+added line";
+    // git status --porcelain format: "XY <path>"
+    const diff = " M src/other.ts";
     const result = analyzeDiff(diff, ["src/target.ts"]);
     expect(result.fail).toBe(true);
     expect(result.reason).toContain("scope creep");
   });
 
-  test("detects unsafe edit -- eval(", () => {
-    const diff = "diff --git a/src/a.ts b/src/a.ts\n+eval(userInput)";
-    const result = analyzeDiff(diff, ["src/a.ts"]);
+  test("flags an UNTRACKED out-of-scope file (?? prefix, #359 bypass fix)", () => {
+    // A newly-created file shows as "?? <path>" in porcelain — git diff HEAD
+    // would NOT list it, so this is the bypass Copilot flagged.
+    const result = analyzeDiff("?? src/leak.ts", ["src/target.ts"]);
     expect(result.fail).toBe(true);
-    expect(result.reason).toContain("unsafe");
+    expect(result.reason).toContain("src/leak.ts");
   });
 
-  test("detects unsafe edit -- rm -rf", () => {
-    const diff = "diff --git a/src/a.ts b/src/a.ts\n+rm -rf /";
-    const result = analyzeDiff(diff, ["src/a.ts"]);
+  test("parses a rename line, keeping the new path", () => {
+    const result = analyzeDiff("R  src/old.ts -> src/b/new.ts", ["src/a/"]);
     expect(result.fail).toBe(true);
-    expect(result.reason).toContain("unsafe");
+    expect(result.reason).toContain("src/b/new.ts");
   });
 
-  test("detects unsafe edit -- process.env write", () => {
-    const diff = "diff --git a/src/a.ts b/src/a.ts\n+process.env.API_KEY=leak";
-    const result = analyzeDiff(diff, ["src/a.ts"]);
-    expect(result.fail).toBe(true);
-    expect(result.reason).toContain("unsafe");
-  });
-
-  test("detects unsafe edit -- password literal", () => {
-    const diff = "diff --git a/src/a.ts b/src/a.ts\n+const SECRET='password'";
-    const result = analyzeDiff(diff, ["src/a.ts"]);
-    expect(result.fail).toBe(true);
-    expect(result.reason).toContain("unsafe");
-  });
-
-  test("passes clean diff", () => {
-    const diff = "diff --git a/src/a.ts b/src/a.ts\n+normal change";
-    const result = analyzeDiff(diff, ["src/a.ts"]);
+  test("passes clean diff (in-scope tracked modification)", () => {
+    const result = analyzeDiff(" M src/a.ts", ["src/a.ts"]);
     expect(result.fail).toBe(false);
   });
 
@@ -3452,31 +3438,29 @@ describe("analyzeDiff", () => {
   });
 
   test("passes on empty scope (no diff analysis needed)", () => {
-    const diff = "diff --git a/src/a.ts b/src/a.ts\n+normal change";
     // With scope=[], every changed file is out of scope -> fail.
-    const result = analyzeDiff(diff, []);
+    const result = analyzeDiff(" M src/a.ts", []);
     expect(result.fail).toBe(true);
     expect(result.reason).toContain("scope creep");
   });
 
   test("scope is prefix-matched (in-scope)", () => {
-    const diff = "diff --git a/src/core/sub.ts b/src/core/sub.ts\n+ok";
-    const result = analyzeDiff(diff, ["src/core"]);
+    const result = analyzeDiff(" M src/core/sub.ts", ["src/core"]);
     expect(result.fail).toBe(false);
   });
 
-  // #359: reader now emits --name-only (bare path per line); parser must accept it.
-  test("reads --name-only path list and flags out-of-scope file (#359)", () => {
+  // #359: reader emits a bare path list (test input); parser accepts it.
+  test("reads a bare path list and flags out-of-scope file (#359)", () => {
     const r = analyzeDiff("src/a/keep.ts\nsrc/b/leak.ts\n", ["src/a/"]);
     expect(r.fail).toBe(true);
     expect(r.reason).toContain("src/b/leak.ts");
   });
 
-  test("passes when every --name-only file is in scope (#359)", () => {
-    expect(analyzeDiff("src/a/keep.ts\n", ["src/a/"]).fail).toBe(false);
+  test("passes when every file is in scope (#359)", () => {
+    expect(analyzeDiff(" M src/a/keep.ts\n", ["src/a/"]).fail).toBe(false);
   });
 
-  test("empty --name-only diff is clean (#359)", () => {
+  test("empty diff is clean (#359)", () => {
     expect(analyzeDiff("", ["src/a/"]).fail).toBe(false);
   });
 });
@@ -3504,7 +3488,7 @@ describe("defaultDiffReader", () => {
 describe("makeReviewer diff injection", () => {
   test("blocks on scope creep even at high confidence", () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
-      "diff --git a/src/other.ts b/src/other.ts\n+line";
+      " M src/other.ts";
     const r = makeReviewer("cli", 0.85, { diffReader });
     const unit = { scope: ["src/target.ts"] } as WorkUnit;
     const outcome = {
@@ -3518,25 +3502,9 @@ describe("makeReviewer diff injection", () => {
     expect(result.reason).toContain("scope creep");
   });
 
-  test("blocks on unsafe edit", () => {
-    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
-      "diff --git a/src/x.ts b/src/x.ts\n+eval(danger)";
-    const r = makeReviewer("cli", 0.85, { diffReader });
-    const unit = { scope: ["src/x.ts"] } as WorkUnit;
-    const outcome = {
-      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
-      confidence: 0.95,
-      evidence: ["checked"],
-      status: "done" as const,
-    };
-    const result = r(unit, outcome);
-    expect(result.pass).toBe(false);
-    expect(result.reason).toContain("unsafe");
-  });
-
   test("passes on clean diff", () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
-      "diff --git a/src/x.ts b/src/x.ts\n+clean change";
+      " M src/x.ts";
     const r = makeReviewer("cli", 0.85, { diffReader });
     const unit = { scope: ["src/x.ts"] } as WorkUnit;
     const outcome = {
