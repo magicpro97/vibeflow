@@ -283,6 +283,21 @@ describe("generateWorkflowArtifacts", () => {
     expect(updated).toContain(VF_BLOCK_START);
   });
 
+  test("copies the shipped common template for a no-IO phase that has one", () => {
+    // "Implement" → slug "implement" ships templates/skills/implement/SKILL.md.
+    // No inputs/outputs → hasUserDeclaredIO=false → else branch reads the
+    // shipped template (workflow-artifacts.ts:239) instead of rendering a stub.
+    const written = generateWorkflowArtifacts({
+      phases: [{ name: "Implement", description: "Implement the feature" }],
+      engines: ["claude"],
+      projectName: "p",
+      base: dir,
+    });
+    const canon = join(dir, ".vibeflow", "skills", "implement", "SKILL.md");
+    expect(existsSync(canon)).toBe(true);
+    expect(written.some((w) => w.includes(".vibeflow/skills/implement/SKILL.md"))).toBe(true);
+  });
+
   test("skips unknown engine in the snippet loop (no throw)", () => {
     // Use codex (AGENTS.md in ENGINE_CONFIGS.codex post-#75) to
     // exercise the "no instructionFiles to update" path... actually
