@@ -670,6 +670,20 @@ describe("preflight async: branches", () => {
     }
   });
 
+  test("async probe: spawn throw in runAttempt yields probe-failed (line 111-112)", async () => {
+    const original = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
+      throw new Error("spawn crashed");
+    }) as unknown as typeof Bun.spawn;
+    try {
+      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
+      expect(r.level).toBe("probe-failed");
+      expect(r.detail).toContain("spawn crashed");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+
   test("async probe: copilot with gh, real spawn, auth ok returns ready (line 425-446)", async () => {
     const originalSpawn = Bun.spawn;
     const originalSync = Bun.spawnSync;
