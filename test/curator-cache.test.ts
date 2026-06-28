@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -168,9 +168,13 @@ describe("pruneCuratorCache", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-ccache-"));
     try {
       mkdirSync(join(dir, ".vibeflow", "cache"), { recursive: true });
-      writeFileSync(join(dir, ".vibeflow", "cache", "curator-old.json"), "{}");
-      // maxAgeMs=0 => cutoff = Date.now(). Freshly-written file has mtime < now.
-      expect(pruneCuratorCache(dir, 0)).toBe(1);
+      const stale = join(dir, ".vibeflow", "cache", "curator-old.json");
+      writeFileSync(stale, "{}");
+      // Force an explicit 1970 mtime so the file is unambiguously past the
+      // cutoff — maxAgeMs=0 with a fresh write is timing-flaky (mtime can
+      // equal Date.now()).
+      utimesSync(stale, new Date(0), new Date(0));
+      expect(pruneCuratorCache(dir, 1000)).toBe(1);
       expect(existsSync(join(dir, ".vibeflow", "cache", "curator-old.json"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
