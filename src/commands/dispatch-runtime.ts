@@ -483,7 +483,7 @@ export function makeReviewer(
     // Read and analyze the unit's actual diff
     const diff = readDiff(unit.scope ?? [], process.cwd());
     const analysis = analyzeDiff(diff, unit.scope ?? []);
-    if (analysis.fail) return { pass: false, reason: analysis.reason };
+    if (analysis.fail) return { pass: false, reason: `unit ${unit.name}: ${analysis.reason}` };
 
     return {
       pass: true,

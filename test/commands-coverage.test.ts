@@ -3574,6 +3574,30 @@ describe("makeReviewer diff injection", () => {
     expect(result.pass).toBe(true);
     expect(result.reason).toContain("dry");
   });
+
+  // #359: out-of-scope write blocks review; reason names offending path AND unit.
+  test("blocks an out-of-scope write, names path + unit (#359)", () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      "src/other/leak.ts\n";
+    const r = makeReviewer("cli", 0.8, { diffReader });
+    const unit = { name: "unit-a", scope: ["src/a/"] } as WorkUnit;
+    const outcome = { confidence: 1, evidence: ["did work"], status: "done" as const };
+    const result = r(unit, outcome);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain("src/other/leak.ts");
+    expect(result.reason).toContain("unit-a");
+  });
+
+  test("passes an in-scope-only --name-only write (#359)", () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      "src/a/keep.ts\n";
+    const r = makeReviewer("cli", 0.8, { diffReader });
+    const unit = { name: "unit-a", scope: ["src/a/"] } as WorkUnit;
+    const outcome = { confidence: 1, evidence: ["did work"], status: "done" as const };
+    const result = r(unit, outcome);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toContain("diff clean");
+  });
 });
 
 // W1: defaultWorktreeOps/makeWorktreeOps — inject a fake spawn (NOT mock.module,
