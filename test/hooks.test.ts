@@ -15,6 +15,7 @@ import {
   gitPostCheckout,
   gitPostMerge,
   gitPreCommit,
+  perCommandWarning,
 } from "../src/hooks/adapters.js";
 import { scoreRisk } from "../src/hooks/risk.js";
 import {
@@ -64,6 +65,12 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
     expect(engineEnforcement("copilot").preActionBlocking).toBe("native");
     // codex stays post-hoc-only: it has no native pre-tool veto.
     expect(engineEnforcement("codex").preActionBlocking).toBe("post-hoc-only");
+  });
+
+  test("perCommandWarning: empty for native, warns for detection-only", () => {
+    expect(perCommandWarning("claude")).toBe("");
+    expect(perCommandWarning("copilot")).toBe("");
+    expect(perCommandWarning("codex")).toContain("detection-only");
   });
 
   test("downgradeBannerText: empty for native engines, warns only for codex", () => {

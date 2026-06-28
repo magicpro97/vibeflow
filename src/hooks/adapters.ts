@@ -50,6 +50,12 @@ export function downgradeBannerText(engine: Engine): string {
   return `! ${engine}: detection-only guardrails. This engine has no vetoing pre-action hook, so VibeFlow can only flag risky actions after they happen (post-command/post-write/verify-result), not block them beforehand. Use Claude Code for native blocking.`;
 }
 
+/** Per-command warning for detection-only engines. Empty for native engines. */
+export function perCommandWarning(engine: Engine): string {
+  if (engineEnforcement(engine).preActionBlocking === "native") return "";
+  return `! ${engine}: detection-only — this action was flagged but NOT blocked. Use Claude Code for native blocking.`;
+}
+
 /** Claude Code `.claude/settings.json` hooks section delegating to `vf hook`.
  *  Uses absolute path so the subprocess always finds the CLI regardless of PATH. */
 export function claudeHookConfig(): string {
