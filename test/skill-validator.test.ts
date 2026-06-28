@@ -144,17 +144,34 @@ describe("validateSkillDir: error branches", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes("1024"))).toBe(true);
   });
-});
 
-// Documented limitations:
-// - validateSkillDir's readFileSync catch (line 35-40) cannot be
-//   exercised in unit tests without mocking node:fs.
-// - validateSkillDir's directory-inspection catch (line 88) cannot be
-//   exercised in unit tests without mocking node:fs.
-// - validateSkillRoots's readdirSync catch (line 116) cannot be
-//   exercised in unit tests without mocking node:fs.
-// All three are defensive try/catch blocks for network FS / symlink-loop
-// errors. The production code path is exercised manually.
+  test("returns cannot-read error when readFileSync throws (line 51-56)", () => {
+    const dir = tmpSkill("broken-read");
+    writeSkill(dir, "irrelevant");
+    const inject = { readFileSync: () => { throw new Error("permission denied"); } };
+    const result = validateSkillDir(dir, inject);
+    expect(result.ok).toBe(false);
+    expect(result.errors[0]).toContain("cannot read SKILL.md");
+    expect(result.errors[0]).toContain("permission denied");
+  });
+
+  test("warns when readdirSync throws during dir inspection (line 125)", () => {
+    const dir = tmpSkill("unreadable-dir");
+    writeSkill(
+      dir,
+      "---\nname: unreadable-dir\ndescription: Test catch of dir-inspection error.\n---\n\n# Test\n\nEnough actionable content for this skill body.\n",
+    );
+    const inject = {
+      readdirSync(path: string) {
+        if (path.endsWith("unreadable-dir")) throw new Error("access denied");
+        return require("node:fs").readdirSync(path);
+      },
+    };
+    const result = validateSkillDir(dir, inject);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("could not inspect skill directory"))).toBe(true);
+  });
+});
 
 describe("validateSkillDir: task-ID leak detection", () => {
   test("warns when body contains BR-1234 style requirement IDs", () => {
