@@ -1548,7 +1548,7 @@ describe("commands.tools", () => {
     expect(tools("enable", ["codegraph"], {}, { base: dir })).toBe(0);
     expect(readSettings(dir).tools.codegraph).toBe(true);
     expect(tools("disable", ["codegraph"], {}, { base: dir })).toBe(0);
-    expect(readSettings(dir).tools.codegraph).toBe(true);
+    expect(readSettings(dir).tools.codegraph).toBe(false);
   });
 
   test("status reports settings and a priority ladder", () => {

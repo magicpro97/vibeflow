@@ -101,7 +101,7 @@ describe("settings.forwardCompat", () => {
       writeRaw(dir, JSON.stringify({ tools: { codegraph: true } }));
       const s = readSettings(dir);
       expect(s.tools.codegraph).toBe(true);
-      expect(s.tools.lsp).toBe(false); // filled from defaults
+      expect(s.tools.lsp).toBe(true); // filled from defaults
       expect(s.toolPriority).toEqual(["codegraph", "lsp", "native"]); // filled from defaults
     } finally {
       rmSync(dir, { recursive: true, force: true });
