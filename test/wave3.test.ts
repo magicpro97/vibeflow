@@ -25,7 +25,11 @@ describe("investigate", () => {
     const r = investigate({
       question: "which auth lib?",
       riskClass: "feature",
-      research: (round) => ({ findings: [`finding ${round}`], confidence: round * 0.45 }),
+      research: (round) => ({
+        findings: [`finding ${round}`],
+        confidence: round * 0.45,
+        artifacts: [`cmd-output-${round}.log`],
+      }),
     });
     expect(r.met).toBe(true);
     expect(r.stoppedBy).toBe("threshold-met");
