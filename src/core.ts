@@ -44,7 +44,7 @@ export function readVersion(
 
 export const VERSION = readVersion();
 
-/** Read a template file from the templates/ directory. Relative path like "claude/CLAUDE.md". */
+/** Read a template file from the templates/ directory. Relative path like "claude/rules/coding-conventions.md". */
 export function readTemplate(relativePath: string): string {
   const url = new URL(`../templates/${relativePath}`, import.meta.url);
   return readFileSync(fileURLToPath(url), "utf8");

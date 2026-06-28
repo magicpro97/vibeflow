@@ -66,9 +66,16 @@ export function seedClaudeCode(base: string, engines: readonly string[], dry: bo
   const claudeDir = join(base, ".claude");
 
   const tc = detectToolchain(base);
-  const runner = tc.kind === "npm" ? tc.runner : tc.kind === "gradle" ? tc.cmd : "npm";
+  const runner =
+    tc.kind === "npm" || tc.kind === "monorepo" ? tc.runner : tc.kind === "gradle" ? tc.cmd : "npm";
   const toolchainLabel =
-    tc.kind === "npm" ? `${runner} + TypeScript` : tc.kind === "gradle" ? "Gradle" : "Unknown";
+    tc.kind === "npm"
+      ? `${runner} + TypeScript`
+      : tc.kind === "monorepo"
+        ? `${runner} + TypeScript (monorepo: ${tc.dir})`
+        : tc.kind === "gradle"
+          ? "Gradle"
+          : "Unknown";
   const vars = { runner, toolchainLabel, projectName: basename(base) };
 
   // .claude/rules/coding-conventions.md (create-if-absent)
