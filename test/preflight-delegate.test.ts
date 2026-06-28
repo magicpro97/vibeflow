@@ -113,6 +113,17 @@ describe("preflightDelegate: branches", () => {
     expect(r.level).toBe("warning");
   });
 
+  test("unknown quota triggers warning-level conservative fallback", async () => {
+    const r = await preflightDelegate("/repo", "claude", {
+      cache: new ProbeCache(),
+      presenceCheck: () => READY,
+      quotaProbe: async () => ({ level: "unknown", error: "parse failed" }),
+    });
+    expect(r.allowed).toBe(true);
+    expect(r.level).toBe("warning");
+    expect(r.detail).toContain("parse failed");
+  });
+
   test("exhausted blocks if no fallback", async () => {
     const r = await preflightDelegate("/repo", "claude", {
       cache: new ProbeCache(),
