@@ -53,6 +53,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
+      - run: bun run file-size:check
       - run: bun run test
       - run: bun run build
       - name: Smoke test built CLI (prints version)
