@@ -56,12 +56,14 @@ import type { ProtectionRuntime } from "./_shared.js";
 /** Reads the git diff for a unit's scoped files. Inject seam for testing. */
 export type DiffReader = (scope: readonly string[], cwd: string) => string;
 
-/** Default: git diff HEAD for the scoped files. Returns empty string on error or empty scope. */
+/** Default: whole-tree changed-file list (git diff HEAD --name-only). Returns empty string on
+ *  error or empty scope. Diffs the WHOLE tree (not scope-filtered) so analyzeDiff can attribute
+ *  out-of-scope writes — a scope pathspec would hide the very files the scope-creep check needs (#359). */
 export function defaultDiffReader(scope: readonly string[], cwd: string): string {
   if (scope.length === 0) return "";
   try {
     // ponytail: use spawnSync with array args to avoid shell injection
-    const r = spawnSync("git", ["diff", "HEAD", "--", ...scope], {
+    const r = spawnSync("git", ["diff", "HEAD", "--name-only"], {
       cwd,
       encoding: "utf8",
       timeout: 5000,
