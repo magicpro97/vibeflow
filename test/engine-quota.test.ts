@@ -27,12 +27,12 @@ describe("parseQuotaOutput", () => {
     expect(r.resetAt).toBe("2026-06-13");
   });
 
-  test("empty output → exhausted level", () => {
-    expect(parseQuotaOutput("claude", "").level).toBe("exhausted");
+  test("empty output → unknown level", () => {
+    expect(parseQuotaOutput("claude", "").level).toBe("unknown");
   });
 
-  test("unparseable output → exhausted level", () => {
-    expect(parseQuotaOutput("claude", "???garbage???").level).toBe("exhausted");
+  test("unparseable output → unknown level", () => {
+    expect(parseQuotaOutput("claude", "???garbage???").level).toBe("unknown");
   });
 });
 
@@ -49,8 +49,8 @@ describe("checkEngineQuota", () => {
     expect(checkEngineQuota({ percentRemaining: 1 }).level).toBe("exhausted");
   });
 
-  test("ready when percentRemaining undefined (assume ok)", () => {
-    expect(checkEngineQuota({}).level).toBe("ready");
+  test("unknown when percentRemaining undefined", () => {
+    expect(checkEngineQuota({}).level).toBe("unknown");
   });
 
   test("rate-limited on HTTP 429 in stderr", () => {
@@ -78,8 +78,8 @@ describe("parseQuotaOutput: edge cases", () => {
     // → percentRemaining stays undefined → falls through to "exhausted"
     const r = parseQuotaOutput("codex", "quota: / (0% used, 0% remaining)");
     // The regex `(\d+)\s*\/\s*(\d+)` requires at least one digit, so an
-    // empty fraction won't match. The function should fall through to
-    // the unparseable branch.
+    // empty fraction won't match. The percentage fallback catches `0%`,
+    // making this legitimately exhausted.
     expect(r.level).toBe("exhausted");
   });
 
@@ -99,11 +99,53 @@ describe("parseQuotaOutput: edge cases", () => {
     expect(r.percentRemaining).toBeUndefined();
   });
 
-  test("claude non-JSON body → exhausted with error message (line 61-62 catch)", () => {
+  test("claude non-JSON body → unknown with error message (line 61-62 catch)", () => {
     // The text starts with `{` (to match the JSON branch) but isn't
-    // valid JSON → JSON.parse throws → catch returns exhausted.
+    // valid JSON → JSON.parse throws → catch returns unknown.
     const r = parseQuotaOutput("claude", "{not valid json");
-    expect(r.level).toBe("exhausted");
+    expect(r.level).toBe("unknown");
     expect(r.error).toBeDefined();
+  });
+
+  test("malformed JSON → unknown, not exhausted", () => {
+    const r = parseQuotaOutput("claude", '{"remaining": 5, broken');
+    expect(r.level).toBe("unknown");
+    expect(r.error).toBeDefined();
+  });
+
+  test("JSON missing all fields → unknown (no percentRemaining)", () => {
+    const r = parseQuotaOutput("claude", '{"someField": "value"}');
+    expect(r.level).toBe("unknown");
+    expect(r.percentRemaining).toBeUndefined();
+  });
+
+  test("JSON with only used → unknown (no limit to compute pct)", () => {
+    const r = parseQuotaOutput("claude", '{"used": 5}');
+    expect(r.level).toBe("unknown");
+    expect(r.percentRemaining).toBeUndefined();
+  });
+
+  test("JSON with zero limit → unknown (division by zero guarded)", () => {
+    const r = parseQuotaOutput("claude", '{"remaining": 0, "limit": 0}');
+    expect(r.level).toBe("unknown");
+    expect(r.percentRemaining).toBeUndefined();
+  });
+
+  test("legacy format with percent string (no fraction) → classifies correctly", () => {
+    const r = parseQuotaOutput("copilot", "10% remaining");
+    expect(r.level).toBe("warning");
+    expect(r.percentRemaining).toBe(10);
+  });
+
+  test("unknown engine with empty output → unknown", () => {
+    const r = parseQuotaOutput("some-new-engine", "");
+    expect(r.level).toBe("unknown");
+    expect(r.error).toBe("empty output");
+  });
+
+  test("unknown engine with unparseable output → unknown", () => {
+    const r = parseQuotaOutput("some-new-engine", "engine v2.0 quota info here");
+    expect(r.level).toBe("unknown");
+    expect(r.error).toBe("unparseable output");
   });
 });

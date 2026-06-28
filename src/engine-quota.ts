@@ -4,7 +4,8 @@ export type QuotaLevel =
   | "exhausted"
   | "rate-limited"
   | "forbidden"
-  | "not-logged-in";
+  | "not-logged-in"
+  | "unknown";
 
 export interface QuotaStatus {
   level: QuotaLevel;
@@ -36,7 +37,7 @@ function parsePercent(s: string): number | undefined {
 /** Parse engine-specific output. Format is engine-specific; verified against docs. */
 export function parseQuotaOutput(engine: string, out: string): QuotaStatus {
   const text = out.trim();
-  if (!text) return { level: "exhausted", error: "empty output" };
+  if (!text) return { level: "unknown", error: "empty output" };
 
   // JSON variants (claude; `gh api user/copilot_billing` for individual copilot quota;
   // `gh api copilot` is the Copilot Business admin endpoint and is NOT per-user quota)
@@ -60,7 +61,7 @@ export function parseQuotaOutput(engine: string, out: string): QuotaStatus {
         resetAt,
       };
     } catch (err) {
-      return { level: "exhausted", error: (err as Error).message };
+      return { level: "unknown", error: (err as Error).message };
     }
   }
 
@@ -86,12 +87,12 @@ export function parseQuotaOutput(engine: string, out: string): QuotaStatus {
     return { level: classify({ percentRemaining: pct }), percentRemaining: pct };
   }
 
-  return { level: "exhausted", error: "unparseable output" };
+  return { level: "unknown", error: "unparseable output" };
 }
 
 function classify(p: { percentRemaining?: number }): QuotaLevel {
   const pct = p.percentRemaining;
-  if (pct === undefined) return "ready";
+  if (pct === undefined) return "unknown";
   if (pct <= 5) return "exhausted";
   if (pct <= 20) return "warning";
   return "ready";
@@ -123,5 +124,5 @@ export function checkEngineQuota(probe: QuotaProbe): QuotaStatus {
       percentRemaining: probe.percentRemaining,
     };
   }
-  return { level: "ready" };
+  return { level: "unknown" };
 }
