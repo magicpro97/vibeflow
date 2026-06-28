@@ -29,11 +29,13 @@ import {
   panel,
   provisionTool,
   readSettings,
+  readTemplate,
   rmSync,
   runFindSkillsFallback,
   runInitAiEnrichment,
   runMemoryPhase,
   spawnSync,
+  writeFileSafe,
   writeSettings,
   writeToolConfigs,
 } from "../_shared.js";
@@ -52,6 +54,39 @@ import type {
   UnitDispatcher,
   WorkflowPhase,
 } from "../_shared.js";
+import { detectToolchain } from "../tools-detect.js";
+
+function renderTemplate(tpl: string, vars: Record<string, string>): string {
+  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
+}
+
+export function seedClaudeCode(base: string, engines: readonly string[], dry: boolean): string[] {
+  if (!engines.includes("claude")) return [];
+  const written: string[] = [];
+  const claudeDir = join(base, ".claude");
+
+  const tc = detectToolchain(base);
+  const runner = tc.kind === "npm" ? tc.runner : tc.kind === "gradle" ? tc.cmd : "npm";
+  const toolchainLabel =
+    tc.kind === "npm" ? `${runner} + TypeScript` : tc.kind === "gradle" ? "Gradle" : "Unknown";
+  const vars = { runner, toolchainLabel, projectName: basename(base) };
+
+  // .claude/rules/coding-conventions.md (create-if-absent)
+  const rulesPath = join(claudeDir, "rules", "coding-conventions.md");
+  if (!dry && !existsSync(rulesPath)) {
+    writeFileSafe(rulesPath, readTemplate("claude/rules/coding-conventions.md"));
+    written.push(".claude/rules/coding-conventions.md");
+  }
+
+  // .claude/CLAUDE.md (create-if-absent)
+  const claudeMdPath = join(claudeDir, "CLAUDE.md");
+  if (!dry && !existsSync(claudeMdPath)) {
+    writeFileSafe(claudeMdPath, renderTemplate(readTemplate("claude/CLAUDE.md.mustache"), vars));
+    written.push(".claude/CLAUDE.md");
+  }
+
+  return written;
+}
 
 export async function writeInitArtifacts(params: {
   answers: IntakeAnswers;
@@ -187,6 +222,12 @@ export async function writeInitArtifacts(params: {
     } else {
       out("vf", c.dim("Hooks setup skipped — existing guardrail policy left unchanged."));
     }
+  }
+
+  // Phase 1.66: Claude Code scaffolding (create-if-absent)
+  const claudeFiles = seedClaudeCode(cwd(), engines, dry);
+  for (const rel of claudeFiles) {
+    out("vf", `${c.green("+")} ${rel}`);
   }
 
   // Phase 1.7: ctx7 auth check
