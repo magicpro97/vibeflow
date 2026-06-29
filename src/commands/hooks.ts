@@ -344,6 +344,7 @@ export function hooks(
       );
       // The live per-tool-call guardrail only exists if .claude/settings.json delegates a
       // PreToolUse hook to `vf hook`. Report it LOUDLY — a silent "OFF" reads as "protected".
+      out("vf");
       out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
       return 0;
     }

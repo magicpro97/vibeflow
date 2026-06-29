@@ -192,7 +192,7 @@ export async function init(
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
   const initSpinner = new Spinner();
-  initSpinner.start(dry ? "➥ Preparing init dry run" : "➥ Generating VibeFlow context");
+  initSpinner.start(dry ? "Preparing init dry run" : "Generating VibeFlow context");
   let result: ReturnType<typeof applyIntake>;
   try {
     result = applyIntake(answers, {

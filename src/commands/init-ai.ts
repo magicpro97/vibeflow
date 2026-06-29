@@ -184,7 +184,7 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
       }
     } else {
       const aiSpinner = new Spinner();
-      aiSpinner.start(`➥ Running AI enrichment ${prefix}`);
+      aiSpinner.start(`Running AI enrichment ${prefix}`);
       // Legacy --no-agent-team path: original runAiInit shape.
       // When workflow phases exist, use the enrichment prompt instead.
       const { runAiInit } = await import("../ai-init.js");
