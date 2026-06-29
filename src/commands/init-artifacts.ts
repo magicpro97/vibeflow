@@ -180,7 +180,7 @@ export async function writeInitArtifacts(params: {
         return { status: r.status ?? 1 };
       });
     const curSettings = readSettings(cwd());
-    let toolsEnabled = false;
+    let toolsNewlyInstalled = false;
 
     for (const name of VALID_TOOLS) {
       if (!curSettings.tools?.[name]) continue; // not enabled by user — skip
@@ -188,14 +188,13 @@ export async function writeInitArtifacts(params: {
       const installed = detect(name);
       if (installed) {
         ensureToolIndex(cwd(), name, syncSpawner);
-        toolsEnabled = true;
       } else {
         out("vf", c.cyan(`▶ Installing ${TOOLS[name].title}...`));
         const rc = provisionTool(cwd(), name, syncSpawner);
         if (rc === 0) {
           out("vf", c.green(`+ installed ${TOOLS[name].title}`));
           ensureToolIndex(cwd(), name, syncSpawner);
-          toolsEnabled = true;
+          toolsNewlyInstalled = true;
         } else {
           out(
             "vf",
@@ -207,7 +206,11 @@ export async function writeInitArtifacts(params: {
       }
     }
 
-    if (toolsEnabled) {
+    // Only re-sync MCP configs when a tool was newly installed this run.
+    // applyIntake() already called writeToolConfigs via syncToolConfigs for
+    // pre-existing tools, so a second call would duplicate the Copilot
+    // instructions print without changing any files.
+    if (toolsNewlyInstalled) {
       writeToolConfigs(cwd(), readSettings(cwd()), engines);
     }
   }
