@@ -1786,7 +1786,8 @@ describe("commands.tools", () => {
     });
     expect(code).toBe(0);
     expect(spawned).toBe(false);
-    expect(out.join("\n")).toContain("index present");
+    // A present index is the happy path — ensureToolIndex now stays silent (no noise).
+    expect(out.join("\n")).toBe("");
   });
 
   test("ensureToolIndex builds the index when only an empty .codegraph/ exists (no codegraph.db)", () => {
