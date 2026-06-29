@@ -65,7 +65,8 @@ export function toolsStatus(
 ): number {
   const settings = readSettings(base);
   const languages = repoLanguages(base);
-  out("vf", c.bold("Optional developer tools\n"));
+  out("vf", c.bold("Optional developer tools"));
+  out("vf");
   for (const name of VALID_TOOLS) {
     const tool = TOOLS[name];
     const enabled = settings.tools[name];
@@ -112,9 +113,11 @@ export function toolsStatus(
       }
     }
   }
-  out("vf", `\n  priority: ${c.cyan(renderPriority(settings))}`);
+  out("vf");
+  out("vf", `  priority: ${c.cyan(renderPriority(settings))}`);
   if (languages.length) out("vf", `  detected languages: ${c.dim(languages.join(", "))}`);
-  out("vf", c.dim("\n  Re-run `vf init` after changing tools to regenerate instructions."));
+  out("vf");
+  out("vf", c.dim("  Re-run `vf init` after changing tools to regenerate instructions."));
   return 0;
 }
 
