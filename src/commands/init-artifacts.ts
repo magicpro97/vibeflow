@@ -202,6 +202,7 @@ export async function writeInitArtifacts(params: {
             c.yellow(
               `! ${TOOLS[name].title} install failed — skipping. Run \`vf tools install ${name}\` manually.`,
             ),
+            { level: "error" },
           );
         }
       }
