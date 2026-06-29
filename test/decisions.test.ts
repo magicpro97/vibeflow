@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decision } from "../src/cli.js";
+import { decision } from "../src/commands/config-decision.js";
 import { CTX_DIR } from "../src/core.js";
 import {
   appendDecision,

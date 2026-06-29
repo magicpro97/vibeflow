@@ -24,77 +24,10 @@ import {
   verify,
   workflow,
 } from "./commands.js";
+import { config, decision } from "./commands/config-decision.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
-import { appendDecision, decisionsPath } from "./decisions.js";
 import { out } from "./logbus.js";
 import { startServer } from "./server.js";
-import { type VibeSettings, readSettings, writeSettings } from "./settings.js";
-
-// ponytail: inlined from commands/config.ts (#390)
-function printMemory(base: string): void {
-  const on = readSettings(base).memory;
-  out("vf", `memory: ${on ? c.green("on") : c.yellow("off")}`);
-}
-export function config(key: string | undefined, rest: string[], base: string = cwd()): number {
-  if (key !== "memory") {
-    out("vf", c.red("Usage: vf config memory <on|off|status>"), { level: "error" });
-    return 2;
-  }
-  const value = rest[0];
-  if (value === undefined || value === "status") {
-    printMemory(base);
-    return 0;
-  }
-  if (value !== "on" && value !== "off") {
-    out("vf", c.red(`Unknown value "${value}". Usage: vf config memory <on|off|status>`), {
-      level: "error",
-    });
-    return 2;
-  }
-  const next: Partial<VibeSettings> = value === "on" ? { memory: true } : { memory: false };
-  writeSettings(base, next);
-  printMemory(base);
-  return 0;
-}
-
-// ponytail: inlined from commands/decision.ts (#390)
-function _flagStr(flags: Record<string, string | boolean>, key: string): string | undefined {
-  const v = flags[key];
-  return typeof v === "string" ? v : undefined;
-}
-export function decision(sub: string | undefined, flags: Record<string, string | boolean>): number {
-  const base = cwd();
-  if (sub === "add") {
-    const title = _flagStr(flags, "title");
-    const context = _flagStr(flags, "context");
-    const dec = _flagStr(flags, "decision");
-    const consequences = _flagStr(flags, "consequences");
-    if (!title || !context || !dec) {
-      out(
-        "vf",
-        c.red(
-          'Usage: vf decision add --title "<t>" --context "<c>" --decision "<d>" [--consequences "<x>"]',
-        ),
-        { level: "error" },
-      );
-      return 2;
-    }
-    const seq = appendDecision(base, title, context, dec, consequences);
-    out("vf", c.green(`+ ADR-${String(seq).padStart(3, "0")} recorded → ${decisionsPath(base)}`));
-    return 0;
-  }
-  if (sub === "list" || sub === undefined) {
-    const path = decisionsPath(base);
-    if (!existsSync(path)) {
-      out("vf", c.dim("No decisions recorded yet. Add one with `vf decision add`."));
-      return 0;
-    }
-    out("vf", readFileSync(path, "utf8").trimEnd());
-    return 0;
-  }
-  out("vf", c.red(`Unknown subcommand: vf decision ${sub}  (use: add | list)`), { level: "error" });
-  return 2;
-}
 
 function openBrowser(url: string): void {
   const cmd =

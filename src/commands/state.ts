@@ -416,7 +416,7 @@ export function isBriefFresh(base: string, nowMs: number, inject: BriefInject = 
   return nowMs - last <= BRIEF_FRESH_MS;
 }
 
-// ponytail: inlined from state-gate.ts (#390)
+// ponytail: inlined from state-gate.ts (#390) — A1 FU #199 shared gate (shape + freshness)
 export function assertCoordBriefReady(
   base: string,
   nowMs: number,
