@@ -2314,6 +2314,7 @@ describe("commands.help branches", () => {
     expect(printCommandHelp("ui")).toBe(0);
     expect(printCommandHelp("hooks")).toBe(0);
     expect(printCommandHelp("verify")).toBe(0);
+    expect(printCommandHelp("pr")).toBe(0);
     expect(printCommandHelp("decision")).toBe(0);
   });
 

@@ -35,6 +35,8 @@ export function printHelp(): number {
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
     ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)
     ${c.cyan("hooks [sub]")}       status | install | emit (write engine hook configs)
+    ${c.cyan("pr [sub]")}           create | queue | merge-when-green — open/queue GitHub PRs (--yes to push)
+    ${c.cyan("decision [sub]")}    add | list — record durable architecture decisions (ADR-lite)
     ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
     ${c.cyan("help, --version")}   show help / version
 
@@ -257,6 +259,20 @@ workflow ledger. Returns nonzero if any gate fails.
 
 ${c.bold("Examples:")}
   vf verify`,
+
+  pr: () => `${c.bold("vf pr")} ${c.dim("<create|queue|merge-when-green> [options]")}
+Open, queue, or auto-merge GitHub pull requests from the active branch.
+
+${c.bold("Subcommands:")}
+  create <issue>       open a PR linked to the given issue reference (e.g. #173)
+  queue                add the current branch to the merge queue
+  merge-when-green     set auto-merge once all checks pass
+
+${c.bold("Examples:")}
+  vf pr create #173
+  vf pr create #173 --yes
+  vf pr queue
+  vf pr merge-when-green`,
 
   decision:
     () => `${c.bold("vf decision")} ${c.dim('[add --title "<t>" --context "<c>" --decision "<d>" [--consequences "<x>"] | list]')}
