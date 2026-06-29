@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { config } from "../src/commands/config.js";
+import { config } from "../src/cli.js";
 import { readSettings, writeSettings } from "../src/settings.js";
 
 function tmpRepo(): string {

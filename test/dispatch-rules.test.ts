@@ -6,7 +6,7 @@ import {
   DISPATCH_HARD_RULES,
   readDispatchPolicyRules,
   resolveDispatchRules,
-} from "../src/dispatch-rules.js";
+} from "../src/adapters/dispatch-prompt.js";
 
 describe("DISPATCH_HARD_RULES", () => {
   test("is a non-empty array of strings", () => {

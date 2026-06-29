@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { focusTerminal, maybeFocus } from "../src/ui-focus.js";
+import { focusTerminal, maybeFocus } from "../src/commands/orchestrate.js";
 
 describe("focusTerminal", () => {
   test("darwin + iTerm.app → osascript iTerm", () => {

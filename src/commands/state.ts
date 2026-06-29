@@ -6,6 +6,7 @@
 // plan changes, merges). A0 ships the surface; A1 (`vf coord` shim) +
 // A2-A14 build on it.
 //
+// size-waiver: #390 — merged from state-frontmatter.ts and state-gate.ts (400-line cap splinters)
 // File: .vibeflow/knowledge/coordinator-brief.md (the canonical example
 // was authored by the coordinator on 2026-06-20 in the
 // orchestrator-first session; see issue #184 for the upstream ACs).
@@ -54,7 +55,56 @@ import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CTX_DIR, type Channel, c, cwd, out } from "./_shared.js";
 import { atomicWriteFileSync } from "./atomic-write.js";
-import { parseFrontmatter, upsertFrontmatter } from "./state-frontmatter.js";
+
+// ponytail: inlined from state-frontmatter.ts (#390)
+/** Parsed brief frontmatter: the body after `--- ... ---` is stripped,
+ *  plus the optional `last-consult` timestamp. */
+export interface ParsedFrontmatter {
+  body: string;
+  lastConsult: string | null;
+}
+export function parseFrontmatter(raw: string): ParsedFrontmatter {
+  if (!raw.startsWith("---")) return { body: raw, lastConsult: null };
+  const end = raw.indexOf("\n---", 3);
+  if (end === -1) return { body: raw, lastConsult: null };
+  const header = raw.slice(3, end).trim();
+  const rest = raw.slice(end + 4).replace(/^[\r\n]+/, "");
+  let lastConsult: string | null = null;
+  for (const line of header.split(/\r?\n/)) {
+    const m = line.match(/^\s*last-consult:\s*(.+?)\s*$/);
+    if (m) lastConsult = m[1] ?? null;
+  }
+  return { body: rest, lastConsult };
+}
+export function upsertFrontmatter(raw: string, kv: Record<string, string>): string {
+  const entries = Object.entries(kv)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n");
+  if (raw.startsWith("---")) {
+    const end = raw.indexOf("\n---", 3);
+    if (end === -1) return `---\n${entries}\n---\n${raw}`;
+    const header = raw.slice(3, end);
+    const rest = raw.slice(end + 4);
+    const updated = _upsertKeys(header, kv);
+    return `---\n${updated}\n---${rest}`;
+  }
+  return `---\n${entries}\n---\n\n${raw}`;
+}
+function _upsertKeys(header: string, kv: Record<string, string>): string {
+  const lines = header.split(/\r?\n/);
+  for (const [k, v] of Object.entries(kv)) {
+    let found = false;
+    for (let i = 0; i < lines.length; i++) {
+      if ((lines[i] ?? "").match(new RegExp(`^\\s*${k}:\\s*`))) {
+        lines[i] = `${k}: ${v}`;
+        found = true;
+        break;
+      }
+    }
+    if (!found) lines.push(`${k}: ${v}`);
+  }
+  return lines.filter((l, i, arr) => !(l.trim() === "" && i === arr.length - 1)).join("\n");
+}
 
 /** Path to the brief file, relative to the project base. */
 export const BRIEF_PATH = `${CTX_DIR}/knowledge/coordinator-brief.md`;
@@ -364,4 +414,46 @@ export function isBriefFresh(base: string, nowMs: number, inject: BriefInject = 
   if (last === null) return false;
   if (last > nowMs) return false; // F0 review #2: future timestamps are stale, not fresh
   return nowMs - last <= BRIEF_FRESH_MS;
+}
+
+// ponytail: inlined from state-gate.ts (#390)
+export function assertCoordBriefReady(
+  base: string,
+  nowMs: number,
+  inject: BriefInject = {},
+  outFn: OutFn = out,
+): number {
+  const _exists = inject.existsSync ?? existsSync;
+  const _read = inject.readFileSync ?? readFileSync;
+  const path = join(base, BRIEF_PATH);
+  if (!_exists(path)) {
+    outFn("vf", c.red(`no brief at ${BRIEF_PATH}. Run \`vf state brief write\` to create one.`), {
+      level: "error",
+    });
+    return 1;
+  }
+  const raw = _read(path, "utf8");
+  const shape = validateBriefShape(raw);
+  if (!shape.ok) {
+    outFn(
+      "vf",
+      c.red(
+        `brief is missing ${shape.missing.length} canonical section(s): ${shape.missing.join(", ")}. Run \`vf state brief write\` to repair, then \`vf state brief --consult\`.`,
+      ),
+      { level: "error" },
+    );
+    return 1;
+  }
+  if (!isBriefFresh(base, nowMs, inject)) {
+    outFn(
+      "vf",
+      c.red(
+        `brief is stale (or missing) at ${BRIEF_PATH}. Run \`vf state brief --consult\` first. (freshness window: ${Math.round(BRIEF_FRESH_MS / 1000)}s)`,
+      ),
+      { level: "error" },
+    );
+    return 1;
+  }
+  outFn("vf", c.dim("brief is ready; --coord gate passed"));
+  return 0;
 }

@@ -67,11 +67,6 @@ export { applyDispatch, mutateUnits, normalizeUnit } from "./commands/dispatch.j
 // keeps working. The body does not call `units` directly — it's a
 // pure CLI entry point.
 export { units } from "./commands/units.js";
-// === Re-export the config subcommand (claude-mem integration) ===
-// `config` (vf config memory on|off|status) lives in src/commands/config.ts.
-// The facade re-exports it so the CLI dispatch keeps the flat
-// `import { config } from "../commands.js"` shape.
-export { config } from "./commands/config.js";
 // === Re-export the orchestrate subcommand (issue #80, phase 6/14) ===
 // `orchestrate` + `resolveMode` / `resolveEngine` / `announceLaunch`
 // (test seams) now live in src/commands/orchestrate.ts. The facade
@@ -220,7 +215,7 @@ export {
 // was over the 400-line cap). The facade re-exports it from here
 // so callers can `import { atomicWriteFileSync } from "commands"`.
 export { atomicWriteFileSync } from "./commands/atomic-write.js";
-export { assertCoordBriefReady } from "./commands/state-gate.js";
+export { assertCoordBriefReady } from "./commands/state.js";
 export type { Brief, BriefInject, OutFn } from "./commands/state.js";
 // === Re-export the coord shim (issue #184 A0 stub, A1 #167+#194 real) ===
 // `vf coord` lives in src/commands/coord.ts. A0 shipped the brief-

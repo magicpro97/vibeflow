@@ -62,9 +62,35 @@ import {
 } from "./_shared.js";
 import type { PreflightFn } from "./_shared.js";
 
+// ponytail: inlined from ui-focus.ts (#390)
+import { spawnSync as _spawnSync } from "node:child_process";
+export function focusTerminal(
+  inject: {
+    platform?: string;
+    run?: (cmd: string, args: string[]) => void;
+    termProgram?: string;
+  } = {},
+): void {
+  if ((inject.platform ?? process.platform) !== "darwin") return;
+  const run =
+    inject.run ??
+    ((c, a) => {
+      _spawnSync(c, a, { stdio: "ignore" });
+    });
+  const app =
+    (inject.termProgram ?? process.env.TERM_PROGRAM) === "iTerm.app" ? "iTerm" : "Terminal";
+  run("osascript", ["-e", `tell application "${app}" to activate`]);
+}
+export function maybeFocus(
+  flags: { focus?: boolean; isTTY?: boolean },
+  inject?: Parameters<typeof focusTerminal>[0],
+): void {
+  if (flags.focus !== true || flags.isTTY !== true) return;
+  focusTerminal(inject);
+}
+
 // Resolver helpers extracted into orchestrate/resolve.ts (#186 PR7).
 import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
-import { maybeFocus } from "../ui-focus.js";
 // The facade imports them for internal use AND re-exports the 5 public
 // test seams (resolveRisk is internal to this file, called by orchestrate()).
 import {
