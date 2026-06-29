@@ -121,10 +121,8 @@ export async function run(
 
   const invocation = engineCommand(engine, inject.probe ?? {});
   if (isUnavailable(invocation)) {
-    out(
-      "vf",
-      c.yellow(`\n${invocation.unavailable}. Dispatch prompt written; install then re-run.`),
-    );
+    out("vf");
+    out("vf", c.yellow(`${invocation.unavailable}. Dispatch prompt written; install then re-run.`));
     return 0;
   }
   if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));

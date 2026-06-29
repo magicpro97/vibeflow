@@ -76,6 +76,7 @@ export function planProtection(
     out(
       "vf",
       c.yellow("! no git — engine edits are irreversible; proceeding without a checkpoint"),
+      { level: "warn" },
     );
     return { refused: false, checkpoint: createCheckpoint(base, runId, { autoWip: false, git }) };
   }
