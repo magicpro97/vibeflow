@@ -13,7 +13,6 @@ import {
   armHooks,
   basename,
   c,
-  collectHookSetup,
   copyPhaseAgentTemplates,
   copyPhaseSkillTemplates,
   copySkillCreator,
@@ -56,6 +55,7 @@ import type {
   WorkflowPhase,
 } from "./_shared.js";
 import { detectToolchain } from "./tools-detect.js";
+import { confirmInput } from "../terminal-prompts/prompts.js";
 
 function renderTemplate(tpl: string, vars: Record<string, string>): string {
   return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
@@ -220,7 +220,9 @@ export async function writeInitArtifacts(params: {
       inject.hookSetup !== undefined
         ? inject.hookSetup
         : process.stdin.isTTY
-          ? await collectHookSetup()
+          ? (await confirmInput("Setup guardrail hooks? (block destructive commands, protect secrets, protect config, flag installs, workspace guard)", true))
+            ? defaultHookConfig()
+            : null
           : defaultHookConfig(); // headless/CI: auto-arm with all-on default
     if (config) {
       out("vf");
