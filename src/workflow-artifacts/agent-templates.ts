@@ -172,3 +172,64 @@ export function copyPhaseAgentTemplates(
 
   return written;
 }
+
+const ENGINE_META: Record<
+  AgentEngine,
+  { name: string; agentDir: string; skillDir: string; instructionFile: string }
+> = {
+  claude: {
+    name: "Claude Code",
+    agentDir: ".claude/agents/",
+    skillDir: ".claude/skills/",
+    instructionFile: "CLAUDE.md",
+  },
+  codex: {
+    name: "Codex",
+    agentDir: ".codex/agents/",
+    skillDir: ".agents/skills/",
+    instructionFile: "AGENTS.md",
+  },
+  copilot: {
+    name: "Copilot",
+    agentDir: ".github/agents/",
+    skillDir: ".github/skills/",
+    instructionFile: ".github/copilot-instructions.md",
+  },
+};
+
+export function copyUsageGuide(
+  base: string,
+  phases: WorkflowPhase[],
+  engines: AgentEngine[],
+  projectName: string,
+): string[] {
+  const templatePath = resolveTemplatePath("guides/VIBEFLOW_USAGE.md");
+  if (!templatePath) return [];
+
+  const phaseListSummary = phases
+    .map((p, i) => `  ${i + 1}. **${p.name}** — ${p.description || ""}`)
+    .join("\n");
+
+  const primary = engines[0] ? ENGINE_META[engines[0]] : ENGINE_META.copilot;
+  const engineTable = engines
+    .map((e) => {
+      const m = ENGINE_META[e];
+      return `| ${m.name} | \`${m.instructionFile}\`, \`${m.agentDir}*\`, \`${m.skillDir}*\` |`;
+    })
+    .join("\n");
+
+  const content = readFileSync(templatePath, "utf8")
+    .replace(/\{\{PROJECT_NAME\}\}/g, projectName)
+    .replace(/\{\{PHASE_COUNT\}\}/g, String(phases.length))
+    .replace(/\{\{PHASE_LIST_SUMMARY\}\}/g, phaseListSummary)
+    .replace(/\{\{ENGINE_NAME\}\}/g, primary.name)
+    .replace(/\{\{ENGINE_AGENT_DIR\}\}/g, primary.agentDir)
+    .replace(/\{\{ENGINE_SKILL_DIR\}\}/g, primary.skillDir)
+    .replace(/\{\{ENGINE_INSTRUCTION_FILE\}\}/g, primary.instructionFile)
+    .replace(/\{\{ENGINE_TABLE\}\}/g, engineTable)
+    .replace(/--\s*$/, "");
+
+  const relPath = "VIBEFLOW.md";
+  writeFileSync(join(base, relPath), content);
+  return [relPath];
+}
