@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.11.0](https://github.com/magicpro97/vibeflow/compare/v0.10.0...v0.11.0) (2026-06-29)
+
+
+### Features
+
+* **dispatch:** write-time scope enforcement + split dispatch-runtime ([#359](https://github.com/magicpro97/vibeflow/issues/359), [#80](https://github.com/magicpro97/vibeflow/issues/80)) ([#385](https://github.com/magicpro97/vibeflow/issues/385)) ([d3c428f](https://github.com/magicpro97/vibeflow/commit/d3c428f8ebb02a7e0e02ed61126d0cf90691d0bc))
+* **hooks:** content-aware secret scan at write boundary ([#357](https://github.com/magicpro97/vibeflow/issues/357)) ([#384](https://github.com/magicpro97/vibeflow/issues/384)) ([2a2d679](https://github.com/magicpro97/vibeflow/commit/2a2d6799580bba3093b9c2b32f32139f065eaed2))
+* **init:** vf init generates Claude Code scaffolding ([b6c5e5a](https://github.com/magicpro97/vibeflow/commit/b6c5e5a29376e556604a9dcc501b288cd31af094))
+
+
+### Bug Fixes
+
+* **confidence:** remove turn-count synthesis + cap self-report ([d5abf21](https://github.com/magicpro97/vibeflow/commit/d5abf219afbce5ddc8c310c6c02f491750587f20)), closes [#347](https://github.com/magicpro97/vibeflow/issues/347) [#349](https://github.com/magicpro97/vibeflow/issues/349)
+* **confidence:** remove turn-count synthesis + cap self-report ([530dd67](https://github.com/magicpro97/vibeflow/commit/530dd6797e6ecb8aeff182e1935ccf0b05f8aa30))
+* **coverage:** empty COVERAGE_WAIVERS — all 12 waived files at 100% line coverage ([#383](https://github.com/magicpro97/vibeflow/issues/383)) ([fada2f4](https://github.com/magicpro97/vibeflow/commit/fada2f47e641d30b1df08cbf4bfd6fc238b16393))
+* **coverage:** normalize gate paths + add tests for waived files ([fbd8d3d](https://github.com/magicpro97/vibeflow/commit/fbd8d3d60cf704da6d7fc65723c3a6bbc269c31d))
+* **coverage:** normalize paths in gate + add tests for waived files ([ec50395](https://github.com/magicpro97/vibeflow/commit/ec50395acd1323b8b02e7fa6e5d2bd4f6cba213b))
+* **coverage:** use DA-entry count for accurate per-file coverage ([ad47732](https://github.com/magicpro97/vibeflow/commit/ad47732803ac5ff7b84415803ef9d3b64dc07836))
+* **release:** verify on ubuntu by default ([#386](https://github.com/magicpro97/vibeflow/issues/386)) ([4e1e58a](https://github.com/magicpro97/vibeflow/commit/4e1e58ae3b719b579dc435896c29edff27e80993))
+* **test:** Windows path separator + EBUSY + codegraph default fixes ([ca376ec](https://github.com/magicpro97/vibeflow/commit/ca376ecf842aa50eb8108375bbffd3dfd9fc9955))
+
+
+### Tests
+
+* **curator-cache:** cover prune path and catch block to 100% line ([5d274ed](https://github.com/magicpro97/vibeflow/commit/5d274edd8953e70be47b58936ad078c737c95602))
+* **ui-focus:** cover default spawnSync path to 100% line ([48589f7](https://github.com/magicpro97/vibeflow/commit/48589f7814d57d26f80572ffaceb4ddda2035818))
+* **validator:** cover readFileSync catch and readdirSync catch via inject seam ([17b3827](https://github.com/magicpro97/vibeflow/commit/17b38272c551404d022b25fe7102a94a8aa3db69))
+
 ## [0.10.0](https://github.com/magicpro97/vibeflow/compare/v0.9.1...v0.10.0) (2026-06-28)
 
 
