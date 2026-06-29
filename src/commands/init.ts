@@ -225,7 +225,8 @@ export async function init(
     out("vf", dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
   }
   if (!dry) {
-    out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+    out("vf");
+    out("vf", c.bold(`Generated ${result.files.length} files from canonical context.`));
     for (const rel of result.backedUp ?? []) {
       out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
