@@ -685,7 +685,6 @@
   </style>
 
   <script>
-    // ponytail: Alpine components registered via Alpine.data() (CSP build requirement)
     // CSRF token (injected server-side via __CSRF__ replacement)
     const CSRF = document.querySelector('meta[name=csrf]').content;
 
@@ -769,7 +768,6 @@
 
     document.addEventListener('alpine:init', () => {
       // Shared store — avoids cross-component _x_dataStack hacks
-      // ponytail: Alpine.store is the idiomatic CSP-safe way to share state
       Alpine.store('vf', {
         state: null,
         stage: 1,

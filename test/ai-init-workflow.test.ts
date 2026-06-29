@@ -688,7 +688,6 @@ describe("Phase 2 engine-scoping invariants", () => {
       (candidate) => candidate.name === "ai-init-skill-curator",
     );
     if (!u) throw new Error("skill-curator not in plan");
-    // ponytail: create .vibeflow/SKILL_INDEX.md so statSync passes on CI
     const dir = mkdtempSync(join(tmpdir(), "vf-scope-"));
     mkdirSync(join(dir, ".vibeflow"), { recursive: true });
     writeFileSync(join(dir, ".vibeflow/SKILL_INDEX.md"), "# fixture\n");

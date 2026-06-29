@@ -35,7 +35,6 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// ponytail: normalize path separators for Windows
 const norm = (s: string) => s.replace(/\\/g, "/");
 const SCRIPT_PATH = join(import.meta.dir, "..", "scripts", "check-file-size.cjs");
 

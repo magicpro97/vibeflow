@@ -1829,7 +1829,6 @@ describe("commands.tools", () => {
   });
 
   test("tools sync is a no-op (never spawns) when no indexable tool is enabled", () => {
-    // ponytail: writeSettings to disable codegraph (default changed to true)
     writeSettings(dir, { tools: { codegraph: false, lsp: false } });
     let spawned = false;
     const code = tools(

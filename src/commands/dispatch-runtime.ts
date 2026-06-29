@@ -267,7 +267,6 @@ export function makeDispatcher(
             }
             return r;
           };
-    // ponytail: try/finally ensures worktree removal even on throw.
     try {
       const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended

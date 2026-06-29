@@ -114,7 +114,6 @@ export async function collectVerifyReportAsync(
       await runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   }
 
-  // ponytail: coverage gate — check existing lcov.info when coverage=true.
   if (inject.coverage) {
     const lcovPath = join(base, "coverage", "lcov.info");
     if (existsSync(lcovPath)) {
@@ -183,7 +182,6 @@ export function verify(
     out("vf", c.red(`✗ ${f}`));
   }
 
-  // ponytail: coverage gate — check existing lcov.info when --coverage.
   if (inject.coverage) {
     const lcovPath = join(base, "coverage", "lcov.info");
     if (existsSync(lcovPath)) {

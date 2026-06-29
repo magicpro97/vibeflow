@@ -75,7 +75,6 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
         const inner = parseEngineSummary(obj.result);
         if (inner && typeof inner.confidence === "number") confidence = inner.confidence;
       }
-      // ponytail: turn-count no longer raises confidence (issue #347).
       // Confidence comes from verifiable evidence only (gate pass, tests run).
       // Turn count may annotate activity level but cannot fabricate certainty.
       const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;

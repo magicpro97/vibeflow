@@ -4,11 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectVerifyReportAsync } from "../src/commands/tools-detect.js";
 
-// ponytail: minimal tests for the extracted seam — no framework, no fixtures.
 // Async-only: the route uses collectVerifyReportAsync (non-blocking); the old
 // sync collectVerifyReport was removed because spawnSync froze Bun.serve.
 
-// ponytail: fake async spawner — resolves with the given exit status.
 const fakeSpawner = (status: number) => () => Promise.resolve({ status });
 
 // Helper: create a temp dir with a package.json containing the given scripts.

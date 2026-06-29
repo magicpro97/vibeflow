@@ -74,7 +74,6 @@ function escapesWorkspace(filePath: string, workspace: string): boolean {
   const target = resolve(workspace, filePath);
   const root = resolve(workspace);
   if (target === root) return false;
-  // ponytail: case-fold for case-insensitive filesystems (macOS default)
   return !target.toLowerCase().startsWith(`${root}${sep}`.toLowerCase());
 }
 

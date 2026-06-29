@@ -106,7 +106,6 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
   return {
     ...unit,
     status: outcome.status,
-    // ponytail: cap self-reported confidence (issue #349).
     // Engine self-grade is an untrusted hint. Confidence can only reach
     // the close threshold when corroborated by a measured gate.
     confidence: Math.min(outcome.confidence, SELF_REPORT_CAP),

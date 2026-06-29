@@ -90,7 +90,6 @@ export async function preflightDelegate(
       quota,
     };
   }
-  // ponytail: "unknown" triggers conservative fallback (allow but warn)
   if (quota.level === "unknown") {
     return {
       allowed: true,

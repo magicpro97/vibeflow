@@ -21,7 +21,6 @@ export type DiffReader = (scope: readonly string[], cwd: string) => string;
 export function defaultDiffReader(scope: readonly string[], cwd: string): string {
   if (scope.length === 0) return "";
   try {
-    // ponytail: spawnSync array args (no shell injection). --porcelain includes untracked (??).
     const r = spawnSync("git", ["status", "--porcelain"], {
       cwd,
       encoding: "utf8",
@@ -41,7 +40,6 @@ interface DiffAnalysis {
 export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysis {
   if (!diff) return { fail: false, reason: "" };
 
-  // ponytail: parse `git status --porcelain` lines. Each is `XY <path>` (XY = 2-char status,
   // e.g. ` M`, `??`, `A `). Strip the 3-char prefix when present; a bare path (test input) is
   // taken as-is. Rename lines `R  old -> new` keep the new path (after `-> `).
   const changedFiles = diff
@@ -55,7 +53,6 @@ export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysi
     });
 
   // Scope creep: files outside unit scope changed.
-  // ponytail: file is in-scope if it IS the scope entry or is under that directory.
   // Strip trailing slash so a scope of "src/a/" matches "src/a/x.ts" (no `src/a//` mismatch).
   const outOfScope = changedFiles.filter(
     (f) =>
@@ -68,7 +65,6 @@ export function analyzeDiff(diff: string, scope: readonly string[]): DiffAnalysi
     return { fail: true, reason: `scope creep: ${outOfScope.join(", ")} outside unit scope` };
   }
 
-  // ponytail: content-safety (secrets/eval/rm-rf) is NOT checked here — that is the hook
   // PreToolUse boundary's job (#357 token-scan + risk.ts scoreCommand). This function owns
   // scope enforcement only. Add content checks here only if the hook boundary is bypassed.
   return { fail: false, reason: "" };
