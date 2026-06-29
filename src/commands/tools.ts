@@ -230,7 +230,7 @@ function toolsToggle(
  * Generic over any tool — drives entirely off the registry's plans, no per-tool branching. */
 function runToolSteps(steps: { cmd: string; args: string[] }[], spawner: StepSpawner): boolean {
   for (const step of steps) {
-    out("vf", c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    out("vf", c.cyan(`▶ ${step.cmd} ${step.args.join(" ")}`));
     const { status } = spawner(step.cmd, step.args);
     if (status !== 0) {
       out("vf", c.red(`✗ step failed (${status}).`), {
@@ -292,7 +292,7 @@ function toolsInstall(
     return 0;
   }
   for (const step of plan.steps) {
-    out("vf", c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    out("vf", c.cyan(`▶ ${step.cmd} ${step.args.join(" ")}`));
     const { status } = spawner(step.cmd, step.args);
     if (status !== 0) {
       out("vf", c.red(`✗ step failed (${status}). Stopping.`), {
