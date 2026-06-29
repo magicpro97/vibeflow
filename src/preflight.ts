@@ -48,7 +48,7 @@ export class ProbeCache {
     this.now = opts.now ?? (() => Date.now());
   }
   private key(engine: string, repo: string, args: readonly string[]): string {
-    return `${engine}|${repo}|${args.join("")}`;
+    return `${engine}|${repo}|${args.join("\u0001")}`;
   }
   get(
     engine: string,
