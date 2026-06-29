@@ -285,10 +285,12 @@ function toolsInstall(
   const plan = TOOLS[name].installPlan(ctx);
   out("vf", c.bold(`Install plan for ${TOOLS[name].title}:`));
   for (const step of plan.steps) {
-    out("vf", `  ${c.cyan(`${step.cmd} ${step.args.join(" ")}`)}\n    ${c.dim(step.description)}`);
+    out("vf", `  ${c.cyan(`${step.cmd} ${step.args.join(" ")}`)}`);
+    out("vf", `    ${c.dim(step.description)}`);
   }
   if (!approved) {
-    out("vf", c.yellow("\nNo changes made. Re-run with --yes to execute the plan."));
+    out("vf");
+    out("vf", c.yellow("No changes made. Re-run with --yes to execute the plan."));
     return 0;
   }
   for (const step of plan.steps) {
