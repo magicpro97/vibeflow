@@ -561,8 +561,8 @@ describe("pr-queue split (#186 PR4 sentinel)", () => {
   const root = join(import.meta.dir, "..");
   const facade = readFileSync(join(root, "src/commands/pr-queue.ts"), "utf8");
   test("facade re-exports moved fns from new modules", () => {
-    expect(facade).toMatch(/from\s*["']\.\/pr-queue\/lock\.js["']/);
-    expect(facade).toMatch(/from\s*["']\.\/pr-queue\/store\.js["']/);
+    expect(facade).toMatch(/from\s*["']\.\/pr-queue-lock\.js["']/);
+    expect(facade).toMatch(/from\s*["']\.\/pr-queue-store\.js["']/);
   });
   test("moved bodies live in the new files, not the facade", () => {
     expect(facade).not.toMatch(/^export\s+function\s+acquireLock\s*\(/m);

@@ -5628,7 +5628,7 @@ describe("orchestrate split (#186 PR7 sentinel)", () => {
     const r = readFileSync("src/commands/orchestrate-resolve.ts", "utf8");
     expect(r).toMatch(/^export function\s+resolveMode/m);
     expect(facade).not.toMatch(/^export function\s+resolveMode/m);
-    expect(facade).toMatch(/from\s*["']\.\/orchestrate\/resolve\.js["']/);
+    expect(facade).toMatch(/from\s*["']\.\/orchestrate-resolve\.js["']/);
   });
   test("orchestrate() stays in the facade", () => {
     expect(facade).toMatch(/^export async function\s+orchestrate/m);

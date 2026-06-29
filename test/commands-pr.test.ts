@@ -574,8 +574,8 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
 describe("pr split (#186 PR5 sentinel)", () => {
   const repoRoot = process.cwd();
   const facade = readFileSync(join(repoRoot, "src/commands/pr.ts"), "utf8");
-  test("facade re-exports moved fns from pr/gh", () => {
-    expect(facade).toMatch(/from\s*["']\.\/pr\/gh\.js["']/);
+  test("facade re-exports moved fns from pr-gh", () => {
+    expect(facade).toMatch(/from\s*["']\.\/pr-gh\.js["']/);
   });
   test("moved bodies live in the new file, not the facade", () => {
     expect(facade).not.toMatch(/^export\s+function\s+verifyGhAccount\s*\(/m);
