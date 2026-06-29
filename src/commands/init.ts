@@ -205,7 +205,7 @@ export async function init(
       // comes from the tools.ts sibling via the _shared barrel bridge
       // (the cycle rule forbids importing it directly).
       syncToolConfigs: (base, settings) => {
-        if (settings) writeToolConfigs(base, settings);
+        if (settings) writeToolConfigs(base, settings, engines);
       },
     });
   } catch (err) {

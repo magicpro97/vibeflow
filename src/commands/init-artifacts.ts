@@ -5,6 +5,7 @@
 // hooks setup, ctx7 auth, find-skills fallback, AI enrichment, and cleanup.
 // Called from init() with every captured local threaded as an explicit param.
 
+import { confirmInput } from "../terminal-prompts/prompts.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -13,7 +14,6 @@ import {
   armHooks,
   basename,
   c,
-  collectHookSetup,
   copyPhaseAgentTemplates,
   copyPhaseSkillTemplates,
   copySkillCreator,
@@ -225,11 +225,16 @@ export async function writeInitArtifacts(params: {
       inject.hookSetup !== undefined
         ? inject.hookSetup
         : process.stdin.isTTY
-          ? await collectHookSetup()
+          ? (await confirmInput(
+              "Setup guardrail hooks? (block destructive commands, protect secrets, protect config, flag installs, workspace guard)",
+              true,
+            ))
+            ? defaultHookConfig()
+            : null
           : defaultHookConfig(); // headless/CI: auto-arm with all-on default
     if (config) {
       out("vf");
-      const armed = armHooks(cwd(), config);
+      const armed = armHooks(cwd(), config, engines);
       out("vf", panel("Hooks", c.bold("armed")));
       out("vf", c.green(`+ ${CTX_DIR}/SETTINGS.json (hooks policy)`));
       for (const rel of armed) out("vf", `${c.green("+")} ${rel}`);

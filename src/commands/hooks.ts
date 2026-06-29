@@ -26,6 +26,7 @@ import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CTX_DIR,
+  type Engine,
   type HookConfig,
   c,
   cwd,
@@ -281,8 +282,8 @@ function mergeClaudeSettings(absPath: string, generated: string): string | null 
  * a PreToolUse hook into a running agent, so only invoke this after an explicit
  * --yes / interactive opt-in.
  */
-export function emitHookFiles(base: string): string[] {
-  const files = engineHookFiles();
+export function emitHookFiles(base: string, engines?: Engine[]): string[] {
+  const files = engineHookFiles(engines);
   const written: string[] = [];
   for (const [rel, content] of Object.entries(files)) {
     const dest = join(base, rel);
@@ -321,9 +322,9 @@ export function emitHookFiles(base: string): string[] {
  * land (and a watching agent hot-reloads its PreToolUse hook), the very next
  * `vf hook` invocation already reads the intended policy — never a stale all-on.
  */
-export function armHooks(base: string, config: HookConfig): string[] {
+export function armHooks(base: string, config: HookConfig, engines?: Engine[]): string[] {
   writeSettings(base, { hooks: config });
-  return emitHookFiles(base);
+  return emitHookFiles(base, engines);
 }
 
 export function hooks(

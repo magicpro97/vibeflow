@@ -103,7 +103,7 @@ export const INIT_ASK_PHASE_LABELS: Record<InitAskPhase, string> = {
   "basic-design": "Basic design",
   "detail-design": "Detail design",
   implement: "Implement",
-  testing: "Testing (UT/IT)",
+  testing: "Testing",
   verify: "Verify",
 };
 
@@ -284,8 +284,8 @@ export async function collectInitAskQuestionnaireData(
     for (const phase of normalizedPhases) {
       write("vf", c.dim(`\n${INIT_ASK_PHASE_LABELS[phase]}`));
       phaseDetails[phase] = {
-        input: await askText("  Input"),
-        output: await askText("  Output"),
+        input: await askText("  Input (File Path, Content,...)"),
+        output: await askText("  Output (File Path, Content,...)"),
       };
     }
     const documentLocation = await askSelectOne(
