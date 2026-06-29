@@ -174,12 +174,11 @@ export function validateBriefShape(raw: string): { ok: boolean; missing: readonl
 /** Top-level `vf state` dispatcher. */
 export function state(
   sub: string | undefined,
-  _rest: string[],
-  _flags: Record<string, string | boolean>,
+  rest: string[],
+  flags: Record<string, string | boolean>,
 ): number {
   if (sub === "brief") {
-    out("vf", c.red("Usage: vf state brief [--consult]"), { level: "error" });
-    return 2;
+    return brief(rest, flags);
   }
   out(
     "vf",
@@ -196,7 +195,6 @@ ${c.bold("Options:")}
 ${c.bold("Examples:")}
   vf state brief
   vf state brief --consult`,
-    { level: "error" },
   );
   return 2;
 }
