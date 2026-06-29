@@ -203,7 +203,7 @@ export function verify(
 
   if (failed > 0) {
     out("vf");
-    out("vf", c.red(`${failed} gate(s) failed.`));
+    out("vf", c.red(`${failed} gate(s) failed.`), { level: "error" });
     if (writeJournal) {
       appendJournal(base, "verify", "fail", [
         `${failed} gate(s) failed`,

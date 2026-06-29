@@ -47,7 +47,8 @@ export function units(
         const gs = (["build", "lint", "test", "review"] as const)
           .map((k) => `${k}:${gateColor(g[k])}`)
           .join(" ");
-        out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}\n  ${gs}`);
+        out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}`);
+        out("vf", `  ${gs}`);
       }
       return 0;
     }
