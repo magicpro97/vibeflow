@@ -17,6 +17,7 @@ import {
   copyPhaseAgentTemplates,
   copyPhaseSkillTemplates,
   copySkillCreator,
+  copyUsageGuide,
   cwd,
   defaultHookConfig,
   ensureContextDir,
@@ -153,6 +154,9 @@ export async function writeInitArtifacts(params: {
         out("vf", c.green(`+ ${rel}`));
       }
       for (const rel of ensureContextDir(cwd())) {
+        out("vf", c.green(`+ ${rel}`));
+      }
+      for (const rel of copyUsageGuide(cwd(), phases, targetEngines, projectName)) {
         out("vf", c.green(`+ ${rel}`));
       }
     }

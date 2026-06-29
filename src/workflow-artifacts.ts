@@ -28,7 +28,7 @@ import type {
   WorkflowArtifactOpts,
 } from "./workflow-artifacts/types.js";
 import { ENGINE_CONFIGS, hasUserDeclaredIO, phaseSlug } from "./workflow-artifacts/types.js";
-export { copyPhaseAgentTemplates } from "./workflow-artifacts/agent-templates.js";
+export { copyPhaseAgentTemplates, copyUsageGuide } from "./workflow-artifacts/agent-templates.js";
 
 // ── Re-exports (public surface, unchanged for the 6 importers) ──────────────
 
