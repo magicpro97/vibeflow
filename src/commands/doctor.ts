@@ -25,20 +25,73 @@ import {
   c,
   cwd,
   existsSync,
-  guardrailOffNote,
   hasCommand,
   isAbsolute,
   isGitRepo,
   join,
-  liveGuardrailArmed,
   out,
   panel,
   preflightAll,
   preflightAllAsync,
+  readFileSync,
   resolve,
   statSync,
   table,
 } from "./_shared.js";
+
+// ponytail: inlined from seams.ts (#391) — guardrail diagnostics
+const GUARDRAIL_SENTINEL = "vibeflow-guardrail";
+function _commandDelegatesToVibeflow(cmd: string): boolean {
+  if (cmd.includes(GUARDRAIL_SENTINEL)) return true;
+  return /dist\/cli\.js"?\s+hook\b/.test(cmd);
+}
+function _hookDelegatesToVibeflow(command: unknown, args: unknown): boolean {
+  if (Array.isArray(args)) {
+    const strs = args.filter((a): a is string => typeof a === "string");
+    if (strs.some((a) => /[\\/]dist[\\/]cli\.js$/.test(a)) && strs.includes("hook")) return true;
+  }
+  return typeof command === "string" && _commandDelegatesToVibeflow(command);
+}
+export function liveGuardrailArmed(base: string): boolean {
+  try {
+    const raw = readFileSync(join(base, ".claude", "settings.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      hooks?: { PreToolUse?: Array<{ hooks?: Array<{ command?: unknown; args?: unknown }> }> };
+    };
+    const pre = parsed.hooks?.PreToolUse;
+    if (
+      Array.isArray(pre) &&
+      pre.some((e) => (e.hooks ?? []).some((h) => _hookDelegatesToVibeflow(h.command, h.args)))
+    )
+      return true;
+  } catch {
+    /* not armed via Claude */
+  }
+  try {
+    const raw = readFileSync(join(base, ".github", "hooks", "copilot.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      hooks?: { preToolUse?: Array<{ bash?: unknown; powershell?: unknown }> };
+    };
+    const pre = parsed.hooks?.preToolUse;
+    if (
+      Array.isArray(pre) &&
+      pre.some(
+        (e) =>
+          _commandDelegatesToVibeflow(typeof e.bash === "string" ? e.bash : "") ||
+          _commandDelegatesToVibeflow(typeof e.powershell === "string" ? e.powershell : ""),
+      )
+    )
+      return true;
+  } catch {
+    /* not armed via Copilot */
+  }
+  return false;
+}
+export function guardrailOffNote(): string {
+  return c.yellow(
+    "live guardrail: OFF — risky tool calls are NOT intercepted. Run `vf hooks emit --yes` to arm the PreToolUse gate.",
+  );
+}
 
 /** Color a readiness level for the doctor table. */
 function readinessMark(level: EngineReadiness["level"]): string {

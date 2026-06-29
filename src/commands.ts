@@ -4,16 +4,9 @@
 // public command + helper lives in src/commands/*.ts and is re-exported
 // below. No value imports remain because no function bodies live here.
 
-// === Re-export test seams + guardrail diagnostics (issue #80, phase 2/14) ===
-// `tipState` + `resetTipStateForTests` + `liveGuardrailArmed` +
-// `guardrailOffNote` live in src/commands/seams.ts. The facade re-exports
-// them so existing callers keep working.
-export {
-  tipState,
-  resetTipStateForTests,
-  liveGuardrailArmed,
-  guardrailOffNote,
-} from "./commands/seams.js";
+// ponytail: seams.ts deleted (#391) — symbols inlined into their natural homes
+export { tipState, resetTipStateForTests } from "./commands/orchestrate.js";
+export { liveGuardrailArmed, guardrailOffNote } from "./commands/doctor.js";
 
 // === Re-export the doctor subcommand + repo detection helpers ===
 // (issue #80, phase 3/14) `doctor`, `detectRepo`, `RepoDetection`,
@@ -213,9 +206,8 @@ export {
   printCoordGatePassed,
 } from "./commands/state.js";
 // F0 review #3: atomic write extracted to its own module (state.ts
-// was over the 400-line cap). The facade re-exports it from here
-// so callers can `import { atomicWriteFileSync } from "commands"`.
-export { atomicWriteFileSync } from "./commands/atomic-write.js";
+// ponytail: atomicWriteFileSync inlined into state.ts (#392)
+export { atomicWriteFileSync } from "./commands/state.js";
 export { assertCoordBriefReady } from "./commands/state.js";
 export type { Brief, BriefInject, OutFn } from "./commands/state.js";
 // === Re-export the coord shim (issue #184 A0 stub, A1 #167+#194 real) ===

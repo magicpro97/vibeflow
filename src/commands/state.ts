@@ -7,6 +7,7 @@
 // A2-A14 build on it.
 //
 // size-waiver: #390 — merged from state-frontmatter.ts and state-gate.ts (400-line cap splinters)
+// size-waiver: #392 — merged from atomic-write.ts (400-line cap splinter)
 // File: .vibeflow/knowledge/coordinator-brief.md (the canonical example
 // was authored by the coordinator on 2026-06-20 in the
 // orchestrator-first session; see issue #184 for the upstream ACs).
@@ -51,10 +52,19 @@
 //   existsSync) accept an `inject` parameter so unit tests can drive
 //   every branch without touching the real .vibeflow/ tree.
 
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { CTX_DIR, type Channel, c, cwd, out } from "./_shared.js";
-import { atomicWriteFileSync } from "./atomic-write.js";
 
 // ponytail: inlined from state-frontmatter.ts (#390)
 /** Parsed brief frontmatter: the body after `--- ... ---` is stripped,
@@ -456,4 +466,55 @@ export function assertCoordBriefReady(
   }
   outFn("vf", c.dim("brief is ready; --coord gate passed"));
   return 0;
+}
+
+// ponytail: inlined from atomic-write.ts (#392)
+/** Atomic write of a file. Writes to a temp file, fsyncs, then
+ *  renames over the destination. POSIX rename is atomic; a SIGKILL
+ *  between truncate and the new bytes leaves the OLD file intact.
+ *  Pure stdlib (`node:fs`), no new deps. */
+export function atomicWriteFileSync(
+  path: string,
+  data: string,
+  inject: {
+    openSync?: typeof openSync;
+    writeSync?: (fd: number, data: string) => number;
+    closeSync?: typeof closeSync;
+    fsyncSync?: typeof fsyncSync;
+    renameSync?: typeof renameSync;
+    unlinkSync?: typeof unlinkSync;
+    writeFileSync?: (p: string, data: string, opts?: { mode?: number }) => void;
+    pid?: number;
+  } = {},
+): void {
+  const _open = inject.openSync ?? openSync;
+  const _writeFile = inject.writeFileSync ?? writeFileSync;
+  const _writeFd = inject.writeSync;
+  const _close = inject.closeSync ?? closeSync;
+  const _fsync = inject.fsyncSync ?? fsyncSync;
+  const _rename = inject.renameSync ?? renameSync;
+  const _unlink = inject.unlinkSync ?? unlinkSync;
+  const pid = inject.pid ?? process.pid;
+  const tmp = `${path}.tmp.${pid}`;
+  try {
+    _writeFile(tmp, data, { mode: 0o600 });
+    if (_writeFd) {
+      const fd = _open(tmp, "a");
+      _writeFd(fd, data);
+      _fsync(fd);
+      _close(fd);
+    } else {
+      const fd = _open(tmp, "r+");
+      _fsync(fd);
+      _close(fd);
+    }
+    _rename(tmp, path);
+  } catch (err) {
+    try {
+      _unlink(tmp);
+    } catch {
+      /* best-effort cleanup */
+    }
+    throw err;
+  }
 }

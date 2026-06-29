@@ -69,14 +69,8 @@ export * from "../workflow/lifecycle.js";
 export * from "../workflow/merge.js";
 export * from "../logbus.js";
 
-// === Test seams + guardrail diagnostics re-exported from seams.ts ===
-// (issue #80, phase 3/14) The doctor subcommand uses liveGuardrailArmed
-// and guardrailOffNote. The cycle rule forbids doctor.ts from importing
-// from a sibling (./seams.js), so we re-export the two names through
-// this barrel. seam.ts is the only sibling allowed to be referenced
-// from here because the facade pattern is the *only* legitimate way to
-// expose a sibling to other subcommand files.
-export { liveGuardrailArmed, guardrailOffNote } from "./seams.js";
+// ponytail: liveGuardrailArmed/guardrailOffNote inlined into doctor.ts (#391)
+export { liveGuardrailArmed, guardrailOffNote } from "./doctor.js";
 
 // === doctor subcommand helpers re-exported from doctor.ts ===
 // (issue #80, phase 4/14) The init subcommand uses resolveRepo to
@@ -162,12 +156,8 @@ export type {
 // (re-exported above from dispatch.ts) is the parent operation.
 export { normalizeUnit } from "./dispatch.js";
 
-// === test seams re-exported from seams.ts ===
-// (issue #80, phase 6/14) The orchestrate subcommand uses
-// tipState to gate the "watch live" tip so it prints at most
-// once per process. The cycle rule forbids orchestrate.ts from
-// importing tipState from seams.ts directly.
-export { tipState } from "./seams.js";
+// ponytail: tipState inlined into orchestrate.ts (#391)
+export { tipState } from "./orchestrate.js";
 
 // === orchestrate subcommand helpers re-exported from orchestrate.ts ===
 // (issue #80, phase 6.5/14) The `run` subcommand (in
@@ -240,12 +230,9 @@ export {
 } from "./state.js";
 // F0/A1 #199: the shared gate (shape + freshness) lives in its own
 // module to keep state.ts under the 400-line cap. Re-exported here
-// so callers can `import { assertCoordBriefReady } from "commands"`.
 export { assertCoordBriefReady } from "./state.js";
-// F0 review #3: atomic write is in its own module (atomic-write.ts).
-// state.ts re-exports the frontmatter helpers; atomic write is a generic
-// file-IO helper that doesn't belong to the state cluster.
-export { atomicWriteFileSync } from "./atomic-write.js";
+// ponytail: atomicWriteFileSync inlined into state.ts (#392)
+export { atomicWriteFileSync } from "./state.js";
 export type { Brief, BriefInject, OutFn } from "./state.js";
 // === Re-export the coord shim (issue #184 A0 stub, A1 #167+#194 real) ===
 // `coord.ts` is the A0 stub (brief freshness only) plus the A1 real

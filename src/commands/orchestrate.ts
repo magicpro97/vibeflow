@@ -57,10 +57,15 @@ import {
   readState,
   recomputeTotals,
   thresholdFor,
-  tipState,
   writeState,
 } from "./_shared.js";
 import type { PreflightFn } from "./_shared.js";
+
+// ponytail: inlined from seams.ts (#391) — once-only tip state
+export const tipState = { shown: false };
+export function resetTipStateForTests(): void {
+  tipState.shown = false;
+}
 
 // ponytail: inlined from ui-focus.ts (#390)
 import { spawnSync as _spawnSync } from "node:child_process";
