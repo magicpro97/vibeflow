@@ -382,7 +382,7 @@ describe("skills/sync.syncSkillMirrors (PR129 coverage shim)", () => {
 
 describe("terminal-prompts.textInput (PR129 coverage shim)", () => {
   test("textInput calls rl.question and returns the answer (line 155)", async () => {
-    const { textInput } = await import("../src/terminal-prompts.js");
+    const { textInput } = await import("../src/terminal-prompts/prompts.js");
     let questionSeen: string | null = null;
     const fakeCreateInterface = (_opts: unknown) => ({
       question: (q: string, cb: (a: string) => void) => {

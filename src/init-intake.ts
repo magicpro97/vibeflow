@@ -1,15 +1,10 @@
-import { defaultContext } from "./adapters.js";
+import { defaultContext } from "./adapters/context-builders.js";
 import type { IntakeAnswers } from "./commands.js";
 import { ENGINES, c, cwd, readState } from "./core.js";
 import { out } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
-import {
-  confirmInput,
-  isCancellation,
-  selectMany,
-  selectOne,
-  textInput,
-} from "./terminal-prompts.js";
+import { confirmInput, selectMany, selectOne, textInput } from "./terminal-prompts/prompts.js";
+import { isCancellation } from "./terminal-prompts/utils.js";
 import { panel } from "./ui.js";
 import type { WorkflowPhase } from "./workflow-artifacts.js";
 

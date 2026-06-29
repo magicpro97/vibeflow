@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentFiles } from "../src/adapters.js";
+import { agentFiles } from "../src/adapters/agent-files.js";
 import { detectRolesForRepo } from "../src/agents/detect-roles.js";
 import type { RoleName } from "../src/agents/role-templates.js";
 

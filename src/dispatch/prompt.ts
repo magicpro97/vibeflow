@@ -1,5 +1,6 @@
-import type { ProjectContext, UnitBrief } from "../adapters.js";
-import { dispatchPrompt } from "../adapters.js";
+import type { ProjectContext } from "../adapters/context-builders.js";
+import type { UnitBrief } from "../adapters/dispatch-prompt.js";
+import { dispatchPrompt } from "../adapters/dispatch-prompt.js";
 import type { Engine } from "../core.js";
 import type { EngineSummary } from "./types.js";
 

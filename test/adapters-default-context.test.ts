@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultContext } from "../src/adapters.js";
+import { defaultContext } from "../src/adapters/context-builders.js";
 import { VF_WORKFLOW, VF_WORKFLOW_SLIM } from "../src/adapters/context-builders.js";
 import { CTX_DIR } from "../src/core.js";
 

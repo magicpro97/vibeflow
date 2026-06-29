@@ -1,23 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { cwd } from "node:process";
+import { confirmInput, selectMany, selectOne, textInput } from "../src/terminal-prompts/prompts.js";
 import {
   PROMPT_CANCEL_MESSAGES,
   type TerminalDeps,
   clampInput,
-  confirmInput,
   isCancellation,
-  selectMany,
-  selectOne,
-  textInput,
-} from "../src/terminal-prompts.js";
+} from "../src/terminal-prompts/utils.js";
 
 const repoRoot = cwd();
 
 async function runPrompt(expression: string, input: string): Promise<unknown> {
   const script = `
     import { textInput, confirmInput, selectOne, selectMany } from ${JSON.stringify(
-      join(repoRoot, "src/terminal-prompts.ts"),
+      join(repoRoot, "src/terminal-prompts/prompts.ts"),
     )};
     const result = await (${expression});
     process.stdout.write("\\n__RESULT__" + JSON.stringify(result));
@@ -46,7 +43,7 @@ async function runPrompt(expression: string, input: string): Promise<unknown> {
 async function runPromptWithChunks(expression: string, chunks: string[]): Promise<unknown> {
   const script = `
     import { textInput, confirmInput, selectOne, selectMany } from ${JSON.stringify(
-      join(repoRoot, "src/terminal-prompts.ts"),
+      join(repoRoot, "src/terminal-prompts/prompts.ts"),
     )};
     const result = await (${expression});
     process.stdout.write("\\n__RESULT__" + JSON.stringify(result));

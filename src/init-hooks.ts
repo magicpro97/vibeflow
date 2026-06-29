@@ -18,11 +18,11 @@ import { out } from "./logbus.js";
 import {
   type SelectOptions,
   confirmInput,
-  isCancellation,
   selectMany,
   selectOne,
   textInput,
-} from "./terminal-prompts.js";
+} from "./terminal-prompts/prompts.js";
+import { isCancellation } from "./terminal-prompts/utils.js";
 import { panel } from "./ui.js";
 
 /** Test seam: prompt + output deps, mirroring init-intake's InitAskDeps. */

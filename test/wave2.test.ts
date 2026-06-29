@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultContext } from "../src/adapters.js";
+import { defaultContext } from "../src/adapters/context-builders.js";
 import type { WorkflowState } from "../src/core.js";
 import {
   buildEnginePrompt,

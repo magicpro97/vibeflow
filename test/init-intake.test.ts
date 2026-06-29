@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { SelectOptions } from "../src/terminal-prompts.js";
+import type { SelectOptions } from "../src/terminal-prompts/prompts.js";
 import { installTtyMock, restoreAllTtyMocks } from "./helpers/tty-mock.js";
 
 afterEach(() => {

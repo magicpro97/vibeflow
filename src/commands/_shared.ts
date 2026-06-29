@@ -23,7 +23,11 @@ export { spawnSync, spawn } from "node:child_process";
 export { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 export { basename, isAbsolute, join, resolve } from "node:path";
 
-export * from "../adapters.js";
+export * from "../adapters/agent-files.js";
+export * from "../adapters/canonical-files.js";
+export * from "../adapters/context-builders.js";
+export * from "../adapters/dispatch-prompt.js";
+export * from "../adapters/engine-files.js";
 export * from "../agents/detect-roles.js";
 export * from "../agents/render.js";
 export * from "../core.js";

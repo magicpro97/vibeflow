@@ -11,7 +11,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalFiles, defaultContext, dispatchPrompt, engineFiles } from "../src/adapters.js";
+import { canonicalFiles } from "../src/adapters/canonical-files.js";
+import { defaultContext } from "../src/adapters/context-builders.js";
+import { dispatchPrompt } from "../src/adapters/dispatch-prompt.js";
+import { engineFiles } from "../src/adapters/engine-files.js";
 import {
   applyIntake,
   detectRepo,

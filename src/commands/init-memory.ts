@@ -17,7 +17,7 @@ import {
   appendMemoryGuide as realAppendMemoryGuide,
   ensureInstalledForEngines as realEnsureInstalledForEngines,
 } from "../memory.js";
-import { confirmInput } from "../terminal-prompts.js";
+import { confirmInput } from "../terminal-prompts/prompts.js";
 import { type Engine, c, out, writeSettings } from "./_shared.js";
 
 /** Injection seams so unit tests drive Phase 1.5 without a TTY or a real install. */
