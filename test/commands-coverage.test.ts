@@ -2366,7 +2366,7 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     // The test asserts that BOTH the source file and the facade
     // re-export reference DEFAULT_ENGINE — never a hardcoded string.
     const src = readFileSync("src/commands.ts", "utf8");
-    const resolveSrc = readFileSync("src/commands/orchestrate/resolve.ts", "utf8");
+    const resolveSrc = readFileSync("src/commands/orchestrate-resolve.ts", "utf8");
     // The facade must re-export resolveEngine (for back-compat callers).
     expect(src).toMatch(/export \{[^}]*resolveEngine[^}]*\}/);
     // The source-of-truth definition must reference DEFAULT_ENGINE
@@ -5613,7 +5613,7 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
 describe("init split (#186 PR6 sentinel)", () => {
   const facade = readFileSync("src/commands/init.ts", "utf8");
   test("artifact phase extracted to init/artifacts.ts", () => {
-    const art = readFileSync("src/commands/init/artifacts.ts", "utf8");
+    const art = readFileSync("src/commands/init-artifacts.ts", "utf8");
     expect(art).toMatch(/^export async function\s+writeInitArtifacts/m);
     expect(facade).toMatch(/writeInitArtifacts/);
   });
@@ -5625,7 +5625,7 @@ describe("init split (#186 PR6 sentinel)", () => {
 describe("orchestrate split (#186 PR7 sentinel)", () => {
   const facade = readFileSync("src/commands/orchestrate.ts", "utf8");
   test("resolvers extracted to orchestrate/resolve.ts", () => {
-    const r = readFileSync("src/commands/orchestrate/resolve.ts", "utf8");
+    const r = readFileSync("src/commands/orchestrate-resolve.ts", "utf8");
     expect(r).toMatch(/^export function\s+resolveMode/m);
     expect(facade).not.toMatch(/^export function\s+resolveMode/m);
     expect(facade).toMatch(/from\s*["']\.\/orchestrate\/resolve\.js["']/);

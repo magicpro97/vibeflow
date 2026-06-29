@@ -24,6 +24,105 @@ export type {
 export { probeInvocation } from "./preflight/probe.js";
 export { checkEngineAsync, runAttempts };
 
+// ponytail: inlined from probe-cache.ts (#393)
+const DEFAULT_TTL_MS = 60_000;
+const SHORT_TTL_MS = 5_000;
+type CacheClass = "stable" | "short";
+interface CacheEntry {
+  result: EngineReadiness;
+  expiresAt: number;
+}
+export interface ProbeCacheOpts {
+  ttlMs?: number;
+  shortTtlMs?: number;
+  now?: () => number;
+}
+export class ProbeCache {
+  private map = new Map<string, CacheEntry>();
+  private readonly ttlMs: number;
+  private readonly shortTtlMs: number;
+  private readonly now: () => number;
+  constructor(opts: ProbeCacheOpts = {}) {
+    this.ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
+    this.shortTtlMs = opts.shortTtlMs ?? SHORT_TTL_MS;
+    this.now = opts.now ?? (() => Date.now());
+  }
+  private key(engine: string, repo: string, args: readonly string[]): string {
+    return `${engine}|${repo}|${args.join("")}`;
+  }
+  get(
+    engine: string,
+    repo: string,
+    args: readonly string[],
+    at?: Date,
+  ): EngineReadiness | undefined {
+    const k = this.key(engine, repo, args);
+    const entry = this.map.get(k);
+    if (!entry) return undefined;
+    const t = at ? at.getTime() : this.now();
+    if (t >= entry.expiresAt) {
+      this.map.delete(k);
+      return undefined;
+    }
+    return entry.result;
+  }
+  set(
+    engine: string,
+    repo: string,
+    args: readonly string[],
+    result: EngineReadiness,
+    at?: Date,
+    class_: CacheClass = "stable",
+  ): void {
+    const t = at ? at.getTime() : this.now();
+    this.map.set(this.key(engine, repo, args), {
+      result,
+      expiresAt: t + (class_ === "short" ? this.shortTtlMs : this.ttlMs),
+    });
+  }
+  invalidate(engine: string): void {
+    for (const k of [...this.map.keys()]) {
+      if (k.startsWith(`${engine}|`)) this.map.delete(k);
+    }
+  }
+  invalidateAll(): void {
+    this.map.clear();
+  }
+  size(): number {
+    return this.map.size;
+  }
+}
+let _sharedCache: ProbeCache | undefined;
+export function getSharedCache(): ProbeCache {
+  if (!_sharedCache) _sharedCache = new ProbeCache();
+  return _sharedCache;
+}
+export function setSharedCache(c: ProbeCache | undefined): void {
+  _sharedCache = c;
+}
+export function getCachedProbe(
+  engine: string,
+  repo: string,
+  args: readonly string[],
+): EngineReadiness | undefined {
+  return getSharedCache().get(engine, repo, args);
+}
+export function setCachedProbe(
+  engine: string,
+  repo: string,
+  args: readonly string[],
+  result: EngineReadiness,
+): void {
+  const class_: CacheClass = result.level === "probe-failed" ? "short" : "stable";
+  getSharedCache().set(engine, repo, args, result, undefined, class_);
+}
+export function invalidateProbe(engine: string): void {
+  getSharedCache().invalidate(engine);
+}
+export function invalidateAllProbes(): void {
+  getSharedCache().invalidateAll();
+}
+
 /**
  * Staged, short-circuiting readiness check: presence → auth → live probe. Each stage that fails
  * stops the chain with the most actionable level. Never throws — a misbehaving spawner is caught.
@@ -44,7 +143,6 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
 
   // Cache lookup: short-circuit when fresh
   if (!opts.skipCache) {
-    const { getSharedCache } = require("./probe-cache.js") as typeof import("./probe-cache.js");
     const cache = getSharedCache();
     const cacheRepo = opts.cacheKey ?? process.cwd();
     const hit = cache.get(engine, cacheRepo, [], undefined);
@@ -52,7 +150,6 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
   }
 
   const cmd = engineBinary(engine);
-  // Issue #87: bare-name `has` is insufficient on Windows (npm shims).
   const usesDefaultHas = opts.has === undefined;
   if (!has(cmd)) {
     const shimCheck = usesDefaultHas ? resolveEngineBinary(cmd) : undefined;
@@ -62,8 +159,6 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
       return r;
     }
   }
-  // Issue #87: resolve shim-aware name so the probe spawner is invoked
-  // with the actual executable on Windows.
   const effectiveCmd = engineBinaryResolved(engine);
   const resolvedCmd =
     opts.spawner !== undefined ? effectiveCmd : (resolveCommand(effectiveCmd) ?? effectiveCmd);
@@ -98,7 +193,6 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
 
 function writeToCache(engine: Engine, opts: PreflightOpts, r: EngineReadiness): void {
   if (opts.skipCache) return;
-  const { setCachedProbe } = require("./probe-cache.js") as typeof import("./probe-cache.js");
   const repo = opts.cacheKey ?? process.cwd();
   setCachedProbe(engine, repo, [], r);
 }

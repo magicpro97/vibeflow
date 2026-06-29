@@ -170,7 +170,7 @@ export async function doctor(
   const probe = Boolean(flags.probe);
   const refresh = Boolean(flags.refresh);
   if (refresh) {
-    const { invalidateAllProbes } = await import("../probe-cache.js");
+    const { invalidateAllProbes } = await import("../preflight.js");
     invalidateAllProbes();
     out("vf", c.dim("probe cache cleared"));
   }

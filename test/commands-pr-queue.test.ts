@@ -566,7 +566,7 @@ describe("pr-queue split (#186 PR4 sentinel)", () => {
   });
   test("moved bodies live in the new files, not the facade", () => {
     expect(facade).not.toMatch(/^export\s+function\s+acquireLock\s*\(/m);
-    const lock = readFileSync(join(root, "src/commands/pr-queue/lock.ts"), "utf8");
+    const lock = readFileSync(join(root, "src/commands/pr-queue-lock.ts"), "utf8");
     expect(lock).toMatch(/^export\s+function\s+acquireLock\s*\(/m);
   });
   test("size-waiver removed", () => {

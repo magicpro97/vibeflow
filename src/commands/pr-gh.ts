@@ -1,4 +1,4 @@
-// src/commands/pr/gh.ts
+// src/commands/pr-gh.ts
 //
 // Gh-command helpers extracted from pr.ts (#186 PR5).
 // Each function accepts an inject bag so tests can swap shell commands.

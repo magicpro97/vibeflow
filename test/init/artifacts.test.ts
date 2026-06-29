@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { seedClaudeCode } from "../../src/commands/init/artifacts.js";
+import { seedClaudeCode } from "../../src/commands/init-artifacts.js";
 
 function tmpRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "vf-artifacts-"));

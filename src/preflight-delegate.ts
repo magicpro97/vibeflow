@@ -1,8 +1,7 @@
 import type { Engine } from "./core.js";
 import { ENGINES } from "./core.js";
 import { type QuotaStatus, checkEngineQuota } from "./engine-quota.js";
-import { type EngineReadiness, checkEngine } from "./preflight.js";
-import type { ProbeCache, getSharedCache } from "./probe-cache.js";
+import { type EngineReadiness, type ProbeCache, checkEngine, getSharedCache } from "./preflight.js";
 
 export type DelegateLevel =
   | "ready"

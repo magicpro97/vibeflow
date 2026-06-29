@@ -579,7 +579,7 @@ describe("pr split (#186 PR5 sentinel)", () => {
   });
   test("moved bodies live in the new file, not the facade", () => {
     expect(facade).not.toMatch(/^export\s+function\s+verifyGhAccount\s*\(/m);
-    const gh = readFileSync(join(repoRoot, "src/commands/pr/gh.ts"), "utf8");
+    const gh = readFileSync(join(repoRoot, "src/commands/pr-gh.ts"), "utf8");
     expect(gh).toMatch(/^export\s+function\s+verifyGhAccount\s*\(/m);
   });
   test("size-waiver removed", () => {

@@ -1,4 +1,4 @@
-// src/commands/init/artifacts.ts
+// src/commands/init-artifacts.ts
 //
 // Extracted from src/commands/init.ts (issue #186, PR6). Contains the
 // second half of init(): workflow-artifact generation, tool provisioning,
@@ -39,7 +39,7 @@ import {
   writeFileSafe,
   writeSettings,
   writeToolConfigs,
-} from "../_shared.js";
+} from "./_shared.js";
 import type {
   AgentEngine,
   ApplyIntakeResult,
@@ -54,8 +54,8 @@ import type {
   ToolName,
   UnitDispatcher,
   WorkflowPhase,
-} from "../_shared.js";
-import { detectToolchain } from "../tools-detect.js";
+} from "./_shared.js";
+import { detectToolchain } from "./tools-detect.js";
 
 function renderTemplate(tpl: string, vars: Record<string, string>): string {
   return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");

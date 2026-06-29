@@ -5,7 +5,7 @@ import {
   invalidateProbe,
   setCachedProbe,
   setSharedCache,
-} from "../src/probe-cache";
+} from "../src/preflight.js";
 
 describe("ProbeCache", () => {
   test("returns undefined for missing key", () => {

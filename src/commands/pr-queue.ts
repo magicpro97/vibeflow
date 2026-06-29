@@ -7,11 +7,11 @@
 // `prQueue` dispatcher + `prQueueList` internal.
 
 import { c, out } from "./_shared.js";
-import { addEntry, claimEntry, listFree, readQueue, releaseClaim } from "./pr-queue/store.js";
-import type { QueueEntry } from "./pr-queue/store.js";
+import { addEntry, claimEntry, listFree, readQueue, releaseClaim } from "./pr-queue-store.js";
+import type { QueueEntry } from "./pr-queue-store.js";
 
 // Re-export the lock module surface.
-export { acquireLock, LOCK_DIR, releaseLock } from "./pr-queue/lock.js";
+export { acquireLock, LOCK_DIR, releaseLock } from "./pr-queue-lock.js";
 
 // Re-export the store module surface.
 export {
@@ -21,8 +21,8 @@ export {
   listFree,
   readQueue,
   releaseClaim,
-} from "./pr-queue/store.js";
-export type { QueueEntry } from "./pr-queue/store.js";
+} from "./pr-queue-store.js";
+export type { QueueEntry } from "./pr-queue-store.js";
 
 /** Sentinel exit codes for `vf pr queue` (mirrors A7). */
 export const EXIT_OK = 0;

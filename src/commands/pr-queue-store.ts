@@ -1,11 +1,11 @@
-// src/commands/pr-queue/store.ts
+// src/commands/pr-queue-store.ts
 // Single-writer JSONL queue for "which PR to merge next".
 // File format: JSONL at `.vibeflow/.merge-queue.jsonl` (one PR per line).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { cwd } from "../_shared.js";
-import { acquireLock, releaseLock } from "./lock.js";
+import { cwd } from "./_shared.js";
+import { acquireLock, releaseLock } from "./pr-queue-lock.js";
 
 /** Queue file location. */
 export const QUEUE_PATH = ".vibeflow/.merge-queue.jsonl";

@@ -1,11 +1,11 @@
-// src/commands/pr-queue/lock.ts
+// src/commands/pr-queue-lock.ts
 // Lock primitives for the PR merge queue.
 // Uses mkdirSync atomicity: two concurrent mkdirSync(lock) calls
 // produce at most one success on POSIX.
 
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { cwd } from "../_shared.js";
+import { cwd } from "./_shared.js";
 
 /** Lock dir (POSIX mkdirSync is atomic, so two concurrent `mkdirSync`
  *  calls on the same path produce exactly one success). */

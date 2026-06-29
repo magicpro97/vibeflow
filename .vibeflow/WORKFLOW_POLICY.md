@@ -29,6 +29,12 @@ Drive every task through this loop instead of free-handing it:
 
 **Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (`vf skills` to list/resolve). Read curated guidance in .vibeflow/knowledge/ before knowledge-heavy work, and pull external library docs on demand with `vf discover docs <lib> --yes`. After acting, record what you did or learned: append an entry to `.vibeflow/knowledge/log.md` (`## [YYYY-MM-DD] note | <title>`, append-only) and keep `.vibeflow/knowledge/index.md` current.
 
+**Learn from this run so the next one is smarter.** The point of the journal is reuse, not paperwork:
+- A reusable procedure you discovered, or a mistake you had to work around → capture it as a skill: `vf skills draft <name>` (lands as `status: draft` for review — never auto-installed).
+- A non-obvious architecture/process decision → `vf decision add --title "…" --context "…" --decision "…"` (durable in `.vibeflow/knowledge/decisions.md`, separate from the noisy journal).
+- Routine progress → the `knowledge/log.md` entry above.
+At the end of `vf orchestrate` (and `vf verify --journal`), recurring patterns are auto-crystallized into a DRAFT skill — review the untracked file and `git add` it if useful.
+
 **Tools.** `vf tools enable codegraph|lsp` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.
 
 **When `vf verify` fails.** A red gate is investigated, not worked around. (1) Read the `✗` lines — each names a failing gate (typecheck/lint/test) or a policy gate (`confidence<1`, `no-evidence`, scope overlap). (2) Fix the root cause. (3) For a unit stuck below the bar: record evidence (`vf units evidence <u> --add "<proof>"`) then close it (`vf units update <u> --status done --confidence 1`). (4) Re-run `vf verify`. `vf verify` is read-only by default; pass `--journal` only if you want the run appended to the work journal.

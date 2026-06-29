@@ -53,7 +53,7 @@ import type {
   UnitDispatcher,
 } from "./_shared.js";
 
-import { writeInitArtifacts } from "./init/artifacts.js";
+import { writeInitArtifacts } from "./init-artifacts.js";
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
 // Test seam: exported so unit tests can verify the readiness listing

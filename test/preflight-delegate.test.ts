@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { preflightDelegate } from "../src/preflight-delegate";
 import type { EngineReadiness } from "../src/preflight.js";
-import { ProbeCache } from "../src/probe-cache";
+import { ProbeCache } from "../src/preflight.js";
 
 const READY: EngineReadiness = {
   level: "ready",

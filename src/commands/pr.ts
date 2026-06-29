@@ -13,8 +13,6 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { c, out } from "./_shared.js";
-import { mergeWhenGreen } from "./pr-merge-when-green.js";
-import { prQueue } from "./pr-queue.js";
 import {
   EXIT_ACCOUNT,
   EXIT_DCO,
@@ -28,7 +26,9 @@ import {
   findCommitsLackingDco,
   pushBranch,
   verifyGhAccount,
-} from "./pr/gh.js";
+} from "./pr-gh.js";
+import { mergeWhenGreen } from "./pr-merge-when-green.js";
+import { prQueue } from "./pr-queue.js";
 
 export {
   verifyGhAccount,
@@ -44,7 +44,7 @@ export {
   EXIT_DCO,
   EXIT_PUSH,
   EXIT_PR_CREATE,
-} from "./pr/gh.js";
+} from "./pr-gh.js";
 
 /** The PR body template. The operator can override via --body-file
  *  but the default follows the MagicPro97 convention. */

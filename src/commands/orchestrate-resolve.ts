@@ -1,4 +1,4 @@
-// src/commands/orchestrate/resolve.ts
+// src/commands/orchestrate-resolve.ts
 //
 // Pure resolver helpers extracted from orchestrate.ts (#186 PR7).
 // The hardened orchestrate() dispatcher stays in the facade.
@@ -19,7 +19,7 @@
 // - engineReady: the stronger pre-dispatch gate. A live preflight
 //   probe of the single chosen engine.
 
-import type { Engine, EngineReadiness, PreflightFn, RiskClass } from "../_shared.js";
+import type { Engine, EngineReadiness, PreflightFn, RiskClass } from "./_shared.js";
 import {
   DEFAULT_ENGINE,
   ENGINES,
@@ -29,7 +29,7 @@ import {
   isUnavailable,
   out,
   preflightAll,
-} from "../_shared.js";
+} from "./_shared.js";
 
 export function resolveMode(flags: Record<string, string | boolean>): "cli" | "bridge" | "dry" {
   if (flags.yes) return "cli";

@@ -105,7 +105,7 @@ import {
   resolveEngine,
   resolveMode,
   resolveRisk,
-} from "./orchestrate/resolve.js";
+} from "./orchestrate-resolve.js";
 
 // Re-export the test seams so the 2 existing importers are unchanged.
 export {
@@ -114,7 +114,7 @@ export {
   readyStub,
   resolveEngine,
   resolveMode,
-} from "./orchestrate/resolve.js";
+} from "./orchestrate-resolve.js";
 export async function orchestrate(
   flags: Record<string, string | boolean>,
   base: string = cwd(),

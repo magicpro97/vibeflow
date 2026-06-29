@@ -866,7 +866,7 @@ describe("doctor --probe surfaces probe failures", () => {
   });
 
   test("doctor with --refresh clears the probe cache (line 178-180)", async () => {
-    const { getSharedCache } = await import("../src/probe-cache.js");
+    const { getSharedCache } = await import("../src/preflight.js");
     getSharedCache().set("claude", "/repo", [], {
       engine: "claude",
       level: "ready",
