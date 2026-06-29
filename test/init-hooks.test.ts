@@ -141,6 +141,26 @@ describe("collectHookSetup", () => {
         throw new Error("disk on fire");
       }) as HookSetupDeps["selectMany"],
     });
-    await expect(collectHookSetup(deps)).rejects.toThrow("disk on fire");
+    expect(collectHookSetup(deps)).rejects.toThrow("disk on fire");
+  });
+
+  test("user selects 'Skip hooks setup' returns null", async () => {
+    const { deps } = makeDeps({
+      selectOne: (async (q: string, _items: string[], opts?: { defaultValue?: string }) =>
+        q === "Hooks setup"
+          ? "Skip hooks setup"
+          : (opts?.defaultValue ?? "")) as HookSetupDeps["selectOne"],
+    });
+    expect(await collectHookSetup(deps)).toBeNull();
+  });
+
+  test("user selects 'Set up guardrail hooks' continues to template selection", async () => {
+    const { deps } = makeDeps({
+      selectOne: (async (_q: string, _items: string[], opts?: { defaultValue?: string }) =>
+        opts?.defaultValue ?? "") as HookSetupDeps["selectOne"],
+    });
+    const cfg = await collectHookSetup(deps);
+    expect(cfg).not.toBeNull();
+    expect(cfg?.templates).toEqual([...HOOK_TEMPLATE_IDS]);
   });
 });

@@ -134,6 +134,12 @@ export async function collectHookSetup(deps: HookSetupDeps = {}): Promise<HookCo
 
   try {
     write("vf", paint("Hooks", c.bold("guardrail setup")));
+    const action = await askSelectOne(
+      "Hooks setup",
+      ["Set up guardrail hooks", "Skip hooks setup"],
+      { defaultValue: "Set up guardrail hooks" },
+    );
+    if (action === "Skip hooks setup") return null;
     write(
       "vf",
       c.dim("Pick the built-in guardrails to keep active. All are preselected — Enter keeps them."),
