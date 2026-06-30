@@ -31,17 +31,21 @@ export function printVersion(): number {
 
 /** Print a delete plan: the workflow summary + targets to remove + preserved files. */
 function printDeletePlan(plan: DeletePlan, willApply: boolean): void {
-  out("vf", c.bold("Workflow delete plan\n"));
+  out("vf", c.bold("Workflow delete plan"));
+  out("vf");
   out("vf", plan.summary);
-  out("vf", c.bold("\nWould remove:"));
+  out("vf");
+  out("vf", c.bold("Would remove:"));
   for (const t of plan.targets) out("vf", `  ${c.red("-")} ${t}`);
   if (!plan.targets.length) out("vf", c.dim("  (nothing)"));
   if (plan.preserved.length) {
-    out("vf", c.bold("\nPreserved:"));
+    out("vf");
+    out("vf", c.bold("Preserved:"));
     for (const p of plan.preserved) out("vf", `  ${c.green("•")} ${p}`);
   }
   if (!willApply) {
-    out("vf", c.yellow("\nDry run. Re-run with --yes to delete the targets above."));
+    out("vf");
+    out("vf", c.yellow("Dry run. Re-run with --yes to delete the targets above."));
   }
 }
 
@@ -57,7 +61,8 @@ function workflowDelete(flags: Record<string, string | boolean>): number {
   printDeletePlan(plan, apply);
   if (!apply) return 0;
   const removed = applyDelete(plan);
-  out("vf", c.green(`\nRemoved ${removed.length} target(s).`));
+  out("vf");
+  out("vf", c.green(`Removed ${removed.length} target(s).`));
   return 0;
 }
 
@@ -89,7 +94,8 @@ function workflowDeleteUnit(
 
 /** Print the outcome of a merge: added / renamed / conflicts / goal reconciliation. */
 function printMergeResult(result: MergeResult): void {
-  out("vf", c.bold("Import plan\n"));
+  out("vf", c.bold("Import plan"));
+  out("vf");
   out("vf", `added: ${result.added.length ? result.added.join(", ") : "(none)"}`);
   for (const [from, to] of result.renamed) out("vf", c.yellow(`renamed: ${from} → ${to}`));
   for (const conflict of result.conflicts) out("vf", c.yellow(`conflict: ${conflict.detail}`));
@@ -119,11 +125,13 @@ function workflowImport(src: string | undefined, flags: Record<string, string | 
   }
   printMergeResult(result);
   if (!flags.yes) {
-    out("vf", c.yellow("\nDry run. Re-run with --yes to persist the merged workflow."));
+    out("vf");
+    out("vf", c.yellow("Dry run. Re-run with --yes to persist the merged workflow."));
     return 0;
   }
   writeState(base, result.merged);
-  out("vf", c.green(`\nMerged: ${result.merged.work_units.length} total unit(s).`));
+  out("vf");
+  out("vf", c.green(`Merged: ${result.merged.work_units.length} total unit(s).`));
   return 0;
 }
 
