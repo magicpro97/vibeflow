@@ -191,7 +191,7 @@ export async function doctor(
 
   if (missingRequired > 0) {
     out("vf");
-    out("vf", c.red(`${missingRequired} required tool(s) missing.`));
+    out("vf", c.red(`${missingRequired} required tool(s) missing.`), { level: "error" });
     return 1;
   }
   const probeFailed = probe ? readiness.filter((r) => r.level === "probe-failed") : [];
