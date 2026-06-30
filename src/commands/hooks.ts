@@ -222,6 +222,8 @@ function installHooks(): number {
   const status = r.status ?? 0;
   if (status === 0) {
     out("vf", c.green("Installed: core.hooksPath → .githooks"));
+    out("vf");
+    out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
     return 0;
   }
   // Failure: surface stderr + likely cause. The hint text is intentionally generic —

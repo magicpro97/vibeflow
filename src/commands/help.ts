@@ -23,7 +23,7 @@ export function printHelp(): number {
     ${c.cyan("(none)")}            open the local web UI
     ${c.cyan("ui")}                open the local web UI
     ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
-    ${c.cyan("init")}             generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
+    ${c.cyan("init")}              generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)
