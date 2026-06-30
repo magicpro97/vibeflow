@@ -148,7 +148,8 @@ function printCopilotMcp(base: string, settings: VibeSettings, languages: string
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "copilot", ctx);
   if (merged.entries.length === 0) return 0;
-  out("vf", c.bold("\nCopilot (run these — VibeFlow won't touch your secret ~/.copilot):"));
+  out("vf");
+  out("vf", c.bold("Copilot (run these — VibeFlow won't touch your secret ~/.copilot):"));
   let count = 0;
   for (const entry of merged.entries) {
     for (const [name, server] of Object.entries((entry as JsonMcpEntry).servers)) {

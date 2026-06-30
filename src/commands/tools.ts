@@ -267,10 +267,7 @@ export function provisionTool(base: string, name: ToolName, spawner: StepSpawner
 export function ensureToolIndex(base: string, name: ToolName, spawner: StepSpawner): number {
   const tool = TOOLS[name];
   if (!tool.indexPlan || !tool.indexPresent) return 0;
-  if (tool.indexPresent(base)) {
-    out("vf", c.dim(`  ${tool.title} index present.`));
-    return 0;
-  }
+  if (tool.indexPresent(base)) return 0;
   const ctx = { workspace: base, languages: repoLanguages(base) };
   if (!runToolSteps(tool.indexPlan(ctx).steps, spawner)) return 1;
   out("vf", c.green(`  ✓ built ${tool.title} index.`));
