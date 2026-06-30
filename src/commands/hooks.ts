@@ -199,7 +199,9 @@ export function hookSelftest(
   }
   if (report.failed > 0) {
     out("vf");
-    out("vf", c.red(`${report.failed}/${report.cases.length} self-test case(s) regressed.`));
+    out("vf", c.red(`${report.failed}/${report.cases.length} self-test case(s) regressed.`), {
+      level: "error",
+    });
     return 1;
   }
   out(
