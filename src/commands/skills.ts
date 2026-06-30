@@ -33,6 +33,7 @@ import {
   scanRepo,
   syncSkillMirrors,
   validateSkillRoots,
+  verifySkillCommand,
   verifySkillSync,
   writeFileSafe,
 } from "./_shared.js";
@@ -249,6 +250,9 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       ),
     );
     return 0;
+  }
+  if (sub === "verify") {
+    return verifySkillCommand(repo, rest);
   }
   if (sub === "crystallize") {
     const runId = rest[0]?.trim();
