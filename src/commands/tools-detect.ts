@@ -202,7 +202,8 @@ export function verify(
   for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
 
   if (failed > 0) {
-    out("vf", c.red(`\n${failed} gate(s) failed.`));
+    out("vf");
+    out("vf", c.red(`${failed} gate(s) failed.`));
     if (writeJournal) {
       appendJournal(base, "verify", "fail", [
         `${failed} gate(s) failed`,
@@ -212,7 +213,8 @@ export function verify(
     }
     return 1;
   }
-  out("vf", c.green("\nAll configured gates passed."));
+  out("vf");
+  out("vf", c.green("All configured gates passed."));
   if (writeJournal) {
     appendJournal(base, "verify", "pass", [
       `${report.passed.length} gate(s) passed`,
