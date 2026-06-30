@@ -37,6 +37,8 @@ export function printHelp(): number {
     ${c.cyan("hooks [sub]")}       status | install | emit (write engine hook configs)
     ${c.cyan("pr [sub]")}           create | queue | merge-when-green — open/queue GitHub PRs (--yes to push)
     ${c.cyan("decision [sub]")}    add | list — record durable architecture decisions (ADR-lite)
+    ${c.cyan("state [sub]")}        brief [--consult] — read the coordinator brief
+    ${c.cyan("coord")}             consult brief + enforce freshness gate before non-trivial actions
     ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
     ${c.cyan("help, --version")}   show help / version
 
@@ -273,6 +275,25 @@ ${c.bold("Examples:")}
   vf pr create #173 --yes
   vf pr queue
   vf pr merge-when-green`,
+
+  state: () => `${c.bold("vf state")} ${c.dim("[brief] [--consult]")}
+Read the coordinator brief — the durable cross-session memory the coordinator
+consults before any non-trivial action.
+
+${c.bold("Subcommands:")}
+  brief          print the brief + "what changed since last consult"
+  brief --consult  same, and write the current timestamp as .last-consult
+
+${c.bold("Examples:")}
+  vf state brief
+  vf state brief --consult`,
+
+  coord: () => `${c.bold("vf coord")} ${c.dim("[--no-coord]")}
+Enforce the coordinator brief freshness gate. Refuses when the brief is
+missing, malformed, or older than 10 minutes. Used by \`vf init\` automatically.
+
+${c.bold("Examples:")}
+  vf coord`,
 
   decision:
     () => `${c.bold("vf decision")} ${c.dim('[add --title "<t>" --context "<c>" --decision "<d>" [--consequences "<x>"] | list]')}
