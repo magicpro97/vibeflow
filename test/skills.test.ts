@@ -206,7 +206,7 @@ describe("resolver status-aware matching", () => {
     expect(matchSkillsForTask(skills, "read the xlsx").length).toBe(0);
   });
 
-  test("(c) only an experimental match → need is NOT silently satisfied", () => {
+  test("(c) only an experimental match → available-unverified, NOT satisfied (#425)", () => {
     const dir = tmpRepo();
     try {
       const skillDir = join(dir, CTX_DIR, "skills", "xlsx-reader");
@@ -224,8 +224,12 @@ describe("resolver status-aware matching", () => {
       );
       const needs = resolveSkillNeeds({ repo: dir, attachments: ["data.xlsx"] });
       const xlsx = needs.find((n) => n.need === "xlsx-reader");
-      expect(xlsx?.status).toBe("missing");
-      expect(xlsx?.acquire).toBeTruthy();
+      // Invariant preserved: an unproven (experimental) skill is NEVER satisfied.
+      // Post-#425 it is surfaced as available-unverified (promote hint) instead
+      // of being hidden behind a Context7 acquire.
+      expect(xlsx?.status).toBe("available-unverified");
+      expect(xlsx?.promote).toBe("xlsx-reader");
+      expect(xlsx?.satisfiedBy).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -251,6 +255,63 @@ describe("resolver status-aware matching", () => {
       const xlsx = needs.find((n) => n.need === "xlsx-reader");
       expect(xlsx?.status).toBe("satisfied");
       expect(xlsx?.satisfiedBy).toBe("xlsx-reader");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("unverified local match → available-unverified with promote hint, NOT satisfied (#425)", () => {
+    const dir = tmpRepo();
+    try {
+      const skillDir = join(dir, CTX_DIR, "skills", "xlsx-reader");
+      mkdirSync(skillDir, { recursive: true });
+      // No status line → parses as unverified.
+      writeFileSync(
+        join(skillDir, "SKILL.md"),
+        ["---", "name: xlsx-reader", "description: an unverified xlsx reader", "---"].join("\n"),
+      );
+      const needs = resolveSkillNeeds({ repo: dir, attachments: ["data.xlsx"] });
+      const xlsx = needs.find((n) => n.need === "xlsx-reader");
+      expect(xlsx?.status).toBe("available-unverified");
+      expect(xlsx?.promote).toBe("xlsx-reader");
+      expect(xlsx?.satisfiedBy).toBeUndefined();
+      expect(xlsx?.acquire).toBeUndefined();
+      // Render shows the promote hint, not a Context7 acquire line.
+      expect(renderSkillNeeds(needs)).toContain("vf skills verify xlsx-reader");
+      expect(renderSkillNeeds(needs)).not.toContain("vf discover skills xlsx");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("no local match → missing, render shows the acquire line (#425)", () => {
+    const dir = tmpRepo();
+    try {
+      const needs = resolveSkillNeeds({ repo: dir, attachments: ["data.xlsx"] });
+      const xlsx = needs.find((n) => n.need === "xlsx-reader");
+      expect(xlsx?.status).toBe("missing");
+      expect(renderSkillNeeds(needs)).toContain("vf discover skills xlsx --yes");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("unverified match in a MIRROR root (.kiro) → missing, not available (#435 review)", () => {
+    // `vf skills verify` only promotes CTX_DIR/skills, so a match that lives
+    // only under .kiro/skills must NOT get an un-followable promote hint.
+    const dir = tmpRepo();
+    try {
+      const skillDir = join(dir, ".kiro", "skills", "xlsx-reader");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(
+        join(skillDir, "SKILL.md"),
+        ["---", "name: xlsx-reader", "description: a mirror-root xlsx reader", "---"].join("\n"),
+      );
+      const needs = resolveSkillNeeds({ repo: dir, attachments: ["data.xlsx"] });
+      const xlsx = needs.find((n) => n.need === "xlsx-reader");
+      expect(xlsx?.status).toBe("missing");
+      expect(xlsx?.promote).toBeUndefined();
+      expect(renderSkillNeeds(needs)).toContain("vf discover skills xlsx --yes");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

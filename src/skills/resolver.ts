@@ -1,6 +1,11 @@
+import { join } from "node:path";
 import type { Skill } from "../core.js";
+import { CTX_DIR } from "../core.js";
 import type { ProjectProfile } from "../scanner.js";
 import { discoverSkills, matchSkillsForFile } from "./registry.js";
+
+/** The canonical, writable local skills root — the only one `vf skills verify` can promote. */
+const CANONICAL_SKILLS_ROOT = join(CTX_DIR, "skills");
 
 /**
  * Canonical map from a file extension to the *reader skill capability* an agent would
@@ -43,9 +48,16 @@ export interface SkillNeed {
   need: string;
   /** Human-readable justification (which file/type/framework drove the need). */
   reason: string;
-  status: "satisfied" | "missing";
+  status: "satisfied" | "available-unverified" | "missing";
   /** The local skill that satisfies the need, if any. */
   satisfiedBy?: string;
+  /**
+   * An unverified local skill that matches the need but is not yet promoted.
+   * Carries its name so the renderer can suggest `vf skills verify <name>`
+   * instead of a Context7 acquire. Set only when status is
+   * "available-unverified".
+   */
+  promote?: string;
   /** Suggested on-demand acquisition command when missing. */
   acquire?: string;
 }
@@ -63,17 +75,48 @@ export interface ResolveInput {
 }
 
 /**
- * Find a skill that can SATISFY a reader need. A need is only considered satisfied by a
- * VERIFIED skill — an unverified/experimental/draft match is not enough (it must still be
- * validated/acquired), and `deprecated` skills are excluded by the matcher. This keeps the
- * resolver from silently treating an unproven skill as production-ready.
+ * Find a local skill that matches a reader need, preferring a VERIFIED match.
+ * Returns `{ skill, verified }`:
+ *  - a verified match (by name, else by file capability) → verified:true. Only
+ *    a verified skill may be counted as SATISFYING the need (the security
+ *    invariant — an unverified skill is unproven and must be promoted first).
+ *  - else an UNVERIFIED match (same lookup over the non-verified, non-deprecated
+ *    set) → verified:false. Surfaced as "available, run `vf skills verify`"
+ *    rather than hidden, so a full store doesn't masquerade as empty.
+ *  - else undefined (truly missing → acquire on demand).
+ * `deprecated` skills are excluded from both passes by the matcher / the filter.
  */
-function satisfier(local: Skill[], reader: string, filename: string): Skill | undefined {
-  const verified = local.filter((s) => s.status === "verified");
-  const byName = verified.find((s) => s.name === reader);
-  if (byName) return byName;
-  const match = matchSkillsForFile(verified, filename)[0]?.skill;
-  return match;
+function satisfier(
+  local: Skill[],
+  reader: string,
+  filename: string,
+): { skill: Skill; verified: boolean } | undefined {
+  const find = (pool: Skill[]): Skill | undefined =>
+    pool.find((s) => s.name === reader) ?? matchSkillsForFile(pool, filename)[0]?.skill;
+
+  const verifiedHit = find(local.filter((s) => s.status === "verified"));
+  if (verifiedHit) return { skill: verifiedHit, verified: true };
+
+  // An unverified match is only actionable if it lives in the canonical store,
+  // because the promote hint (`vf skills verify`) only operates on
+  // CTX_DIR/skills/<name>. A match from a mirror root (.kiro/, engine mirrors)
+  // can't be promoted there, so we do NOT surface it as available — it falls
+  // through to "missing" (acquire on demand) instead of dangling an
+  // un-followable hint (#435 review).
+  const unverifiedHit = find(
+    local.filter(
+      (s) =>
+        s.status !== "verified" &&
+        s.status !== "deprecated" &&
+        s.dir
+          .split(/[\\/]/)
+          .join("/")
+          .includes(`${CANONICAL_SKILLS_ROOT.split(/[\\/]/).join("/")}/`),
+    ),
+  );
+  if (unverifiedHit) return { skill: unverifiedHit, verified: false };
+
+  return undefined;
 }
 
 /**
@@ -89,13 +132,31 @@ export function resolveSkillNeeds(input: ResolveInput): SkillNeed[] {
     const reader = skillForFile(filename);
     if (needs.has(reader)) return;
     const hit = satisfier(local, reader, filename);
-    needs.set(reader, {
-      need: reader,
-      reason: why,
-      status: hit ? "satisfied" : "missing",
-      satisfiedBy: hit?.name,
-      acquire: hit ? undefined : `vf discover skills ${ext} --yes`,
-    });
+    if (hit?.verified) {
+      needs.set(reader, {
+        need: reader,
+        reason: why,
+        status: "satisfied",
+        satisfiedBy: hit.skill.name,
+      });
+    } else if (hit) {
+      // Unverified local match: surface it with a promote hint instead of an
+      // acquire line, so the user promotes the existing skill rather than
+      // re-fetching from Context7.
+      needs.set(reader, {
+        need: reader,
+        reason: why,
+        status: "available-unverified",
+        promote: hit.skill.name,
+      });
+    } else {
+      needs.set(reader, {
+        need: reader,
+        reason: why,
+        status: "missing",
+        acquire: `vf discover skills ${ext} --yes`,
+      });
+    }
   };
 
   for (const name of input.attachments ?? []) {
@@ -120,7 +181,10 @@ export function resolveSkillNeeds(input: ResolveInput): SkillNeed[] {
   }
 
   return [...needs.values()].sort((a, b) => {
-    if (a.status !== b.status) return a.status === "missing" ? -1 : 1;
+    // Most-actionable first: missing, then available-unverified, then satisfied.
+    const rank = (s: SkillNeed["status"]): number =>
+      s === "missing" ? 0 : s === "available-unverified" ? 1 : 2;
+    if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
     return a.need.localeCompare(b.need);
   });
 }
@@ -130,10 +194,13 @@ export function renderSkillNeeds(needs: SkillNeed[]): string {
   if (!needs.length) return "No skill needs derived from the current context.\n";
   return `${needs
     .map((n) => {
-      const mark = n.status === "satisfied" ? "✓" : "•";
-      const tail =
-        n.status === "satisfied" ? `satisfied by ${n.satisfiedBy}` : `missing — ${n.acquire}`;
-      return `${mark} ${n.need}  (${n.reason}) — ${tail}`;
+      if (n.status === "satisfied") {
+        return `✓ ${n.need}  (${n.reason}) — satisfied by ${n.satisfiedBy}`;
+      }
+      if (n.status === "available-unverified") {
+        return `• ${n.need}  (${n.reason}) — available locally — run \`vf skills verify ${n.promote}\``;
+      }
+      return `• ${n.need}  (${n.reason}) — missing — ${n.acquire}`;
     })
     .join("\n")}\n`;
 }
