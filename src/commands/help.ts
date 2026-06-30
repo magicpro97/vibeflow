@@ -35,9 +35,9 @@ export function printHelp(): number {
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
     ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)
     ${c.cyan("hooks [sub]")}       status | install | emit (write engine hook configs)
-    ${c.cyan("pr [sub]")}           create | queue | merge-when-green — open/queue GitHub PRs (--yes to push)
+    ${c.cyan("pr [sub]")}          create | queue | merge-when-green — open/queue GitHub PRs (--yes to push)
     ${c.cyan("decision [sub]")}    add | list — record durable architecture decisions (ADR-lite)
-    ${c.cyan("state [sub]")}        brief [--consult] — read the coordinator brief
+    ${c.cyan("state [sub]")}       brief [--consult] — read the coordinator brief
     ${c.cyan("coord")}             consult brief + enforce freshness gate before non-trivial actions
     ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
     ${c.cyan("help, --version")}   show help / version
