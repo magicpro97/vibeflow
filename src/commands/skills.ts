@@ -131,7 +131,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       out(
         "vf",
         c.green(
-          `✔ synced ${result.synced.length} skill mirror(s) (mode=${result.mode}) → ${result.synced.slice(0, 3).join(", ")}${result.synced.length > 3 ? "…" : ""}`,
+          `✔ synced ${result.synced.length} skill mirror(s) (mode=${result.mode})${result.synced.length > 0 ? ` → ${result.synced.slice(0, 3).join(", ")}${result.synced.length > 3 ? "…" : ""}` : ""}`,
         ),
       );
       return 0;

@@ -198,7 +198,8 @@ export async function orchestrate(
   // Nothing left to dispatch — every unit is already complete. Report the goal verdict and exit
   // without launching the engine (a no-op dispatch would only re-review finished work).
   if (units.length === 0) {
-    out("vf", c.green("\nAll work units already complete — nothing to dispatch."));
+    out("vf");
+    out("vf", c.green("All work units already complete — nothing to dispatch."));
     // issue #90: apply the spec band threshold (per-unit riskClass) to the verdict, not 1.0.
     for (const u of state.work_units) {
       if (!u.riskClass) u.riskClass = riskClass;
@@ -226,7 +227,8 @@ export async function orchestrate(
   if (mode === "cli") {
     const plan = planProtection(base, state.task_id, fp, git);
     if (plan.refused) {
-      out("vf", c.red(`\n${plan.reason}`), {
+      out("vf");
+      out("vf", c.red(`${plan.reason}`), {
         level: "error",
       });
       return 1;
@@ -361,7 +363,8 @@ export async function orchestrate(
   const verdict = goalEval(state);
   const color =
     verdict.verdict === "met" ? c.green : verdict.verdict === "blocked" ? c.red : c.yellow;
-  out("vf", color(`\ngoal: ${verdict.verdict}`));
+  out("vf");
+  out("vf", color(`goal: ${verdict.verdict}`));
   for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
   // Append a machine event to the work journal — real runs only (dry is read-only).
   if (mode !== "dry") {
