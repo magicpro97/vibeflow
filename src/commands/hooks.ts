@@ -197,7 +197,8 @@ export function hookSelftest(
     out("vf", `${mark} [${c0.expected}→${c0.actual}] ${c0.risk} · ${c0.input}`);
   }
   if (report.failed > 0) {
-    out("vf", c.red(`\n${report.failed}/${report.cases.length} self-test case(s) regressed.`));
+    out("vf");
+    out("vf", c.red(`${report.failed}/${report.cases.length} self-test case(s) regressed.`));
     return 1;
   }
   out(

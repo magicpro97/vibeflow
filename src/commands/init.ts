@@ -59,7 +59,8 @@ import { writeInitArtifacts } from "./init-artifacts.js";
 // Test seam: exported so unit tests can verify the readiness listing
 // format and the "no engine ready" exit code contract.
 export function reportPreflightRefusal(readiness: EngineReadiness[] | undefined): number {
-  out("vf", c.red("\nNo engine is ready — refusing to generate engine files."), {
+  out("vf");
+  out("vf", c.red("No engine is ready — refusing to generate engine files."), {
     level: "error",
   });
   for (const r of readiness ?? []) {
@@ -225,7 +226,8 @@ export async function init(
     out("vf", dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
   }
   if (!dry) {
-    out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+    out("vf");
+    out("vf", c.bold(`Generated ${result.files.length} files from canonical context.`));
     for (const rel of result.backedUp ?? []) {
       out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
