@@ -308,9 +308,11 @@ describe("state cluster — top-level dispatcher", () => {
     expect(code).toBe(2);
   });
 
-  test("state brief with no args prints usage hint and exits 2", () => {
+  test("state brief with no brief file exits 1 with not-found error", () => {
+    // state("brief") now delegates to brief() instead of printing usage.
+    // When no brief file exists, brief() returns 1 (file not found).
     const code = state("brief", [], {});
-    expect(code).toBe(2);
+    expect(code).toBe(1);
   });
 });
 

@@ -59,7 +59,15 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       out("vf", c.green(`✔ ${result.skills.length} skill(s) valid`));
       return 0;
     }
-    out("vf", c.red(`✗ ${result.errors.length} validation error(s)`), { level: "error" });
+    if (result.skills.length === 0) {
+      out(
+        "vf",
+        c.red("✗ no skills found — run `vf skills sync` or add skills under .vibeflow/skills/"),
+        { level: "error" },
+      );
+    } else {
+      out("vf", c.red(`✗ ${result.errors.length} validation error(s)`), { level: "error" });
+    }
     return 1;
   }
   if (sub === "search") {
@@ -131,7 +139,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       out(
         "vf",
         c.green(
-          `✔ synced ${result.synced.length} skill mirror(s) (mode=${result.mode}) → ${result.synced.slice(0, 3).join(", ")}${result.synced.length > 3 ? "…" : ""}`,
+          `✔ synced ${result.synced.length} skill mirror(s) (mode=${result.mode})${result.synced.length > 0 ? ` → ${result.synced.slice(0, 3).join(", ")}${result.synced.length > 3 ? "…" : ""}` : ""}`,
         ),
       );
       return 0;

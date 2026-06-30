@@ -141,7 +141,8 @@ export async function writeInitArtifacts(params: {
       for (const rel of artifactFiles) {
         out("vf", c.green(`+ ${rel}`));
       }
-      out("vf", c.bold(`\nGenerated ${artifactFiles.length} workflow artifact(s).`));
+      out("vf");
+      out("vf", c.bold(`Generated ${artifactFiles.length} workflow artifact(s).`));
     }
     if (!result.refused) {
       for (const rel of copySkillCreator(cwd(), targetEngines)) {
@@ -201,6 +202,7 @@ export async function writeInitArtifacts(params: {
             c.yellow(
               `! ${TOOLS[name].title} install failed — skipping. Run \`vf tools install ${name}\` manually.`,
             ),
+            { level: "error" },
           );
         }
       }
@@ -234,6 +236,7 @@ export async function writeInitArtifacts(params: {
       const custom = config.custom.length ? `, ${config.custom.length} custom` : "";
       out("vf", c.dim(`${config.templates.length} template(s) active${custom}.`));
     } else {
+      out("vf");
       out("vf", c.dim("Hooks setup skipped — existing guardrail policy left unchanged."));
     }
   }
@@ -248,14 +251,14 @@ export async function writeInitArtifacts(params: {
   let ctx7Auth: Ctx7AuthResult = { authenticated: false, fallback: true };
   if (ai && !dry && !result.refused && process.stdin.isTTY) {
     out("vf");
-    out("vf", c.bold("ctx7 Auth"));
+    out("vf", panel("ctx7", c.bold("auth")));
     ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject ?? {});
   }
 
   // Phase 1.8: find-skills fallback
   if (ai && !dry && !result.refused && ctx7Auth.fallback) {
     out("vf");
-    out("vf", c.bold("Find-Skills"));
+    out("vf", panel("Skills", c.bold("find")));
     await runFindSkillsFallback(cwd());
   }
 
