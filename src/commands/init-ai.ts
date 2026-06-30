@@ -253,15 +253,18 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
       { name: profile.name, summary: profile.summary, languages: profile.languages },
       base,
     );
-    out("vf", c.dim(`\n${prompt.slice(0, 1500)}…`));
+    out("vf");
+    out("vf", c.dim(`${prompt.slice(0, 1500)}…`));
   } else if (ai && dry) {
     // Dry-run --ai without phases: show the original AI init prompt
-    out("vf", c.dim("\ndry-run: prompt would be sent to the best available engine"));
+    out("vf");
+    out("vf", c.dim("dry-run: prompt would be sent to the best available engine"));
     const { buildAiInitPrompt } = await import("../ai-init.js");
     const { scanRepo } = await import("../scanner.js");
     const base = cwd();
     const profile = scanRepo(base);
     const prompt = buildAiInitPrompt(profile, base);
-    out("vf", c.dim(`\n${prompt.slice(0, 1500)}…`));
+    out("vf");
+    out("vf", c.dim(`${prompt.slice(0, 1500)}…`));
   }
 }

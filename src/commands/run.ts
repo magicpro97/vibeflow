@@ -130,7 +130,8 @@ export async function run(
   if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));
   // The dry-run path never launches, so it stays cheap: no git gate, no checkpoint.
   if (!flags.yes) {
-    out("vf", c.dim(`\nDry run. Re-run with --yes to launch ${engine}.`));
+    out("vf");
+    out("vf", c.dim(`Dry run. Re-run with --yes to launch ${engine}.`));
     return 0;
   }
   // runId derived from the saved task (never Date.now/random) so test-covered paths are stable.
@@ -161,7 +162,8 @@ async function launchEngine(
   const git = inject.git ?? repoGit(base);
   const plan = planProtection(base, runId, fp, git);
   if (plan.refused) {
-    out("vf", c.red(`\n${plan.reason}`), {
+    out("vf");
+    out("vf", c.red(`${plan.reason}`), {
       level: "error",
     });
     return 1;
