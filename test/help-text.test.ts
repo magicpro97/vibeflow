@@ -43,4 +43,9 @@ describe("help text", () => {
     // new COMMAND_HELP.config arm in src/commands/help.ts).
     expect(printCommandHelp("config")).toBe(0);
   });
+
+  test("demo has a per-command help block (covers the new COMMAND_HELP.demo arm)", () => {
+    expect(hasCommandHelp("demo")).toBe(true);
+    expect(printCommandHelp("demo")).toBe(0);
+  });
 });

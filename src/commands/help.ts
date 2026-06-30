@@ -128,6 +128,15 @@ ${c.bold("Examples:")}
   vf orchestrate --engine codex --yes --concurrency 2
   vf orchestrate --engine codex --yes --concurrency 3 --isolate --pr`,
 
+  demo: () => `${c.bold("vf demo")} ${c.dim("[--engine <e>] [--concurrency <n>]")}
+Stage a fixed file corpus as work units and run them through the orchestrate
+path in dry + focus mode. No engine spend — deterministic and repeatable.
+Useful for screen recording the phase timeline or verifying orchestrate works.
+
+${c.bold("Examples:")}
+  vf demo
+  vf demo --engine claude`,
+
   workflow: () => `${c.bold("vf workflow")} ${c.dim("<delete | delete-unit | import> …")}
 Manage a saved workflow. Destructive paths are dry by default and print exactly what
 they will touch before --yes applies them.

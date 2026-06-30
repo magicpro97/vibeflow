@@ -34,7 +34,7 @@ export function config(key: string | undefined, rest: string[], base: string = c
   }
   const next: Partial<VibeSettings> = value === "on" ? { memory: true } : { memory: false };
   writeSettings(base, next);
-  printMemory(base);
+  out("vf", value === "on" ? c.green("✓ memory: on") : c.yellow("○ memory: off"));
   return 0;
 }
 
