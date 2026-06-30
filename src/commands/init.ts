@@ -123,6 +123,8 @@ export async function init(
     // Production callers leave this undefined; the `process.stdin.isTTY`
     // gate is the only path for end users.
     hookSetup?: HookConfig | null;
+    /** Test seam: override the interactive hooks confirm prompt (forwarded to writeInitArtifacts). Defaults to real confirmInput. */
+    confirmInput?: (question: string, defaultValue?: boolean) => Promise<boolean>;
     // Test seam: drive Phase 1.5 (claude-mem opt-in) without a TTY or a
     // real install. Forwarded to runMemoryPhase. Production callers leave
     // this undefined; the real prompt + install run.

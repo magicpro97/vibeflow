@@ -111,6 +111,8 @@ export async function writeInitArtifacts(params: {
     /** Override tool detection for Phase 1.6 (test seam). Defaults to TOOLS[name].detect(). */
     detectTool?: (name: ToolName) => boolean;
     hookSetup?: HookConfig | null;
+    /** Test seam: override the interactive hooks confirm prompt. Defaults to real confirmInput. */
+    confirmInput?: (question: string, defaultValue?: boolean) => Promise<boolean>;
     memoryInject?: MemoryPhaseInject;
     aiSpawner?: AsyncSpawner;
     aiPreflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
@@ -221,11 +223,12 @@ export async function writeInitArtifacts(params: {
   // default all-on policy in headless/CI mode (issue #333).
   const wantHooks = !dry && !result.refused && !flags["no-hooks"];
   if (wantHooks) {
+    const askConfirm = inject.confirmInput ?? confirmInput;
     const config =
       inject.hookSetup !== undefined
         ? inject.hookSetup
         : process.stdin.isTTY
-          ? (await confirmInput(
+          ? (await askConfirm(
               "Setup guardrail hooks? (block destructive commands, protect secrets, protect config, flag installs, workspace guard)",
               true,
             ))

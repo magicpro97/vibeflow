@@ -316,8 +316,8 @@ describe("init --ask cancellation flow (defect #B2)", () => {
     expect(data).not.toBeNull();
     expect(calls).toContain("confirm:Use AI to analyze from source base?");
     expect(calls).toContain("many:Workflow phases to execute");
-    expect(calls).toContain("text:  Input");
-    expect(calls).toContain("text:  Output");
+    expect(calls).toContain("text:  Input (File Path, Content,...)");
+    expect(calls).toContain("text:  Output (File Path, Content,...)");
     expect(calls).toContain("one:Where are project documents stored?");
     expect(calls).toContain("one:Which platform manages tasks?");
     expect(calls).toContain("many:Document file types");

@@ -883,6 +883,62 @@ describe("commands.init branches", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // TTY hooks branch (init-artifacts.ts L228-232): no inject.hookSetup, so the
+  // step falls through to the interactive `confirmInput` prompt. The
+  // inject.confirmInput seam stands in for the real prompt (no TTY/stdin read).
+  test("init: TTY confirmInput=true arms default hook config", async () => {
+    const dir = freshDir("vf-init-hooks-confirm-yes-");
+    const orig = process.cwd();
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { "no-ai": true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          ...neutralizedAi,
+          memoryInject: { isTTY: () => false },
+          confirmInput: async () => true,
+        },
+      );
+      expect(code).toBe(0);
+      // defaultHookConfig() armed → SETTINGS hooks + engine config written.
+      expect(readSettings(dir).hooks?.templates?.length).toBeGreaterThan(0);
+      expect(existsSync(join(dir, ".claude", "settings.json"))).toBe(true);
+    } finally {
+      process.chdir(orig);
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init: TTY confirmInput=false skips hooks (config=null)", async () => {
+    const dir = freshDir("vf-init-hooks-confirm-no-");
+    const orig = process.cwd();
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { "no-ai": true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          ...neutralizedAi,
+          memoryInject: { isTTY: () => false },
+          confirmInput: async () => false,
+        },
+      );
+      expect(code).toBe(0);
+      // config=null → no hooks block written, policy untouched.
+      expect(readSettings(dir).hooks).toBeUndefined();
+    } finally {
+      process.chdir(orig);
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
