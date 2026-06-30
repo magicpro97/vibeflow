@@ -109,7 +109,8 @@ function printReadiness(
   probe: boolean,
   list = preflightAll(ENGINES, { probe }),
 ): EngineReadiness[] {
-  out("vf", c.bold(`\nEngine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
+  out("vf");
+  out("vf", c.bold(`Engine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
   for (const r of list) {
     out("vf", `  ${readinessMark(r.level)} ${r.engine}: ${c.dim(r.detail)}`);
   }
@@ -147,7 +148,8 @@ export async function doctor(
     toolRows.push([mark, name, status]);
   }
   out("vf", table(["", "tool", "status"], toolRows));
-  out("vf", `\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
+  out("vf");
+  out("vf", `  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
   out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
 
   // Issue #163 (F2): stale logbus lock detection
@@ -188,7 +190,8 @@ export async function doctor(
   printReadiness(probe, readiness);
 
   if (missingRequired > 0) {
-    out("vf", c.red(`\n${missingRequired} required tool(s) missing.`));
+    out("vf");
+    out("vf", c.red(`${missingRequired} required tool(s) missing.`));
     return 1;
   }
   const probeFailed = probe ? readiness.filter((r) => r.level === "probe-failed") : [];
@@ -201,7 +204,8 @@ export async function doctor(
     );
     return 1;
   }
-  out("vf", c.green("\nReady."));
+  out("vf");
+  out("vf", c.green("Ready."));
   return 0;
 }
 
