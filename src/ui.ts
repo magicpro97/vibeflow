@@ -42,14 +42,14 @@ export class Spinner {
   succeed(msg?: string): void {
     this.stop();
     if (msg) this.msg = msg;
-    if (TTY()) this.line(`${c.green("✔")} ${this.msg}`);
+    if (TTY()) this.line(`${c.green("✔")} ${this.msg}\n`);
     else console.error(`${c.green("✔")} ${this.msg}`);
   }
 
   fail(msg?: string): void {
     this.stop();
     if (msg) this.msg = msg;
-    if (TTY()) this.line(`${c.red("✖")} ${this.msg}`);
+    if (TTY()) this.line(`${c.red("✖")} ${this.msg}\n`);
     else console.error(`${c.red("✖")} ${this.msg}`);
   }
 
