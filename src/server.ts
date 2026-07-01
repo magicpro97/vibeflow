@@ -311,8 +311,7 @@ export function startServer(
             path === "/api/verify" ||
             path === "/api/upload")) ||
         (method === "DELETE" && path === "/api/upload") ||
-        (method === "DELETE" && path === "/api/state") ||
-        (method === "DELETE" && path === "/api/projects");
+        (method === "DELETE" && (path === "/api/state" || path === "/api/projects"));
 
       if (isWrite) {
         if (!guarded(req)) {
