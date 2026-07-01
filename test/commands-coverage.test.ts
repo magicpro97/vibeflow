@@ -74,12 +74,6 @@ function freshDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-// Suppress console.log + console.error — CLI commands print status lines that leak to the
-// user's terminal when `vf verify` runs `bun run test`. Tests that need to assert on logged
-// output override console.log inline (see "verify on empty dir" test).
-console.log = () => {};
-console.error = () => {};
-
 function writeFixture(base: string, overrides: Partial<WorkflowState> = {}): void {
   const ctx = join(base, CTX_DIR);
   mkdirSync(ctx, { recursive: true });

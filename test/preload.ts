@@ -15,6 +15,12 @@ if (process.stdin.isTTY) {
   Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
 }
 
+// Suppress CLI output — out() calls console.log/console.error so status lines from commands
+// (workflow, verify, init, etc.) don't leak to the user's terminal during `vf verify`.
+// Tests that need to assert on output override console.log inline and restore afterwards.
+console.log = () => {};
+console.error = () => {};
+
 // --- Global spawn-integrity guard (test-pollution detector) ---------------
 //
 // Several tests patch `Bun.spawnSync` / `Bun.spawn` to stub subprocess calls
