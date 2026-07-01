@@ -1384,6 +1384,36 @@ test("DELETE /api/projects without path returns 400", async () => {
   expect((result as Response).status).toBe(400);
 });
 
+test("DELETE /api/projects via live server removes entry (isWrite whitelist)", async () => {
+  // Verifies server.ts wires DELETE /api/projects through the CSRF guard + handleMutationRoute
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-del-live-"));
+  const { upsertRegistry, readRegistry } = await import("../src/registry.js");
+  upsertRegistry({
+    path: tmp,
+    name: "live-test",
+    lastUsed: Date.now(),
+    goal: "test",
+    totals: { units: 0, done: 0, tokens: 0, cost_usd: 0 },
+  });
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/projects?path=${encodeURIComponent(tmp)}`, {
+      method: "DELETE",
+      headers: { "x-vibeflow-token": token },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+    expect(readRegistry().find((e) => e.path === tmp)).toBeUndefined();
+  } finally {
+    server.stop();
+  }
+});
+
 test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", async () => {
   const { server, url } = (await startServer()) as {
     server: { stop: () => void };
