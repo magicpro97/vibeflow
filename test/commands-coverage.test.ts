@@ -4420,7 +4420,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000); // CI can be slow on first-run codegraph init
 
   test("init --ai with injected aiSpawner and aiPreflight runs the enrichment (line 1277-1319)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-ai-test-"));
@@ -4587,7 +4587,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000); // CI can be slow on first-run codegraph init
 
   test("init --ai agent-team factory callbacks stream inline stdout/stderr", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-agent-team-stream-"));
