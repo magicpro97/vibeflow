@@ -15,11 +15,24 @@ if (process.stdin.isTTY) {
   Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
 }
 
-// Suppress CLI output — out() calls console.log/console.error so status lines from commands
-// (workflow, verify, init, etc.) don't leak to the user's terminal during `vf verify`.
+// Suppress CLI output so status lines from commands don't leak to the user's terminal during
+// `vf verify`. Two layers:
+//   1. console.log/error — used by out() no-bus fallback
+//   2. process.stderr.write — used by ai-init-dispatcher, logbus, ui spinner directly
 // Tests that need to assert on output override console.log inline and restore afterwards.
 console.log = () => {};
 console.error = () => {};
+
+const _realStderrWrite = process.stderr.write.bind(process.stderr);
+const APP_PREFIX = /^\[(?:ai-init|logbus|codegraph|lsp|vf|test-pollution)/;
+Object.assign(process.stderr, {
+  write(chunk: string | Buffer, ...rest: unknown[]): boolean {
+    const s = typeof chunk === "string" ? chunk : chunk.toString();
+    if (APP_PREFIX.test(s)) return true;
+    if (s.charCodeAt(0) === 13) return true; // CR — ANSI spinner sequences from ui.ts
+    return (_realStderrWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
+  },
+});
 
 // --- Global spawn-integrity guard (test-pollution detector) ---------------
 //
