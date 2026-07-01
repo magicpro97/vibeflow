@@ -34,3 +34,15 @@ export function ensureIndex(base?: string): boolean {
   writeFileSafe(p, "# Knowledge Index\n\nCatalog of knowledge pages — one entry per line.\n");
   return true;
 }
+
+/** Create .vibeflow/knowledge/log.md with a minimal header if absent. Idempotent —
+ *  never overwrites existing content. Returns true if it created the file. */
+export function ensureLog(base?: string): boolean {
+  const p = journalPath(base);
+  if (existsSync(p)) return false;
+  writeFileSafe(
+    p,
+    "# Work Journal\n\nAppend-only log of operations — each entry is prefixed with a timestamp.\n",
+  );
+  return true;
+}
