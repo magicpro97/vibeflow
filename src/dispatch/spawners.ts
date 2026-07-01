@@ -186,10 +186,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       if (timedOut) return;
       timedOut = true;
       killGroup("SIGTERM");
-      if (graceMs > 0)
-        graceTerm = setTimeout(() => {
-          killGroup("SIGKILL");
-        }, graceMs);
+      if (graceMs > 0) graceTerm = setTimeout(() => killGroup("SIGKILL"), graceMs);
     };
     if (timeoutMs != null) {
       term = setTimeout(killProc, timeoutMs);

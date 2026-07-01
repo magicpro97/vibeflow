@@ -1205,7 +1205,83 @@ describe("server split (#186 PR11 sentinel)", () => {
   });
 });
 
-import { handleMutationRoute } from "../src/server/routes.js";
+import { handleMutationRoute, handleProjectsRoute } from "../src/server/routes.js";
+// --- handleProjectsRoute unit tests (covers src/server/routes.ts lines 259-284) ---
+
+test("handleProjectsRoute GET /api/projects returns projects array", () => {
+  const url = new URL("http://127.0.0.1/api/projects");
+  const res = handleProjectsRoute("/api/projects", url);
+  expect(res).not.toBeNull();
+  expect((res as Response).status).toBe(200);
+});
+
+test("handleProjectsRoute GET /api/projects/state without path returns 400", () => {
+  const url = new URL("http://127.0.0.1/api/projects/state");
+  const res = handleProjectsRoute("/api/projects/state", url);
+  expect((res as Response).status).toBe(400);
+});
+
+test("handleProjectsRoute GET /api/projects/state with unknown path returns 404", () => {
+  const url = new URL("http://127.0.0.1/api/projects/state?path=%2Ftmp%2Fno-such-vf-repo");
+  const res = handleProjectsRoute("/api/projects/state", url);
+  expect((res as Response).status).toBe(404);
+});
+
+test("handleProjectsRoute GET /api/projects/state with valid state returns 200", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-pstate-"));
+  mkdirSync(join(tmp, ".vibeflow"), { recursive: true });
+  writeFileSync(
+    join(tmp, ".vibeflow", "WORKFLOW_STATE.json"),
+    JSON.stringify({ goal: "test", work_units: [] }),
+  );
+  const encoded = encodeURIComponent(tmp);
+  const url = new URL(`http://127.0.0.1/api/projects/state?path=${encoded}`);
+  const res = handleProjectsRoute("/api/projects/state", url);
+  expect((res as Response).status).toBe(200);
+  const body = (await (res as Response).json()) as { state: { goal: string } };
+  expect(body.state.goal).toBe("test");
+});
+
+test("handleProjectsRoute GET /api/projects/logs without path returns 400", () => {
+  const url = new URL("http://127.0.0.1/api/projects/logs");
+  const res = handleProjectsRoute("/api/projects/logs", url);
+  expect((res as Response).status).toBe(400);
+});
+
+test("handleProjectsRoute GET /api/projects/logs with missing log file returns empty events", async () => {
+  const url = new URL("http://127.0.0.1/api/projects/logs?path=%2Ftmp%2Fno-such-vf-repo");
+  const res = handleProjectsRoute("/api/projects/logs", url);
+  expect((res as Response).status).toBe(200);
+  const body = (await (res as Response).json()) as { events: unknown[] };
+  expect(Array.isArray(body.events)).toBe(true);
+});
+
+test("handleProjectsRoute returns null for unmatched sub-path", () => {
+  const url = new URL("http://127.0.0.1/api/projects/unknown");
+  const res = handleProjectsRoute("/api/projects/unknown", url);
+  expect(res).toBeNull();
+});
+
+// --- Live server integration: covers server.ts lines 139-140 ---
+
+test("GET /api/projects via live server returns 200 with projects array (covers server.ts:139-140)", async () => {
+  const { server, url } = (await startServer()) as {
+    server: { stop: () => void };
+    url: string;
+  };
+  try {
+    const res = await fetch(`${url}/api/projects`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { projects: unknown[] };
+    expect(Array.isArray(body.projects)).toBe(true);
+  } finally {
+    server.stop();
+  }
+});
+
 test("handleMutationRoute returns null for unmatched path (safety net)", async () => {
   const req = new Request("http://127.0.0.1/api/unknown", {
     method: "POST",

@@ -273,12 +273,8 @@ export function handleProjectsRoute(path: string, url: URL): Response | null {
     const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 500);
     if (!repoPath) return Response.json({ error: "path required" }, { status: 400 });
     const logFile = join(repoPath, CTX_DIR, "logs", "current.log");
-    try {
-      const events = replayFromLog(logFile, since, limit);
-      return Response.json({ events });
-    } catch {
-      return Response.json({ events: [] });
-    }
+    const events = replayFromLog(logFile, since, limit);
+    return Response.json({ events });
   }
   // fallback
   return null;
