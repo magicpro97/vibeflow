@@ -54,8 +54,8 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run file-size:check
-      - run: bun run test
       - run: bun run build
+      - run: bun run test
       - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version
       - name: Coverage gate — fail if line coverage < 100%
