@@ -1869,6 +1869,19 @@ describe("commands.detectToolchain", () => {
     const p = detectToolchain(dir, { exists: () => false });
     expect(p.kind).toBe("none");
   });
+
+  test("flutter plan when pubspec.yaml present (#440)", () => {
+    const dir = freshDir("vf-toolchain-flutter-");
+    writeFileSync(join(dir, "pubspec.yaml"), "name: flutter_app\n");
+    const p = detectToolchain(dir, {
+      exists: (p) => existsSync(p),
+      readScripts: () => [],
+    });
+    expect(p.kind).toBe("flutter");
+    if (p.kind === "flutter") {
+      expect(p.cmd).toBe("flutter");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2211,6 +2224,31 @@ describe("commands.verify branches", () => {
       expect(code).toBe(1);
       // fail-branch journal write is opt-in (issue #154)
       expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(true);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify with pubspec.yaml runs flutter test (#440)", () => {
+    const dir = freshDir("vf-verify-flutter-");
+    writeFileSync(join(dir, "pubspec.yaml"), "name: flutter_app\n");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+      const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "flutter", status: 0 } });
+      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(0);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.cmd).toBe("flutter");
+      expect(calls[0]?.args).toEqual(["test"]);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
