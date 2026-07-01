@@ -140,6 +140,12 @@ export function units(
         );
         return 2;
       }
+      if (/[/\\]/.test(name)) {
+        out("vf", c.red("Unit name must not contain path separators (/ or \\)."), {
+          level: "error",
+        });
+        return 2;
+      }
       const addPatch: Partial<WorkUnit> & { name: string } = { name };
       if (typeof flags.spec === "string") addPatch.spec = flags.spec;
       if (typeof flags.scope === "string") {
