@@ -22,6 +22,7 @@ if (process.stdin.isTTY) {
 // Tests that need to assert on output override console.log inline and restore afterwards.
 console.log = () => {};
 console.error = () => {};
+console.warn = () => {};
 
 const _realStderrWrite = process.stderr.write.bind(process.stderr);
 const APP_PREFIX = /^\[(?:ai-init|logbus|codegraph|lsp|vf|test-pollution)/;
