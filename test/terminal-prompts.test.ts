@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { cwd } from "node:process";
+
+// Suppress picker UI output — tests that need to assert stdout install their own mock.
+const _realStdoutWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = (() => true) as typeof process.stdout.write;
 import { confirmInput, selectMany, selectOne, textInput } from "../src/terminal-prompts/prompts.js";
 import {
   PROMPT_CANCEL_MESSAGES,

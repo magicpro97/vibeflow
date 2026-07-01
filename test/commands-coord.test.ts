@@ -296,11 +296,11 @@ describe("coord shim (A1 #167 + #194)", () => {
   });
 
   // ---- defaultEngineSpawner (exported for the test seam) actually
-  //      spawns a real binary. Uses /bin/echo on Unix. Returns the
+  //      spawns a real binary. Uses /bin/true on Unix (no output). Returns the
   //      exit code (0 for success). ----
   test("(defaultEngineSpawner) real /bin/echo spawn returns 0", async () => {
     if (process.platform === "win32") return;
-    const code = await defaultEngineSpawner("/bin/echo", ["hello"]);
+    const code = await defaultEngineSpawner("/usr/bin/true", []);
     expect(code).toBe(0);
   });
 
@@ -319,7 +319,7 @@ describe("coord shim (A1 #167 + #194)", () => {
     const writes: Array<{ channel: string; level: string; text: string }> = [];
     setLogbusForTests({ write: (msg: any) => writes.push(msg) } as any);
     try {
-      const code = await defaultEngineSpawner("/bin/echo", ["hello"]);
+      const code = await defaultEngineSpawner("/usr/bin/true", []);
       expect(code).toBe(0);
       const warn = writes.find(
         (w) => w.level === "warn" && w.text.includes("hook emission failed"),

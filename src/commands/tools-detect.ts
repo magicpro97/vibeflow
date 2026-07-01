@@ -148,7 +148,7 @@ export function verify(
     // Test seam: tests inject a fake spawner to avoid the 28s
     // gradle download on CI. Production callers fall through to
     // the real spawnSync.
-    const r = (inject.spawner ?? spawnSync)(cmd, args, { stdio: "inherit", cwd: dir });
+    const r = (inject.spawner ?? spawnSync)(cmd, args, { stdio: "pipe", cwd: dir });
     if (r.status !== 0) {
       failed++;
       out("vf", c.red(`✗ ${label} failed`));
@@ -193,7 +193,7 @@ export function verify(
   if (inject.coverage) {
     const lcovPath = join(base, "coverage", "lcov.info");
     if (existsSync(lcovPath)) {
-      const cov = spawnSync("node", ["scripts/coverage-gate.cjs"], { stdio: "inherit", cwd: base });
+      const cov = spawnSync("node", ["scripts/coverage-gate.cjs"], { stdio: "pipe", cwd: base });
       if (cov.status !== 0) {
         failed++;
         out("vf", c.red("✗ coverage gate failed"));

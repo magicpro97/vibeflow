@@ -25,13 +25,26 @@ console.error = () => {};
 console.warn = () => {};
 
 const _realStderrWrite = process.stderr.write.bind(process.stderr);
-const APP_PREFIX = /^\[(?:ai-init|logbus|codegraph|lsp|vf|test-pollution)/;
+const _realStdoutWrite = process.stdout.write.bind(process.stdout);
+const APP_STDERR_PREFIX =
+  /^\[(?:ai-init|logbus|codegraph|lsp|vf|test-pollution|curator|orchestrator)/;
 Object.assign(process.stderr, {
   write(chunk: string | Buffer, ...rest: unknown[]): boolean {
     const s = typeof chunk === "string" ? chunk : chunk.toString();
-    if (APP_PREFIX.test(s)) return true;
-    if (s.charCodeAt(0) === 13) return true; // CR — ANSI spinner sequences from ui.ts
+    if (APP_STDERR_PREFIX.test(s)) return true;
+    if (s.charCodeAt(0) === 13) return true; // CR — ANSI spinner from ui.ts
     return (_realStderrWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
+  },
+});
+// Suppress interactive picker UI (ANSI cursor sequences written to stdout by prompt libraries)
+Object.assign(process.stdout, {
+  write(chunk: string | Buffer, ...rest: unknown[]): boolean {
+    const s = typeof chunk === "string" ? chunk : chunk.toString();
+    // \x1b[ or \x1b? or cursor-hide (\x1b[?25l) — picker/spinner ANSI codes
+    if (s.charCodeAt(0) === 27) return true; // ESC
+    if (s.charCodeAt(0) === 13) return true; // CR
+    if (s.startsWith("\x1b") || s.startsWith("[1A") || s.startsWith("[2K")) return true;
+    return (_realStdoutWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
   },
 });
 
