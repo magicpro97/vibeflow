@@ -43,7 +43,9 @@ export function startServer(port = 0): Promise<{
     try {
       raw = readFileSync(uiHtmlPath, "utf8");
     } catch {
-      return "<html><body><pre>UI not built. Run: bun run build</pre></body></html>";
+      // dist/ui not built yet — return a minimal shell with the CSRF token so
+      // server tests that call csrfToken() still work before `bun run build`.
+      return `<!doctype html><html><head><meta name="vf-token" content="${token}" /><meta name="vf-version" content="${versionVal}" /></head><body><pre>UI not built. Run: bun run build</pre></body></html>`;
     }
     return raw.replaceAll("__CSRF__", token).replaceAll("__VERSION__", versionVal);
   };
