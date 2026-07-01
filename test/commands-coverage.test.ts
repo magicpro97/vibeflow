@@ -85,6 +85,12 @@ function silenced<T>(fn: () => T): T {
   }
 }
 
+// Suppress all console.log at file level — CLI commands print status lines that leak to the
+// user's terminal when `vf verify` runs `bun run test`. Tests that need to assert on logged
+// output restore console.log themselves (see "verify on empty dir" test).
+const _realLog = console.log;
+console.log = () => {};
+
 function writeFixture(base: string, overrides: Partial<WorkflowState> = {}): void {
   const ctx = join(base, CTX_DIR);
   mkdirSync(ctx, { recursive: true });
@@ -2291,7 +2297,7 @@ describe("commands.verify branches", () => {
 describe("commands.tools branches", () => {
   test("tools: unknown sub returns 2 (line 2556-2560)", () => {
     const dir = freshDir("vf-tools-bogus-");
-    const code = tools("bogus", [], {}, { base: dir });
+    const code = silenced(() => tools("bogus", [], {}, { base: dir }));
     expect(code).toBe(2);
   });
 });
@@ -2302,11 +2308,11 @@ describe("commands.tools branches", () => {
 
 describe("commands.printVersion / printHelp", () => {
   test("printVersion returns 0 (line 2593-2595)", () => {
-    expect(printVersion()).toBe(0);
+    expect(silenced(() => printVersion())).toBe(0);
   });
 
   test("printHelp returns 0 (line 2721-2748)", () => {
-    expect(printHelp()).toBe(0);
+    expect(silenced(() => printHelp())).toBe(0);
   });
 });
 
@@ -2330,23 +2336,23 @@ describe("commands.workflow branches", () => {
 
   test("workflow: delete dry-run reports nothing to remove (line 2618-2620)", () => {
     // First init doesn't add any units, so plan.targets is empty.
-    expect(workflow("delete", [], {})).toBe(0);
+    expect(silenced(() => workflow("delete", [], {}))).toBe(0);
   });
 
   test("workflow: delete-unit with no name returns 2 (line 2636-2640)", () => {
-    expect(workflow("delete-unit", [], {})).toBe(2);
+    expect(silenced(() => workflow("delete-unit", [], {}))).toBe(2);
   });
 
   test("workflow: delete-unit with unknown name returns 1 (line 2643-2651)", () => {
-    expect(workflow("delete-unit", ["ghost"], {})).toBe(1);
+    expect(silenced(() => workflow("delete-unit", ["ghost"], {}))).toBe(1);
   });
 
   test("workflow: import with no src returns 2 (line 2668-2676)", () => {
-    expect(workflow("import", [], {})).toBe(2);
+    expect(silenced(() => workflow("import", [], {}))).toBe(2);
   });
 
   test("workflow: unknown sub returns 2 (line 2714-2718)", () => {
-    expect(workflow("bogus", [], {})).toBe(2);
+    expect(silenced(() => workflow("bogus", [], {}))).toBe(2);
   });
 });
 
@@ -2367,27 +2373,29 @@ describe("commands.help branches", () => {
   });
 
   test("printCommandHelp for known subcommand renders and returns 0 (line 2942-2945)", () => {
-    expect(printCommandHelp("init")).toBe(0);
-    expect(printCommandHelp("doctor")).toBe(0);
-    expect(printCommandHelp("run")).toBe(0);
-    expect(printCommandHelp("orchestrate")).toBe(0);
-    expect(printCommandHelp("workflow")).toBe(0);
-    expect(printCommandHelp("units")).toBe(0);
-    expect(printCommandHelp("skills")).toBe(0);
-    expect(printCommandHelp("tools")).toBe(0);
-    expect(printCommandHelp("discover")).toBe(0);
-    expect(printCommandHelp("hook")).toBe(0);
-    expect(printCommandHelp("ui")).toBe(0);
-    expect(printCommandHelp("hooks")).toBe(0);
-    expect(printCommandHelp("verify")).toBe(0);
-    expect(printCommandHelp("pr")).toBe(0);
-    expect(printCommandHelp("state")).toBe(0);
-    expect(printCommandHelp("coord")).toBe(0);
-    expect(printCommandHelp("decision")).toBe(0);
+    silenced(() => {
+      expect(printCommandHelp("init")).toBe(0);
+      expect(printCommandHelp("doctor")).toBe(0);
+      expect(printCommandHelp("run")).toBe(0);
+      expect(printCommandHelp("orchestrate")).toBe(0);
+      expect(printCommandHelp("workflow")).toBe(0);
+      expect(printCommandHelp("units")).toBe(0);
+      expect(printCommandHelp("skills")).toBe(0);
+      expect(printCommandHelp("tools")).toBe(0);
+      expect(printCommandHelp("discover")).toBe(0);
+      expect(printCommandHelp("hook")).toBe(0);
+      expect(printCommandHelp("ui")).toBe(0);
+      expect(printCommandHelp("hooks")).toBe(0);
+      expect(printCommandHelp("verify")).toBe(0);
+      expect(printCommandHelp("pr")).toBe(0);
+      expect(printCommandHelp("state")).toBe(0);
+      expect(printCommandHelp("coord")).toBe(0);
+      expect(printCommandHelp("decision")).toBe(0);
+    });
   });
 
   test("printCommandHelp for unknown subcommand falls back to printHelp (line 2943-2944)", () => {
-    expect(printCommandHelp("definitely-not-real")).toBe(0);
+    expect(silenced(() => printCommandHelp("definitely-not-real"))).toBe(0);
   });
 });
 
@@ -5621,8 +5629,10 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
     // These are smoke checks that the public symbols are wired through
     // the facade re-exports and actually run, not just parse.
     const { printVersion, printHelp, hasCommandHelp } = require("../src/commands.js");
-    expect(printVersion()).toBe(0);
-    expect(printHelp()).toBe(0);
+    silenced(() => {
+      expect(printVersion()).toBe(0);
+      expect(printHelp()).toBe(0);
+    });
     expect(hasCommandHelp(undefined)).toBe(false);
   });
 });
