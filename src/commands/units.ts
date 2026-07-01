@@ -124,6 +124,22 @@ export function units(
         });
         return 2;
       }
+      // ponytail: reject control chars early before sanitizeUnitName silently
+      // transforms them. User expects `units show <exact-input>` to work.
+      const hasControl = [...name].some((c) => {
+        const code = c.codePointAt(0);
+        return code !== undefined && (code < 0x20 || code === 0x7f);
+      });
+      if (hasControl) {
+        out(
+          "vf",
+          c.red(
+            "Unit name contains control characters — use only letters, digits, dots, dashes and underscores.",
+          ),
+          { level: "error" },
+        );
+        return 2;
+      }
       const addPatch: Partial<WorkUnit> & { name: string } = { name };
       if (typeof flags.spec === "string") addPatch.spec = flags.spec;
       if (typeof flags.scope === "string") {
