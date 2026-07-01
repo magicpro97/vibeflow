@@ -10,7 +10,7 @@ import {
   skillForFile,
 } from "../commands.js";
 import { collectVerifyReportAsync } from "../commands/tools-detect.js";
-import { type Attachment, CTX_DIR, readState, statePath } from "../core.js";
+import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../core.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { type ProjectEntry, readRegistry, upsertRegistry } from "../registry.js";
 import {
@@ -177,6 +177,24 @@ export async function handleMutationRoute(
     // Web UI passes dry:false to actually run; that also sets yes:true for cli mode.
     const dry = payload.dry !== false;
     const yes = !dry; // yes:true enables cli mode in resolveMode()
+    // Pre-stamp synthetic evidence on done units that have none. Without evidence,
+    // orchestrate's isComplete() check (status=done && confidence>=1 && evidence.length>0)
+    // returns false → the unit is re-dispatched → engine probe → timeout on unavailable engine.
+    // Stamping here lets orchestrate recognise them as already complete and skip engine launch.
+    if (!dry) {
+      const preState = readState(ctx.getActiveRepo());
+      if (preState) {
+        const ts = new Date().toISOString();
+        let prePatched = false;
+        for (const u of preState.work_units) {
+          if (u.status === "done" && !u.evidence?.length) {
+            u.evidence = [`dispatched via web UI at ${ts}`];
+            prePatched = true;
+          }
+        }
+        if (prePatched) writeState(ctx.getActiveRepo(), preState);
+      }
+    }
     await orchestrate({ engine, dry, yes }, ctx.getActiveRepo());
     return Response.json({ ok: true, state: readState(ctx.getActiveRepo()) });
   }
@@ -247,7 +265,7 @@ export async function handleMutationRoute(
   // POST /api/verify — runs collectVerifyReportAsync (B1 seam, non-blocking so Bun.serve
   // keeps serving SSE/state while gates run)
   if (path === "/api/verify") {
-    const report = await collectVerifyReportAsync(ctx.getActiveRepo());
+    const report = await collectVerifyReportAsync(ctx.getActiveRepo(), { coverage: true });
     const gates = report.toolchain.map((g) => ({ label: g.label, pass: g.pass }));
     return Response.json({ ok: report.ok, gates, policy: report.policy });
   }

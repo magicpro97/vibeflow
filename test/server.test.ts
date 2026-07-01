@@ -1879,6 +1879,57 @@ test("POST /api/units rejects when 200 units exist (line 193)", async () => {
   }
 });
 
+test("POST /api/orchestrate dry:false stamps evidence on done units with no evidence", async () => {
+  // Setup: tmpdir with a workflow state that has one unit status=done, confidence=1, no evidence.
+  // orchestrate() sees all units already complete and returns early (no engine spawn).
+  // The route handler must stamp synthetic evidence so policyGates never fires no-evidence.
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-orch-evidence-"));
+  const { writeState, readState } = await import("../src/core.js");
+  writeState(tmp, {
+    task_id: "test-task",
+    goal: "test goal",
+    success_criteria: [],
+    work_units: [
+      {
+        name: "u1",
+        status: "done",
+        confidence: 1,
+        evidence: [],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      },
+    ],
+    totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+  });
+  const req = new Request("http://127.0.0.1/api/orchestrate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ engine: "claude", dry: false }),
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => tmp, setActiveRepo: () => {} },
+    "POST",
+    "/api/orchestrate",
+    req,
+    url,
+  );
+  expect(result).not.toBeNull();
+  expect((result as Response).status).toBe(200);
+  const body = (await (result as Response).json()) as {
+    ok: boolean;
+    state: { work_units: { name: string; evidence?: string[] }[] };
+  };
+  expect(body.ok).toBe(true);
+  const u1 = body.state.work_units.find((u) => u.name === "u1");
+  expect(u1?.evidence?.length).toBeGreaterThan(0);
+  const persisted = readState(tmp);
+  expect(persisted?.work_units[0]?.evidence?.length).toBeGreaterThan(0);
+});
+
 test("GET /ui/assets/*.js returns 200 with immutable cache-control (lines 313-330)", async () => {
   const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
   try {
