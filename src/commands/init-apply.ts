@@ -70,6 +70,8 @@ export interface IntakeAnswers {
   taskSource?: string;
   fileTypes?: string[];
   expectedResult?: string;
+  /** Array form from the web UI — takes precedence over expectedResult when present */
+  successCriteria?: string[];
   sample?: string;
   repoPath?: string;
   workflowPhases?: WorkflowPhase[];
@@ -181,8 +183,16 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   const state = recomputeTotals({
     task_id: prev?.task_id ?? "TASK-1",
     goal: ctx.goal,
-    success_criteria: ctx.expectedResult ? [ctx.expectedResult] : (prev?.success_criteria ?? []),
-    work_units: prev?.work_units ?? [],
+    success_criteria: answers.successCriteria?.length
+      ? answers.successCriteria
+      : ctx.expectedResult
+        ? [ctx.expectedResult]
+        : prev && prev.goal === ctx.goal
+          ? (prev.success_criteria ?? []) // only carry over if same goal
+          : [],
+    // Reset work_units when goal changes so stale running units don't
+    // auto-advance the UI past the review step. Preserve when goal is unchanged.
+    work_units: prev && prev.goal === ctx.goal ? prev.work_units : [],
     totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     attachments: prev?.attachments ?? [],
     // Stamp the current version so subsequent `vf init` calls can detect

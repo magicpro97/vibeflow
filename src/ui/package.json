@@ -1,0 +1,21 @@
+{
+  "name": "@magicpro97/vibeflow-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "pinia": "^2.2.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@unocss/preset-wind": "^65.0.0",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "unocss": "^65.0.0",
+    "vite": "^6.0.0",
+    "vue-tsc": "^2.2.0"
+  }
+}

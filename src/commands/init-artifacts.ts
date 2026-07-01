@@ -179,7 +179,7 @@ export async function writeInitArtifacts(params: {
     const syncSpawner: StepSpawner =
       inject.syncSpawner ??
       ((cmd, args) => {
-        const r = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
+        const r = spawnSync(cmd, args, { cwd: cwd(), stdio: "pipe" });
         return { status: r.status ?? 1 };
       });
     const curSettings = readSettings(cwd());

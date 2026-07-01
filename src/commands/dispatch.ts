@@ -110,7 +110,8 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
     status: VALID_STATUS.includes(input.status as WorkUnit["status"])
       ? (input.status as WorkUnit["status"])
       : "pending",
-    confidence: typeof input.confidence === "number" ? input.confidence : 0,
+    confidence:
+      typeof input.confidence === "number" ? Math.min(1, Math.max(0, input.confidence)) : 0,
     // issue #90: round-trip the per-unit risk class so goalEval applies the correct threshold
     riskClass: input.riskClass,
     owner_agent: input.owner_agent,
@@ -137,12 +138,14 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
       review: g.review ?? "pending",
     },
     resources: {
-      agents: r.agents ?? 0,
-      tokens: r.tokens ?? 0,
-      cost_usd: r.cost_usd ?? 0,
-      wall_seconds: r.wall_seconds ?? 0,
+      agents: Math.max(0, Math.round(Number(r.agents) || 0)),
+      tokens: Math.max(0, Math.round(Number(r.tokens) || 0)),
+      cost_usd: Math.max(0, Number(r.cost_usd) || 0),
+      wall_seconds: Math.max(0, Math.round(Number(r.wall_seconds) || 0)),
     },
-    evidence: input.evidence,
+    evidence: Array.isArray(input.evidence)
+      ? input.evidence.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+      : input.evidence,
   };
 }
 
@@ -161,16 +164,23 @@ export function mutateUnits(
   if (!Array.isArray(state.work_units)) state.work_units = [];
   const name = unit.name?.trim();
   if (!name) return null;
-  const idx = state.work_units.findIndex((u) => u.name === name);
+  // Sanitize BEFORE duplicate check — different raw names can map to same slug
+  const sanitizedName = sanitizeUnitName(name);
+  if (!sanitizedName || sanitizedName === "") return null;
+  const idx = state.work_units.findIndex((u) => u.name === sanitizedName);
   if (action === "delete") {
     if (idx === -1) return null;
     state.work_units.splice(idx, 1);
   } else if (action === "add") {
     if (idx !== -1) return null; // name must be unique
-    state.work_units.push(normalizeUnit({ ...unit, name }));
+    state.work_units.push(normalizeUnit({ ...unit, name: sanitizedName }));
   } else {
     if (idx === -1) return null;
-    state.work_units[idx] = normalizeUnit({ ...state.work_units[idx], ...unit, name });
+    state.work_units[idx] = normalizeUnit({
+      ...state.work_units[idx],
+      ...unit,
+      name: sanitizedName,
+    });
   }
   recomputeTotals(state);
   writeState(base, state);

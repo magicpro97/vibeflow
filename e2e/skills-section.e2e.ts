@@ -1,17 +1,21 @@
 import { expect, test } from "@playwright/test";
 import { waitForPage } from "./helpers";
 
-
 test.describe("Skills section", () => {
-  test("skills box exists in page structure", async ({ page }) => {
+  test("stage 1 is visible on load (skills fetched in background)", async ({ page }) => {
     await page.goto("/");
     await waitForPage(page);
-    await expect(page.locator("#skillsBox")).toBeAttached();
+    // Stage 1 is the intake — skills API is fetched in background
+    await expect(page.locator("#repo-path")).toBeAttached();
   });
 
-  test("needs box exists in page structure", async ({ page }) => {
+  test("GET /api/skills returns ok", async ({ page }) => {
     await page.goto("/");
     await waitForPage(page);
-    await expect(page.locator("#needsBox")).toBeAttached();
+    const result = await page.evaluate(async () => {
+      const res = await fetch("/api/skills");
+      return { status: res.status, ok: res.ok };
+    });
+    expect(result.ok).toBe(true);
   });
 });

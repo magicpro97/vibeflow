@@ -16,7 +16,8 @@ function walk(dir: string, out: string[] = [], includeTestFiles = false): string
     const p = join(dir, entry);
     const s = statSync(p);
     if (s.isDirectory()) {
-      if (entry === "node_modules" || entry === "dist" || entry === "coverage") continue;
+      if (entry === "node_modules" || entry === "dist" || entry === "coverage" || entry === "ui")
+        continue;
       walk(p, out, includeTestFiles);
     } else if (
       p.endsWith(".ts") &&

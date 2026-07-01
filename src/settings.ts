@@ -106,7 +106,7 @@ function coerceFailureProtection(raw: unknown): FailureProtection {
   if (!raw || typeof raw !== "object") return out;
   const obj = raw as Record<string, unknown>;
   if (typeof obj.timeoutSeconds === "number" && Number.isFinite(obj.timeoutSeconds)) {
-    out.timeoutSeconds = Math.max(0, obj.timeoutSeconds);
+    out.timeoutSeconds = Math.min(3600, Math.max(0, Math.round(obj.timeoutSeconds)));
   }
   if (typeof obj.autoWip === "boolean") out.autoWip = obj.autoWip;
   if (typeof obj.rollbackOnFail === "boolean") out.rollbackOnFail = obj.rollbackOnFail;
@@ -174,7 +174,10 @@ export function writeSettings(
   const merged: VibeSettings = {
     tools: { ...current.tools, ...(next.tools ?? {}) },
     toolPriority: next.toolPriority ? normalizePriority(next.toolPriority) : current.toolPriority,
-    failureProtection: { ...current.failureProtection, ...(next.failureProtection ?? {}) },
+    failureProtection: coerceFailureProtection({
+      ...current.failureProtection,
+      ...(next.failureProtection ?? {}),
+    }),
     memory: next.memory ?? current.memory,
     updatedAt: now(),
   };

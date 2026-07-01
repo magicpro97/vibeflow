@@ -24,7 +24,8 @@
     "dev": "bun run src/cli.ts",
     "state": "node dist/cli.js state",
     "coord": "node dist/cli.js coord",
-    "build": "bun build ./src/cli.ts --target=node --outfile=dist/cli.js --banner='#!/usr/bin/env node' && mkdir -p dist/ui && cp src/ui/shell.html dist/ui/shell.html && cp src/ui/sections.html dist/ui/sections.html && cp -R src/assets dist/assets && chmod +x dist/cli.js",
+    "build": "bun run --cwd src/ui build && bun build ./src/cli.ts --target=node --outfile=dist/cli.js --banner='#!/usr/bin/env node' && mkdir -p dist/assets && cp -R src/assets/. dist/assets && chmod +x dist/cli.js",
+    "ui:dev": "bun run --cwd src/ui dev",
     "debug:ui": "bun --inspect=7499 run src/cli.ts ui --no-open --port 7799",
     "debug:ui:break": "bun --inspect-brk=7499 run src/cli.ts ui --no-open --port 7799",
     "typecheck": "tsc --noEmit",
@@ -69,6 +70,7 @@
   "publishConfig": {
     "access": "public"
   },
+  "workspaces": ["src/ui"],
   "dependencies": {
     "proper-lockfile": "^4.1.2"
   },

@@ -5,7 +5,7 @@ import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { listAttachments, replayFromLog, settingsView } from "./server/handlers.js";
-import { handleMutationRoute } from "./server/routes.js";
+import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
 
@@ -22,27 +22,35 @@ const ASSET_TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 const CSP =
-  "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'";
+  // script-src 'self': Vite bundles all JS externally — no inline scripts needed.
+  // style-src 'unsafe-inline': UnoCSS injects atomic utility styles at runtime.
+  "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'";
 
-export function startServer(port = 0): Promise<{
+export function startServer(
+  port = 0,
+  _opts: { uiHtmlPath?: URL } = {},
+): Promise<{
   server: { stop: () => void };
   url: string;
 }> {
   const token = randomUUID();
 
-  const shellV2Enabled = process.env.VIBEFLOW_UI_V2 === "1";
-  const shellHtmlSrc = shellV2Enabled ? "./ui/shell-v2.html" : "./ui/shell.html";
-  const shellHtml = readFileSync(new URL(shellHtmlSrc, import.meta.url), "utf8");
-  const sectionsHtml = readFileSync(new URL("./ui/sections.html", import.meta.url), "utf8");
+  const uiHtmlPath = _opts.uiHtmlPath ?? new URL("../dist/ui/index.html", import.meta.url);
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
     version?: string;
   };
-  const versionVal = pkgJson.version || "0.0.0";
-  // v1 embeds sections.html; v2 is self-contained
-  const pageHtml = shellV2Enabled
-    ? shellHtml
-    : shellHtml.replace("<!-- SECTIONS -->", sectionsHtml);
-  const cachedHtml = pageHtml.replace(/__CSRF__/g, token).replace(/__VERSION__/g, versionVal);
+  const versionVal = (pkgJson.version || "0.0.0").replace(/[^0-9a-zA-Z.\-+]/g, "");
+  // ponytail: read HTML per-request so a `vite build` hot-reload doesn't serve stale asset hashes
+  const serveHtml = () => {
+    let raw: string;
+    try {
+      raw = readFileSync(uiHtmlPath, "utf8");
+    } catch {
+      // dist/ui not built — minimal shell with CSRF token so csrfToken() tests work pre-build
+      return `<!doctype html><html><head><meta name="vf-token" content="${token}" /><meta name="vf-version" content="${versionVal}" /></head><body><pre>UI not built. Run: bun run build</pre></body></html>`;
+    }
+    return raw.replaceAll("__CSRF__", token).replaceAll("__VERSION__", versionVal);
+  };
 
   let activeRepo = cwd();
 
@@ -71,10 +79,12 @@ export function startServer(port = 0): Promise<{
       const path = url.pathname;
 
       // --- GET / (HTML page) ---
-      if (method === "GET" && (path === "/" || path.startsWith("/index"))) {
-        return new Response(cachedHtml, {
+      if (method === "GET" && (path === "/" || path === "/index.html")) {
+        return new Response(serveHtml(), {
           headers: {
             "content-type": "text/html; charset=utf-8",
+            // no-cache: revalidate on every navigation so new asset hashes are picked up
+            "cache-control": "no-cache",
             "content-security-policy": CSP,
             "x-content-type-options": "nosniff",
           },
@@ -104,7 +114,7 @@ export function startServer(port = 0): Promise<{
 
       // --- GET /api/attachments ---
       if (method === "GET" && path === "/api/attachments") {
-        return Response.json({ attachments: listAttachments(activeRepo) });
+        return Response.json({ ok: true, attachments: listAttachments(activeRepo) });
       }
 
       // --- GET /api/skills ---
@@ -116,12 +126,18 @@ export function startServer(port = 0): Promise<{
           task: state?.goal,
           profile: scanRepo(activeRepo),
         });
-        return Response.json({ skills: discoverSkills(activeRepo), needs });
+        return Response.json({ ok: true, skills: discoverSkills(activeRepo), needs });
       }
 
       // --- GET /api/settings ---
       if (method === "GET" && path === "/api/settings") {
-        return Response.json(settingsView(activeRepo));
+        return Response.json({ ok: true, ...settingsView(activeRepo) });
+      }
+
+      // --- GET /api/projects* ---
+      if (method === "GET" && path.startsWith("/api/projects")) {
+        const r = handleProjectsRoute(path, url);
+        if (r) return r;
       }
 
       // --- SSE: /api/logs/stream ---
@@ -131,7 +147,7 @@ export function startServer(port = 0): Promise<{
         return new Response(
           new ReadableStream({
             start(controller) {
-              controller.enqueue(new TextEncoder().encode(": vibeflow-logs-1\\n\\n"));
+              controller.enqueue(new TextEncoder().encode(": vibeflow-logs-1\n\n"));
               if (!bus) {
                 controller.enqueue(
                   new TextEncoder().encode(
@@ -140,10 +156,18 @@ export function startServer(port = 0): Promise<{
                 );
               } else {
                 try {
-                  const caught = replayFromLog(bus.currentFile(), 0, 1000);
+                  // replay from session start seq so stale logs from previous sessions are skipped
+                  let startSeq = 0;
+                  try {
+                    const seqFile = join(activeRepo, CTX_DIR, "logs", "session-start-seq");
+                    startSeq = Number(readFileSync(seqFile, "utf8").trim()) || 0;
+                  } catch {
+                    /* file may not exist yet */
+                  }
+                  const caught = replayFromLog(bus.currentFile(), startSeq, 1000);
                   for (const ev of caught) {
                     controller.enqueue(
-                      new TextEncoder().encode(`event: log\\ndata: ${JSON.stringify(ev)}\\n\\n`),
+                      new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
                     );
                   }
                 } catch {
@@ -163,7 +187,7 @@ export function startServer(port = 0): Promise<{
                 }
               };
               const heartbeat = setInterval(
-                () => safeEnqueue(new TextEncoder().encode(": keepalive\\n\\n")),
+                () => safeEnqueue(new TextEncoder().encode(": keepalive\n\n")),
                 25_000,
               );
 
@@ -194,6 +218,18 @@ export function startServer(port = 0): Promise<{
         );
       }
 
+      // --- GET /api/logs/session --- returns session start seq (to skip stale logs)
+      // cli.ts writes session-start-seq to activeRepo/.vibeflow/logs/ on startup
+      if (method === "GET" && path === "/api/logs/session") {
+        try {
+          const seqFile = join(activeRepo, CTX_DIR, "logs", "session-start-seq");
+          const seq = Number(readFileSync(seqFile, "utf8").trim()) || 0;
+          return Response.json({ sessionStartSeq: seq });
+        } catch {
+          return Response.json({ sessionStartSeq: 0 });
+        }
+      }
+
       // --- GET /api/logs/recent ---
       if (method === "GET" && path === "/api/logs/recent") {
         const bus = getLogbus();
@@ -219,7 +255,7 @@ export function startServer(port = 0): Promise<{
                 const json = JSON.stringify(state);
                 if (json !== last) {
                   last = json;
-                  controller.enqueue(new TextEncoder().encode(`data: ${json}\\n\\n`));
+                  controller.enqueue(new TextEncoder().encode(`data: ${json}\n\n`));
                 }
                 if (state) {
                   for (const u of state.work_units ?? []) {
@@ -236,7 +272,7 @@ export function startServer(port = 0): Promise<{
                         if (!slice.trim()) continue;
                         controller.enqueue(
                           new TextEncoder().encode(
-                            `event: stream\\ndata: ${JSON.stringify({ unit: u.name, lines: slice.split("\\n").filter(Boolean) })}\\n\\n`,
+                            `event: stream\ndata: ${JSON.stringify({ unit: u.name, lines: slice.split("\n").filter(Boolean) })}\n\n`,
                           ),
                         );
                       }
@@ -274,7 +310,8 @@ export function startServer(port = 0): Promise<{
             path === "/api/settings" ||
             path === "/api/verify" ||
             path === "/api/upload")) ||
-        (method === "DELETE" && path === "/api/upload");
+        (method === "DELETE" && path === "/api/upload") ||
+        (method === "DELETE" && path === "/api/state");
 
       if (isWrite) {
         if (!guarded(req)) {
@@ -294,16 +331,35 @@ export function startServer(port = 0): Promise<{
             url,
           );
           if (result) return result;
-          // Each whitelisted /api/* write route above returns
-          // before reaching this point. If we got here, the path
-          // was in `isWrite` but no inner handler matched. That
-          // would mean a future contributor added a new entry to
-          // isWrite without an inner if/else — kept as a safety
-          // net so the request doesn't fall through to the
-          // /assets/* 404 handler.
+          // ponytail: safety net — path in isWrite but no inner handler matched
           return Response.json({ error: "not found" }, { status: 404 });
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 400 });
+        }
+      }
+
+      // --- GET /ui/* (Vite build assets — hashed filenames, immutable cache) ---
+      if (method === "GET" && path.startsWith("/ui/")) {
+        const rel = path.slice("/ui/".length);
+        if (!rel || rel.includes("..") || rel.includes("\0"))
+          return new Response("not found", { status: 404 });
+        const UI_DIST = new URL("../dist/ui/", import.meta.url);
+        const fileUrl = new URL(rel, UI_DIST);
+        if (!fileUrl.href.startsWith(UI_DIST.href))
+          return new Response("not found", { status: 404 });
+        const ext = rel.slice(rel.lastIndexOf("."));
+        const type = ASSET_TYPES[ext] ?? "application/octet-stream";
+        try {
+          const data = readFileSync(fileUrl.pathname);
+          return new Response(data, {
+            headers: {
+              "content-type": type,
+              "cache-control": "public, max-age=31536000, immutable",
+              "x-content-type-options": "nosniff",
+            },
+          });
+        } catch {
+          return new Response("not found", { status: 404 });
         }
       }
 
@@ -318,7 +374,7 @@ export function startServer(port = 0): Promise<{
         const ext = rel.slice(rel.lastIndexOf("."));
         const type = ASSET_TYPES[ext];
         if (!type) return new Response("not found", { status: 404 });
-        const file = Bun.file(fileUrl);
+        const file = Bun.file(fileUrl.pathname);
         const ok = await file.exists();
         if (!ok) return new Response("not found", { status: 404 });
         return new Response(file, {

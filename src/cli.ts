@@ -28,7 +28,7 @@ import { config, decision } from "./commands/config-decision.js";
 import { coord } from "./commands/coord.js";
 import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
-import { out } from "./logbus.js";
+import { installLogbus, out } from "./logbus.js";
 import { startServer } from "./server.js";
 
 function openBrowser(url: string): void {
@@ -82,6 +82,31 @@ async function startServerResilient(
 }
 
 async function ui(flags: Record<string, string | boolean>): Promise<number> {
+  // Install logbus so logs flow immediately — without this, /api/logs/stream
+  // returns "no logbus instance" until orchestrate() is called first.
+  // The logbus file is reused across sessions; read the last seq BEFORE installing
+  // so the UI can skip stale logs from previous runs on catchup.
+  const { replayFromLog } = await import("./server/handlers.js");
+  const logDir = join(cwd(), CTX_DIR, "logs");
+  const logFile = join(logDir, "current.log");
+  let sessionStartSeq = 0;
+  try {
+    const { existsSync } = await import("node:fs");
+    if (existsSync(logFile)) {
+      const events = replayFromLog(logFile, 0, 10_000);
+      sessionStartSeq = events.at(-1)?.seq ?? 0;
+    }
+  } catch {
+    /* log file may not exist yet */
+  }
+  installLogbus({ dir: logDir });
+  // Write session start seq to a file for the server to expose via /api/logs/session
+  try {
+    const { writeFileSafe } = await import("./core.js");
+    writeFileSafe(join(logDir, "session-start-seq"), String(sessionStartSeq));
+  } catch {
+    /* best-effort */
+  }
   const port = typeof flags.port === "string" ? Number(flags.port) : 0;
   let { server, url } = await startServerResilient(Number.isFinite(port) ? port : 0);
   if (!flags["no-open"]) openBrowser(url);

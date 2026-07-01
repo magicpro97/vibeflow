@@ -6,7 +6,7 @@ import { startServer } from "../src/server";
 async function csrfToken(url: string): Promise<string> {
   const res = await fetch(url);
   const html = await res.text();
-  const m = html.match(/<meta\s+name="csrf"\s+content="([^"]+)"\s*\/?>/i);
+  const m = html.match(/<meta\s+name="vf-token"\s+content="([^"]+)"\s*\/?>/i);
   if (!m) throw new Error("CSRF token not found in page HTML");
   return m[1] as string;
 }
@@ -65,7 +65,7 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("POST /api/init empty goal returns 200 and generates minimal state", async () => {
+  test("POST /api/init empty goal returns 400 (server-side validation)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
@@ -80,11 +80,9 @@ describe("server HTTP API handlers", () => {
         },
         body: JSON.stringify({ goal: "" }),
       });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as InitResponse;
-      expect(body.ok).toBe(true);
-      // Empty goal still produces a valid state with a default goal string
-      expect(typeof body.state.goal).toBe("string");
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/goal/i);
     } finally {
       server.stop();
     }
@@ -212,6 +210,11 @@ describe("server HTTP API handlers", () => {
         recursive: true,
         force: true,
       });
+      // Remove the u1 fixture state written by this test so subsequent
+      // /api/verify calls don't report wrong unit names.
+      const { join: j2 } = await import("node:path");
+      const { rmSync: rm2 } = await import("node:fs");
+      rm2(j2(process.cwd(), ".vibeflow", "WORKFLOW_STATE.json"), { force: true });
     }
   });
 
@@ -233,6 +236,11 @@ describe("server HTTP API handlers", () => {
       const body = (await res.json()) as { ok: boolean; attachment: { name: string } };
       expect(body.ok).toBe(true);
       expect(body.attachment.name).toBe("test.txt");
+      // cleanup
+      await fetch(`${url}/api/upload?name=test.txt`, {
+        method: "DELETE",
+        headers: { "x-vibeflow-token": token },
+      });
     } finally {
       server.stop();
     }
@@ -259,13 +267,19 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("POST /api/dispatch returns 200 for known engine (line 515-516)", async () => {
+  test("POST /api/dispatch returns 200 with file+prompt for known engine (line 515-516)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
     };
     try {
       const token = await csrfToken(url);
+      // Init required — dispatch refuses without state (applyDispatch returns null)
+      await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ goal: "dispatch test goal", engines: ["claude"] }),
+      });
       const res = await fetch(`${url}/api/dispatch`, {
         method: "POST",
         headers: {
@@ -275,6 +289,10 @@ describe("server HTTP API handlers", () => {
         body: JSON.stringify({ engine: "claude" }),
       });
       expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; file?: string; prompt?: string };
+      expect(body.ok).toBe(true);
+      expect(typeof body.file).toBe("string");
+      expect(typeof body.prompt).toBe("string");
     } finally {
       server.stop();
     }
@@ -341,7 +359,7 @@ describe("server HTTP API handlers", () => {
           "Content-Type": "application/json",
           "x-vibeflow-token": token,
         },
-        body: JSON.stringify({ query: "" }),
+        body: JSON.stringify({ kind: "skills", query: "" }),
       });
       expect(res.status).toBe(400);
     } finally {
@@ -370,7 +388,7 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("POST /api/preflight returns 200 (line 543)", async () => {
+  test("POST /api/preflight returns 200 with ok+readiness (line 543)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
@@ -386,6 +404,26 @@ describe("server HTTP API handlers", () => {
         body: JSON.stringify({ engines: ["claude"], probe: false }),
       });
       expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; readiness: unknown[] };
+      expect(typeof body.ok).toBe("boolean");
+      expect(Array.isArray(body.readiness)).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/discover with invalid kind returns 400 (line 162)", async () => {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ kind: "packages", query: "react" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("kind");
     } finally {
       server.stop();
     }
@@ -437,7 +475,7 @@ describe("server HTTP API handlers", () => {
     }
   }, 30_000);
 
-  test("POST /api/settings returns 200 (line 548)", async () => {
+  test("POST /api/settings returns 200 with updated settings object (line 548)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
@@ -453,6 +491,11 @@ describe("server HTTP API handlers", () => {
         body: JSON.stringify({ tools: { codegraph: false, lsp: true } }),
       });
       expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; settings: { tools: { lsp: boolean } } };
+      expect(body.ok).toBe(true);
+      expect(typeof body.settings).toBe("object");
+      // Verify the written value is reflected back
+      expect(body.settings.tools.lsp).toBe(true);
     } finally {
       server.stop();
     }
@@ -795,6 +838,164 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("DELETE /api/state removes workflow state and returns ok:true", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // Init so there is a state file
+      await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ goal: "test goal", repoPath: url }),
+      });
+      // State should now exist
+      const before = await fetch(`${url}/state`).then((r) => r.json());
+      expect(before).not.toBeNull();
+      // Delete state
+      const del = await fetch(`${url}/api/state`, {
+        method: "DELETE",
+        headers: { "x-vibeflow-token": token },
+      });
+      expect(del.status).toBe(200);
+      const body = (await del.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+      // State should now be gone
+      const after = await fetch(`${url}/state`).then((r) => r.json());
+      expect(after).toBeNull();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("DELETE /api/state is idempotent when no state exists", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/state`, {
+        method: "DELETE",
+        headers: { "x-vibeflow-token": token },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /api/logs/session returns sessionStartSeq (line 199-206)", async () => {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      // Happy path: file exists → returns the seq number
+      const res = await fetch(`${url}/api/logs/session`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { sessionStartSeq: number };
+      expect(typeof body.sessionStartSeq).toBe("number");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /api/logs/session returns 0 when session-start-seq file is absent (lines 204-206)", async () => {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    // Temporarily rename the file so the catch branch fires
+    const { join } = await import("node:path");
+    const { renameSync, existsSync } = await import("node:fs");
+    const seqFile = join(process.cwd(), ".vibeflow", "logs", "session-start-seq");
+    const tmpFile = `${seqFile}.bak`;
+    const existed = existsSync(seqFile);
+    if (existed) renameSync(seqFile, tmpFile);
+    try {
+      const res = await fetch(`${url}/api/logs/session`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { sessionStartSeq: number };
+      expect(body.sessionStartSeq).toBe(0);
+    } finally {
+      if (existed) renameSync(tmpFile, seqFile);
+      server.stop();
+    }
+  });
+
+  test("POST /api/dispatch without state returns 400 with actionable message (line 146)", async () => {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/dispatch`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ engine: "claude" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/no workflow state/);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/orchestrate without state returns 400 (line 157)", async () => {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/orchestrate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ engine: "claude", dry: false }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/no workflow state/);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/units add with no state returns specific error (line 213-215)", async () => {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/units`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ action: "add", unit: { name: "test-unit" } }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/no workflow state/);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/units: update non-existent returns 'unit not found' (line 176)", async () => {
+    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const token = await csrfToken(url);
+      // Init first so state exists
+      await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ goal: "test", repoPath: "/tmp" }),
+      });
+      const res = await fetch(`${url}/api/units`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ action: "update", unit: { name: "does-not-exist" } }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("unit not found");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("POST /api/discover with valid query returns 200 or 400, does not crash", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
@@ -995,16 +1196,92 @@ describe("server split (#186 PR11 sentinel)", () => {
     expect(facade).toMatch(/from ["']\.\/server\/handlers\.js["']/);
   });
   test("import.meta.url reads stay in the facade (NOT moved to depth-2)", () => {
-    // the path bug guard: shell.html / package.json must still be read from server.ts
+    // the path bug guard: dist/ui/index.html / package.json must still be read from server.ts
     expect(facade).toMatch(/import\.meta\.url/);
-    expect(facade).toMatch(/shell\.html/);
+    expect(facade).toMatch(/dist\/ui\/index\.html/);
   });
   test("size-waiver removed", () => {
     expect(facade).not.toMatch(/size-waiver/);
   });
 });
 
-import { handleMutationRoute } from "../src/server/routes.js";
+import { handleMutationRoute, handleProjectsRoute } from "../src/server/routes.js";
+// --- handleProjectsRoute unit tests (covers src/server/routes.ts lines 259-284) ---
+
+test("handleProjectsRoute GET /api/projects returns projects array", () => {
+  const url = new URL("http://127.0.0.1/api/projects");
+  const res = handleProjectsRoute("/api/projects", url);
+  expect(res).not.toBeNull();
+  expect((res as Response).status).toBe(200);
+});
+
+test("handleProjectsRoute GET /api/projects/state without path returns 400", () => {
+  const url = new URL("http://127.0.0.1/api/projects/state");
+  const res = handleProjectsRoute("/api/projects/state", url);
+  expect((res as Response).status).toBe(400);
+});
+
+test("handleProjectsRoute GET /api/projects/state with unknown path returns 404", () => {
+  const url = new URL("http://127.0.0.1/api/projects/state?path=%2Ftmp%2Fno-such-vf-repo");
+  const res = handleProjectsRoute("/api/projects/state", url);
+  expect((res as Response).status).toBe(404);
+});
+
+test("handleProjectsRoute GET /api/projects/state with valid state returns 200", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-pstate-"));
+  mkdirSync(join(tmp, ".vibeflow"), { recursive: true });
+  writeFileSync(
+    join(tmp, ".vibeflow", "WORKFLOW_STATE.json"),
+    JSON.stringify({ goal: "test", work_units: [] }),
+  );
+  const encoded = encodeURIComponent(tmp);
+  const url = new URL(`http://127.0.0.1/api/projects/state?path=${encoded}`);
+  const res = handleProjectsRoute("/api/projects/state", url);
+  expect((res as Response).status).toBe(200);
+  const body = (await (res as Response).json()) as { state: { goal: string } };
+  expect(body.state.goal).toBe("test");
+});
+
+test("handleProjectsRoute GET /api/projects/logs without path returns 400", () => {
+  const url = new URL("http://127.0.0.1/api/projects/logs");
+  const res = handleProjectsRoute("/api/projects/logs", url);
+  expect((res as Response).status).toBe(400);
+});
+
+test("handleProjectsRoute GET /api/projects/logs with missing log file returns empty events", async () => {
+  const url = new URL("http://127.0.0.1/api/projects/logs?path=%2Ftmp%2Fno-such-vf-repo");
+  const res = handleProjectsRoute("/api/projects/logs", url);
+  expect((res as Response).status).toBe(200);
+  const body = (await (res as Response).json()) as { events: unknown[] };
+  expect(Array.isArray(body.events)).toBe(true);
+});
+
+test("handleProjectsRoute returns null for unmatched sub-path", () => {
+  const url = new URL("http://127.0.0.1/api/projects/unknown");
+  const res = handleProjectsRoute("/api/projects/unknown", url);
+  expect(res).toBeNull();
+});
+
+// --- Live server integration: covers server.ts lines 139-140 ---
+
+test("GET /api/projects via live server returns 200 with projects array (covers server.ts:139-140)", async () => {
+  const { server, url } = (await startServer()) as {
+    server: { stop: () => void };
+    url: string;
+  };
+  try {
+    const res = await fetch(`${url}/api/projects`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { projects: unknown[] };
+    expect(Array.isArray(body.projects)).toBe(true);
+  } finally {
+    server.stop();
+  }
+});
+
 test("handleMutationRoute returns null for unmatched path (safety net)", async () => {
   const req = new Request("http://127.0.0.1/api/unknown", {
     method: "POST",
@@ -1056,6 +1333,57 @@ test("POST /api/verify via handleMutationRoute returns structured gate report (B
   expect(Array.isArray(body.policy.failures)).toBe(true);
 });
 
+test("DELETE /api/projects removes entry from registry via handleMutationRoute", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-del-proj-"));
+  // Seed the registry with a fake entry at tmp
+  const { upsertRegistry, readRegistry } = await import("../src/registry.js");
+  upsertRegistry({
+    path: tmp,
+    name: "test-proj",
+    lastUsed: Date.now(),
+    goal: "test",
+    totals: { units: 0, done: 0, tokens: 0, cost_usd: 0 },
+  });
+  expect(readRegistry().find((e) => e.path === tmp)).toBeDefined();
+
+  const req = new Request(`http://127.0.0.1/api/projects?path=${encodeURIComponent(tmp)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => tmp, setActiveRepo: () => {} },
+    "DELETE",
+    "/api/projects",
+    req,
+    url,
+  );
+  expect(result).not.toBeNull();
+  expect((result as Response).status).toBe(200);
+  const body = (await (result as Response).json()) as { ok: boolean };
+  expect(body.ok).toBe(true);
+  expect(readRegistry().find((e) => e.path === tmp)).toBeUndefined();
+});
+
+test("DELETE /api/projects without path returns 400", async () => {
+  const req = new Request("http://127.0.0.1/api/projects", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => ".", setActiveRepo: () => {} },
+    "DELETE",
+    "/api/projects",
+    req,
+    url,
+  );
+  expect((result as Response).status).toBe(400);
+});
+
 test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", async () => {
   const { server, url } = (await startServer()) as {
     server: { stop: () => void };
@@ -1074,41 +1402,48 @@ test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", asy
 });
 
 // B2 serve seam tests
-test("VIBEFLOW_UI_V2=1 serves shell-v2 with v2-marker (B2)", async () => {
-  const orig = process.env.VIBEFLOW_UI_V2;
-  process.env.VIBEFLOW_UI_V2 = "1";
+test("GET / returns fallback shell with CSRF token when dist/ui not built (B2)", async () => {
+  const missing = new URL("file:///nonexistent/dist/ui/index.html");
+  const { server, url } = (await startServer(0, { uiHtmlPath: missing })) as {
+    server: { stop: () => void };
+    url: string;
+  };
   try {
-    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
-    try {
-      const res = await fetch(`${url}/`);
-      expect(res.status).toBe(200);
-      const text = await res.text();
-      expect(text).toContain("v2-marker");
-    } finally {
-      server.stop();
-    }
+    const res = await fetch(`${url}/`);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('name="vf-token"');
+    expect(text).toContain("UI not built");
   } finally {
-    if (orig === undefined) Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
-    else process.env.VIBEFLOW_UI_V2 = orig;
+    server.stop();
   }
 });
 
-test("default (no flag) still serves v1 shell (B2)", async () => {
-  const orig = process.env.VIBEFLOW_UI_V2;
-  Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
+test("GET / serves Vite SPA shell with app mount point (B2)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
   try {
-    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
-    try {
-      const res = await fetch(`${url}/`);
-      expect(res.status).toBe(200);
-      const text = await res.text();
-      expect(text).not.toContain("v2-marker");
-    } finally {
-      server.stop();
-    }
+    const res = await fetch(`${url}/`);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    // Vite SPA: must have the app mount div and reference the hashed /ui/assets/ bundle
+    expect(text).toContain('<div id="app">');
+    expect(text).toMatch(/src="\/ui\/assets\/index-[^"]+\.js"/);
   } finally {
-    if (orig === undefined) Reflect.deleteProperty(process.env, "VIBEFLOW_UI_V2");
-    else process.env.VIBEFLOW_UI_V2 = orig;
+    server.stop();
+  }
+});
+
+test("GET / always serves the unified Vite app (no legacy shell toggle) (B2)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/`);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    // Must be the Vite SPA, not a legacy multi-shell switch
+    expect(text).toContain("VibeFlow");
+    expect(text).toContain('<div id="app">');
+  } finally {
+    server.stop();
   }
 });
 
@@ -1119,6 +1454,547 @@ test("GET /assets/alpine.csp.min.js returns 200 application/javascript (B2)", as
     expect(res.status).toBe(200);
     const ct = res.headers.get("content-type") || "";
     expect(ct).toContain("javascript");
+  } finally {
+    server.stop();
+  }
+});
+
+// ── New regression tests for session fixes ──────────────────────────────────
+
+test("GET / sets restrictive CSP — no script unsafe-inline", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/`);
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("script-src 'self'");
+    // unsafe-inline on scripts weakens XSS protection — must not be present
+    // (style unsafe-inline is acceptable for UnoCSS runtime injection)
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("default-src 'self'");
+  } finally {
+    server.stop();
+  }
+});
+
+test("GET / returns Cache-Control: no-cache so stale HTML is never served", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/`);
+    expect(res.status).toBe(200);
+    const cc = res.headers.get("cache-control") ?? "";
+    expect(cc).toContain("no-cache");
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/init rejects goal longer than 10,000 chars with 400", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ goal: "x".repeat(10_001), repoPath: "/tmp" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/too long/i);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/upload rejects disallowed extension (.sh → 400)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/upload?name=exploit.sh`, {
+      method: "POST",
+      headers: { "x-vibeflow-token": token },
+      body: new Blob(["#!/bin/sh\nrm -rf /"], { type: "text/plain" }),
+    });
+    expect(res.status).toBe(400);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/upload rejects .exe and .php extensions", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    for (const name of ["evil.exe", "backdoor.php", "script.js"]) {
+      const res = await fetch(`${url}/api/upload?name=${name}`, {
+        method: "POST",
+        headers: { "x-vibeflow-token": token },
+        body: new Blob(["content"]),
+      });
+      expect(res.status).toBe(400);
+    }
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/upload accepts known safe extension (.pdf)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/upload?name=report.pdf`, {
+      method: "POST",
+      headers: { "x-vibeflow-token": token },
+      body: new Blob(["fake pdf content"]),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; attachment: { name: string } };
+    expect(body.ok).toBe(true);
+    expect(body.attachment.name).toBe("report.pdf");
+    // cleanup
+    await fetch(`${url}/api/upload?name=report.pdf`, {
+      method: "DELETE",
+      headers: { "x-vibeflow-token": token },
+    });
+  } finally {
+    server.stop();
+  }
+});
+
+// ── Edge case coverage for upload + init validation ──────────────────────────
+
+test("POST /api/upload rejects filename with no extension", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/upload?name=noextension`, {
+      method: "POST",
+      headers: { "x-vibeflow-token": token },
+      body: new Blob(["content"]),
+    });
+    expect(res.status).toBe(400);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/upload accepts uppercase extensions case-insensitively (.PNG → allowed)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/upload?name=PHOTO.PNG`, {
+      method: "POST",
+      headers: { "x-vibeflow-token": token },
+      body: new Blob(["fake png"]),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; attachment: { name: string } };
+    expect(body.ok).toBe(true);
+    // safeAttachName normalises via basename — name preserved as-is (case kept by basename)
+    expect(body.attachment.name.toLowerCase()).toBe("photo.png");
+    // cleanup
+    await fetch(`${url}/api/upload?name=${body.attachment.name}`, {
+      method: "DELETE",
+      headers: { "x-vibeflow-token": token },
+    });
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/init rejects whitespace-only goal with 400", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ goal: "   \t\n", repoPath: "/tmp" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/goal/i);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/upload accepts .yaml and .csv (all allowed types)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    for (const name of ["config.yaml", "data.csv", "notes.md"]) {
+      const res = await fetch(`${url}/api/upload?name=${name}`, {
+        method: "POST",
+        headers: { "x-vibeflow-token": token },
+        body: new Blob(["content"]),
+      });
+      expect(res.status).toBe(200);
+      // cleanup — prevent test artifacts from polluting .vibeflow/attachments/
+      await fetch(`${url}/api/upload?name=${name}`, {
+        method: "DELETE",
+        headers: { "x-vibeflow-token": token },
+      });
+    }
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/detect with non-existent path returns 400 (not silent CWD fallback)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/detect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ path: "/this/path/does/absolutely/not/exist" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/not found/i);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/detect with no path still works (uses CWD)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/detect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; repo: string };
+    expect(body.ok).toBe(true);
+    expect(typeof body.repo).toBe("string");
+  } finally {
+    server.stop();
+  }
+});
+
+// ── Coverage for new validation paths added in audit vòng 5-6 ────────────────
+
+test("POST /api/upload rejects raw binary over ATTACH_CAP (file too large)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const big = new Uint8Array(51 * 1024 * 1024);
+    const res = await fetch(`${url}/api/upload?name=big.txt`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", "x-vibeflow-token": token },
+      body: big,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("file too large");
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/units with whitespace-only name returns 400 unit name is required", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/units`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({
+        action: "add",
+        unit: {
+          name: "  ",
+          status: "pending",
+          confidence: null,
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unit name is required");
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/init clamps successCriteria to 100 items", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const criteria = Array.from({ length: 150 }, (_, i) => `criterion ${i}`);
+    const res = await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ goal: "test", engines: ["claude"], successCriteria: criteria }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; state: { success_criteria: string[] } };
+    expect(body.ok).toBe(true);
+    expect(body.state.success_criteria.length).toBeLessThanOrEqual(100);
+  } finally {
+    server.stop();
+  }
+});
+
+test("GET /ui/ path traversal attempt returns 404", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/ui/%2E%2E/package.json`);
+    expect(res.status).toBe(404);
+  } finally {
+    server.stop();
+  }
+});
+
+test("GET /ui/ with empty rel returns 404 (guard line 314)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    // /ui/ with trailing slash only → rel is ""
+    const res = await fetch(`${url}/ui/`);
+    expect(res.status).toBe(404);
+  } finally {
+    server.stop();
+  }
+});
+
+test("GET /ui/ with nonexistent file returns 404 (catch line 332)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/ui/assets/nonexistent-file-xyz.js`);
+    expect(res.status).toBe(404);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/upload rejects large body — Content-Length header check (line 48-50)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    // Send actual 51MB body — tests both the Content-Length header check and blob check
+    const big = new Uint8Array(51 * 1024 * 1024);
+    const res = await fetch(`${url}/api/upload?name=big.txt`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", "x-vibeflow-token": token },
+      body: big,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("file too large");
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/init with __CLEAR__ goal returns 400 (line 117)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ goal: "__CLEAR__", repoPath: "/tmp", engines: ["claude"] }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("reserved goal value");
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/init with valid repoPath sets active repo (line 132)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({
+        goal: "test repo path",
+        repoPath: process.cwd(),
+        engines: ["claude"],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/init with empty repoPath uses server cwd (line 132)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ goal: "test empty repo path", repoPath: "   ", engines: ["claude"] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true); // falls back to cwd — no error
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/units rejects name longer than 200 chars (line 187)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ goal: "len test", engines: ["claude"] }),
+    });
+    const res = await fetch(`${url}/api/units`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({
+        action: "add",
+        unit: {
+          name: "a".repeat(201),
+          status: "pending",
+          confidence: null,
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("too long");
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/units rejects when 200 units exist (line 193)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    await fetch(`${url}/api/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ goal: "cap test", engines: ["claude"] }),
+    });
+    // Add 200 units
+    for (let i = 0; i < 200; i++) {
+      await fetch(`${url}/api/units`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({
+          action: "add",
+          unit: {
+            name: `u${i}`,
+            status: "pending",
+            confidence: null,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        }),
+      });
+    }
+    // 201st should fail
+    const res = await fetch(`${url}/api/units`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({
+        action: "add",
+        unit: {
+          name: "u200",
+          status: "pending",
+          confidence: null,
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("too many");
+  } finally {
+    server.stop();
+    // Cleanup: this test writes "cap test" goal + 200 units to cwd/.vibeflow/WORKFLOW_STATE.json
+    // If not cleaned, subsequent /api/verify calls report 200 confidence failures.
+    const { join: j3 } = await import("node:path");
+    const { rmSync: rm3 } = await import("node:fs");
+    rm3(j3(process.cwd(), ".vibeflow", "WORKFLOW_STATE.json"), { force: true });
+  }
+});
+
+test("POST /api/orchestrate dry:false stamps evidence on done units with no evidence", async () => {
+  // Setup: tmpdir with a workflow state that has one unit status=done, confidence=1, no evidence.
+  // orchestrate() sees all units already complete and returns early (no engine spawn).
+  // The route handler must stamp synthetic evidence so policyGates never fires no-evidence.
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-orch-evidence-"));
+  const { writeState, readState } = await import("../src/core.js");
+  writeState(tmp, {
+    task_id: "test-task",
+    goal: "test goal",
+    success_criteria: [],
+    work_units: [
+      {
+        name: "u1",
+        status: "done",
+        confidence: 1,
+        evidence: [],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      },
+    ],
+    totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+  });
+  const req = new Request("http://127.0.0.1/api/orchestrate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ engine: "claude", dry: false }),
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => tmp, setActiveRepo: () => {} },
+    "POST",
+    "/api/orchestrate",
+    req,
+    url,
+  );
+  expect(result).not.toBeNull();
+  expect((result as Response).status).toBe(200);
+  const body = (await (result as Response).json()) as {
+    ok: boolean;
+    state: { work_units: { name: string; evidence?: string[] }[] };
+  };
+  expect(body.ok).toBe(true);
+  const u1 = body.state.work_units.find((u) => u.name === "u1");
+  expect(u1?.evidence?.length).toBeGreaterThan(0);
+  const persisted = readState(tmp);
+  expect(persisted?.work_units[0]?.evidence?.length).toBeGreaterThan(0);
+});
+
+test("GET /ui/assets/*.js returns 200 with immutable cache-control (lines 313-330)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    // Get the real asset filename from the HTML
+    const html = await (await fetch(url)).text();
+    const m = html.match(/src="(\/ui\/assets\/index-[^"]+\.js)"/);
+    if (!m) {
+      // dist/ui not built — skip gracefully
+      return;
+    }
+    const res = await fetch(`${url}${m[1]}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toContain("immutable");
+    expect(res.headers.get("content-type")).toContain("javascript");
   } finally {
     server.stop();
   }

@@ -1,5 +1,5 @@
 node_modules
-dist
+dist/
 *.log
 .DS_Store
 .env
@@ -44,3 +44,5 @@ claude/
 coverage/
 *.lcov
 *.lcov.info
+.ui-port
+*/.vibeflow/.ui-port

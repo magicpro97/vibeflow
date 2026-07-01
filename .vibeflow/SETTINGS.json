@@ -9,13 +9,13 @@
     "native"
   ],
   "failureProtection": {
-    "timeoutSeconds": 600,
-    "autoWip": false,
+    "timeoutSeconds": 3600,
+    "autoWip": true,
     "rollbackOnFail": false,
-    "requireGit": false
+    "requireGit": true
   },
-  "memory": false,
-  "updatedAt": "2026-06-29T07:31:24.451Z",
+  "memory": true,
+  "updatedAt": "2026-06-30T21:16:33.769Z",
   "hooks": {
     "templates": [
       "block-destructive",

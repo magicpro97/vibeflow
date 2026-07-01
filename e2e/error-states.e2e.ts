@@ -1,22 +1,17 @@
 import { expect, test } from "@playwright/test";
 import { waitForPage } from "./helpers";
 
-
 test.describe("Edge cases", () => {
-  test("all sections render on empty state", async ({ page }) => {
+  test("stage 1 renders on empty state", async ({ page }) => {
     await page.goto("/");
     await waitForPage(page);
-    await expect(page.locator("#intake")).toBeVisible();
-    await expect(page.locator("#actionSec")).toBeVisible();
+    await expect(page.locator("#repo-path")).toBeVisible();
+    await expect(page.locator("#goal")).toBeVisible();
   });
 
-  test("feedback log shows state information", async ({ page }) => {
+  test("header is always visible on empty state", async ({ page }) => {
     await page.goto("/");
     await waitForPage(page);
-    await page.locator("#feedbackBtn").click();
-    await page.waitForTimeout(400);
-    const logContent = await page.locator("#feedbackLog").textContent();
-    expect(logContent).toContain("timestamp:");
-    expect(logContent).toContain("userAgent:");
+    await expect(page.locator("header").getByText("VibeFlow")).toBeVisible();
   });
 });

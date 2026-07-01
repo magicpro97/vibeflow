@@ -1,7 +1,7 @@
 <!-- vibeflow:start -->
 # CLAUDE.md
 ## ⚡ VibeFlow v0.11.0 Active — local-first orchestrator for AI coding agents (https://github.com/magicpro97/vibeflow).
-Project: ponytail-393-394 · Goal: test
+Project: vibeflow · Goal: test orchestrate end2end
 - For code navigation (definitions, references, callers, impact): prefer the language-server (LSP) MCP tools first; only fall back to grep/find/read if the others are unavailable.
 ## VibeFlow commands (use these)
 - `vf doctor` — check engine readiness before dispatching.

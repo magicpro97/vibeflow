@@ -54,8 +54,8 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run file-size:check
-      - run: bun run test
       - run: bun run build
+      - run: bun run test
       - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version
       - name: Coverage gate — fail if line coverage < 100%
@@ -65,7 +65,7 @@ jobs:
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
       - name: Web UI e2e (real dashboard in Chromium)
-        run: bun run test:e2e
+        run: rm -f ~/.vibeflow/projects.json && bun run test:e2e
 
   release-please:
     runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}

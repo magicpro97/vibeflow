@@ -1,0 +1,9 @@
+/* Hanken Grotesk — geometric sans, variable weight 400-700
+   Serves same-origin from Vite build output; satisfies CSP font-src 'self' */
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./hanken-grotesk.woff2") format("woff2");
+}
