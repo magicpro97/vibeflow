@@ -14,7 +14,8 @@
     ".agents/skills/skill-creator",
     ".agents/skills/vf",
     "templates/skills",
-    "templates"
+    "templates",
+    "bin"
   ],
   "engines": {
     "node": ">=18"
