@@ -286,15 +286,27 @@
     </div>
 
     <div class="pt-2 space-y-2">
-      <button
-        id="plan-btn"
-        class="btn-primary w-full justify-center"
-      :disabled="submitting || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !engines.some((e) => e.enabled) || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
-      :title="detecting ? 'Detecting repo…' : detectErr ? 'Fix the repository path first' : !form.repoPath.trim() ? 'Enter a repo path first' : !form.goal.trim() ? 'Enter a goal first' : form.goal.trim() === '__CLEAR__' ? 'Reserved value — enter a different goal' : !engines.some((e) => e.enabled) ? 'Select at least one engine' : docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) ? 'Fix invalid URLs first' : 'Plan — ⌘↵ also works'"
-      @click="submit"
-    >
-      <span v-if="submitting" class="inline-block w-3 h-3 border-2 border-neutral-400/30 border-t-neutral-900 rounded-full animate-spin mr-1.5" />
-      {{ submitting ? "Planning…" : "Plan" }}</button>
+      <div class="flex gap-2">
+        <button
+          id="plan-btn"
+          class="btn-primary flex-1 justify-center"
+          :disabled="submitting || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !engines.some((e) => e.enabled) || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
+          :title="detecting ? 'Detecting repo…' : detectErr ? 'Fix the repository path first' : !form.repoPath.trim() ? 'Enter a repo path first' : !form.goal.trim() ? 'Enter a goal first' : form.goal.trim() === '__CLEAR__' ? 'Reserved value — enter a different goal' : !engines.some((e) => e.enabled) ? 'Select at least one engine' : docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) ? 'Fix invalid URLs first' : 'Plan — ⌘↵ also works'"
+          @click="submit"
+        >
+          <span v-if="submitting" class="inline-block w-3 h-3 border-2 border-neutral-400/30 border-t-neutral-900 rounded-full animate-spin mr-1.5" />
+          {{ submitting ? "Planning…" : "Plan" }}
+        </button>
+        <button
+          class="px-3 py-1.5 rounded border border-neutral-800 text-xs text-neutral-500 hover:border-neutral-600 hover:text-neutral-200 transition-colors disabled:opacity-40 flex-shrink-0"
+          :disabled="saving || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !engines.some((e) => e.enabled) || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
+          title="Save config without planning — runs init only"
+          @click="saveInit"
+        >
+          <span v-if="saving" class="inline-block w-3 h-3 border-2 border-neutral-700 border-t-neutral-400 rounded-full animate-spin" />
+          <span v-else>Save</span>
+        </button>
+      </div>
       <p class="text-[11px] text-neutral-700 text-center">
         <kbd class="font-mono">⌘↵</kbd> to submit · <kbd class="font-mono">Tab</kbd> to navigate
       </p>
@@ -363,6 +375,7 @@ async function useCwd() {
   if (form.repoPath) await runDetect();
 }
 const submitting = ref(false);
+const saving = ref(false);
 const err = ref<string | null>(null);
 const detectInfo = ref<string | null>(null);
 const detectWarn = ref(false);
@@ -574,38 +587,51 @@ async function runDetect() {
   }
 }
 
-async function submit() {
-  // Wait for any in-flight detect, then run detect if not yet done
-  if (detecting.value) return; // detect in-flight — let blur finish, user can retry
-  // Run detect if user hasn't done it yet — prevents silent repo fallback to cwd
+async function callInit(): Promise<boolean> {
+  if (detecting.value) return false;
   if (form.repoPath.trim() && !detectInfo.value) {
     await runDetect();
-    if (detectErr.value) return; // invalid path — abort
+    if (detectErr.value) return false;
   }
-  submitting.value = true;
   err.value = null;
+  const selectedEngines = engines.filter((e) => e.enabled).map((e) => e.key);
+  await api.init({
+    repoPath: form.repoPath,
+    goal: form.goal,
+    successCriteria: criteriaRaw.value
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+    engines: selectedEngines,
+    docSources: docSources.filter((s) => s.ref.trim()),
+    taskSources: taskSources.filter((s) => s.ref.trim()),
+    workflowSteps: workflowSteps.filter(Boolean),
+  });
+  if (selectedEngines[0]) {
+    try {
+      localStorage.setItem("vf-engine", selectedEngines[0]);
+    } catch {}
+  }
+  await store.loadState();
+  return true;
+}
+
+async function saveInit() {
+  saving.value = true;
   try {
-    const selectedEngines = engines.filter((e) => e.enabled).map((e) => e.key);
-    await api.init({
-      repoPath: form.repoPath,
-      goal: form.goal,
-      successCriteria: criteriaRaw.value
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .filter(Boolean),
-      engines: selectedEngines,
-      docSources: docSources.filter((s) => s.ref.trim()),
-      taskSources: taskSources.filter((s) => s.ref.trim()),
-      workflowSteps: workflowSteps.filter(Boolean),
-    });
-    // Persist primary engine for Stage2 to pre-select — WorkflowState doesn't store this
-    if (selectedEngines[0]) {
-      try {
-        localStorage.setItem("vf-engine", selectedEngines[0]);
-      } catch {}
-    }
-    await store.loadState();
-    store.setStage(2);
+    await callInit();
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function submit() {
+  submitting.value = true;
+  try {
+    const ok = await callInit();
+    if (ok) store.setStage(2);
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
