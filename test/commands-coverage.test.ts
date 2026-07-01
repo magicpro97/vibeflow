@@ -1904,6 +1904,9 @@ describe("commands.verify branches", () => {
     const dir = freshDir("vf-verify-");
     const orig = process.cwd();
     process.chdir(dir);
+    const lines: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
     try {
       writeState(dir, {
         task_id: "T1",
@@ -1913,7 +1916,10 @@ describe("commands.verify branches", () => {
         totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
       expect(verify()).toBe(0);
+      // Warning must appear when no package.json/Gradle is found
+      expect(lines.join("\n")).toContain("no package.json or Gradle build found");
     } finally {
+      console.log = origLog;
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
     }
