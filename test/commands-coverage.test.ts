@@ -1209,6 +1209,11 @@ describe("commands.units subcommand branches", () => {
     expect(units("add", ["test\x00null"])).toBe(2);
   });
 
+  test("units: add with path separators in name returns 2 (#451)", () => {
+    expect(units("add", ["feature/branch"])).toBe(2);
+    expect(units("add", ["feature\\branch"])).toBe(2);
+  });
+
   test("units: add with --scope builds a scope array (line 1550-1554)", () => {
     expect(units("add", ["x"], { scope: "a, b, c" })).toBe(0);
     const u = readState(dir)?.work_units.find((w) => w.name === "x");
