@@ -1869,6 +1869,19 @@ describe("commands.detectToolchain", () => {
     const p = detectToolchain(dir, { exists: () => false });
     expect(p.kind).toBe("none");
   });
+
+  test("flutter plan when pubspec.yaml present (#440)", () => {
+    const dir = freshDir("vf-toolchain-flutter-");
+    writeFileSync(join(dir, "pubspec.yaml"), "name: flutter_app\n");
+    const p = detectToolchain(dir, {
+      exists: (p) => existsSync(p),
+      readScripts: () => [],
+    });
+    expect(p.kind).toBe("flutter");
+    if (p.kind === "flutter") {
+      expect(p.cmd).toBe("flutter");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
