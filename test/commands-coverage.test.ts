@@ -74,22 +74,25 @@ function freshDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-/** Suppress console.log for the duration of fn() — prevents test noise leaking to terminal. */
+/** Suppress console.log + console.error for the duration of fn() — prevents test noise leaking to terminal. */
 function silenced<T>(fn: () => T): T {
-  const orig = console.log;
+  const origLog = console.log;
+  const origErr = console.error;
   console.log = () => {};
+  console.error = () => {};
   try {
     return fn();
   } finally {
-    console.log = orig;
+    console.log = origLog;
+    console.error = origErr;
   }
 }
 
-// Suppress all console.log at file level — CLI commands print status lines that leak to the
-// user's terminal when `vf verify` runs `bun run test`. Tests that need to assert on logged
-// output restore console.log themselves (see "verify on empty dir" test).
-const _realLog = console.log;
+// Suppress console.log + console.error at file level — CLI commands print status lines that
+// leak to the user's terminal when `vf verify` runs `bun run test`. Tests that need to assert
+// on logged output restore console.log themselves (see "verify on empty dir" test).
 console.log = () => {};
+console.error = () => {};
 
 function writeFixture(base: string, overrides: Partial<WorkflowState> = {}): void {
   const ctx = join(base, CTX_DIR);
