@@ -31,11 +31,17 @@ export function defaultSpawner(
   input: string,
   timeout = PROBE_TIMEOUT_MS,
 ) {
-  const r = spawnSync(cmd, args, {
+  const needsShell = needsShellForCommand(cmd);
+  // ponytail: when shell is needed AND path has spaces, quote the cmd.
+  // Node's spawnSync with shell:true passes cmd unquoted to cmd.exe on
+  // Windows, and cmd.exe /s strips the outer quotes — splitting on the
+  // space (e.g. C:\Users\Linh Ngo\...\claude.cmd). Pre-quote to fix #439.
+  const quotedCmd = needsShell && cmd.includes(" ") ? `"${cmd}"` : cmd;
+  const r = spawnSync(quotedCmd, args, {
     input,
     encoding: "utf8",
     timeout,
-    shell: needsShellForCommand(cmd),
+    shell: needsShell,
   });
   const code =
     r.error && typeof (r.error as NodeJS.ErrnoException).code === "string"

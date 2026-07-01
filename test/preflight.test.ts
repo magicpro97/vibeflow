@@ -1089,3 +1089,14 @@ describe("preflight split (#186 PR3 sentinel)", () => {
     expect(facade).not.toMatch(/size-waiver/);
   });
 });
+
+describe("defaultSpawner path quoting (Windows space-in-path fix)", () => {
+  const probeSrc = readFileSync("src/preflight/probe.ts", "utf8");
+  test("defaultSpawner quotes cmd path when it has spaces and needs shell (#439)", () => {
+    // The spawner must wrap a path with spaces in quotes before passing to
+    // spawnSync with shell:true, otherwise cmd.exe splits on the space.
+    expect(probeSrc).toMatch(/quotedCmd/);
+    expect(probeSrc).toMatch(/cmd\.includes\(.*["'] ["']\)/);
+    expect(probeSrc).toMatch(/\$\{cmd\}|"\+cmd\+/);
+  });
+});
