@@ -1203,6 +1203,12 @@ describe("commands.units subcommand branches", () => {
     expect(units("add", [])).toBe(2);
   });
 
+  test("units: add with control characters in name returns 2 (#448)", () => {
+    expect(units("add", ["test\nnewline"])).toBe(2);
+    expect(units("add", ["test\ttab"])).toBe(2);
+    expect(units("add", ["test\x00null"])).toBe(2);
+  });
+
   test("units: add with --scope builds a scope array (line 1550-1554)", () => {
     expect(units("add", ["x"], { scope: "a, b, c" })).toBe(0);
     const u = readState(dir)?.work_units.find((w) => w.name === "x");
