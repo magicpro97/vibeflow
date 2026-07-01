@@ -11,7 +11,21 @@
         @click="clearTask"
       >clear current task</button>
     </div>
-      <p class="text-[11px] text-neutral-600 mt-0.5">Tell VibeFlow what to fix or build, point it at your repo, and AI agents will do the work.</p>
+    <p class="text-[11px] text-neutral-600 mt-0.5">Tell VibeFlow what to fix or build, point it at your repo, and AI agents will do the work.</p>
+
+    <!-- Version mismatch banner -->
+    <div
+      v-if="versionMismatch"
+      class="flex items-start gap-2 p-2.5 rounded border border-amber-800/50 bg-amber-950/30 text-amber-400 text-[11px]"
+      role="alert"
+    >
+      <span class="shrink-0 mt-0.5">⚠</span>
+      <span>
+        Project was initialized with vf <strong>{{ store.state?.vibeflow_version }}</strong>,
+        current server is <strong>{{ store.version }}</strong>.
+        Click <strong>Save</strong> or <strong>Plan</strong> to re-initialize with the new version.
+      </span>
+    </div>
 
     <!-- Repo path + detect -->
     <div class="space-y-1.5">
@@ -315,7 +329,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { api } from "../api.js";
 import { useVfStore } from "../store.js";
 import type { Attachment } from "../types.js";
@@ -331,6 +345,12 @@ interface EngineToggle {
 }
 
 const store = useVfStore();
+
+// Show when project was inited with an older vf version
+const versionMismatch = computed(() => {
+  const stateVer = store.state?.vibeflow_version;
+  return stateVer && store.version && stateVer !== store.version;
+});
 
 // Repo history from localStorage — max 5 entries
 const HISTORY_KEY = "vf-repo-history";
