@@ -1,9 +1,5 @@
 node_modules
-# Ignore all of dist/ except the committed UI bundle and static assets.
-# This lets `git clone` work without a build step.
-dist/*
-!dist/ui/
-!dist/assets/
+dist/
 *.log
 .DS_Store
 .env
