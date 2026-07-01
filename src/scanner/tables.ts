@@ -15,6 +15,7 @@ const EXT_LANG: Record<string, string> = {
   ".c": "C",
   ".cpp": "C++",
   ".sh": "Shell",
+  ".dart": "Dart",
 };
 
 /** Build/manifest marker files → language. Depth-independent: catches languages whose source
@@ -32,6 +33,7 @@ const MARKER_LANG: Array<[string, string]> = [
   ["Gemfile", "Ruby"],
   ["composer.json", "PHP"],
   ["tsconfig.json", "TypeScript"],
+  ["pubspec.yaml", "Dart"],
 ];
 
 const FRAMEWORK_HINTS: Array<[string, string]> = [
