@@ -26,13 +26,16 @@ const CSP =
   // style-src 'unsafe-inline': UnoCSS injects atomic utility styles at runtime.
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'";
 
-export function startServer(port = 0): Promise<{
+export function startServer(
+  port = 0,
+  _opts: { uiHtmlPath?: URL } = {},
+): Promise<{
   server: { stop: () => void };
   url: string;
 }> {
   const token = randomUUID();
 
-  const uiHtmlPath = new URL("../dist/ui/index.html", import.meta.url);
+  const uiHtmlPath = _opts.uiHtmlPath ?? new URL("../dist/ui/index.html", import.meta.url);
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
     version?: string;
   };

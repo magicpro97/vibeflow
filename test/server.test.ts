@@ -1275,6 +1275,23 @@ test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", asy
 });
 
 // B2 serve seam tests
+test("GET / returns fallback shell with CSRF token when dist/ui not built (B2)", async () => {
+  const missing = new URL("file:///nonexistent/dist/ui/index.html");
+  const { server, url } = (await startServer(0, { uiHtmlPath: missing })) as {
+    server: { stop: () => void };
+    url: string;
+  };
+  try {
+    const res = await fetch(`${url}/`);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('name="vf-token"');
+    expect(text).toContain("UI not built");
+  } finally {
+    server.stop();
+  }
+});
+
 test("GET / serves Vite SPA shell with app mount point (B2)", async () => {
   const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
   try {
