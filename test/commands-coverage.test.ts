@@ -74,6 +74,17 @@ function freshDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+/** Suppress console.log for the duration of fn() — prevents test noise leaking to terminal. */
+function silenced<T>(fn: () => T): T {
+  const orig = console.log;
+  console.log = () => {};
+  try {
+    return fn();
+  } finally {
+    console.log = orig;
+  }
+}
+
 function writeFixture(base: string, overrides: Partial<WorkflowState> = {}): void {
   const ctx = join(base, CTX_DIR);
   mkdirSync(ctx, { recursive: true });
@@ -1934,7 +1945,7 @@ describe("commands.verify branches", () => {
     process.chdir(dir);
     try {
       // No writeState call — no .vibeflow/WORKFLOW_STATE.json on disk.
-      expect(verify()).toBe(1);
+      expect(silenced(() => verify())).toBe(1);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1954,7 +1965,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify()).toBe(0);
+      expect(silenced(() => verify())).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1978,7 +1989,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify();
+      const code = silenced(() => verify());
       expect([0, 1]).toContain(code);
     } finally {
       process.chdir(orig);
@@ -2008,7 +2019,7 @@ describe("commands.verify branches", () => {
     try {
       const calls: Array<{ cmd: string; args: readonly string[] }> = [];
       const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "gradle", status: 0 } });
-      const code = verify({ spawner: asSpawnSync(spawner) });
+      const code = silenced(() => verify({ spawner: asSpawnSync(spawner) }));
       expect(code).toBe(0);
       // Verify the gradle path was actually exercised
       expect(calls).toHaveLength(1);
@@ -2033,7 +2044,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true });
+      const code = silenced(() => verify({ journal: true }));
       expect(code).toBe(0);
       // The journal entry was written (opt-in via journal:true; issue #154)
       const journal = existsSync(join(dir, CTX_DIR, "knowledge", "log.md"));
@@ -2064,7 +2075,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true });
+      const code = silenced(() => verify({ journal: true }));
       expect(code).toBe(0);
       // A DRAFT skill file was written under .vibeflow/skills/crystallized-*/
       const skillsDir = join(dir, CTX_DIR, "skills");
@@ -2091,7 +2102,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify();
+      const code = silenced(() => verify());
       expect(code).toBe(0);
       // Default invocation must NOT write the journal — verify is a read-only gate.
       expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(false);
@@ -2131,7 +2142,7 @@ describe("commands.verify branches", () => {
         }
         return result;
       };
-      const code = verify({ spawner: asSpawnSync(wrappedSpawner) });
+      const code = silenced(() => verify({ spawner: asSpawnSync(wrappedSpawner) }));
       // code === 1 because the lint gate failed
       expect(code).toBe(1);
       // Sanity: the spawner was called and the failure was recorded
@@ -2163,7 +2174,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify({ coverage: true })).toBe(0);
+      expect(silenced(() => verify({ coverage: true }))).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2187,7 +2198,7 @@ describe("commands.verify branches", () => {
     process.chdir(dir);
     try {
       // coverage gate exits 1 → failed++ → verify returns 1
-      expect(verify({ coverage: true })).toBe(1);
+      expect(silenced(() => verify({ coverage: true }))).toBe(1);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2207,7 +2218,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify({ coverage: true })).toBe(0);
+      expect(silenced(() => verify({ coverage: true }))).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2237,7 +2248,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true });
+      const code = silenced(() => verify({ journal: true }));
       expect(code).toBe(1);
       // fail-branch journal write is opt-in (issue #154)
       expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(true);
@@ -2262,7 +2273,7 @@ describe("commands.verify branches", () => {
     try {
       const calls: Array<{ cmd: string; args: readonly string[] }> = [];
       const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "flutter", status: 0 } });
-      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(0);
+      expect(silenced(() => verify({ spawner: asSpawnSync(spawner) }))).toBe(0);
       expect(calls).toHaveLength(1);
       expect(calls[0]?.cmd).toBe("flutter");
       expect(calls[0]?.args).toEqual(["test"]);
