@@ -61,6 +61,7 @@ export * from "../skills/registry.js";
 export * from "../skills/resolver.js";
 export * from "../skills/sync.js";
 export * from "../skills/validator.js";
+export * from "../skills/verify.js";
 export * from "../tools/index.js";
 export * from "./worktree.js";
 export * from "../ui.js";

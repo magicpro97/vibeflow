@@ -187,11 +187,15 @@ export function gitPostMerge(): string {
 }
 
 /** All engine hook configs as a path→content map for a target repo. */
-export function engineHookFiles(): Record<string, string> {
+export function engineHookFiles(engines?: Engine[]): Record<string, string> {
   return {
-    ".claude/settings.json": claudeHookConfig(),
-    ".codex/hooks.json": codexHookConfig(),
-    ".github/hooks/copilot.json": copilotHookConfig(),
+    ...(!engines || engines.includes("claude")
+      ? { ".claude/settings.json": claudeHookConfig() }
+      : {}),
+    ...(!engines || engines.includes("codex") ? { ".codex/hooks.json": codexHookConfig() } : {}),
+    ...(!engines || engines.includes("copilot")
+      ? { ".github/hooks/copilot.json": copilotHookConfig() }
+      : {}),
     ".githooks/pre-commit": gitPreCommit(),
     ".githooks/post-checkout": gitPostCheckout(),
     ".githooks/post-merge": gitPostMerge(),

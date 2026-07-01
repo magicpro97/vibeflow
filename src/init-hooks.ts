@@ -133,6 +133,12 @@ export async function collectHookSetup(deps: HookSetupDeps = {}): Promise<HookCo
   if (!tty) return null;
 
   try {
+    const action = await askSelectOne(
+      "Hooks setup",
+      ["Set up guardrail hooks", "Skip hooks setup"],
+      { defaultValue: "Set up guardrail hooks" },
+    );
+    if (action === "Skip hooks setup") return null;
     write("vf", paint("Hooks", c.bold("guardrail setup")));
     write(
       "vf",

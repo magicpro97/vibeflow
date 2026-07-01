@@ -5,6 +5,7 @@
 // hooks setup, ctx7 auth, find-skills fallback, AI enrichment, and cleanup.
 // Called from init() with every captured local threaded as an explicit param.
 
+import { confirmInput } from "../terminal-prompts/prompts.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -13,7 +14,6 @@ import {
   armHooks,
   basename,
   c,
-  collectHookSetup,
   copyPhaseAgentTemplates,
   copyPhaseSkillTemplates,
   copySkillCreator,
@@ -111,6 +111,8 @@ export async function writeInitArtifacts(params: {
     /** Override tool detection for Phase 1.6 (test seam). Defaults to TOOLS[name].detect(). */
     detectTool?: (name: ToolName) => boolean;
     hookSetup?: HookConfig | null;
+    /** Test seam: override the interactive hooks confirm prompt. Defaults to real confirmInput. */
+    confirmInput?: (question: string, defaultValue?: boolean) => Promise<boolean>;
     memoryInject?: MemoryPhaseInject;
     aiSpawner?: AsyncSpawner;
     aiPreflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
@@ -141,7 +143,8 @@ export async function writeInitArtifacts(params: {
       for (const rel of artifactFiles) {
         out("vf", c.green(`+ ${rel}`));
       }
-      out("vf", c.bold(`\nGenerated ${artifactFiles.length} workflow artifact(s).`));
+      out("vf");
+      out("vf", c.bold(`Generated ${artifactFiles.length} workflow artifact(s).`));
     }
     if (!result.refused) {
       for (const rel of copySkillCreator(cwd(), targetEngines)) {
@@ -180,7 +183,7 @@ export async function writeInitArtifacts(params: {
         return { status: r.status ?? 1 };
       });
     const curSettings = readSettings(cwd());
-    let toolsEnabled = false;
+    let toolsNewlyInstalled = false;
 
     for (const name of VALID_TOOLS) {
       if (!curSettings.tools?.[name]) continue; // not enabled by user — skip
@@ -188,26 +191,30 @@ export async function writeInitArtifacts(params: {
       const installed = detect(name);
       if (installed) {
         ensureToolIndex(cwd(), name, syncSpawner);
-        toolsEnabled = true;
       } else {
         out("vf", c.cyan(`▶ Installing ${TOOLS[name].title}...`));
         const rc = provisionTool(cwd(), name, syncSpawner);
         if (rc === 0) {
           out("vf", c.green(`+ installed ${TOOLS[name].title}`));
           ensureToolIndex(cwd(), name, syncSpawner);
-          toolsEnabled = true;
+          toolsNewlyInstalled = true;
         } else {
           out(
             "vf",
             c.yellow(
               `! ${TOOLS[name].title} install failed — skipping. Run \`vf tools install ${name}\` manually.`,
             ),
+            { level: "error" },
           );
         }
       }
     }
 
-    if (toolsEnabled) {
+    // Only re-sync MCP configs when a tool was newly installed this run.
+    // applyIntake() already called writeToolConfigs via syncToolConfigs for
+    // pre-existing tools, so a second call would duplicate the Copilot
+    // instructions print without changing any files.
+    if (toolsNewlyInstalled) {
       writeToolConfigs(cwd(), readSettings(cwd()), engines);
     }
   }
@@ -216,21 +223,28 @@ export async function writeInitArtifacts(params: {
   // default all-on policy in headless/CI mode (issue #333).
   const wantHooks = !dry && !result.refused && !flags["no-hooks"];
   if (wantHooks) {
+    const askConfirm = inject.confirmInput ?? confirmInput;
     const config =
       inject.hookSetup !== undefined
         ? inject.hookSetup
         : process.stdin.isTTY
-          ? await collectHookSetup()
+          ? (await askConfirm(
+              "Setup guardrail hooks? (block destructive commands, protect secrets, protect config, flag installs, workspace guard)",
+              true,
+            ))
+            ? defaultHookConfig()
+            : null
           : defaultHookConfig(); // headless/CI: auto-arm with all-on default
     if (config) {
       out("vf");
-      const armed = armHooks(cwd(), config);
+      const armed = armHooks(cwd(), config, engines);
       out("vf", panel("Hooks", c.bold("armed")));
       out("vf", c.green(`+ ${CTX_DIR}/SETTINGS.json (hooks policy)`));
       for (const rel of armed) out("vf", `${c.green("+")} ${rel}`);
       const custom = config.custom.length ? `, ${config.custom.length} custom` : "";
       out("vf", c.dim(`${config.templates.length} template(s) active${custom}.`));
     } else {
+      out("vf");
       out("vf", c.dim("Hooks setup skipped — existing guardrail policy left unchanged."));
     }
   }
@@ -245,14 +259,14 @@ export async function writeInitArtifacts(params: {
   let ctx7Auth: Ctx7AuthResult = { authenticated: false, fallback: true };
   if (ai && !dry && !result.refused && process.stdin.isTTY) {
     out("vf");
-    out("vf", c.bold("ctx7 Auth"));
+    out("vf", panel("ctx7", c.bold("auth")));
     ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject ?? {});
   }
 
   // Phase 1.8: find-skills fallback
   if (ai && !dry && !result.refused && ctx7Auth.fallback) {
     out("vf");
-    out("vf", c.bold("Find-Skills"));
+    out("vf", panel("Skills", c.bold("find")));
     await runFindSkillsFallback(cwd());
   }
 

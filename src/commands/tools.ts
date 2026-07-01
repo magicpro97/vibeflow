@@ -65,7 +65,8 @@ export function toolsStatus(
 ): number {
   const settings = readSettings(base);
   const languages = repoLanguages(base);
-  out("vf", c.bold("Optional developer tools\n"));
+  out("vf", c.bold("Optional developer tools"));
+  out("vf");
   for (const name of VALID_TOOLS) {
     const tool = TOOLS[name];
     const enabled = settings.tools[name];
@@ -112,9 +113,11 @@ export function toolsStatus(
       }
     }
   }
-  out("vf", `\n  priority: ${c.cyan(renderPriority(settings))}`);
+  out("vf");
+  out("vf", `  priority: ${c.cyan(renderPriority(settings))}`);
   if (languages.length) out("vf", `  detected languages: ${c.dim(languages.join(", "))}`);
-  out("vf", c.dim("\n  Re-run `vf init` after changing tools to regenerate instructions."));
+  out("vf");
+  out("vf", c.dim("  Re-run `vf init` after changing tools to regenerate instructions."));
   return 0;
 }
 
@@ -230,7 +233,7 @@ function toolsToggle(
  * Generic over any tool — drives entirely off the registry's plans, no per-tool branching. */
 function runToolSteps(steps: { cmd: string; args: string[] }[], spawner: StepSpawner): boolean {
   for (const step of steps) {
-    out("vf", c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    out("vf", c.cyan(`▶ ${step.cmd} ${step.args.join(" ")}`));
     const { status } = spawner(step.cmd, step.args);
     if (status !== 0) {
       out("vf", c.red(`✗ step failed (${status}).`), {
@@ -264,10 +267,7 @@ export function provisionTool(base: string, name: ToolName, spawner: StepSpawner
 export function ensureToolIndex(base: string, name: ToolName, spawner: StepSpawner): number {
   const tool = TOOLS[name];
   if (!tool.indexPlan || !tool.indexPresent) return 0;
-  if (tool.indexPresent(base)) {
-    out("vf", c.dim(`  ${tool.title} index present.`));
-    return 0;
-  }
+  if (tool.indexPresent(base)) return 0;
   const ctx = { workspace: base, languages: repoLanguages(base) };
   if (!runToolSteps(tool.indexPlan(ctx).steps, spawner)) return 1;
   out("vf", c.green(`  ✓ built ${tool.title} index.`));
@@ -285,14 +285,16 @@ function toolsInstall(
   const plan = TOOLS[name].installPlan(ctx);
   out("vf", c.bold(`Install plan for ${TOOLS[name].title}:`));
   for (const step of plan.steps) {
-    out("vf", `  ${c.cyan(`${step.cmd} ${step.args.join(" ")}`)}\n    ${c.dim(step.description)}`);
+    out("vf", `  ${c.cyan(`${step.cmd} ${step.args.join(" ")}`)}`);
+    out("vf", `    ${c.dim(step.description)}`);
   }
   if (!approved) {
-    out("vf", c.yellow("\nNo changes made. Re-run with --yes to execute the plan."));
+    out("vf");
+    out("vf", c.yellow("No changes made. Re-run with --yes to execute the plan."));
     return 0;
   }
   for (const step of plan.steps) {
-    out("vf", c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    out("vf", c.cyan(`▶ ${step.cmd} ${step.args.join(" ")}`));
     const { status } = spawner(step.cmd, step.args);
     if (status !== 0) {
       out("vf", c.red(`✗ step failed (${status}). Stopping.`), {

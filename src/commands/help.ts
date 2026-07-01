@@ -23,7 +23,7 @@ export function printHelp(): number {
     ${c.cyan("(none)")}            open the local web UI
     ${c.cyan("ui")}                open the local web UI
     ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
-    ${c.cyan("init")}             generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
+    ${c.cyan("init")}              generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)
@@ -35,6 +35,10 @@ export function printHelp(): number {
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
     ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)
     ${c.cyan("hooks [sub]")}       status | install | emit (write engine hook configs)
+    ${c.cyan("pr [sub]")}          create | queue | merge-when-green — open/queue GitHub PRs (--yes to push)
+    ${c.cyan("decision [sub]")}    add | list — record durable architecture decisions (ADR-lite)
+    ${c.cyan("state [sub]")}       brief [--consult] — read the coordinator brief
+    ${c.cyan("coord")}             consult brief + enforce freshness gate before non-trivial actions
     ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
     ${c.cyan("help, --version")}   show help / version
 
@@ -125,6 +129,15 @@ ${c.bold("Examples:")}
   vf orchestrate
   vf orchestrate --engine codex --yes --concurrency 2
   vf orchestrate --engine codex --yes --concurrency 3 --isolate --pr`,
+
+  demo: () => `${c.bold("vf demo")} ${c.dim("[--engine <e>] [--concurrency <n>]")}
+Stage a fixed file corpus as work units and run them through the orchestrate
+path in dry + focus mode. No engine spend — deterministic and repeatable.
+Useful for screen recording the phase timeline or verifying orchestrate works.
+
+${c.bold("Examples:")}
+  vf demo
+  vf demo --engine claude`,
 
   workflow: () => `${c.bold("vf workflow")} ${c.dim("<delete | delete-unit | import> …")}
 Manage a saved workflow. Destructive paths are dry by default and print exactly what
@@ -257,6 +270,39 @@ workflow ledger. Returns nonzero if any gate fails.
 
 ${c.bold("Examples:")}
   vf verify`,
+
+  pr: () => `${c.bold("vf pr")} ${c.dim("<create|queue|merge-when-green> [options]")}
+Open, queue, or auto-merge GitHub pull requests from the active branch.
+
+${c.bold("Subcommands:")}
+  create <issue>       open a PR linked to the given issue reference (e.g. #173)
+  queue                add the current branch to the merge queue
+  merge-when-green     set auto-merge once all checks pass
+
+${c.bold("Examples:")}
+  vf pr create #173
+  vf pr create #173 --yes
+  vf pr queue
+  vf pr merge-when-green`,
+
+  state: () => `${c.bold("vf state")} ${c.dim("[brief] [--consult]")}
+Read the coordinator brief — the durable cross-session memory the coordinator
+consults before any non-trivial action.
+
+${c.bold("Subcommands:")}
+  brief          print the brief + "what changed since last consult"
+  brief --consult  same, and write the current timestamp as .last-consult
+
+${c.bold("Examples:")}
+  vf state brief
+  vf state brief --consult`,
+
+  coord: () => `${c.bold("vf coord")} ${c.dim("[--no-coord]")}
+Enforce the coordinator brief freshness gate. Refuses when the brief is
+missing, malformed, or older than 10 minutes. Used by \`vf init\` automatically.
+
+${c.bold("Examples:")}
+  vf coord`,
 
   decision:
     () => `${c.bold("vf decision")} ${c.dim('[add --title "<t>" --context "<c>" --decision "<d>" [--consequences "<x>"] | list]')}

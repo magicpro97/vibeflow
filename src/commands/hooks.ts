@@ -26,6 +26,7 @@ import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CTX_DIR,
+  type Engine,
   type HookConfig,
   c,
   cwd,
@@ -197,7 +198,10 @@ export function hookSelftest(
     out("vf", `${mark} [${c0.expected}→${c0.actual}] ${c0.risk} · ${c0.input}`);
   }
   if (report.failed > 0) {
-    out("vf", c.red(`\n${report.failed}/${report.cases.length} self-test case(s) regressed.`));
+    out("vf");
+    out("vf", c.red(`${report.failed}/${report.cases.length} self-test case(s) regressed.`), {
+      level: "error",
+    });
     return 1;
   }
   out(
@@ -220,6 +224,8 @@ function installHooks(): number {
   const status = r.status ?? 0;
   if (status === 0) {
     out("vf", c.green("Installed: core.hooksPath → .githooks"));
+    out("vf");
+    out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
     return 0;
   }
   // Failure: surface stderr + likely cause. The hint text is intentionally generic —
@@ -280,8 +286,8 @@ function mergeClaudeSettings(absPath: string, generated: string): string | null 
  * a PreToolUse hook into a running agent, so only invoke this after an explicit
  * --yes / interactive opt-in.
  */
-export function emitHookFiles(base: string): string[] {
-  const files = engineHookFiles();
+export function emitHookFiles(base: string, engines?: Engine[]): string[] {
+  const files = engineHookFiles(engines);
   const written: string[] = [];
   for (const [rel, content] of Object.entries(files)) {
     const dest = join(base, rel);
@@ -320,9 +326,9 @@ export function emitHookFiles(base: string): string[] {
  * land (and a watching agent hot-reloads its PreToolUse hook), the very next
  * `vf hook` invocation already reads the intended policy — never a stale all-on.
  */
-export function armHooks(base: string, config: HookConfig): string[] {
+export function armHooks(base: string, config: HookConfig, engines?: Engine[]): string[] {
   writeSettings(base, { hooks: config });
-  return emitHookFiles(base);
+  return emitHookFiles(base, engines);
 }
 
 export function hooks(
@@ -344,6 +350,7 @@ export function hooks(
       );
       // The live per-tool-call guardrail only exists if .claude/settings.json delegates a
       // PreToolUse hook to `vf hook`. Report it LOUDLY — a silent "OFF" reads as "protected".
+      out("vf");
       out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
       return 0;
     }

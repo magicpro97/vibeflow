@@ -883,6 +883,62 @@ describe("commands.init branches", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // TTY hooks branch (init-artifacts.ts L228-232): no inject.hookSetup, so the
+  // step falls through to the interactive `confirmInput` prompt. The
+  // inject.confirmInput seam stands in for the real prompt (no TTY/stdin read).
+  test("init: TTY confirmInput=true arms default hook config", async () => {
+    const dir = freshDir("vf-init-hooks-confirm-yes-");
+    const orig = process.cwd();
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { "no-ai": true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          ...neutralizedAi,
+          memoryInject: { isTTY: () => false },
+          confirmInput: async () => true,
+        },
+      );
+      expect(code).toBe(0);
+      // defaultHookConfig() armed → SETTINGS hooks + engine config written.
+      expect(readSettings(dir).hooks?.templates?.length).toBeGreaterThan(0);
+      expect(existsSync(join(dir, ".claude", "settings.json"))).toBe(true);
+    } finally {
+      process.chdir(orig);
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init: TTY confirmInput=false skips hooks (config=null)", async () => {
+    const dir = freshDir("vf-init-hooks-confirm-no-");
+    const orig = process.cwd();
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { "no-ai": true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          ...neutralizedAi,
+          memoryInject: { isTTY: () => false },
+          confirmInput: async () => false,
+        },
+      );
+      expect(code).toBe(0);
+      // config=null → no hooks block written, policy untouched.
+      expect(readSettings(dir).hooks).toBeUndefined();
+    } finally {
+      process.chdir(orig);
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1145,6 +1201,17 @@ describe("commands.units subcommand branches", () => {
 
   test("units: add with no name returns 2 (line 1542-1546)", () => {
     expect(units("add", [])).toBe(2);
+  });
+
+  test("units: add with control characters in name returns 2 (#448)", () => {
+    expect(units("add", ["test\nnewline"])).toBe(2);
+    expect(units("add", ["test\ttab"])).toBe(2);
+    expect(units("add", ["test\x00null"])).toBe(2);
+  });
+
+  test("units: add with path separators in name returns 2 (#451)", () => {
+    expect(units("add", ["feature/branch"])).toBe(2);
+    expect(units("add", ["feature\\branch"])).toBe(2);
   });
 
   test("units: add with --scope builds a scope array (line 1550-1554)", () => {
@@ -1813,6 +1880,19 @@ describe("commands.detectToolchain", () => {
     const p = detectToolchain(dir, { exists: () => false });
     expect(p.kind).toBe("none");
   });
+
+  test("flutter plan when pubspec.yaml present (#440)", () => {
+    const dir = freshDir("vf-toolchain-flutter-");
+    writeFileSync(join(dir, "pubspec.yaml"), "name: flutter_app\n");
+    const p = detectToolchain(dir, {
+      exists: (p) => existsSync(p),
+      readScripts: () => [],
+    });
+    expect(p.kind).toBe("flutter");
+    if (p.kind === "flutter") {
+      expect(p.cmd).toBe("flutter");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2160,6 +2240,31 @@ describe("commands.verify branches", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("verify with pubspec.yaml runs flutter test (#440)", () => {
+    const dir = freshDir("vf-verify-flutter-");
+    writeFileSync(join(dir, "pubspec.yaml"), "name: flutter_app\n");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+      const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "flutter", status: 0 } });
+      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(0);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.cmd).toBe("flutter");
+      expect(calls[0]?.args).toEqual(["test"]);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2258,6 +2363,9 @@ describe("commands.help branches", () => {
     expect(printCommandHelp("ui")).toBe(0);
     expect(printCommandHelp("hooks")).toBe(0);
     expect(printCommandHelp("verify")).toBe(0);
+    expect(printCommandHelp("pr")).toBe(0);
+    expect(printCommandHelp("state")).toBe(0);
+    expect(printCommandHelp("coord")).toBe(0);
     expect(printCommandHelp("decision")).toBe(0);
   });
 

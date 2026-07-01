@@ -76,7 +76,8 @@ export function announceLaunch(
   if (banner) out("vf", c.yellow(banner));
   const invocation = engineCommandFn(engine);
   if (isUnavailable(invocation)) {
-    out("vf", c.yellow(`\n${engine} unavailable: ${invocation.unavailable}`));
+    out("vf");
+    out("vf", c.yellow(`${engine} unavailable: ${invocation.unavailable}`));
     return { skip: true };
   }
   if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));
@@ -112,6 +113,7 @@ export function engineReady(
   const [readiness] = probe([engine]);
   if (readiness?.level === "ready") return true;
   const detail = readiness?.detail ?? "engine not ready";
-  out("vf", c.red(`\n${engine} not ready: ${detail}`));
+  out("vf");
+  out("vf", c.red(`${engine} not ready: ${detail}`));
   return false;
 }

@@ -43,6 +43,7 @@ import {
   detectRolesForRepo,
   engineFiles,
   ensureIndex,
+  ensureLog,
   existsSync,
   join,
   mergeManagedBlock,
@@ -276,9 +277,12 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   if (!opts.dry && opts.syncToolConfigs) {
     opts.syncToolConfigs(base, ctx.settings);
   }
-  // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
-  // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
-  if (!opts.dry) ensureIndex(base);
+  // Seed the work-journal files (knowledge/index.md + knowledge/log.md) so the engine
+  // has a file to maintain. Create-if-absent only — never clobbers a human-curated file.
+  if (!opts.dry) {
+    ensureIndex(base);
+    ensureLog(base);
+  }
   // Issue #323: seed bundled vf skill + sync skills + stamp version on re-init.
   // Runs on every init (first or re-init) to catch upgrades and restore a
   // deleted vf skill. Short-circuits internally when already current.

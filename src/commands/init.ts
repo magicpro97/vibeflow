@@ -59,7 +59,8 @@ import { writeInitArtifacts } from "./init-artifacts.js";
 // Test seam: exported so unit tests can verify the readiness listing
 // format and the "no engine ready" exit code contract.
 export function reportPreflightRefusal(readiness: EngineReadiness[] | undefined): number {
-  out("vf", c.red("\nNo engine is ready — refusing to generate engine files."), {
+  out("vf");
+  out("vf", c.red("No engine is ready — refusing to generate engine files."), {
     level: "error",
   });
   for (const r of readiness ?? []) {
@@ -122,6 +123,8 @@ export async function init(
     // Production callers leave this undefined; the `process.stdin.isTTY`
     // gate is the only path for end users.
     hookSetup?: HookConfig | null;
+    /** Test seam: override the interactive hooks confirm prompt (forwarded to writeInitArtifacts). Defaults to real confirmInput. */
+    confirmInput?: (question: string, defaultValue?: boolean) => Promise<boolean>;
     // Test seam: drive Phase 1.5 (claude-mem opt-in) without a TTY or a
     // real install. Forwarded to runMemoryPhase. Production callers leave
     // this undefined; the real prompt + install run.
@@ -192,7 +195,7 @@ export async function init(
   // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
   // the AI enrichment phase (Phase 2) is the only AI path.
   const initSpinner = new Spinner();
-  initSpinner.start(dry ? "➥ Preparing init dry run" : "➥ Generating VibeFlow context");
+  initSpinner.start(dry ? "Preparing init dry run" : "Generating VibeFlow context");
   let result: ReturnType<typeof applyIntake>;
   try {
     result = applyIntake(answers, {
@@ -204,7 +207,7 @@ export async function init(
       // comes from the tools.ts sibling via the _shared barrel bridge
       // (the cycle rule forbids importing it directly).
       syncToolConfigs: (base, settings) => {
-        if (settings) writeToolConfigs(base, settings);
+        if (settings) writeToolConfigs(base, settings, engines);
       },
     });
   } catch (err) {
@@ -225,7 +228,8 @@ export async function init(
     out("vf", dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
   }
   if (!dry) {
-    out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+    out("vf");
+    out("vf", c.bold(`Generated ${result.files.length} files from canonical context.`));
     for (const rel of result.backedUp ?? []) {
       out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }

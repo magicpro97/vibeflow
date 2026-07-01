@@ -47,7 +47,8 @@ export function units(
         const gs = (["build", "lint", "test", "review"] as const)
           .map((k) => `${k}:${gateColor(g[k])}`)
           .join(" ");
-        out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}\n  ${gs}`);
+        out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}`);
+        out("vf", `  ${gs}`);
       }
       return 0;
     }
@@ -119,6 +120,28 @@ export function units(
       const name = rest[0]?.trim();
       if (!name) {
         out("vf", c.red('Usage: vf units add <name> [--spec "<text>"] [--scope a,b]'), {
+          level: "error",
+        });
+        return 2;
+      }
+      // ponytail: reject control chars early before sanitizeUnitName silently
+      // transforms them. User expects `units show <exact-input>` to work.
+      const hasControl = [...name].some((c) => {
+        const code = c.codePointAt(0);
+        return code !== undefined && (code < 0x20 || code === 0x7f);
+      });
+      if (hasControl) {
+        out(
+          "vf",
+          c.red(
+            "Unit name contains control characters — use only letters, digits, dots, dashes and underscores.",
+          ),
+          { level: "error" },
+        );
+        return 2;
+      }
+      if (/[/\\]/.test(name)) {
+        out("vf", c.red("Unit name must not contain path separators (/ or \\)."), {
           level: "error",
         });
         return 2;

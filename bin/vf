@@ -1,0 +1,15 @@
+#!/bin/sh
+# VibeFlow CLI — shell wrapper with Windows-safe path quoting
+# ponytail: minimal wrapper, rely on dist/cli.js for all logic
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P 2>/dev/null || dirname "$0")"
+
+case "$(uname)" in
+  CYGWIN*|MINGW*|MSYS*)
+    if command -v cygpath >/dev/null 2>&1; then
+      SCRIPT_DIR="$(cygpath -w "$SCRIPT_DIR" 2>/dev/null || echo "$SCRIPT_DIR")"
+    fi
+    ;;
+esac
+
+exec node "$SCRIPT_DIR/../dist/cli.js" "$@"

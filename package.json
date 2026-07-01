@@ -4,7 +4,7 @@
   "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI with shared context, skills, hooks, and verification.",
   "type": "module",
   "bin": {
-    "vf": "./dist/cli.js"
+    "vf": "./bin/vf"
   },
   "files": [
     "dist",
@@ -14,7 +14,8 @@
     ".agents/skills/skill-creator",
     ".agents/skills/vf",
     "templates/skills",
-    "templates"
+    "templates",
+    "bin"
   ],
   "engines": {
     "node": ">=18"

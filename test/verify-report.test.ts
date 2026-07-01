@@ -149,4 +149,14 @@ describe("collectVerifyReportAsync", () => {
     const covGate = report.toolchain.find((g) => g.label === "coverage:gate");
     expect(covGate).toBeUndefined();
   });
+
+  test("flutter toolchain runs flutter test (#440)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-flutter-test-"));
+    writeFileSync(join(dir, "pubspec.yaml"), "name: test\n");
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0) });
+    expect(report.toolchain.length).toBe(1);
+    const gate = report.toolchain[0] as { label: string; pass: boolean };
+    expect(gate.label).toMatch(/flutter.*test|test/);
+    expect(gate.pass).toBe(true);
+  });
 });

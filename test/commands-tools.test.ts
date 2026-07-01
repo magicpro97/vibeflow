@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeToolConfigs } from "../src/commands/tools-mcp-config.js";
 import {
   ensureToolIndex,
   probeIndexHealth,
@@ -230,5 +231,34 @@ describe("toolsSync", () => {
   test("default detect path runs when no inject is given", () => {
     writeSettings(base, { tools: { codegraph: false, lsp: false } });
     expect(toolsSync(base, ok)).toBe(0);
+  });
+});
+
+// Regression guard for #427: writeToolConfigs must honor the `engines`
+// arg so `vf init` does not write MCP config for engines the user did not
+// select. The `vf init` syncToolConfigs closure now forwards `engines`;
+// these assert the per-engine gating that closure relies on.
+describe("writeToolConfigs engine gating (#427)", () => {
+  const CODEX_MCP = join(".codex", "config.toml");
+
+  test("engines=[claude] writes .mcp.json but NOT .codex/config.toml", () => {
+    const settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings, ["claude"]);
+    expect(existsSync(join(base, ".mcp.json"))).toBe(true);
+    expect(existsSync(join(base, CODEX_MCP))).toBe(false);
+  });
+
+  test("engines=[codex] writes .codex/config.toml but NOT .mcp.json", () => {
+    const settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings, ["codex"]);
+    expect(existsSync(join(base, CODEX_MCP))).toBe(true);
+    expect(existsSync(join(base, ".mcp.json"))).toBe(false);
+  });
+
+  test("engines undefined writes both (vf tools toggle path — no engine context)", () => {
+    const settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings);
+    expect(existsSync(join(base, ".mcp.json"))).toBe(true);
+    expect(existsSync(join(base, CODEX_MCP))).toBe(true);
   });
 });

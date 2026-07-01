@@ -25,6 +25,7 @@ import {
 export type ToolchainPlan =
   | { kind: "npm"; runner: string; gates: string[] }
   | { kind: "gradle"; cmd: string }
+  | { kind: "flutter"; cmd: string; gates: string[] }
   | { kind: "monorepo"; runner: string; dir: string; gates: string[] }
   | { kind: "none" };
 
@@ -53,6 +54,9 @@ export function detectToolchain(
     ["build.gradle.kts", "build.gradle", "settings.gradle.kts"].some((f) => exists(join(base, f)))
   ) {
     return { kind: "gradle", cmd: exists(join(base, "gradlew")) ? "./gradlew" : "gradle" };
+  }
+  if (exists(join(base, "pubspec.yaml"))) {
+    return { kind: "flutter", cmd: "flutter", gates: ["test"] };
   }
   for (const d of ["web", "app", "frontend"]) {
     const p = join(base, d, "package.json");
@@ -108,6 +112,8 @@ export async function collectVerifyReportAsync(
       await runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
   } else if (plan.kind === "gradle") {
     await runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
+  } else if (plan.kind === "flutter") {
+    await runGate(`${plan.cmd} test`, plan.cmd, ["test"]);
   } else if (plan.kind === "monorepo") {
     const label = plan.dir.split(/[/\\]/).pop() ?? plan.dir;
     for (const gate of plan.gates)
@@ -160,6 +166,8 @@ export function verify(
       out("vf", c.dim("package.json has no typecheck/lint/test scripts."));
   } else if (plan.kind === "gradle") {
     runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
+  } else if (plan.kind === "flutter") {
+    runGate(`${plan.cmd} test`, plan.cmd, ["test"]);
   } else if (plan.kind === "monorepo") {
     const label = plan.dir.split(/[/\\]/).pop() ?? plan.dir;
     for (const gate of plan.gates)
@@ -202,7 +210,8 @@ export function verify(
   for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
 
   if (failed > 0) {
-    out("vf", c.red(`\n${failed} gate(s) failed.`));
+    out("vf");
+    out("vf", c.red(`${failed} gate(s) failed.`), { level: "error" });
     if (writeJournal) {
       appendJournal(base, "verify", "fail", [
         `${failed} gate(s) failed`,
@@ -212,7 +221,8 @@ export function verify(
     }
     return 1;
   }
-  out("vf", c.green("\nAll configured gates passed."));
+  out("vf");
+  out("vf", c.green("All configured gates passed."));
   if (writeJournal) {
     appendJournal(base, "verify", "pass", [
       `${report.passed.length} gate(s) passed`,

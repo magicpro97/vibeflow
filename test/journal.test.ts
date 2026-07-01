@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { indexPath, journalPath } from "../src/core.js";
-import { appendJournal, ensureIndex, formatEntry } from "../src/journal.js";
+import { appendJournal, ensureIndex, ensureLog, formatEntry } from "../src/journal.js";
 
 describe("journal", () => {
   let base: string;
@@ -49,5 +49,15 @@ describe("journal", () => {
     writeFileSync(indexPath(base), custom);
     expect(ensureIndex(base)).toBe(false);
     expect(readFileSync(indexPath(base), "utf8")).toBe(custom);
+  });
+
+  it("ensureLog creates once and is idempotent without overwriting (#441)", () => {
+    expect(ensureLog(base)).toBe(true);
+    expect(ensureLog(base)).toBe(false);
+
+    const custom = "# My Journal\n\ncustom\n";
+    writeFileSync(journalPath(base), custom);
+    expect(ensureLog(base)).toBe(false);
+    expect(readFileSync(journalPath(base), "utf8")).toBe(custom);
   });
 });

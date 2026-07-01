@@ -5,6 +5,32 @@ import { basename, join } from "node:path";
 import { scanRepo } from "../src/scanner.js";
 
 describe("scanner language detection", () => {
+  test("detects Dart via pubspec.yaml marker", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-dart-"));
+    try {
+      writeFileSync(join(dir, "pubspec.yaml"), "name: test\n");
+      expect(scanRepo(dir).languages).toContain("Dart");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("detects Flutter via pubspec.yaml + .dart extension", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-flutter-"));
+    try {
+      writeFileSync(
+        join(dir, "pubspec.yaml"),
+        "name: flutter_app\nflutter:\n  uses-material-design: true\n",
+      );
+      mkdirSync(join(dir, "lib"), { recursive: true });
+      writeFileSync(join(dir, "lib", "main.dart"), "void main() {}\n");
+      const langs = scanRepo(dir);
+      expect(langs.languages).toContain("Dart");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("detects Kotlin via build.gradle.kts marker even when sources are deep (KMP)", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-scan-"));
     try {
