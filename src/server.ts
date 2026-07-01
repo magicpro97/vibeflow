@@ -38,10 +38,15 @@ export function startServer(port = 0): Promise<{
   };
   const versionVal = (pkgJson.version || "0.0.0").replace(/[^0-9a-zA-Z.\-+]/g, "");
   // ponytail: read HTML per-request so a `vite build` hot-reload doesn't serve stale asset hashes
-  const serveHtml = () =>
-    readFileSync(uiHtmlPath, "utf8")
-      .replaceAll("__CSRF__", token)
-      .replaceAll("__VERSION__", versionVal);
+  const serveHtml = () => {
+    let raw: string;
+    try {
+      raw = readFileSync(uiHtmlPath, "utf8");
+    } catch {
+      return "<html><body><pre>UI not built. Run: bun run build</pre></body></html>";
+    }
+    return raw.replaceAll("__CSRF__", token).replaceAll("__VERSION__", versionVal);
+  };
 
   let activeRepo = cwd();
 
@@ -141,7 +146,15 @@ export function startServer(port = 0): Promise<{
                 );
               } else {
                 try {
-                  const caught = replayFromLog(bus.currentFile(), 0, 1000);
+                  // replay from session start seq so stale logs from previous sessions are skipped
+                  let startSeq = 0;
+                  try {
+                    const seqFile = join(activeRepo, CTX_DIR, "logs", "session-start-seq");
+                    startSeq = Number(readFileSync(seqFile, "utf8").trim()) || 0;
+                  } catch {
+                    /* file may not exist yet */
+                  }
+                  const caught = replayFromLog(bus.currentFile(), startSeq, 1000);
                   for (const ev of caught) {
                     controller.enqueue(
                       new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
