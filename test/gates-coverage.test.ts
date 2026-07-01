@@ -180,7 +180,7 @@ describe("policyGates branches", () => {
       work_units: [
         {
           name: "u1",
-          status: "running" as const,
+          status: "done" as const, // must be done, not running, to pass policy gates
           confidence: 1,
           gates: {
             build: "pass" as const,
@@ -189,13 +189,40 @@ describe("policyGates branches", () => {
             review: "pass" as const,
           },
           resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          evidence: ["proof.log"],
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.passed).toContain("confidence: all units at 1.0");
+  });
+
+  test("policyGates: still-running units block verify (lines 75-79)", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "active-unit",
+          status: "running" as const,
+          confidence: 1,
+          gates: {
+            build: "pass" as const,
+            lint: "pass" as const,
+            test: "pass" as const,
+            review: "pass" as const,
+          },
+          resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
         },
       ],
       totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     };
     const r = policyGates(state);
-    expect(r.ok).toBe(true);
-    expect(r.passed).toContain("confidence: all units at 1.0");
+    expect(r.ok).toBe(false);
+    expect(r.failures.some((f) => f.startsWith("still-running:"))).toBe(true);
   });
 
   test("policyGates: low-confidence units flagged (line 67-78)", () => {
@@ -206,7 +233,7 @@ describe("policyGates branches", () => {
       work_units: [
         {
           name: "u1",
-          status: "running" as const,
+          status: "done" as const, // use done so we test confidence gate specifically
           confidence: 0.5,
           gates: {
             build: "pending" as const,
@@ -215,6 +242,7 @@ describe("policyGates branches", () => {
             review: "pending" as const,
           },
           resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          evidence: [],
         },
       ],
       totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },

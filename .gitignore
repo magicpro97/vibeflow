@@ -1,5 +1,9 @@
 node_modules
-dist
+# Ignore all of dist/ except the committed UI bundle and static assets.
+# This lets `git clone` work without a build step.
+dist/*
+!dist/ui/
+!dist/assets/
 *.log
 .DS_Store
 .env
@@ -44,3 +48,5 @@ claude/
 coverage/
 *.lcov
 *.lcov.info
+.ui-port
+*/.vibeflow/.ui-port

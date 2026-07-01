@@ -10,7 +10,7 @@ test.describe("Workflow state via API", () => {
 
   test("POST /api/init returns 200 with CSRF token", async ({ page }) => {
     // Extract CSRF token from the page meta tag
-    const csrf = await page.locator('meta[name="csrf"]').getAttribute("content");
+    const csrf = await page.locator('meta[name="vf-token"]').getAttribute("content");
     expect(csrf).toBeTruthy();
 
     const base = page.url().replace(/\/$/, "");

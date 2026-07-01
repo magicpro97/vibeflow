@@ -22,6 +22,31 @@ export function attachDir(repo: string): string {
   return join(repo, CTX_DIR, "attachments");
 }
 
+/** Extensions VibeFlow can process — anything else is rejected at upload. */
+const ALLOWED_ATTACH_EXTS = new Set([
+  "md",
+  "markdown",
+  "txt",
+  "log", // agent context files
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "csv",
+  "tsv",
+  "ppt",
+  "pptx",
+  "pdf",
+  "json",
+  "yaml",
+  "yml",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+]);
+
 export function safeAttachName(raw: string): string | null {
   const base = basename(String(raw || "").trim());
   if (!base || base === "." || base === "..") return null;
@@ -30,6 +55,8 @@ export function safeAttachName(raw: string): string | null {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: reject control bytes in filenames
   if (/[\u0000-\u001f]/.test(base)) return null;
   if (base.length > 200) return null;
+  const ext = base.split(".").pop()?.toLowerCase() ?? "";
+  if (!ALLOWED_ATTACH_EXTS.has(ext)) return null;
   return base;
 }
 
@@ -139,11 +166,10 @@ export function settingsView(
 }
 
 export function applySettings(repo: string, payload: Record<string, unknown>): VibeSettings {
-  const raw = (payload.tools ?? {}) as Record<string, unknown>;
-  const tools = { ...readSettings(repo).tools };
-  if (typeof raw.codegraph === "boolean") tools.codegraph = raw.codegraph;
-  if (typeof raw.lsp === "boolean") tools.lsp = raw.lsp;
-  return writeSettings(repo, { tools });
+  // Pass full payload to writeSettings — it handles tools, memory, toolPriority,
+  // failureProtection, hooks, lspServers via its coerce/merge logic.
+  // ponytail: was only saving tools before, silently dropping everything else
+  return writeSettings(repo, payload as Partial<VibeSettings>);
 }
 
 // Test seam: exported so unit tests can exercise the small/large file

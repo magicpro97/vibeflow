@@ -69,8 +69,18 @@ export function policyGates(state: WorkflowState | null): GateReport {
   }
   const units = state.work_units ?? [];
 
-  // Confidence gate.
-  const lowConf = units.filter((u) => (u.confidence ?? 0) < 1);
+  // Running gate — can't verify while agents are still working
+  const stillRunning = units.filter((u) => u.status === "running");
+  if (stillRunning.length) {
+    for (const u of stillRunning) {
+      failures.push(
+        `still-running: "${u.name}" is not done yet — wait for agents to complete before verifying`,
+      );
+    }
+  }
+
+  // Confidence gate — only applies to non-running units
+  const lowConf = units.filter((u) => u.status !== "running" && (u.confidence ?? 0) < 1);
   if (lowConf.length) {
     for (const u of lowConf) {
       failures.push(

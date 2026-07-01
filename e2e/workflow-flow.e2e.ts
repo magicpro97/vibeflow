@@ -1,24 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { waitForPage } from "./helpers";
 
-
 test.describe("Workflow generation", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await waitForPage(page);
   });
 
-  test("dispatch button exists and is disabled initially", async ({ page }) => {
-    await expect(page.locator("#wfDispatchBtn")).toBeDisabled();
+  test("stage 1 form is shown (repo path + goal)", async ({ page }) => {
+    await expect(page.locator("#repo-path")).toBeVisible();
+    await expect(page.locator("#goal")).toBeVisible();
   });
 
-  test("generate button exists", async ({ page }) => {
-    await expect(page.locator("#intakeSubmit")).toBeAttached();
-  });
-
-  test("check engines button triggers readiness check", async ({ page }) => {
-    await page.locator("#checkEnginesBtn").click();
-    await page.waitForTimeout(3000);
-    await expect(page.locator("#engineStatus")).toBeAttached();
+  test("Plan button exists on stage 1", async ({ page }) => {
+    await expect(page.locator("#plan-btn")).toBeAttached();
   });
 });

@@ -564,13 +564,12 @@ describe("engines", () => {
 });
 
 describe("server", () => {
-  test("serves the intake console and state endpoints on loopback", async () => {
+  test("serves the Vue app and state endpoints on loopback", async () => {
     const { server, url } = await startServer(0);
     expect(url).toContain("127.0.0.1");
     const html = await fetch(url).then((r) => r.text());
     expect(html).toContain("VibeFlow");
-    expect(html).toContain("Project Info"); // interactive intake wizard
-    expect(html).toContain('id="intakeForm"');
+    expect(html).toContain('id="app"'); // Vue mount point
     const state = await fetch(`${url}/state`);
     expect(state.status).toBe(200);
     server.stop();
@@ -599,7 +598,7 @@ describe("server", () => {
     try {
       const { server, url } = await startServer(0);
       const html = await fetch(url).then((r) => r.text());
-      const token = (html.match(/name="csrf" content="([^"]+)"/) || [])[1];
+      const token = (html.match(/name="vf-token" content="([^"]+)"/) || [])[1];
       expect(token).toBeTruthy();
 
       const ok = await fetch(`${url}/api/init`, {
@@ -936,7 +935,7 @@ describe("hooks emit is non-destructive by default (bug 2)", () => {
 
 describe("server write endpoints", () => {
   const tokenOf = (html: string) =>
-    (html.match(/name="csrf" content="([^"]+)"/) || [])[1] as string;
+    (html.match(/name="vf-token" content="([^"]+)"/) || [])[1] as string;
 
   test("detect, units CRUD, and guarded uploads with filename sanitization", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-ep-"));
@@ -1112,7 +1111,7 @@ describe("commands.discover (wired HTTP path)", () => {
 
 describe("server orchestration endpoints", () => {
   const tokenOf = (html: string) =>
-    (html.match(/name="csrf" content="([^"]+)"/) || [])[1] as string;
+    (html.match(/name="vf-token" content="([^"]+)"/) || [])[1] as string;
 
   test("skills, discover approval gate, and dry orchestrate over HTTP", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-orch-"));
@@ -1180,7 +1179,7 @@ describe("server orchestration endpoints", () => {
 
 describe("server preflight + settings endpoints", () => {
   const tokenOf = (html: string) =>
-    (html.match(/name="csrf" content="([^"]+)"/) || [])[1] as string;
+    (html.match(/name="vf-token" content="([^"]+)"/) || [])[1] as string;
 
   test("POST /api/preflight returns a readiness array + anyReady, CSRF-guarded", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-pre-"));
@@ -1286,12 +1285,12 @@ describe("server preflight + settings endpoints", () => {
     }
   });
 
-  test("the served HTML carries the engine-status panel and the options section", async () => {
+  test("the served HTML is the Vue app entry point", async () => {
     const { server, url } = await startServer(0);
     const html = await fetch(url).then((r) => r.text());
-    expect(html).toContain('id="engineStatus"');
-    expect(html).toContain('id="checkEnginesBtn"');
-    expect(html).toContain('id="toolOptions"');
+    // Vue app entry: has #app mount point and csrf meta tag
+    expect(html).toContain('id="app"');
+    expect(html).toContain('name="vf-token"');
     server.stop();
   });
 });
