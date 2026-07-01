@@ -112,5 +112,7 @@ export const api = {
         "GET",
         `/api/projects/logs?path=${encodeURIComponent(path)}&since=${since}&limit=${limit}`,
       ).then((r) => r.events),
+    delete: (path: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/projects?path=${encodeURIComponent(path)}`),
   },
 };

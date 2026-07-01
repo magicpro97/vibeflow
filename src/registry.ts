@@ -31,3 +31,12 @@ export function upsertRegistry(entry: ProjectEntry): void {
     /* best-effort — never break the caller */
   }
 }
+
+export function deleteRegistry(path: string): void {
+  try {
+    const list = readRegistry().filter((e) => e.path !== path);
+    writeFileSafe(REGISTRY_PATH, JSON.stringify(list, null, 2));
+  } catch {
+    /* best-effort */
+  }
+}

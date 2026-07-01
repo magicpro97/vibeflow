@@ -12,7 +12,7 @@ import {
 import { collectVerifyReportAsync } from "../commands/tools-detect.js";
 import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../core.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
-import { type ProjectEntry, readRegistry, upsertRegistry } from "../registry.js";
+import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
 import {
   ATTACH_CAP,
   applySettings,
@@ -76,6 +76,13 @@ export async function handleMutationRoute(
   if (method === "DELETE" && path === "/api/state") {
     const p = statePath(ctx.getActiveRepo());
     if (existsSync(p)) unlinkSync(p);
+    return Response.json({ ok: true });
+  }
+
+  if (method === "DELETE" && path === "/api/projects") {
+    const rawPath = url.searchParams.get("path") ?? "";
+    if (!rawPath) return Response.json({ error: "path required" }, { status: 400 });
+    deleteRegistry(rawPath);
     return Response.json({ ok: true });
   }
 

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProjectEntry } from "../src/registry.js";
-import { readRegistry, upsertRegistry } from "../src/registry.js";
+import { deleteRegistry, readRegistry, upsertRegistry } from "../src/registry.js";
 
 const REGISTRY_PATH = join(homedir(), ".vibeflow", "projects.json");
 
@@ -64,5 +64,19 @@ describe("src/registry.ts", () => {
     expect(() => upsertRegistry(ENTRY)).not.toThrow();
     // Clean up our test entry
     withRegistry(JSON.stringify(readRegistry().filter((e) => e.path !== ENTRY.path)), () => {});
+  });
+
+  test("deleteRegistry removes an entry by path", () => {
+    withRegistry(JSON.stringify([ENTRY]), () => {
+      deleteRegistry(ENTRY.path);
+      expect(readRegistry().find((e) => e.path === ENTRY.path)).toBeUndefined();
+    });
+  });
+
+  test("deleteRegistry is a no-op for unknown path", () => {
+    withRegistry(JSON.stringify([ENTRY]), () => {
+      deleteRegistry("/not/in/registry");
+      expect(readRegistry().length).toBe(1);
+    });
   });
 });

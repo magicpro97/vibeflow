@@ -1333,6 +1333,57 @@ test("POST /api/verify via handleMutationRoute returns structured gate report (B
   expect(Array.isArray(body.policy.failures)).toBe(true);
 });
 
+test("DELETE /api/projects removes entry from registry via handleMutationRoute", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-del-proj-"));
+  // Seed the registry with a fake entry at tmp
+  const { upsertRegistry, readRegistry } = await import("../src/registry.js");
+  upsertRegistry({
+    path: tmp,
+    name: "test-proj",
+    lastUsed: Date.now(),
+    goal: "test",
+    totals: { units: 0, done: 0, tokens: 0, cost_usd: 0 },
+  });
+  expect(readRegistry().find((e) => e.path === tmp)).toBeDefined();
+
+  const req = new Request(`http://127.0.0.1/api/projects?path=${encodeURIComponent(tmp)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => tmp, setActiveRepo: () => {} },
+    "DELETE",
+    "/api/projects",
+    req,
+    url,
+  );
+  expect(result).not.toBeNull();
+  expect((result as Response).status).toBe(200);
+  const body = (await (result as Response).json()) as { ok: boolean };
+  expect(body.ok).toBe(true);
+  expect(readRegistry().find((e) => e.path === tmp)).toBeUndefined();
+});
+
+test("DELETE /api/projects without path returns 400", async () => {
+  const req = new Request("http://127.0.0.1/api/projects", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => ".", setActiveRepo: () => {} },
+    "DELETE",
+    "/api/projects",
+    req,
+    url,
+  );
+  expect((result as Response).status).toBe(400);
+});
+
 test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", async () => {
   const { server, url } = (await startServer()) as {
     server: { stop: () => void };

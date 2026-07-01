@@ -49,6 +49,11 @@
               class="px-2 py-0.5 rounded text-[11px] text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
               @click="toggleLogs(p)"
             >Logs</button>
+            <button
+              class="px-2 py-0.5 rounded text-[11px] text-neutral-400 hover:text-red-400 hover:bg-neutral-800 transition-colors disabled:opacity-40"
+              :disabled="actionInFlight === p.path"
+              @click="remove(p)"
+            >Delete</button>
           </div>
         </div>
         <p v-if="errorFor === p.path" class="text-[11px] text-red-400 mt-1">{{ actionErr }}</p>
@@ -64,6 +69,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { api } from "../api.js";
 import { useVfStore } from "../store.js";
 import type { ProjectEntry } from "../types.js";
 import ProjectLogDrawer from "./ProjectLogDrawer.vue";
@@ -112,6 +118,20 @@ async function reuse(p: ProjectEntry) {
 
 function toggleLogs(p: ProjectEntry) {
   logsProject.value = logsProject.value?.path === p.path ? null : p;
+}
+
+async function remove(p: ProjectEntry) {
+  actionInFlight.value = p.path;
+  errorFor.value = null;
+  try {
+    await api.projects.delete(p.path);
+    await store.loadProjects();
+  } catch {
+    errorFor.value = p.path;
+    actionErr.value = "Failed to delete project.";
+  } finally {
+    actionInFlight.value = null;
+  }
 }
 
 function relativeDate(ts: number): string {
