@@ -97,4 +97,20 @@ export const api = {
       `/api/upload?name=${encodeURIComponent(name)}`,
     ),
   discover: (payload: unknown) => req<unknown>("POST", "/api/discover", payload),
+  projects: {
+    list: () =>
+      req<{ projects: import("./types.js").ProjectEntry[] }>("GET", "/api/projects").then(
+        (r) => r.projects,
+      ),
+    state: (path: string) =>
+      req<{ state: import("./types.js").WorkflowState }>(
+        "GET",
+        `/api/projects/state?path=${encodeURIComponent(path)}`,
+      ).then((r) => r.state),
+    logs: (path: string, since = 0, limit = 200) =>
+      req<{ events: import("./types.js").LogEvent[] }>(
+        "GET",
+        `/api/projects/logs?path=${encodeURIComponent(path)}&since=${since}&limit=${limit}`,
+      ).then((r) => r.events),
+  },
 };

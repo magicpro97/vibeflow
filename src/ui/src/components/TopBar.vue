@@ -19,10 +19,10 @@
 
     <!-- Stepper: full labels ≥1024px, dots-only 768-1023px, hidden+badge <768px -->
     <div class="flex-1 flex justify-center min-w-0 overflow-hidden hidden md:flex">
-      <Stepper :stage="store.stage" @select="store.setStage" />
+      <Stepper :stage="(store.stage < 1 ? 1 : store.stage) as 1|2|3|4" @select="store.setStage" />
     </div>
     <!-- Badge shown below md (768px) when stepper is hidden -->
-    <span class="md:hidden text-[11px] text-neutral-500 flex-shrink-0">{{ ['Describe','Plan','Run','Verify'][store.stage - 1] }}</span>
+    <span class="md:hidden text-[11px] text-neutral-500 flex-shrink-0">{{ ['Home','Describe','Plan','Run','Verify'][store.stage] }}</span>
 
     <!-- Server health indicator -->
     <div
@@ -36,6 +36,17 @@
 
     <!-- Right actions — flex-shrink-0 ensures these never get squeezed by Stepper -->
     <div class="flex items-center gap-0.5 flex-shrink-0 ml-2">
+      <button
+        v-if="store.stage !== 0"
+        class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-neutral-500 hover:text-white transition-colors duration-150 rounded"
+        title="Project history"
+        @click="store.setStage(0)"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 6.5 8 2l6 4.5V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6.5Z"/>
+        </svg>
+        <span>Home</span>
+      </button>
       <button
         class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-neutral-500 hover:text-white transition-colors duration-150 rounded"
         :title="logsOpen ? 'Hide logs' : 'Show logs'"

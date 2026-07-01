@@ -5,7 +5,7 @@ import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { listAttachments, replayFromLog, settingsView } from "./server/handlers.js";
-import { handleMutationRoute } from "./server/routes.js";
+import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
 
@@ -132,6 +132,12 @@ export function startServer(
       // --- GET /api/settings ---
       if (method === "GET" && path === "/api/settings") {
         return Response.json({ ok: true, ...settingsView(activeRepo) });
+      }
+
+      // --- GET /api/projects* ---
+      if (method === "GET" && path.startsWith("/api/projects")) {
+        const r = handleProjectsRoute(path, url);
+        if (r) return r;
       }
 
       // --- SSE: /api/logs/stream ---
@@ -325,13 +331,7 @@ export function startServer(
             url,
           );
           if (result) return result;
-          // Each whitelisted /api/* write route above returns
-          // before reaching this point. If we got here, the path
-          // was in `isWrite` but no inner handler matched. That
-          // would mean a future contributor added a new entry to
-          // isWrite without an inner if/else — kept as a safety
-          // net so the request doesn't fall through to the
-          // /assets/* 404 handler.
+          // ponytail: safety net — path in isWrite but no inner handler matched
           return Response.json({ error: "not found" }, { status: 404 });
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 400 });

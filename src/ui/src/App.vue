@@ -5,7 +5,8 @@
       <!-- No Rail — Stepper in TopBar handles navigation -->
       <main class="flex-1 overflow-y-auto p-8 min-w-0">
         <div class="max-w-4xl">
-          <Stage1Describe v-if="store.stage === 1" />
+          <ProjectList v-if="store.stage === 0" />
+          <Stage1Describe v-else-if="store.stage === 1" />
           <Stage2Generate v-else-if="store.stage === 2" />
           <Stage3Orchestrate v-else-if="store.stage === 3" />
           <Stage4Verify v-else-if="store.stage === 4" />
@@ -24,6 +25,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
 import LogPane from "./components/LogPane.vue";
+import ProjectList from "./components/ProjectList.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import Stage1Describe from "./components/Stage1Describe.vue";
 import Stage2Generate from "./components/Stage2Generate.vue";
@@ -35,13 +37,13 @@ import { useVfStore } from "./store.js";
 
 const store = useVfStore();
 const showSettings = ref(false);
-const STAGE_TITLES = ["Describe", "Plan", "Run", "Verify"] as const;
+const STAGE_TITLES = ["Home", "Describe", "Plan", "Run", "Verify"] as const;
 
 // Update page title per stage — helps users with multiple tabs
 watch(
   () => store.stage,
   (s) => {
-    const label = STAGE_TITLES[s - 1];
+    const label = STAGE_TITLES[s];
     const goal = store.state?.goal?.slice(0, 30);
     document.title = goal ? `${label} — ${goal} · VibeFlow` : `${label} · VibeFlow`;
   },
@@ -60,12 +62,17 @@ onMounted(() => {
   // Load state and auto-advance stage based on what's already in progress
   store
     .loadState()
-    .then(() => {
+    .then(async () => {
       const units = store.state?.work_units ?? [];
       const goal = store.state?.goal ?? "";
       // If we have a state (goal was set), advance to at least Plan stage
       // Guard: ignore stale test/empty goals that shouldn't hijack the UI
-      if (!store.state || !goal.trim() || goal === "__CLEAR__") return; // stay at stage 1
+      if (!store.state || !goal.trim() || goal === "__CLEAR__") {
+        // No active workflow — show home screen if there are previous projects
+        await store.loadProjects();
+        if (store.projects.length > 0) store.setStage(0);
+        return;
+      }
       if (units.length === 0) {
         store.setStage(2);
         return;

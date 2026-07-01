@@ -444,6 +444,11 @@ function onGlobalKey(e: KeyboardEvent) {
 }
 onMounted(async () => {
   document.addEventListener("keydown", onGlobalKey);
+  // Prefill from "Reuse" action on ProjectList (one-shot)
+  if (store.reuseGoal) {
+    form.goal = store.reuseGoal;
+    store.reuseGoal = null;
+  }
   // Focus repo-path on first visit (no existing state) so user can type immediately
   if (!existingState?.goal) {
     document.getElementById("repo-path")?.focus();

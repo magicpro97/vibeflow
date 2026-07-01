@@ -10,12 +10,14 @@ import {
   skillForFile,
 } from "../commands.js";
 import { collectVerifyReportAsync } from "../commands/tools-detect.js";
-import { type Attachment, readState, statePath } from "../core.js";
+import { type Attachment, CTX_DIR, readState, statePath } from "../core.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
+import { type ProjectEntry, readRegistry, upsertRegistry } from "../registry.js";
 import {
   ATTACH_CAP,
   applySettings,
   attachDir,
+  replayFromLog,
   runPreflight,
   safeAttachName,
   settingsView,
@@ -136,6 +138,20 @@ export async function handleMutationRoute(
       useAi: payload.useAi === true,
       base: ctx.getActiveRepo(),
     });
+    upsertRegistry({
+      path: ctx.getActiveRepo(),
+      name: "",
+      lastUsed: Date.now(),
+      goal: String(payload.goal ?? "")
+        .trim()
+        .slice(0, 500),
+      totals: {
+        units: state.totals?.units ?? 0,
+        done: state.totals?.done ?? 0,
+        tokens: state.totals?.tokens ?? 0,
+        cost_usd: state.totals?.cost_usd ?? 0,
+      },
+    } satisfies ProjectEntry);
     return Response.json({ ok: true, files, state });
   }
 
@@ -236,5 +252,34 @@ export async function handleMutationRoute(
     return Response.json({ ok: report.ok, gates, policy: report.policy });
   }
 
+  return null;
+}
+
+/** Handle read-only /api/projects/* routes. Returns null if path not matched. */
+export function handleProjectsRoute(path: string, url: URL): Response | null {
+  if (path === "/api/projects") {
+    return Response.json({ projects: readRegistry() });
+  }
+  if (path === "/api/projects/state") {
+    const repoPath = url.searchParams.get("path") ?? "";
+    if (!repoPath) return Response.json({ error: "path required" }, { status: 400 });
+    const s = readState(repoPath);
+    if (!s) return Response.json({ error: "no state" }, { status: 404 });
+    return Response.json({ state: s });
+  }
+  if (path === "/api/projects/logs") {
+    const repoPath = url.searchParams.get("path") ?? "";
+    const since = Number(url.searchParams.get("since") ?? 0);
+    const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 500);
+    if (!repoPath) return Response.json({ error: "path required" }, { status: 400 });
+    const logFile = join(repoPath, CTX_DIR, "logs", "current.log");
+    try {
+      const events = replayFromLog(logFile, since, limit);
+      return Response.json({ events });
+    } catch {
+      return Response.json({ events: [] });
+    }
+  }
+  // fallback
   return null;
 }

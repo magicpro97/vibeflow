@@ -56,6 +56,14 @@ export interface LogEvent {
 
 export type ToolTier = "codegraph" | "lsp" | "native";
 
+export interface ProjectEntry {
+  path: string;
+  name: string;
+  lastUsed: number;
+  goal: string;
+  totals: { units: number; done: number; tokens: number; cost_usd: number };
+}
+
 export type HookTemplateId =
   | "block-destructive"
   | "flag-installs"
