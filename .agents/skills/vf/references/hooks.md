@@ -34,3 +34,32 @@ re-run `vf doctor` (or `vf hooks status`) and confirm the gate shows armed befor
 on it.
 
 Powered by VibeFlow.
+
+## Web UI interactive approval
+
+When running via web UI (vf ui + vf orchestrate from browser):
+- require_approval → HookApprovalModal appears in browser
+- Engine blocked at vf hook subprocess — waits indefinitely for user click
+- UI reconnect: GET /api/hook/pending restores pending modals
+
+## Auto-pilot modes (vf orchestrate flags)
+
+- (default): ask user via modal
+- --auto-pilot: LLM evaluates false positive independently (fresh engine call)
+  - confidence >= 0.9 AND is_false_positive: true → allow
+  - else → block (fail-safe)
+  - Model: same engine being dispatched, independent context
+- --yolo / --allow-all: blind allow-all (use only for throwaway experiments)
+
+## Audit log
+
+Location: .vibeflow/knowledge/hook-audit.log
+Format: append-only JSONL
+Fields: mode, decision, input {tool,command,files}, result {risk,reasons}, aiDecision?, at (ISO timestamp)
+
+## Agent guidance
+
+- User present at computer → default mode (modal)
+- Automated/unattended run, trusted repo → --auto-pilot
+- Throwaway branch, low-risk experiments → --yolo
+- NEVER use --yolo in production or on repos with sensitive data
