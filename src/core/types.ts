@@ -37,6 +37,8 @@ export interface WorkUnit {
   gates: Record<"build" | "lint" | "test" | "review", GateState> & {
     /** Populated by the orchestrator's post-coding security checkpoint. */
     security?: GateState;
+    /** ADR-003: behavioral goal-eval result. */
+    goal_eval?: GateState;
   };
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
@@ -74,6 +76,8 @@ export interface WorkflowState {
   attachments?: Attachment[];
   /** The VibeFlow version that last initialized (or updated) this workflow. Absent on pre-#323 workflows. */
   vibeflow_version?: string;
+  /** ADR-004: transient flag — skip unverifiable-evidence failure check (escape hatch). Never persisted. */
+  _allowUnverifiedEvidence?: boolean;
 }
 
 // --- Skills (Anthropic skill-creator standard: SKILL.md folder) ---

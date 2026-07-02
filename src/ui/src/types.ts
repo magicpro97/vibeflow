@@ -16,6 +16,7 @@ export interface WorkUnit {
   spec?: string;
   gates: Record<"build" | "lint" | "test" | "review", GateState> & {
     security?: GateState;
+    goal_eval?: GateState; // ADR-003
   };
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];

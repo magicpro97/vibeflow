@@ -9,7 +9,7 @@ import {
   resolveRepo,
   skillForFile,
 } from "../commands.js";
-import { collectVerifyReportAsync } from "../commands/tools-detect.js";
+import { collectVerifyReportAsync, defaultGoalEvalFn } from "../commands/tools-detect.js";
 import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../core.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
@@ -273,7 +273,14 @@ export async function handleMutationRoute(
   // POST /api/verify — runs collectVerifyReportAsync (B1 seam, non-blocking so Bun.serve
   // keeps serving SSE/state while gates run)
   if (path === "/api/verify") {
-    const report = await collectVerifyReportAsync(ctx.getActiveRepo(), { coverage: true });
+    const goalEval = url.searchParams.get("goal-eval") === "1";
+    const currentState = readState(ctx.getActiveRepo());
+    const report = await collectVerifyReportAsync(ctx.getActiveRepo(), {
+      coverage: true,
+      ...(goalEval && currentState?.goal
+        ? { goal: currentState.goal, goalEvalFn: defaultGoalEvalFn }
+        : {}),
+    });
     const gates = report.toolchain.map((g) => ({ label: g.label, pass: g.pass }));
     return Response.json({ ok: report.ok, gates, policy: report.policy });
   }

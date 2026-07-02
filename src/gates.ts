@@ -129,14 +129,17 @@ export function policyGates(state: WorkflowState | null): GateReport {
     passed.push("evidence: every done unit has recorded evidence");
   }
 
-  // ADR-004 phase 1: warn (not fail) on unverifiable evidence strings.
-  for (const u of units.filter((u) => u.status === "done" && u.evidence?.length)) {
-    const bad = (u.evidence ?? []).filter((e) => !isVerifiableEvidence(e));
-    if (bad.length) {
-      warnings.push(
-        `unverifiable-evidence: "${u.name}" has ${bad.length} free-text string(s) ` +
-          `→ Fix: vf units evidence ${u.name} --add 'bun test 2>&1 | tail -3 → "<output>"'`,
-      );
+  // ADR-004 phase 2: fail on unverifiable evidence strings.
+  // Escape hatch: state._allowUnverifiedEvidence=true (set by --allow-unverified-evidence flag).
+  if (!state._allowUnverifiedEvidence) {
+    for (const u of units.filter((u) => u.status === "done" && u.evidence?.length)) {
+      const bad = (u.evidence ?? []).filter((e) => !isVerifiableEvidence(e));
+      if (bad.length) {
+        failures.push(
+          `unverifiable-evidence: "${u.name}" has ${bad.length} free-text string(s) ` +
+            `→ Fix: vf units evidence ${u.name} --add 'bun test 2>&1 | tail -3 → "<output>"'`,
+        );
+      }
     }
   }
 
@@ -157,6 +160,17 @@ export function policyGates(state: WorkflowState | null): GateReport {
     }
   }
   if (!overlapFound) passed.push("scope: no overlapping work-unit scopes");
+
+  // ADR-003: goal-eval gate
+  const goalEvalFailed = units.filter((u) => u.gates.goal_eval === "fail");
+  for (const u of goalEvalFailed) {
+    failures.push(
+      `goal-eval-fail: "${u.name}" — behavioral review found uncovered goal behaviors → Fix: address missing cases in spec or implementation, re-run vf verify --goal-eval`,
+    );
+  }
+  if (!goalEvalFailed.length && units.some((u) => u.gates.goal_eval === "pass")) {
+    passed.push("goal-eval: all units covered behavioral review");
+  }
 
   // Skill gate — WARN/report only, NEVER fail (see GateReport.warnings).
   // Acts only on units that CLAIM completion AND were classified knowledge-heavy at dispatch.

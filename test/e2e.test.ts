@@ -59,7 +59,7 @@ describe("e2e golden path", () => {
         name: unit?.name,
         status: "done",
         confidence: 1,
-        evidence: ["evidence/verified.json"],
+        evidence: ["src/gates.ts:47 — verified implementation"],
       });
       const finalState = readState(dir) as WorkflowState;
       expect(policyGates(finalState).ok).toBe(true);
@@ -156,7 +156,7 @@ describe("e2e golden path", () => {
         name: "alpha",
         status: "done",
         confidence: 1,
-        evidence: ["evidence/alpha.json"],
+        evidence: ["src/gates.ts:47 — verified implementation"],
       });
 
       const dispatched: string[] = [];
@@ -188,7 +188,7 @@ describe("e2e golden path", () => {
         name: "solo",
         status: "done",
         confidence: 1,
-        evidence: ["evidence/solo.json"],
+        evidence: ["src/gates.ts:47 — verified implementation"],
       });
 
       let dispatched = 0;

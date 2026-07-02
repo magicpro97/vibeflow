@@ -235,7 +235,11 @@ async function main(argv: string[]): Promise<number> {
     case "hooks":
       return hooks(positionals[0], flags);
     case "verify":
-      return verify({ journal: flags.journal === true, coverage: flags.coverage === true });
+      return verify({
+        journal: flags.journal === true,
+        coverage: flags.coverage === true,
+        allowUnverifiedEvidence: flags["allow-unverified-evidence"] === true,
+      });
     case "decision":
       return decision(positionals[0], flags);
     case "state":

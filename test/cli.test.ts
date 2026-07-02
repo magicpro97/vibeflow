@@ -818,12 +818,16 @@ describe("commands.units CRUD", () => {
       expect(before.failures.some((f) => f.startsWith("no-evidence:"))).toBe(true);
 
       // attach evidence via the new path
-      expect(units("evidence", ["nav"], { add: "BUILD SUCCESSFUL" })).toBe(0);
+      // Use verifiable evidence format (ADR-004 phase 2)
+      expect(
+        units("evidence", ["nav"], { add: 'bun test 2>&1 | tail -3 → "5 pass, 0 fail"' }),
+      ).toBe(0);
 
       // gate now passes
       const after = policyGates(readState(dir));
       expect(after.ok).toBe(true);
       expect(after.failures.some((f) => f.startsWith("no-evidence:"))).toBe(false);
+      expect(after.failures.some((f) => f.includes("unverifiable-evidence"))).toBe(false);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });

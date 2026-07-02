@@ -2,6 +2,7 @@
 // src/commands/tools.ts (issue #136, split-tools). Pure detection logic: no MCP
 // config, no tool installs. All imports through `./_shared.js`.
 
+import { spawnSync as _spawnSync } from "node:child_process";
 import {
   appendJournal,
   autoCrystallizeRun,
@@ -19,6 +20,39 @@ import {
   spawn,
   spawnSync,
 } from "./_shared.js";
+import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
+
+/** ADR-003 phase 2: real LLM eval via VIBEFLOW_AI bridge. Fail-open when bridge not set. */
+export async function defaultGoalEvalFn(
+  goal: string,
+): Promise<{ covered: boolean; uncovered: string[] }> {
+  const diff = (() => {
+    try {
+      const r = _spawnSync("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
+        encoding: "utf8",
+        cwd: process.cwd(),
+      });
+      return (r.stdout ?? "").slice(0, 3000);
+    } catch /* coverage-waiver: #476 */ {
+      return "";
+    }
+  })();
+  const prompt = buildReviewerPrompt({ goal, diff: diff || "(no diff available)" });
+  const bridge = process.env.VIBEFLOW_AI;
+  if (!bridge) return { covered: true, uncovered: [] };
+  try {
+    const parts = bridge.split(" ");
+    const r = _spawnSync(parts[0] ?? "", [...parts.slice(1), prompt], {
+      encoding: "utf8",
+      timeout: 30000,
+    });
+    const raw = (r.stdout ?? "").trim();
+    const covered = /^COVERED/i.test(raw);
+    return { covered, uncovered: covered ? [] : [raw.slice(0, 500)] };
+  } catch /* coverage-waiver: #476 */ {
+    return { covered: true, uncovered: [] };
+  }
+}
 
 /** Plan which toolchain gates `vf verify` should run, by detecting the project's build system.
  * Pure + injectable (exists/readScripts) so it's testable without a real filesystem. */
@@ -93,6 +127,7 @@ export async function collectVerifyReportAsync(
     coverage?: boolean;
     goal?: string; // ADR-003
     goalEvalFn?: (goal: string) => Promise<{ covered: boolean; uncovered: string[] }>; // ADR-003
+    allowUnverifiedEvidence?: boolean; // ADR-004 escape hatch
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
@@ -131,7 +166,9 @@ export async function collectVerifyReportAsync(
     }
   }
 
-  const policy = policyGates(readState(base));
+  const rawState = readState(base);
+  if (inject.allowUnverifiedEvidence && rawState) rawState._allowUnverifiedEvidence = true;
+  const policy = policyGates(rawState);
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
 
   // ADR-003: behavioral goal-eval gate (stub — wire real LLM via --goal-eval flag in phase 2)
@@ -149,7 +186,12 @@ export async function collectVerifyReportAsync(
 }
 
 export function verify(
-  inject: { spawner?: typeof spawnSync; journal?: boolean; coverage?: boolean } = {},
+  inject: {
+    spawner?: typeof spawnSync;
+    journal?: boolean;
+    coverage?: boolean;
+    allowUnverifiedEvidence?: boolean;
+  } = {},
 ): number {
   let failed = 0;
   const base = cwd();
@@ -197,7 +239,9 @@ export function verify(
   }
 
   // Policy gates (confidence / evidence / scope) over the workflow ledger.
-  const report = policyGates(readState());
+  const st = readState();
+  if (inject.allowUnverifiedEvidence && st) st._allowUnverifiedEvidence = true;
+  const report = policyGates(st);
   for (const ok of report.passed) out("vf", c.green(`✓ ${ok}`));
   for (const w of report.warnings) out("vf", c.yellow(`⚠ ${w}`));
   for (const f of report.failures) {

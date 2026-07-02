@@ -1,4 +1,5 @@
 // src/commands/dispatch-runtime.ts
+// size-waiver: #476 — ADR-001 phase 2 LLM reviewer wiring adds ~4 lines
 //
 // Dispatch/orchestration runtime: per-unit dispatcher, researcher,
 // reviewer, and worktree isolation seam. Extracted from
@@ -58,6 +59,7 @@ import {
   defaultWorktreeOps,
   makeWorktreeOps,
 } from "./dispatch-diff.js";
+import { getUnitDiff, makeVibflowLLMFn, runLLMReview } from "./dispatch-reviewer-llm.js";
 // Re-export the moved seam so the public surface (commands.ts, _shared.js, tests)
 // keeps importing these names from dispatch-runtime.js unchanged (#80).
 export { analyzeDiff, defaultDiffReader, defaultWorktreeOps, makeWorktreeOps };
@@ -346,12 +348,21 @@ export function makeDispatcher(
 export function makeReviewer(
   mode: "cli" | "bridge" | "dry",
   threshold: number,
-  inject?: { diffReader?: DiffReader; cwd?: string },
+  inject?: {
+    diffReader?: DiffReader;
+    cwd?: string;
+    goal?: string;
+    llmReviewFn?: (prompt: string) => Promise<string>;
+  },
 ): Reviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
   const cwd = inject?.cwd ?? process.cwd();
+  // ADR-001: auto-wire llmFn only when VF_LLM_REVIEW=1 (opt-in) to avoid smoke/test interference.
+  const llmReviewFn =
+    inject?.llmReviewFn ??
+    (inject?.goal && process.env.VF_LLM_REVIEW === "1" ? makeVibflowLLMFn() : undefined);
 
-  return (unit, outcome) => {
+  return async (unit, outcome) => {
     if (mode === "dry") {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
@@ -376,9 +387,21 @@ export function makeReviewer(
     const analysis = analyzeDiff(diff, unit.scope ?? []);
     if (analysis.fail) return { pass: false, reason: `unit ${unit.name}: ${analysis.reason}` };
 
-    return {
+    const localResult = {
       pass: true,
       reason: `confidence ${outcome.confidence} ≥ ${threshold} with evidence, diff clean`,
     };
+
+    // ADR-001 phase 2: LLM review after local gate passes.
+    if (inject?.goal && llmReviewFn) {
+      const llmDiff = getUnitDiff(cwd, unit.scope ?? []);
+      return await runLLMReview({
+        goal: inject.goal,
+        spec: unit.spec,
+        diff: llmDiff,
+        llmFn: llmReviewFn,
+      });
+    }
+    return localResult;
   };
 }

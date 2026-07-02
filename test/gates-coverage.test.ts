@@ -190,7 +190,7 @@ describe("policyGates branches", () => {
             review: "pass" as const,
           },
           resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
-          evidence: ["proof.log"],
+          evidence: ['bun test 2>&1 | tail -3 → "5 pass, 0 fail"'],
         },
       ],
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
@@ -505,7 +505,7 @@ describe("isVerifiableEvidence", () => {
   });
 });
 
-describe("policyGates: unverifiable-evidence gate (ADR-004 phase1: warn)", () => {
+describe("policyGates: unverifiable-evidence gate (ADR-004 phase2: fail)", () => {
   const doneUnit = {
     name: "u1",
     status: "done" as const,
@@ -518,7 +518,7 @@ describe("policyGates: unverifiable-evidence gate (ADR-004 phase1: warn)", () =>
     },
     resources: { agents: 1, tokens: 10, cost_usd: 0, wall_seconds: 1 },
   };
-  test("emits warning for free-text evidence, not failure", () => {
+  test("emits FAILURE for free-text evidence (phase 2)", () => {
     const state = {
       task_id: "t1",
       goal: "g",
@@ -527,9 +527,23 @@ describe("policyGates: unverifiable-evidence gate (ADR-004 phase1: warn)", () =>
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     };
     const r = policyGates(state);
-    expect(r.warnings.some((w) => w.includes("unverifiable-evidence"))).toBe(true);
+    expect(r.failures.some((f) => f.includes("unverifiable-evidence"))).toBe(true);
+    expect(r.warnings.filter((w) => w.includes("unverifiable-evidence"))).toHaveLength(0);
+    expect(r.failures.some((f) => f.includes("→ Fix:"))).toBe(true);
+    expect(r.ok).toBe(false);
+  });
+  test("_allowUnverifiedEvidence bypasses failure check", () => {
+    const state = {
+      task_id: "t1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [{ ...doneUnit, evidence: ["tests pass"] }],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      _allowUnverifiedEvidence: true,
+    };
+    const r = policyGates(state);
     expect(r.failures.filter((f) => f.includes("unverifiable-evidence"))).toHaveLength(0);
-    expect(r.warnings[0]).toContain("→ Fix:");
+    expect(r.ok).toBe(true);
   });
   test("no warning for verifiable evidence", () => {
     const state = {
@@ -543,7 +557,7 @@ describe("policyGates: unverifiable-evidence gate (ADR-004 phase1: warn)", () =>
       policyGates(state).warnings.filter((w) => w.includes("unverifiable-evidence")),
     ).toHaveLength(0);
   });
-  test("warns only on unverifiable strings, not verifiable ones in same array", () => {
+  test("fails only on unverifiable strings, not verifiable ones in same array", () => {
     const state = {
       task_id: "t1",
       goal: "g",
@@ -552,7 +566,58 @@ describe("policyGates: unverifiable-evidence gate (ADR-004 phase1: warn)", () =>
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     };
     expect(
-      policyGates(state).warnings.filter((w) => w.includes("unverifiable-evidence")),
+      policyGates(state).failures.filter((f) => f.includes("unverifiable-evidence")),
     ).toHaveLength(1);
+    expect(
+      policyGates(state).warnings.filter((w) => w.includes("unverifiable-evidence")),
+    ).toHaveLength(0);
+  });
+});
+
+describe("policyGates: goal_eval gate (ADR-003)", () => {
+  const base = {
+    task_id: "t1",
+    goal: "g",
+    success_criteria: [] as string[],
+    totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+  };
+  const doneUnit = {
+    name: "u1",
+    status: "done" as const,
+    confidence: 1,
+    gates: {
+      build: "pass" as const,
+      lint: "pass" as const,
+      test: "pass" as const,
+      review: "pass" as const,
+    },
+    resources: { agents: 1, tokens: 10, cost_usd: 0, wall_seconds: 1 },
+    evidence: ['bun test 2>&1 | tail -3 → "5 pass, 0 fail"'],
+  };
+
+  test("emits failure when goal_eval=fail", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...doneUnit, gates: { ...doneUnit.gates, goal_eval: "fail" as const } }],
+    };
+    const r = policyGates(state);
+    expect(r.failures.some((f) => f.includes("goal-eval-fail"))).toBe(true);
+    expect(r.failures[0]).toContain("→ Fix:");
+  });
+
+  test("emits passed when goal_eval=pass on any unit", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...doneUnit, gates: { ...doneUnit.gates, goal_eval: "pass" as const } }],
+    };
+    const r = policyGates(state);
+    expect(r.passed.some((p) => p.includes("goal-eval:"))).toBe(true);
+  });
+
+  test("no goal_eval entry when gate is undefined (not run)", () => {
+    const state = { ...base, work_units: [{ ...doneUnit }] };
+    const r = policyGates(state);
+    expect(r.failures.filter((f) => f.includes("goal-eval-fail"))).toHaveLength(0);
+    expect(r.passed.filter((p) => p.includes("goal-eval:"))).toHaveLength(0);
   });
 });

@@ -320,7 +320,12 @@ export async function orchestrate(
     concurrency,
     onProgress,
     dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate, gateFn),
-    reviewer: makeReviewer(mode, thresholdFor(riskClass), { cwd: base }),
+    reviewer: makeReviewer(mode, thresholdFor(riskClass), {
+      cwd: base,
+      // ADR-001: LLM review after local gate — only when goal available
+      // VIBEFLOW_AI bridge used same as defaultGoalEvalFn pattern
+      ...(state.goal ? { goal: state.goal } : {}),
+    }),
     // Post-coding security checkpoint. Opt-in via `--security-check`. When
     // on, the user is prompted (y/n/skip) after each unit finishes coding,
     // BEFORE the independent reviewer is consulted. A `fail` verdict blocks

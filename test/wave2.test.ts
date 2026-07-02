@@ -185,7 +185,7 @@ describe("policy gates", () => {
           gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
           resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
           scope: ["src/auth/"],
-          evidence: ["evidence/build.log"],
+          evidence: ["src/gates.ts:47 — verified implementation"],
         },
         {
           name: "b",
@@ -194,7 +194,7 @@ describe("policy gates", () => {
           gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
           resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
           scope: ["src/ui/"],
-          evidence: ["evidence/test.log"],
+          evidence: ["src/gates.ts:47 — verified implementation"],
         },
       ],
     };
@@ -213,7 +213,7 @@ describe("policy gates", () => {
       review: "pass" as const,
     },
     resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
-    evidence: ["evidence/x.log"],
+    evidence: ["src/gates.ts:47 — verified implementation"],
     ...over,
   });
 

@@ -92,7 +92,10 @@ export interface UnitOutcome {
 }
 
 export type UnitDispatcher = (unit: WorkUnit) => Promise<UnitOutcome>;
-export type Reviewer = (unit: WorkUnit, outcome: UnitOutcome) => { pass: boolean; reason: string };
+export type Reviewer = (
+  unit: WorkUnit,
+  outcome: UnitOutcome,
+) => { pass: boolean; reason: string } | Promise<{ pass: boolean; reason: string }>;
 
 /** Maximum confidence an engine's self-report can contribute.
  *  Must be below the lowest close threshold so a measured gate is always required. */
@@ -254,7 +257,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
         }
       }
       const reviewed = applyOutcome(u, outcome);
-      const review = opts.reviewer(reviewed, outcome);
+      const review = await opts.reviewer(reviewed, outcome);
       reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
       opts.onProgress?.({
         phase: "done",

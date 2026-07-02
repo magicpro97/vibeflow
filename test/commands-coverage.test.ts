@@ -3448,9 +3448,9 @@ describe("commands.makeDispatcher W-A measured gate", () => {
 });
 
 describe("commands.makeReviewer W-C fail-closed gate", () => {
-  test("blocks when a measured gate failed even at confidence=1", () => {
+  test("blocks when a measured gate failed even at confidence=1", async () => {
     const r = makeReviewer("cli", 0.85);
-    const v = r({} as never, {
+    const v = await r({} as never, {
       status: "verifying",
       confidence: 1,
       evidence: ["e"],
@@ -3460,9 +3460,9 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.reason).toContain("gate");
   });
 
-  test("blocks when build fails", () => {
+  test("blocks when build fails", async () => {
     const r = makeReviewer("cli", 0.85);
-    const v = r({} as never, {
+    const v = await r({} as never, {
       status: "verifying",
       confidence: 1,
       evidence: ["e"],
@@ -3472,9 +3472,9 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.reason).toContain("gate");
   });
 
-  test("blocks when lint fails", () => {
+  test("blocks when lint fails", async () => {
     const r = makeReviewer("cli", 0.85);
-    const v = r({} as never, {
+    const v = await r({} as never, {
       status: "verifying",
       confidence: 1,
       evidence: ["e"],
@@ -3484,9 +3484,9 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.reason).toContain("gate");
   });
 
-  test("passes when gates all pass at confidence >= threshold", () => {
+  test("passes when gates all pass at confidence >= threshold", async () => {
     const r = makeReviewer("cli", 0.85);
-    const v = r({} as never, {
+    const v = await r({} as never, {
       status: "verifying",
       confidence: 1,
       evidence: ["e"],
@@ -3495,9 +3495,9 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.pass).toBe(true);
   });
 
-  test("back-compat: gates undefined → passes at high confidence", () => {
+  test("back-compat: gates undefined → passes at high confidence", async () => {
     const r = makeReviewer("cli", 0.85);
-    const v = r({} as never, {
+    const v = await r({} as never, {
       status: "verifying",
       confidence: 1,
       evidence: ["e"],
@@ -3505,9 +3505,9 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.pass).toBe(true);
   });
 
-  test("dry mode passes regardless of gates", () => {
+  test("dry mode passes regardless of gates", async () => {
     const r = makeReviewer("dry", 0.85);
-    const v = r({} as never, {
+    const v = await r({} as never, {
       status: "verifying",
       confidence: 1,
       evidence: ["e"],
@@ -3516,9 +3516,9 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.pass).toBe(true);
   });
 
-  test("blocks on gate failure even if confidence and evidence ok", () => {
+  test("blocks on gate failure even if confidence and evidence ok", async () => {
     const r = makeReviewer("cli", 0.85);
-    const v = r({} as never, {
+    const v = await r({} as never, {
       status: "verifying",
       confidence: 1,
       evidence: ["ok"],
@@ -3531,7 +3531,7 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
 
 // ---- analyzeDiff ----------------------------------------------------------------
 describe("analyzeDiff", () => {
-  test("detects scope creep -- files outside unit scope", () => {
+  test("detects scope creep -- files outside unit scope", async () => {
     // git status --porcelain format: "XY <path>"
     const diff = " M src/other.ts";
     const result = analyzeDiff(diff, ["src/target.ts"]);
@@ -3612,7 +3612,7 @@ describe("defaultDiffReader", () => {
 
 // ---- makeReviewer diff injection --------------------------------------------------
 describe("makeReviewer diff injection", () => {
-  test("blocks on scope creep even at high confidence", () => {
+  test("blocks on scope creep even at high confidence", async () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
       " M src/other.ts";
     const r = makeReviewer("cli", 0.85, { diffReader });
@@ -3623,12 +3623,12 @@ describe("makeReviewer diff injection", () => {
       evidence: ["checked"],
       status: "done" as const,
     };
-    const result = r(unit, outcome);
-    expect(result.pass).toBe(false);
-    expect(result.reason).toContain("scope creep");
+    const v = await r(unit, outcome);
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("scope creep");
   });
 
-  test("passes on clean diff", () => {
+  test("passes on clean diff", async () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
       " M src/x.ts";
     const r = makeReviewer("cli", 0.85, { diffReader });
@@ -3639,12 +3639,12 @@ describe("makeReviewer diff injection", () => {
       evidence: ["checked"],
       status: "done" as const,
     };
-    const result = r(unit, outcome);
-    expect(result.pass).toBe(true);
-    expect(result.reason).toContain("diff clean");
+    const v = await r(unit, outcome);
+    expect(v.pass).toBe(true);
+    expect(v.reason).toContain("diff clean");
   });
 
-  test("passes when scope is empty and diff is empty (no scope creep possible)", () => {
+  test("passes when scope is empty and diff is empty (no scope creep possible)", async () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () => "";
     const r = makeReviewer("cli", 0.85, { diffReader });
     const unit = { scope: [] } as unknown as WorkUnit;
@@ -3654,43 +3654,89 @@ describe("makeReviewer diff injection", () => {
       evidence: ["checked"],
       status: "done" as const,
     };
-    const result = r(unit, outcome);
-    expect(result.pass).toBe(true);
+    const v = await r(unit, outcome);
+    expect(v.pass).toBe(true);
   });
 
-  test("bypasses diff check in dry mode", () => {
+  test("bypasses diff check in dry mode", async () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
       "diff --git a/src/other.ts b/src/other.ts\n+evil";
     const r = makeReviewer("dry", 0.85, { diffReader });
     const unit = { scope: ["src/target.ts"] } as WorkUnit;
     const outcome = { confidence: 0.95, evidence: ["checked"], status: "done" as const };
-    const result = r(unit, outcome);
-    expect(result.pass).toBe(true);
-    expect(result.reason).toContain("dry");
+    const v = await r(unit, outcome);
+    expect(v.pass).toBe(true);
+    expect(v.reason).toContain("dry");
   });
 
   // #359: out-of-scope write blocks review; reason names offending path AND unit.
-  test("blocks an out-of-scope write, names path + unit (#359)", () => {
+  test("blocks an out-of-scope write, names path + unit (#359)", async () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
       "src/other/leak.ts\n";
     const r = makeReviewer("cli", 0.8, { diffReader });
     const unit = { name: "unit-a", scope: ["src/a/"] } as WorkUnit;
     const outcome = { confidence: 1, evidence: ["did work"], status: "done" as const };
-    const result = r(unit, outcome);
-    expect(result.pass).toBe(false);
-    expect(result.reason).toContain("src/other/leak.ts");
-    expect(result.reason).toContain("unit-a");
+    const v = await r(unit, outcome);
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("src/other/leak.ts");
+    expect(v.reason).toContain("unit-a");
   });
 
-  test("passes an in-scope-only --name-only write (#359)", () => {
+  test("passes an in-scope-only --name-only write (#359)", async () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
       "src/a/keep.ts\n";
     const r = makeReviewer("cli", 0.8, { diffReader });
     const unit = { name: "unit-a", scope: ["src/a/"] } as WorkUnit;
     const outcome = { confidence: 1, evidence: ["did work"], status: "done" as const };
-    const result = r(unit, outcome);
-    expect(result.pass).toBe(true);
-    expect(result.reason).toContain("diff clean");
+    const v = await r(unit, outcome);
+    expect(v.pass).toBe(true);
+    expect(v.reason).toContain("diff clean");
+  });
+  test("ADR-001: skips auto-wire LLM review when VF_LLM_REVIEW not set + VIBEFLOW_AI set", async () => {
+    const origVFR = process.env.VF_LLM_REVIEW;
+    const origVAI = process.env.VIBEFLOW_AI;
+    process.env.VF_LLM_REVIEW = undefined;
+    process.env.VIBEFLOW_AI = "echo COVERED";
+    // No explicit llmReviewFn → should NOT auto-wire when VF_LLM_REVIEW absent
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      " M src/x.ts";
+    const r = makeReviewer("cli", 0.85, { diffReader, goal: "g" }); // no llmReviewFn
+    const unit = { scope: ["src/x.ts"] } as WorkUnit;
+    const outcome = {
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+      confidence: 0.95,
+      evidence: ["src/x.ts:1 — added"],
+      status: "done" as const,
+    };
+    const v = await r(unit, outcome);
+    expect(v.reason).not.toContain("LLM reviewer"); // local gate only
+    if (origVFR !== undefined) process.env.VF_LLM_REVIEW = origVFR;
+    else process.env.VF_LLM_REVIEW = undefined;
+    if (origVAI !== undefined) process.env.VIBEFLOW_AI = origVAI;
+    else process.env.VIBEFLOW_AI = undefined;
+  });
+
+  test("ADR-001: calls LLM review when goal + llmReviewFn provided and local gate passes", async () => {
+    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+      " M src/x.ts"; // in-scope
+    let llmCalled = false;
+    const llmReviewFn = async (prompt: string) => {
+      llmCalled = true;
+      expect(prompt).toContain("You have NOT seen");
+      return "COVERED";
+    };
+    const r = makeReviewer("cli", 0.85, { diffReader, goal: "add feature X", llmReviewFn });
+    const unit = { scope: ["src/x.ts"] } as WorkUnit;
+    const outcome = {
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+      confidence: 0.95,
+      evidence: ["src/x.ts:1 — added"],
+      status: "done" as const,
+    };
+    const v = await r(unit, outcome);
+    expect(llmCalled).toBe(true);
+    expect(v.pass).toBe(true);
+    expect(v.reason).toContain("LLM reviewer: COVERED");
   });
 });
 

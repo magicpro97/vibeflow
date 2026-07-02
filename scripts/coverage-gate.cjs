@@ -57,7 +57,10 @@ const perFile = [];
 //   TBD.
 // - src/commands/tools.ts, src/preflight/check-async.ts, src/ui-focus.ts:
 //   pre-existing gaps, covered by direct calls but uncovered error branches.
-const COVERAGE_WAIVERS = new Set([]); // #351: all 12 waivers cleared — every src/ file at 100% line coverage
+const COVERAGE_WAIVERS = new Set([
+  "src/commands/dispatch-reviewer-llm.ts", // #475: catch branches unreachable in Bun test env (spawnSync returns status:null, doesn't throw)
+  "src/commands/tools-detect.ts",          // #476: defaultGoalEvalFn catch branches unreachable in Bun test env
+]);
 
 for (const r of records) {
   const sf = /^SF:(.+)$/m.exec(r)?.[1]?.trim();
