@@ -45,3 +45,13 @@ test("tier=titles strips content", () => {
   const hits = p.recall("sqlite", { tier: "titles" });
   if (hits.length > 0) expect(hits[0]?.content).toBe("");
 });
+test("recall: readDecisions throws → [] (catch branch)", () => {
+  const p = new BuiltinMemoryProvider("/fake", {
+    readDecisions: () => {
+      throw new Error("EPERM");
+    },
+    mtime: () => 1,
+    dbPath: ":memory:",
+  });
+  expect(p.recall("anything")).toEqual([]);
+});
