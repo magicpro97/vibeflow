@@ -60,7 +60,7 @@ export function dispatchPrompt(
   engine: Engine,
   ctx: ProjectContext,
   units: UnitBrief[],
-  inject: { readPolicy?: () => string | undefined } = {},
+  inject: { readPolicy?: () => string | undefined; memoryBlock?: string } = {},
 ): string {
   const names = units.map(briefName);
   const objs = units.filter((u): u is UnitBriefObj => typeof u !== "string");
@@ -114,6 +114,9 @@ export function dispatchPrompt(
   }
   const hardRules = resolveDispatchRules(inject.readPolicy);
 
+  if (inject.memoryBlock?.trim()) {
+    lines.push(inject.memoryBlock.trim(), "");
+  }
   lines.push(
     "Constraints:",
     "- Stay within the declared scope of your work unit.",

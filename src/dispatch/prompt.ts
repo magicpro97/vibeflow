@@ -5,9 +5,14 @@ import type { Engine } from "../core.js";
 import type { EngineSummary } from "./types.js";
 
 /** Build the dispatch prompt and append the required JSON-summary contract. */
-export function buildEnginePrompt(engine: Engine, ctx: ProjectContext, units: UnitBrief[]): string {
+export function buildEnginePrompt(
+  engine: Engine,
+  ctx: ProjectContext,
+  units: UnitBrief[],
+  memoryBlock?: string,
+): string {
   return [
-    dispatchPrompt(engine, ctx, units),
+    dispatchPrompt(engine, ctx, units, { memoryBlock }),
     "When finished, emit a single fenced JSON block as the LAST thing you output:",
     "```json",
     '{ "skills_used": [], "files_changed": [], "commands_run": [], "tests_run": [], "confidence": 0.0, "uncertainty": "" }',
