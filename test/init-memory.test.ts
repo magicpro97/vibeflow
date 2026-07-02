@@ -41,13 +41,13 @@ function spies(over: Record<string, unknown> = {}) {
 }
 
 describe("runMemoryPhase — flag-driven decision", () => {
-  test("--memory wires the given engines, persists memory:true, and appends the guide", async () => {
+  test('--memory wires the given engines, persists memory:"builtin", and appends the guide', async () => {
     const dir = tmpRepo();
     try {
       seedPolicy(dir);
       const { calls, inject } = spies();
       await runMemoryPhase(dir, { memory: true }, ["claude", "codex", "copilot"], inject);
-      expect(readSettings(dir).memory).toBe(true);
+      expect(readSettings(dir).memory).toBe("builtin");
       // One wiring call carrying all three engines.
       expect(calls.wired).toEqual([["claude", "codex", "copilot"]]);
       expect(calls.append).toBe(1);
@@ -96,7 +96,7 @@ describe("runMemoryPhase — flag-driven decision", () => {
         },
       });
       await runMemoryPhase(dir, { memory: true }, ["claude"], inject);
-      expect(readSettings(dir).memory).toBe(true);
+      expect(readSettings(dir).memory).toBe("builtin");
       expect(calls.wired).toEqual([["claude"]]);
       expect(calls.append).toBe(0); // guide skipped when nothing wired
     } finally {
@@ -160,7 +160,7 @@ describe("runMemoryPhase — prompt + skip", () => {
       seedPolicy(dir);
       const { calls, inject } = spies({ isTTY: () => true, ask: async () => true });
       await runMemoryPhase(dir, {}, ["claude", "codex"], inject);
-      expect(readSettings(dir).memory).toBe(true);
+      expect(readSettings(dir).memory).toBe("builtin");
       expect(calls.wired).toEqual([["claude", "codex"]]);
       expect(calls.append).toBe(1);
     } finally {

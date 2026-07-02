@@ -32,7 +32,7 @@ export function config(key: string | undefined, rest: string[], base: string = c
     });
     return 2;
   }
-  const next: Partial<VibeSettings> = value === "on" ? { memory: true } : { memory: false };
+  const next: Partial<VibeSettings> = value === "on" ? { memory: "builtin" } : { memory: false };
   writeSettings(base, next);
   out("vf", value === "on" ? c.green("✓ memory: on") : c.yellow("○ memory: off"));
   return 0;
