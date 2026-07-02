@@ -2055,6 +2055,71 @@ test("GET /api/hook/pending returns empty list when no hooks pending", async () 
   }
 });
 
+test("POST /api/hook/approve resolves pending hook via live server", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { registerPending, clearPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    // Register a pending hook directly
+    registerPending(
+      "test-approve-id",
+      { event: "pre-command" as const, tool: "Bash", command: "ls" },
+      { decision: "require_approval" as const, risk: "high" as const, reasons: ["test"] },
+    );
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ id: "test-approve-id", decision: "allow" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  } finally {
+    clearPending();
+    server.stop();
+  }
+});
+
+test("POST /api/hook/pending via loopback registers hook", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { clearPending, listPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    // POST /api/hook/pending is loopback-only (no CSRF)
+    const res = await fetch(`${url}/api/hook/pending`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "loopback-test-id",
+        input: { event: "pre-command", tool: "Bash" },
+        result: { decision: "require_approval", risk: "high", reasons: ["test"] },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+    expect(listPending().some((p) => p.id === "loopback-test-id")).toBe(true);
+  } finally {
+    clearPending();
+    server.stop();
+  }
+});
+
+test("GET /api/hook/response/:id returns block immediately for unknown id", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { clearPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    const res = await fetch(`${url}/api/hook/response/nonexistent-id`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { decision: string };
+    expect(body.decision).toBe("block");
+  } finally {
+    server.stop();
+  }
+});
+
 test("GET /ui/assets/*.js returns 200 with immutable cache-control (lines 313-330)", async () => {
   const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
   try {
