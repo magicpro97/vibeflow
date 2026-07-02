@@ -196,6 +196,15 @@ Recommended package:
 npx @magicpro97/vibeflow
 ```
 
+## Memory recall
+
+VibeFlow ships a built-in recall layer (`MemoryProvider` seam, two providers):
+
+- **builtin** (default opt-in): bun:sqlite FTS5 over `.vibeflow/knowledge/decisions.md`; zero deps; lazy-indexed on mtime.
+- **claude-mem** (external opt-in): shells `claude-mem search`; requires separate install.
+
+Recall injects a `Relevant past decisions:` block into `dispatchPrompt` (between Skills and Constraints) and `buildPlanPrompt` (beside §2 Non-negotiables). Off by default; enable via `vf config memory builtin`.
+
 ## Updated skill provider decision
 
 The Context7 HTTP API should be the primary external skill and documentation resolver. It is queried over HTTP (`https://context7.com/api/v2`) via the runtime `fetch` — no external `ctx7` binary is required — with an optional `CONTEXT7_API_KEY` for higher rate limits. Vercel `find-skills` remains a supported secondary provider.

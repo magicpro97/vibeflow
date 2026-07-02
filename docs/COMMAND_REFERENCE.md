@@ -126,15 +126,23 @@ vf units evidence <name>   # recorded evidence paths
 ## Settings (config)
 
 ```bash
-vf config memory status    # print the current memory setting (default: on)
-vf config memory on        # enable the claude-mem memory feature
-vf config memory off       # disable the claude-mem memory feature
+vf config memory status     # print the current memory setting (default: false/off)
+vf config memory builtin    # enable built-in BM25/FTS5 recall (zero deps)
+vf config memory claude-mem # enable claude-mem recall (requires claude-mem installed)
+vf config memory off        # disable memory recall
 ```
 
-Reads/toggles `memory` in `.vibeflow/SETTINGS.json`. The setting records your
-claude-mem opt-in; it does **not** gate the `vf init` prompt (init always asks on a
-TTY). It is the forward-compatible switch a later orchestrate-side memory query
-will honour.
+Reads/toggles `memory` in `.vibeflow/SETTINGS.json`. Default is `false` (off).
+Three modes:
+
+| Mode | Behaviour |
+|------|-----------|
+| `false` / `off` | No recall injected |
+| `builtin` | bun:sqlite FTS5 index of `.vibeflow/knowledge/decisions.md`; generates `.vibeflow/knowledge/memory.db` (gitignored) |
+| `claude-mem` | Shells `claude-mem search`; requires separate `claude-mem` install |
+
+The setting does **not** gate the `vf init` prompt (init always asks on a TTY).
+It is the switch `dispatchPrompt` and `buildPlanPrompt` honour for recall injection.
 
 ## Skills (demand-driven)
 
