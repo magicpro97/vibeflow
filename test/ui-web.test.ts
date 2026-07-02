@@ -183,7 +183,6 @@ describe("setStage guard: no forward jump to unreachable stage", () => {
     if (target > current && !localStageReachable(target, state)) return current;
     return target;
   }
-
   const withUnits: WorkflowState = {
     task_id: "T1",
     goal: "g",
@@ -212,5 +211,97 @@ describe("setStage guard: no forward jump to unreachable stage", () => {
   test("backwards navigation always allowed regardless of state", () => {
     expect(localSetStage(4, 1, null)).toBe(1);
     expect(localSetStage(3, 2, null)).toBe(2);
+  });
+});
+
+// ProjectList badge helpers — inlined from ProjectList.vue (pure functions, no DOM)
+import type { ProjectEntry } from "../src/ui/src/types.js";
+
+function projectStatus(p: ProjectEntry): "done" | "partial" | "empty" | "stale" {
+  if (p.totals.units === 0) return "empty";
+  if (p.totals.done === p.totals.units) return "done";
+  if (Date.now() - p.lastUsed > 30 * 24 * 60 * 60 * 1000) return "stale";
+  return "partial";
+}
+
+function badgeClass(status: string): string {
+  const map: Record<string, string> = {
+    done: "text-[10px] px-1.5 py-0.5 rounded bg-green-900 text-green-300",
+    partial: "text-[10px] px-1.5 py-0.5 rounded bg-blue-900 text-blue-300",
+    empty: "text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500",
+    stale: "text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-600",
+  };
+  return map[status] ?? "";
+}
+
+function badgeLabel(p: ProjectEntry): string {
+  if (p.totals.units === 0) return "no tasks";
+  if (p.totals.done === p.totals.units) return "✓ done";
+  return `${p.totals.done}/${p.totals.units} done`;
+}
+
+function makeProject(totals: ProjectEntry["totals"], lastUsed: number): ProjectEntry {
+  return { path: "/p", name: "p", goal: "", lastUsed, totals };
+}
+
+describe("projectStatus", () => {
+  test("units=0 → empty", () => {
+    expect(
+      projectStatus(makeProject({ units: 0, done: 0, tokens: 0, cost_usd: 0 }, Date.now())),
+    ).toBe("empty");
+  });
+  test("done===units → done", () => {
+    expect(
+      projectStatus(makeProject({ units: 3, done: 3, tokens: 0, cost_usd: 0 }, Date.now())),
+    ).toBe("done");
+  });
+  test("partial progress recent → partial", () => {
+    expect(
+      projectStatus(makeProject({ units: 3, done: 1, tokens: 0, cost_usd: 0 }, Date.now())),
+    ).toBe("partial");
+  });
+  test("lastUsed 40 days ago → stale", () => {
+    const fortyDaysAgo = Date.now() - 40 * 24 * 60 * 60 * 1000;
+    expect(
+      projectStatus(makeProject({ units: 3, done: 1, tokens: 0, cost_usd: 0 }, fortyDaysAgo)),
+    ).toBe("stale");
+  });
+});
+
+describe("badgeLabel", () => {
+  test("units=0 → 'no tasks'", () => {
+    expect(badgeLabel(makeProject({ units: 0, done: 0, tokens: 0, cost_usd: 0 }, Date.now()))).toBe(
+      "no tasks",
+    );
+  });
+  test("all done → '✓ done'", () => {
+    expect(badgeLabel(makeProject({ units: 3, done: 3, tokens: 0, cost_usd: 0 }, Date.now()))).toBe(
+      "✓ done",
+    );
+  });
+  test("partial → '1/3 done'", () => {
+    expect(badgeLabel(makeProject({ units: 3, done: 1, tokens: 0, cost_usd: 0 }, Date.now()))).toBe(
+      "1/3 done",
+    );
+  });
+});
+
+describe("badgeClass", () => {
+  test("done → green classes", () => {
+    expect(badgeClass("done")).toContain("bg-green-900");
+  });
+  test("partial → blue classes", () => {
+    expect(badgeClass("partial")).toContain("bg-blue-900");
+  });
+  test("empty → neutral classes", () => {
+    expect(badgeClass("empty")).toContain("bg-neutral-800");
+    expect(badgeClass("empty")).toContain("text-neutral-500");
+  });
+  test("stale → neutral classes", () => {
+    expect(badgeClass("stale")).toContain("bg-neutral-800");
+    expect(badgeClass("stale")).toContain("text-neutral-600");
+  });
+  test("unknown → empty string", () => {
+    expect(badgeClass("unknown")).toBe("");
   });
 });
