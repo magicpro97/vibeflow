@@ -94,6 +94,24 @@ export function scanRepo(repo: string): ProjectProfile {
     }
   }
 
+  // pubspec.yaml → Dart manifest evidence + Flutter framework detection.
+  // MARKER_LANG already maps pubspec.yaml → "Dart" for language detection, but
+  // manifests[] was never populated, leaving language findings with empty evidence
+  // and low confidence for Dart/Flutter repos. Also detect Flutter framework from
+  // the file contents (flutter: dependency or sdk: flutter).
+  const pubspecPath = join(repo, "pubspec.yaml");
+  if (existsSync(pubspecPath)) {
+    manifests.push("pubspec.yaml");
+    try {
+      const pubspec = readFileSync(pubspecPath, "utf8");
+      if (/\bflutter[_:]/.test(pubspec) || pubspec.includes("sdk: flutter")) {
+        frameworks.add("Flutter");
+      }
+    } catch {
+      /* ignore read error — manifest evidence already added */
+    }
+  }
+
   // --- Sub-package framework detection (issue #150) ---
   // A monorepo / multi-package layout (e.g. a `landing/` Astro app beside the
   // root tooling package) hides frameworks from the root-package.json-only

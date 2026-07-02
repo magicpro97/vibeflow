@@ -55,4 +55,11 @@ describe("sanitizeUnitName", () => {
     const long = "a".repeat(1000);
     expect(sanitizeUnitName(long).length).toBe(1000);
   });
+
+  it("windows-style backslash traversal becomes a safe slug", () => {
+    expect(sanitizeUnitName("..\\..\\etc\\passwd")).toBe("etc-passwd");
+    expect(sanitizeUnitName("foo\\bar")).toBe("foo-bar");
+    // all-separator input falls back to "unit"
+    expect(sanitizeUnitName("..\\..\\")).toBe("unit");
+  });
 });

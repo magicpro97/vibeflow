@@ -1207,11 +1207,22 @@ describe("commands.units subcommand branches", () => {
     expect(units("add", ["test\nnewline"])).toBe(2);
     expect(units("add", ["test\ttab"])).toBe(2);
     expect(units("add", ["test\x00null"])).toBe(2);
+    // Leading/trailing control chars must NOT bypass validation via trim() (#449 fix)
+    expect(units("add", ["\nleading"])).toBe(2);
+    expect(units("add", ["trailing\t"])).toBe(2);
+  });
+
+  test("units: add control char error message surfaces codepoint (#448)", () => {
+    // Verify exit code for both embedded and leading/trailing control chars
+    expect(units("add", ["foo\x00bar"])).toBe(2); // U+0000
+    expect(units("add", ["foo\nbar"])).toBe(2); // U+000A
   });
 
   test("units: add with path separators in name returns 2 (#451)", () => {
     expect(units("add", ["feature/branch"])).toBe(2);
     expect(units("add", ["feature\\branch"])).toBe(2);
+    // Windows-style traversal patterns
+    expect(units("add", ["..\\..\\etc"])).toBe(2);
   });
 
   test("units: add with --scope builds a scope array (line 1550-1554)", () => {

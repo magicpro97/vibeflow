@@ -117,35 +117,44 @@ export function units(
       return 0;
     }
     case "add": {
-      const name = rest[0]?.trim();
-      if (!name) {
+      const raw = rest[0] ?? "";
+      if (!raw.trim()) {
         out("vf", c.red('Usage: vf units add <name> [--spec "<text>"] [--scope a,b]'), {
           level: "error",
         });
         return 2;
       }
-      // ponytail: reject control chars early before sanitizeUnitName silently
-      // transforms them. User expects `units show <exact-input>` to work.
-      const hasControl = [...name].some((c) => {
-        const code = c.codePointAt(0);
-        return code !== undefined && (code < 0x20 || code === 0x7f);
+      // Validate on RAW (pre-trim) so leading/trailing control chars are not silently eaten by trim().
+      // Surface the exact offending codepoint so users see immediately what to change.
+      const ctrlChar = [...raw].find((ch) => {
+        const cp = ch.codePointAt(0) ?? 0;
+        return cp < 0x20 || cp === 0x7f;
       });
-      if (hasControl) {
+      if (ctrlChar) {
+        const cp = (ctrlChar.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
         out(
           "vf",
-          c.red(
-            "Unit name contains control characters — use only letters, digits, dots, dashes and underscores.",
-          ),
-          { level: "error" },
+          c.red(`Unit name contains control character U+${cp} — use only printable characters.`),
+          {
+            level: "error",
+          },
         );
         return 2;
       }
-      if (/[/\\]/.test(name)) {
-        out("vf", c.red("Unit name must not contain path separators (/ or \\)."), {
-          level: "error",
-        });
+      const sepChar = /[/\\]/.exec(raw);
+      if (sepChar) {
+        out(
+          "vf",
+          c.red(
+            `Unit name contains path separator "${sepChar[0]}" — use letters, digits, dots, dashes and underscores.`,
+          ),
+          {
+            level: "error",
+          },
+        );
         return 2;
       }
+      const name = raw.trim();
       const addPatch: Partial<WorkUnit> & { name: string } = { name };
       if (typeof flags.spec === "string") addPatch.spec = flags.spec;
       if (typeof flags.scope === "string") {
