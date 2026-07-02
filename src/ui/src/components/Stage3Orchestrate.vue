@@ -105,7 +105,7 @@
       <button
         v-if="canAdvance"
         class="px-4 py-2 rounded text-sm font-medium transition-colors"
-        :class="allDone ? 'border border-neutral-700 text-neutral-200 hover:border-neutral-500 hover:text-white' : 'border border-neutral-800 text-neutral-500 hover:border-neutral-700 hover:text-neutral-300'"
+        :class="[allDone ? 'border border-neutral-700 text-neutral-200 hover:border-neutral-500 hover:text-white' : 'border border-neutral-800 text-neutral-500 hover:border-neutral-700 hover:text-neutral-300', pulsingNext ? 'ring-2 ring-green-500 ring-offset-1 ring-offset-neutral-950' : '']"
         @click="store.setStage(4)"
       >
         {{ allDone ? "Next: Verify →" : "Verify anyway →" }}
@@ -115,6 +115,14 @@
     <div v-if="err" class="flex items-start gap-2 p-3 rounded border border-red-900/60 text-red-400 text-xs" role="alert" aria-live="assertive">
       <span class="mt-0.5 shrink-0">⚠</span><span>{{ err }}</span>
     </div>
+
+    <Transition name="toast">
+      <div
+        v-if="toastVisible"
+        class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-lg bg-green-900/90 text-green-200 text-sm font-medium shadow-lg border border-green-700 cursor-pointer"
+        @click="toastVisible = false"
+      >{{ toastMsg }}</div>
+    </Transition>
   </div>
 </template>
 
@@ -156,6 +164,9 @@ const engine = computed<Engine>(() => {
 const orchestrating = ref(false);
 const orchestrated = ref(false); // brief confirmation flash
 const err = ref<string | null>(null);
+const toastVisible = ref(false);
+const toastMsg = ref("");
+const pulsingNext = ref(false);
 
 // ── Preflight ──────────────────────────────────────────────────────────────
 const preflightLoading = ref(false);
@@ -212,6 +223,21 @@ watch(allDone, (v) => {
   if (v) store.setStage(4);
 });
 
+watch(allDone, (val, old) => {
+  if (val && !old && units.value.length > 0) {
+    const secs = totals.value.wall_seconds;
+    toastMsg.value = `✓ All agents complete${secs > 0 ? ` (${secs}s)` : ""}`;
+    toastVisible.value = true;
+    pulsingNext.value = true;
+    setTimeout(() => {
+      toastVisible.value = false;
+    }, 5000);
+    setTimeout(() => {
+      pulsingNext.value = false;
+    }, 3000);
+  }
+});
+
 // ── Orchestrate ────────────────────────────────────────────────────────────
 async function orchestrate() {
   orchestrating.value = true;
@@ -242,3 +268,8 @@ function fmtCost(n: number): string {
   return n >= 1 ? n.toFixed(2) : n.toFixed(4);
 }
 </script>
+
+<style scoped>
+.toast-enter-active, .toast-leave-active { transition: all 0.3s ease; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(0.5rem); }
+</style>

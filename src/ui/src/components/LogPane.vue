@@ -24,28 +24,34 @@
 
     <!-- Scroll area -->
     <div ref="scrollEl" class="flex-1 overflow-y-auto py-1 relative" @scroll="onScroll">
-      <div
-        v-for="ev in logs"
-        :key="ev.seq"
-        class="flex items-baseline gap-1.5 px-3 py-0.5 font-mono text-[11px] leading-[1.6] hover:bg-white/[0.02]"
-      >
-        <!-- Timestamp -->
-        <span class="text-neutral-700 select-none tabular-nums shrink-0">{{ fmtTime(ev.ts) }}</span>
-        <!-- Channel badge — friendly names -->
-        <span
-          class="shrink-0 text-[10px]"
-          :class="channelTextClass(ev.channel)"
-        >{{ channelLabel(ev.channel) }}</span>
-        <!-- Message -->
-        <span class="min-w-0 break-all" :class="levelClass(ev.level)">{{ ev.text }}</span>
-      </div>
-      <div v-if="logs.length === 0" class="px-3 py-3 text-[11px] text-neutral-700 italic font-mono space-y-1">
+      <ul>
+        <template v-for="item in eventsWithDividers" :key="item.type === 'divider' ? `div-${item.ts}` : item.event.seq">
+          <li v-if="item.type === 'divider'" class="text-[10px] text-neutral-700 text-center py-1 border-t border-neutral-800/50 select-none">
+            ── {{ formatDividerTime(item.ts) }} ──
+          </li>
+          <li
+            v-else
+            class="flex items-baseline gap-1.5 px-3 py-0.5 font-mono text-[11px] leading-[1.6] hover:bg-white/[0.02]"
+          >
+            <!-- Timestamp -->
+            <span class="text-neutral-700 select-none tabular-nums shrink-0">{{ fmtTime(item.event.ts) }}</span>
+            <!-- Channel badge — friendly names -->
+            <span
+              class="shrink-0 text-[10px]"
+              :class="channelTextClass(item.event.channel)"
+            >{{ channelLabel(item.event.channel) }}</span>
+            <!-- Message -->
+            <span class="min-w-0 break-all" :class="levelClass(item.event.level)">{{ item.event.text }}</span>
+          </li>
+        </template>
+      </ul>
+      <div v-if="eventsWithDividers.length === 0" class="px-3 py-3 text-[11px] text-neutral-700 italic font-mono space-y-1">
         <p>No logs yet</p>
         <p class="not-italic text-neutral-800">Go to Run and click "Run agents" — logs appear as the engine executes.</p>
       </div>
       <!-- Scroll to bottom button — appears when user has scrolled up -->
       <button
-        v-if="isScrolledUp && logs.length > 0"
+        v-if="isScrolledUp && eventsWithDividers.length > 0"
         class="sticky bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-1 rounded border border-neutral-700 bg-neutral-900 text-[10px] text-neutral-400 hover:text-neutral-200 transition-colors shadow-lg"
         aria-label="Scroll to latest logs"
         @click="scrollToBottom"
@@ -55,13 +61,31 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useSSE } from "../composables/useSSE.js";
 import { useVfStore } from "../store.js";
-import type { LogLevel } from "../types.js";
+import type { LogEvent, LogLevel } from "../types.js";
 
 const store = useVfStore();
 const { logs, error: sseError, clearLogs } = useSSE("/api/logs/stream");
+
+type LogItem = { type: "event"; event: LogEvent } | { type: "divider"; ts: number };
+const eventsWithDividers = computed((): LogItem[] => {
+  const result: LogItem[] = [];
+  for (let i = 0; i < logs.value.length; i++) {
+    const ev = logs.value[i];
+    if (!ev) continue;
+    const prev = logs.value[i - 1];
+    if (prev && ev.ts - prev.ts > 60_000) {
+      result.push({ type: "divider", ts: ev.ts });
+    }
+    result.push({ type: "event", event: ev });
+  }
+  return result;
+});
+function formatDividerTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString();
+}
 const scrollEl = ref<HTMLElement | null>(null);
 const isScrolledUp = ref(false);
 
