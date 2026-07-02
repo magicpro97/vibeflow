@@ -7,8 +7,10 @@ export function renderMemoryBlock(hits: MemoryHit[]): string {
   if (!hits.length) return "";
   const lines = ["Relevant past decisions:"];
   for (const h of hits) {
-    const body = h.content.replace(/\s+/g, " ").slice(0, 200).trim();
-    lines.push(`- ${h.id} — ${h.title}${body ? `: ${body}` : ""}`);
+    const id = h.id.replace(/\s+/g, " ").trim();
+    const title = h.title.replace(/\s+/g, " ").trim();
+    const body = h.content.slice(0, 200).replace(/\s+/g, " ").trim();
+    lines.push(`- ${id} — ${title}${body ? `: ${body}` : ""}`);
   }
   lines.push("");
   return lines.join("\n");
