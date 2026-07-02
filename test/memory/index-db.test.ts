@@ -45,6 +45,14 @@ test("searchEntries: malformed query → [] (no throw)", () => {
   expect(searchEntries(db, "AND OR (", 5)).toEqual([]);
 });
 
+test("searchEntries: closed db → [] (catch branch coverage)", () => {
+  const db = openMemoryDb(":memory:");
+  db.close();
+  // db is closed — query() will throw; catch branch must return [].
+  expect(() => searchEntries(db, "recall", 5)).not.toThrow();
+  expect(searchEntries(db, "recall", 5)).toEqual([]);
+});
+
 test("searchEntries: limit respected", () => {
   const db = openMemoryDb(":memory:");
   upsertEntries(db, [
