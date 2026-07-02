@@ -8,6 +8,17 @@ export type ToolTier = "codegraph" | "lsp" | "native";
 /** All valid tiers, in the canonical default order (highest preference first). */
 const TIERS: ToolTier[] = ["codegraph", "lsp", "native"];
 
+/** Memory recall mode. false = off (default). "builtin" = bun:sqlite FTS5.
+ *  "claude-mem" = opt-in external claude-mem CLI. Legacy boolean true → "builtin". */
+export type MemoryMode = false | "builtin" | "claude-mem";
+
+/** Coerce stored memory field to MemoryMode. Legacy boolean true→"builtin". */
+export function coerceMemory(v: unknown): MemoryMode {
+  if (v === true) return "builtin";
+  if (v === "builtin" || v === "claude-mem") return v;
+  return false;
+}
+
 /**
  * Source-protection policy for real (cli) dispatch. All conservative by default so an
  * upgrade never silently changes behavior: a bounded timeout, no auto-WIP, no rollback,
@@ -39,7 +50,7 @@ export interface VibeSettings {
    * Toggled via `vf config memory on|off`. Default: false (PR #160 review:
    * truth-tell on `vf config memory status`).
    */
-  memory: boolean;
+  memory: MemoryMode;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -133,7 +144,7 @@ function coerce(raw: unknown): VibeSettings {
   // Read the `memory` field if the stored file carries it. PR #160 added
   // this; without it, `readSettings` always returns the default (false)
   // regardless of what's on disk — the setting would never read true.
-  if (typeof obj.memory === "boolean") out.memory = obj.memory;
+  out.memory = coerceMemory(obj.memory);
 
   // Only materialize `hooks` when the stored file actually carries the key, so
   // repos that never configured hooks keep an absent block (fail-safe all-on at

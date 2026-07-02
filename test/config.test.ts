@@ -36,7 +36,7 @@ async function capture(fn: () => number | Promise<number>): Promise<{ code: numb
 }
 
 describe("config memory on|off", () => {
-  test("`config memory on` persists memory:true and prints memory: on", async () => {
+  test('`config memory on` persists memory:"builtin" and prints memory: on', async () => {
     const dir = tmpRepo();
     try {
       // Seed the opposite so the toggle is observable.
@@ -44,7 +44,7 @@ describe("config memory on|off", () => {
       const { code, out } = await capture(() => config("memory", ["on"], dir));
       expect(code).toBe(0);
       expect(out).toContain("memory: on");
-      expect(readSettings(dir).memory).toBe(true);
+      expect(readSettings(dir).memory).toBe("builtin");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

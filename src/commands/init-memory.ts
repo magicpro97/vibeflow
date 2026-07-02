@@ -17,6 +17,7 @@ import {
   appendMemoryGuide as realAppendMemoryGuide,
   ensureInstalledForEngines as realEnsureInstalledForEngines,
 } from "../memory.js";
+import { coerceMemory } from "../settings.js";
 import { confirmInput } from "../terminal-prompts/prompts.js";
 import { type Engine, c, out, writeSettings } from "./_shared.js";
 
@@ -64,7 +65,7 @@ export async function runMemoryPhase(
   if (decision === null) return; // non-TTY, no flag → silent skip
 
   // Persist the answer regardless of install outcome.
-  writeSettings(base, { memory: decision });
+  writeSettings(base, { memory: coerceMemory(decision) });
   if (!decision) return;
 
   const wireEngines = inject.ensureInstalledForEngines ?? realEnsureInstalledForEngines;
