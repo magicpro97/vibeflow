@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BRIEF_PATH, PLAN_SECTIONS, plan, slugify } from "../src/commands.js";
+import { BRIEF_PATH, PLAN_SECTIONS, buildPlanPrompt, plan, slugify } from "../src/commands.js";
 
 const PLAN_BODY = `## 1. The artifact
 Test artifact for the contract test.
@@ -228,5 +228,20 @@ partial
   test("(no-dispatch) plan returns 1 when no dispatch is injected", async () => {
     const code = await plan(["missing dispatch"], {}, {});
     expect(code).toBe(1);
+  });
+
+  test("buildPlanPrompt: includes memory block when provided", () => {
+    const result = buildPlanPrompt(
+      "state.ts refactor",
+      null,
+      "Relevant past decisions:\n- ADR-001 — use sqlite\n",
+    );
+    expect(result).toContain("Relevant past decisions");
+    expect(result).toContain("ADR-001");
+  });
+
+  test("buildPlanPrompt: no memory block when empty", () => {
+    const result = buildPlanPrompt("state.ts refactor", null, "");
+    expect(result).not.toContain("Relevant past decisions");
   });
 });

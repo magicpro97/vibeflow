@@ -229,6 +229,7 @@ export type { CoordInject, DeniedToolCall, Engine } from "./commands/coord.js";
 // for testability (production wires the real engine dispatcher).
 export {
   plan,
+  buildPlanPrompt,
   PLAN_SECTIONS,
   PLANS_DIR,
   DEFAULT_PLAN_ENGINE,
