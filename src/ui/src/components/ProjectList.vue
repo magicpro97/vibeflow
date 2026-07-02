@@ -33,8 +33,9 @@
         <div class="flex items-center justify-between mt-2">
           <span class="text-[10px] text-neutral-700">
             {{ p.totals.done }}/{{ p.totals.units }} tasks · ${{ p.totals.cost_usd.toFixed(2) }}
+            <span :class="badgeClass(projectStatus(p))">{{ badgeLabel(p) }}</span>
           </span>
-          <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div class="flex gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
             <button
               class="px-2 py-0.5 rounded text-[11px] text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors disabled:opacity-40"
               :disabled="actionInFlight === p.path"
@@ -132,6 +133,29 @@ async function remove(p: ProjectEntry) {
   } finally {
     actionInFlight.value = null;
   }
+}
+
+function projectStatus(p: ProjectEntry): "done" | "partial" | "empty" | "stale" {
+  if (p.totals.units === 0) return "empty";
+  if (p.totals.done === p.totals.units) return "done";
+  if (Date.now() - p.lastUsed > 30 * 24 * 60 * 60 * 1000) return "stale";
+  return "partial";
+}
+
+function badgeClass(status: string): string {
+  const map: Record<string, string> = {
+    done: "text-[10px] px-1.5 py-0.5 rounded bg-green-900 text-green-300",
+    partial: "text-[10px] px-1.5 py-0.5 rounded bg-blue-900 text-blue-300",
+    empty: "text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500",
+    stale: "text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-600",
+  };
+  return map[status] ?? "";
+}
+
+function badgeLabel(p: ProjectEntry): string {
+  if (p.totals.units === 0) return "no tasks";
+  if (p.totals.done === p.totals.units) return "✓ done";
+  return `${p.totals.done}/${p.totals.units} done`;
 }
 
 function relativeDate(ts: number): string {
