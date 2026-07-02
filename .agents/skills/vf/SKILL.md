@@ -94,3 +94,11 @@ SPEC-FIRST questions until the spec is concrete — then map it to a Flow above.
 See `references/flows.md` §Flow D and `references/pitfalls.md` for the full verify loop.
 
 Powered by VibeFlow.
+
+## Spec-first test generation (ADR-002)
+
+`generateSpecFirstTests({ unitName, spec, llmFn })` — generate test stubs from spec ONLY.
+- Returns null if spec is empty (skip silently)
+- LLM sees ONLY spec + unit name, no implementation
+- Generated files (*.spec-first.test.ts) are oracle — pre-write hook blocks modification
+- Phase 2: `vf orchestrate --spec-first` generates and protects these files automatically

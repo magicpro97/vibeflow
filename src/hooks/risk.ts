@@ -228,6 +228,13 @@ function scoreFiles(
   if (enabled.has("protect-config"))
     flag(CONFIG_PROTECTED, "edits build/lint/hook config (path-protected)");
 
+  // ADR-002: spec-first test files are oracle — implementer must not modify them.
+  // These files are generated before dispatch and protected unconditionally.
+  if (files?.some((f) => /\.spec-first\./.test(f))) {
+    bump("critical");
+    reasons.push("spec-first test file is an oracle — implementer must not modify it (ADR-002)");
+  }
+
   if (enabled.has("workspace-guard")) {
     const escaped = outOfScope(files, input.scope);
     if (escaped.length) {

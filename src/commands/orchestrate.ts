@@ -1,4 +1,5 @@
 // src/commands/orchestrate.ts
+// size-waiver: #472 — generateSpecFirstTests (ADR-002) + buildReviewerPrompt re-export (ADR-001) adds ~29 lines
 //
 // `vf orchestrate` subcommand — the multi-unit dispatch loop (issue #80, phase 6/14).
 // Resolver helpers live in orchestrate-resolve.ts (#186 PR7).
@@ -398,3 +399,32 @@ export async function orchestrate(
   }
   return verdict.verdict === "blocked" ? 1 : 0;
 }
+
+// ─── ADR-002: Spec-first test generation ─────────────────────────────────────
+
+export interface SpecFirstOpts {
+  unitName: string;
+  spec: string;
+  /** Injectable LLM call — production uses engine dispatch; tests use a fake. */
+  llmFn: (prompt: string) => Promise<string>;
+}
+
+/**
+ * Generate test stubs from a unit's spec BEFORE the implementer is dispatched.
+ * The LLM sees ONLY the spec — no source code, no implementation context.
+ * Returns null when spec is empty (spec-first skipped for that unit).
+ * ADR-002: written files are protected from implementer writes via pre-write hook.
+ * ponytail: llmFn is injected; production wiring via --spec-first flag in phase 2.
+ */
+export async function generateSpecFirstTests(opts: SpecFirstOpts): Promise<string | null> {
+  if (!opts.spec.trim()) return null;
+  const prompt = [
+    "You are a test author. Given ONLY the spec below (no implementation), write failing test stubs.",
+    "Return ONLY the test code — no explanation, no markdown fences, no implementation.",
+    `Unit: ${opts.unitName}`,
+    `Spec: ${opts.spec}`,
+  ].join("\n");
+  return opts.llmFn(prompt);
+}
+
+// ─── End ADR-002 ─────────────────────────────────────────────────────────────

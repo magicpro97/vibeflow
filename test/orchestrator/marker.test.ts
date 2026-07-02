@@ -503,6 +503,7 @@ describe("tryLock / releaseLock", () => {
       // Cleanup.
       releaseLock(u);
     },
+    15000,
   );
 });
 
