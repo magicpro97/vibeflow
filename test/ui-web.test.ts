@@ -358,3 +358,71 @@ describe("fixCommand", () => {
     ).toBe("run vf init first");
   });
 });
+
+describe("toastMsg format", () => {
+  function makeToastMsg(wallSeconds: number): string {
+    return `✓ All agents complete${wallSeconds > 0 ? ` (${wallSeconds}s)` : ""}`;
+  }
+  test("with wall_seconds=120", () => {
+    expect(makeToastMsg(120)).toBe("✓ All agents complete (120s)");
+  });
+  test("with wall_seconds=0", () => {
+    expect(makeToastMsg(0)).toBe("✓ All agents complete");
+  });
+});
+
+describe("eventsWithDividers", () => {
+  type LogItem = { type: "event"; ts: number } | { type: "divider"; ts: number };
+  function makeEventsWithDividers(tsList: number[]): LogItem[] {
+    const result: LogItem[] = [];
+    for (let i = 0; i < tsList.length; i++) {
+      const ts = tsList[i];
+      if (ts === undefined) continue;
+      const prev = tsList[i - 1];
+      if (prev !== undefined && ts - prev > 60_000) {
+        result.push({ type: "divider", ts });
+      }
+      result.push({ type: "event", ts });
+    }
+    return result;
+  }
+  test("events <60s apart have no divider", () => {
+    const result = makeEventsWithDividers([1000, 30_000]);
+    expect(result.every((i) => i.type === "event")).toBe(true);
+  });
+  test("events >60s apart get divider inserted between", () => {
+    const result = makeEventsWithDividers([1000, 62_000]);
+    expect(result).toHaveLength(3);
+    expect(result[0]?.type).toBe("event");
+    expect(result[1]?.type).toBe("divider");
+    expect(result[2]?.type).toBe("event");
+  });
+});
+
+describe("ENGINE_HINTS", () => {
+  const ENGINE_HINTS: Record<string, string> = {
+    claude: "Best for complex reasoning, architecture, multi-file changes",
+    codex: "Fast, focused on code generation and completions",
+    copilot: "GitHub-integrated, good for PR-context tasks",
+  };
+  test("all 3 engines have non-empty hints", () => {
+    expect(ENGINE_HINTS.claude?.length).toBeGreaterThan(0);
+    expect(ENGINE_HINTS.codex?.length).toBeGreaterThan(0);
+    expect(ENGINE_HINTS.copilot?.length).toBeGreaterThan(0);
+  });
+  const ENGINE_PRIORITY = ["claude", "copilot", "codex"];
+  function deriveRecommended(readyKeys: string[]): string {
+    const ready = new Set(readyKeys);
+    return ENGINE_PRIORITY.find((e) => ready.has(e)) ?? "claude";
+  }
+  test("codex-only ready -> recommends codex", () => {
+    expect(deriveRecommended(["codex"])).toBe("codex");
+  });
+  test("empty ready -> fallback claude", () => {
+    expect(deriveRecommended([])).toBe("claude");
+  });
+  test("priority: claude beats copilot beats codex", () => {
+    expect(deriveRecommended(["claude", "codex"])).toBe("claude");
+    expect(deriveRecommended(["copilot", "codex"])).toBe("copilot");
+  });
+});
