@@ -42,7 +42,7 @@ export function ensureLog(base?: string): boolean {
   if (existsSync(p)) return false;
   writeFileSafe(
     p,
-    "# Work Journal\n\nAppend-only log of operations — each entry is prefixed with a timestamp.\n",
+    "# Work Journal\n\nAppend-only log of operations — each entry is prefixed with a date (YYYY-MM-DD).\n",
   );
   return true;
 }

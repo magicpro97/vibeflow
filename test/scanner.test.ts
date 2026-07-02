@@ -460,3 +460,59 @@ describe("scanner split (#186 PR2 sentinel)", () => {
     expect(facade).not.toMatch(/size-waiver/);
   });
 });
+
+describe("scanner pubspec.yaml / Dart / Flutter detection (#444 fix)", () => {
+  test("pubspec.yaml is added to manifests (evidence for language finding)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-pubspec-"));
+    try {
+      writeFileSync(join(dir, "pubspec.yaml"), "name: myapp\n");
+      const profile = scanRepo(dir);
+      expect(profile.manifests).toContain("pubspec.yaml");
+      expect(profile.languages).toContain("Dart");
+      const langFinding = profile.findings.find((f) => f.component === "language");
+      expect(langFinding?.confidence).toBe("high");
+      expect(langFinding?.evidence.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("Flutter framework detected when pubspec.yaml contains sdk: flutter", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-flutter-"));
+    try {
+      writeFileSync(
+        join(dir, "pubspec.yaml"),
+        "name: myapp\ndependencies:\n  flutter:\n    sdk: flutter\n",
+      );
+      const profile = scanRepo(dir);
+      expect(profile.frameworks).toContain("Flutter");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("Flutter framework detected via flutter: dependency key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-flutter2-"));
+    try {
+      writeFileSync(
+        join(dir, "pubspec.yaml"),
+        "name: myapp\ndependencies:\n  flutter_bloc: ^8.0.0\n",
+      );
+      const profile = scanRepo(dir);
+      expect(profile.frameworks).toContain("Flutter");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("Dart-only pubspec (no flutter dep) does not add Flutter framework", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-dart-only-"));
+    try {
+      writeFileSync(join(dir, "pubspec.yaml"), "name: mylib\n");
+      const profile = scanRepo(dir);
+      expect(profile.frameworks).not.toContain("Flutter");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

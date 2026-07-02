@@ -159,4 +159,18 @@ describe("collectVerifyReportAsync", () => {
     expect(gate.label).toMatch(/flutter.*test|test/);
     expect(gate.pass).toBe(true);
   });
+
+  test("flutter toolchain iterates plan.gates not hardcoded (#446 fix)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-flutter-loop-"));
+    writeFileSync(join(dir, "pubspec.yaml"), "name: test\n");
+    const called: { cmd: string; args: string[] }[] = [];
+    const spawner = async (cmd: string, args: string[]) => {
+      called.push({ cmd, args: [...args] });
+      return { status: 0 };
+    };
+    await collectVerifyReportAsync(dir, { spawner });
+    expect(called).toHaveLength(1);
+    expect(called[0]?.cmd).toBe("flutter");
+    expect(called[0]?.args).toEqual(["test"]);
+  });
 });
