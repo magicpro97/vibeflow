@@ -60,6 +60,7 @@ const perFile = [];
 const COVERAGE_WAIVERS = new Set([
   "src/commands/dispatch-reviewer-llm.ts", // #477: catch branches unreachable in Bun test env (spawnSync returns status:null, doesn't throw)
   "src/commands/tools-detect.ts",          // #478: defaultGoalEvalFn catch branches unreachable in Bun test env
+  "src/memory/builtin.ts",                 // #495: catch in ensureIndexed unreachable in test env
 ]);
 
 for (const r of records) {
