@@ -1,5 +1,5 @@
 // src/commands/dispatch-runtime.ts
-// size-waiver: #478 — ADR-001 phase 2 LLM reviewer wiring adds ~4 lines
+// size-waiver: #503 — memory recall wiring (resolveMemoryProvider + renderMemoryBlock) adds ~7 lines
 //
 // Dispatch/orchestration runtime: per-unit dispatcher, researcher,
 // reviewer, and worktree isolation seam. Extracted from
