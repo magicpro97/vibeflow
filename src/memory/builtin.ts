@@ -30,12 +30,12 @@ export class BuiltinMemoryProvider implements MemoryProvider {
   }
 
   private ensureIndexed(): boolean {
-    const mt = this.mtime();
-    if (mt === null) return false;
-    if (this.db && this.indexedMtime === mt) return true;
-    const raw = this.readDecisions();
-    if (raw === null) return false;
     try {
+      const mt = this.mtime();
+      if (mt === null) return false;
+      if (this.db && this.indexedMtime === mt) return true;
+      const raw = this.readDecisions();
+      if (raw === null) return false;
       if (!this.db) this.db = openMemoryDb(this.dbPath);
       else this.db.run("DELETE FROM mem");
       upsertEntries(this.db, parseDecisions(raw));
