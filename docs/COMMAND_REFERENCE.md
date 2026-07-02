@@ -96,6 +96,12 @@ vf orchestrate --concurrency 4         # bound the parallel pool (default 3)
 vf orchestrate --yes                   # real dispatch via the engine CLI
 ```
 
+  --auto-pilot        require_approval hooks: dispatch independent LLM call to
+                      evaluate false positive (confidence ≥ 0.9 → allow, else block).
+                      Writes audit entry to .vibeflow/knowledge/hook-audit.log.
+  --yolo              Auto-allow ALL require_approval hooks (blind). Audit logged.
+  --allow-all         Alias for --yolo.
+
 Modes: `--yes` → CLI, else `$VIBEFLOW_AI` → bridge, else dry. Dispatches units in
 parallel, runs an independent reviewer (pass only at confidence `1.0` with evidence),
 then prints the goal-eval verdict (`met | partial | blocked`).
@@ -194,6 +200,16 @@ vf hooks install    # wire core.hooksPath → .githooks
 vf hooks emit       # write engine hook configs (Claude/Codex/Copilot + git pre-commit)
 echo '<json-event>' | vf hook       # → {"decision":"allow|warn|require_approval|block",...}
 ```
+
+### require_approval in web UI context
+When VF_HOOK_MODE=default and .vibeflow/.ui-port exists, require_approval
+pauses the engine indefinitely until the user responds via the web UI modal.
+
+### VF_HOOK_MODE env var
+Set automatically by vf orchestrate based on flags:
+- default: ask user via web UI modal
+- auto-pilot: independent LLM false-positive evaluation
+- yolo: blind allow-all
 
 ## Verification
 

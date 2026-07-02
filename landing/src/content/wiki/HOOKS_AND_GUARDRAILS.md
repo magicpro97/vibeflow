@@ -303,5 +303,39 @@ Block only when the action is clearly unsafe.
 
 ---
 
+## Web UI interactive approval (vf orchestrate + web UI)
+
+When `vf orchestrate` is launched from the web UI (`vf ui`), hooks that return
+`require_approval` pause the engine and surface an approval modal in the browser
+instead of auto-deciding. The engine waits indefinitely for user response.
+
+### How it works
+1. `vf hook` detects a running UI server (`.vibeflow/.ui-port` present)
+2. Registers the pending approval at `POST /api/hook/pending`
+3. Blocks on `GET /api/hook/response/{id}` (no timeout — waits for user)
+4. User sees HookApprovalModal: tool, command, risk level, reasons
+5. User clicks Allow once / Block → `POST /api/hook/approve {id, decision}`
+6. `vf hook` exits with the user decision
+
+If the UI tab is closed and reopened, `GET /api/hook/pending` returns pending
+approvals and the modal re-appears automatically.
+
+### Auto-pilot modes
+
+| Flag | Behavior | Audit log |
+|------|----------|-----------|
+| (default) | Ask user via modal | No |
+| `--auto-pilot` | LLM evaluates false positive (confidence ≥ 0.9 → allow) | Yes |
+| `--yolo` | Blind allow-all, no evaluation | Yes |
+| `--allow-all` | Same as --yolo | Yes |
+
+Audit log: `.vibeflow/knowledge/hook-audit.log` (append-only JSONL).
+
+### CLI-only fallback
+When `.vibeflow/.ui-port` is absent, `require_approval` auto-decides:
+medium → allow (warn), high/critical → block.
+
+---
+
 **Related:** [Security Model](./SECURITY_MODEL.md) · [Tool Adapters](./TOOL_ADAPTERS.md)
 [Edit this page on GitHub](https://github.com/magicpro97/vibeflow/edit/main/docs/HOOKS_AND_GUARDRAILS.md)

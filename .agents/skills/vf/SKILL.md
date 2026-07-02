@@ -45,6 +45,17 @@ Skip the gate only for read-only commands (`vf doctor`, `vf units status`, `vf v
 | "is it done / ship it" | **Flow D — verify & ship** | `references/flows.md` |
 | bare `/vf` (no arguments) | **Grill from context** | `references/grill.md` |
 
+## Hook behavior: web UI vs CLI
+
+**Web UI dispatch** (vf orchestrate --yes via browser):
+- require_approval → user sees modal in browser (waits indefinitely)
+- --auto-pilot: independent LLM eval, approve if confidence >= 0.9
+- --yolo: blind allow-all
+
+**CLI dispatch** (vf orchestrate --yes in terminal, no UI):
+- require_approval → auto-block (no UI available)
+- Set VF_HOOK_MODE=yolo in env to override (use carefully)
+
 Always start with `vf doctor --probe` if you have not confirmed an engine is ready
 this session — a dispatch against a cold engine fails the creation gate.
 
@@ -60,7 +71,7 @@ SPEC-FIRST questions until the spec is concrete — then map it to a Flow above.
 
 - **`references/flows.md`** — full Flow A-D playbooks (init / spec→task / workflow / verify-and-ship), every flag explained.
 - **`references/grill.md`** — bare `/vf` context-grill protocol: infer intents, interview to a spec, route to a Flow.
-- **`references/hooks.md`** — guardrail hooks: arming, the live PreToolUse gate, per-engine block-vs-detect semantics.
+- **`references/hooks.md`** — guardrail hooks: arming, live PreToolUse gate, per-engine semantics, web UI approval modal, auto-pilot/yolo flags, audit log
 - **`references/pitfalls.md`** — the anti-patterns learned the hard way; read before improvising.
 
 ## 3. Skills and external docs (before inventing steps)
