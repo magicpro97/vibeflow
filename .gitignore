@@ -46,3 +46,4 @@ coverage/
 *.lcov.info
 .ui-port
 */.vibeflow/.ui-port
+.vibeflow/knowledge/memory.db*

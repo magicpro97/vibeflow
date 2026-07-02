@@ -237,7 +237,13 @@ src/skills/SKILL_TAXONOMY.md             # reference, copied to .vibeflow/ai-con
 src/probe-cache.ts                # 60s stable / 5s short-TTL engine readiness cache
 src/engine-quota.ts               # parse claude/codex/copilot quota output for the preflight gate
 src/preflight-delegate.ts         # 3-layer gate: presence → auth → quota, with auto-fallback
+src/memory/                       # MemoryProvider seam + builtin (bun:sqlite FTS5) + claude-mem providers
 ```
+
+### Runtime-generated files (gitignored)
+
+- `.vibeflow/knowledge/memory.db` — SQLite FTS5 index of `decisions.md` (builtin memory mode; regenerated on mtime change; gitignored)
+- `WORKFLOW_POLICY.md` — when `vf init --memory` accepted: the `## Memory: claude-mem` guide block is appended
 
 ---
 
