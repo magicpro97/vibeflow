@@ -1,10 +1,10 @@
 // src/memory/parse-decisions.ts
 import type { RawEntry } from "./index-db.js";
 
-const ENTRY_RE = /^## \[[^\]]+\] (ADR-\d+) \| (.+)$/;
+const ENTRY_RE = /^## \[[^\]]+\] (ADR-\d{3}) \| (.+)$/;
 
 export function parseDecisions(raw: string): RawEntry[] {
-  const lines = raw.split("\n");
+  const lines = raw.split(/\r?\n/);
   const entries: RawEntry[] = [];
   let cur: { id: string; title: string; body: string[] } | null = null;
   const flush = () => {
