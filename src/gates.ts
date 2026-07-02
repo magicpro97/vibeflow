@@ -161,6 +161,17 @@ export function policyGates(state: WorkflowState | null): GateReport {
   }
   if (!overlapFound) passed.push("scope: no overlapping work-unit scopes");
 
+  // ADR-003: goal-eval gate
+  const goalEvalFailed = units.filter((u) => u.gates.goal_eval === "fail");
+  for (const u of goalEvalFailed) {
+    failures.push(
+      `goal-eval-fail: "${u.name}" — behavioral review found uncovered goal behaviors → Fix: address missing cases in spec or implementation, re-run vf verify --goal-eval`,
+    );
+  }
+  if (!goalEvalFailed.length && units.some((u) => u.gates.goal_eval === "pass")) {
+    passed.push("goal-eval: all units covered behavioral review");
+  }
+
   // Skill gate — WARN/report only, NEVER fail (see GateReport.warnings).
   // Acts only on units that CLAIM completion AND were classified knowledge-heavy at dispatch.
   // `=== true` is deliberate: legacy/undefined units (pre-feature) are skipped, not gated.

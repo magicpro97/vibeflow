@@ -93,8 +93,22 @@ vf run <engine> --yes           # launch the engine CLI
 vf orchestrate                         # plan + dispatch work units (dry: prompts only)
 vf orchestrate --engine codex          # choose the engine
 vf orchestrate --concurrency 4         # bound the parallel pool (default 3)
+vf orchestrate --review-engine codex           # optional: reviewer engine (ADR-001)
+vf orchestrate --allow-unverified-evidence     # skip evidence format gate (ADR-004 escape hatch)
+vf orchestrate --spec-first           # phase 2: generate spec-first tests before dispatch (ADR-002)
+                                       # current: flag accepted but no-op until phase 2 wiring
+                                       # default: same engine, fresh session, isolated context
 vf orchestrate --yes                   # real dispatch via the engine CLI
 ```
+
+  --auto-pilot        require_approval hooks: dispatch independent LLM call to
+                      evaluate false positive (confidence ≥ 0.9 → allow, else block).
+                      Writes audit entry to .vibeflow/knowledge/hook-audit.log.
+  --yolo              Auto-allow ALL require_approval hooks (blind). Audit logged.
+  --allow-all         Alias for --yolo.
+  --goal-eval <goal>  (opt-in, phase 2) Behavioral goal-eval gate: after toolchain
+                      passes, an LLM checks whether <goal> is covered by the changes.
+                      Stub wired in ADR-003; real LLM integration in a future release.
 
 Modes: `--yes` → CLI, else `$VIBEFLOW_AI` → bridge, else dry. Dispatches units in
 parallel, runs an independent reviewer (pass only at confidence `1.0` with evidence),
@@ -195,10 +209,21 @@ vf hooks emit       # write engine hook configs (Claude/Codex/Copilot + git pre-
 echo '<json-event>' | vf hook       # → {"decision":"allow|warn|require_approval|block",...}
 ```
 
+### require_approval in web UI context
+When VF_HOOK_MODE=default and .vibeflow/.ui-port exists, require_approval
+pauses the engine indefinitely until the user responds via the web UI modal.
+
+### VF_HOOK_MODE env var
+Set automatically by vf orchestrate based on flags:
+- default: ask user via web UI modal
+- auto-pilot: independent LLM false-positive evaluation
+- yolo: blind allow-all
+
 ## Verification
 
 ```bash
 vf verify
+vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migration escape hatch)
 ```
 
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,

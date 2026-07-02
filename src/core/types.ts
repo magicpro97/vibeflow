@@ -37,6 +37,8 @@ export interface WorkUnit {
   gates: Record<"build" | "lint" | "test" | "review", GateState> & {
     /** Populated by the orchestrator's post-coding security checkpoint. */
     security?: GateState;
+    /** ADR-003: behavioral goal-eval result. */
+    goal_eval?: GateState;
   };
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];

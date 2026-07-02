@@ -207,4 +207,74 @@ describe("collectVerifyReportAsync", () => {
     const report = await collectVerifyReportAsync(tmp, { spawner, goalEvalFn, goal: "add X" });
     expect(report.goalEval).toBeUndefined(); // only run when toolchain passes
   });
+
+  test("collectVerifyReportAsync: goalEvalFn called in production path when goal provided", async () => {
+    let called = false;
+    const goalEvalFn = async (goal: string) => {
+      called = true;
+      expect(goal).toBe("add X feature");
+      return { covered: true, uncovered: [] as string[] };
+    };
+    const spawner = async () => ({ status: 0 });
+    const report = await collectVerifyReportAsync(tmp, {
+      spawner,
+      goal: "add X feature",
+      goalEvalFn,
+    });
+    expect(called).toBe(true);
+    expect(report.goalEval?.pass).toBe(true);
+  });
+
+  test("collectVerifyReportAsync: goalEval.pass=false when LLM reports uncovered", async () => {
+    const goalEvalFn = async () => ({
+      covered: false,
+      uncovered: ["edge case: empty string not handled"],
+    });
+    const spawner = async () => ({ status: 0 });
+    const report = await collectVerifyReportAsync(tmp, { spawner, goal: "g", goalEvalFn });
+    expect(report.goalEval?.pass).toBe(false);
+    expect(report.ok).toBe(false);
+  });
+});
+
+import { defaultGoalEvalFn } from "../src/commands/tools-detect.js";
+
+test("defaultGoalEvalFn: catch block — git diff throws → still returns covered=true (fail-open)", async () => {
+  // Temporarily change cwd to a non-git path so git diff throws internally
+  const orig = process.cwd();
+  process.chdir("/tmp");
+  const origEnv = process.env.VIBEFLOW_AI;
+  process.env.VIBEFLOW_AI = undefined;
+  const result = await defaultGoalEvalFn("any goal");
+  process.chdir(orig);
+  if (origEnv !== undefined) process.env.VIBEFLOW_AI = origEnv;
+  expect(result.covered).toBe(true); // fail-open
+});
+
+test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI not set", async () => {
+  const origEnv = process.env.VIBEFLOW_AI;
+  process.env.VIBEFLOW_AI = undefined;
+  const result = await defaultGoalEvalFn("any goal");
+  expect(result.covered).toBe(true);
+  if (origEnv !== undefined) process.env.VIBEFLOW_AI = origEnv;
+});
+
+test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI set to echo COVERED", async () => {
+  const orig = process.env.VIBEFLOW_AI;
+  process.env.VIBEFLOW_AI = "echo COVERED";
+  const result = await defaultGoalEvalFn("add X feature");
+  expect(result.covered).toBe(true);
+  expect(result.uncovered).toHaveLength(0);
+  if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+  else process.env.VIBEFLOW_AI = orig;
+});
+
+test("defaultGoalEvalFn: returns covered=false when VIBEFLOW_AI returns non-COVERED", async () => {
+  const orig = process.env.VIBEFLOW_AI;
+  process.env.VIBEFLOW_AI = "echo Missing edge case: empty input";
+  const result = await defaultGoalEvalFn("add X feature");
+  expect(result.covered).toBe(false);
+  expect(result.uncovered.length).toBeGreaterThan(0);
+  if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+  else process.env.VIBEFLOW_AI = orig;
 });

@@ -223,6 +223,7 @@ Set automatically by vf orchestrate based on flags:
 
 ```bash
 vf verify
+vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migration escape hatch)
 ```
 
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
