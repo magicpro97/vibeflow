@@ -250,6 +250,35 @@ describe("policyGates branches", () => {
     const r = policyGates(state);
     expect(r.ok).toBe(false);
     expect(r.failures.some((f) => f.includes("confidence<1"))).toBe(true);
+    expect(r.failures.some((f) => f.includes("→ Fix:"))).toBe(true);
+  });
+
+  test("policyGates: no-evidence failure contains → Fix: substring", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "done" as const,
+          confidence: 1,
+          gates: {
+            build: "pass" as const,
+            lint: "pass" as const,
+            test: "pass" as const,
+            review: "pass" as const,
+          },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          evidence: [],
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(false);
+    expect(r.failures.some((f) => f.includes("no-evidence"))).toBe(true);
+    expect(r.failures.some((f) => f.includes("→ Fix:"))).toBe(true);
   });
 });
 

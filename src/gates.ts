@@ -61,7 +61,7 @@ export function policyGates(state: WorkflowState | null): GateReport {
     return {
       ok: false,
       failures: [
-        "no-workflow-state: .vibeflow/WORKFLOW_STATE.json missing or unreadable — run `vf init` before `vf verify`",
+        "no-workflow-state: .vibeflow/WORKFLOW_STATE.json missing or unreadable — run `vf init` before `vf verify` → Fix: run vf init first",
       ],
       passed: [],
       warnings: [],
@@ -84,7 +84,7 @@ export function policyGates(state: WorkflowState | null): GateReport {
   if (lowConf.length) {
     for (const u of lowConf) {
       failures.push(
-        `confidence<1: "${u.name}" at ${u.confidence} — investigate/debate before close`,
+        `confidence<1: "${u.name}" at ${u.confidence} — investigate/debate before close → Fix: vf units update ${u.name} --confidence 1`,
       );
     }
   } else {
@@ -95,7 +95,9 @@ export function policyGates(state: WorkflowState | null): GateReport {
   const noEvidence = units.filter((u) => u.status === "done" && !u.evidence?.length);
   if (noEvidence.length) {
     for (const u of noEvidence) {
-      failures.push(`no-evidence: "${u.name}" is done but has no recorded evidence`);
+      failures.push(
+        `no-evidence: "${u.name}" is done but has no recorded evidence → Fix: vf units evidence ${u.name} --add "describe what was done"`,
+      );
     }
   } else {
     passed.push("evidence: every done unit has recorded evidence");

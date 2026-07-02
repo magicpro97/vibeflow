@@ -47,7 +47,7 @@
           placeholder="/path/to/repo (not ~/...)"
           class="flex-1 box-border bg-transparent border border-neutral-800 rounded px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
           @blur="form.repoPath.trim() && !detectInfo && !detecting && runDetect()"
-          @input="detectInfo = null; detectWarn = false; detectErr = null; engineWarning = null"
+          @input="detectInfo = null; detectWarn = false; detectErr = null; engineWarning = null; detected = false"
         />
         <button
           class="px-2 py-1.5 rounded border border-neutral-800 text-xs text-neutral-500 hover:border-neutral-600 hover:text-neutral-200 transition-colors disabled:opacity-40 flex-shrink-0"
@@ -305,7 +305,7 @@
           id="plan-btn"
           class="btn-primary flex-1 justify-center"
           :disabled="submitting || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !engines.some((e) => e.enabled) || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
-          :title="detecting ? 'Detecting repo…' : detectErr ? 'Fix the repository path first' : !form.repoPath.trim() ? 'Enter a repo path first' : !form.goal.trim() ? 'Enter a goal first' : form.goal.trim() === '__CLEAR__' ? 'Reserved value — enter a different goal' : !engines.some((e) => e.enabled) ? 'Select at least one engine' : docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) ? 'Fix invalid URLs first' : 'Plan — ⌘↵ also works'"
+          :title="!detected ? 'Detect repo & engines first to continue' : detecting ? 'Detecting repo…' : detectErr ? 'Fix the repository path first' : !form.repoPath.trim() ? 'Enter a repo path first' : !form.goal.trim() ? 'Enter a goal first' : form.goal.trim() === '__CLEAR__' ? 'Reserved value — enter a different goal' : !engines.some((e) => e.enabled) ? 'Select at least one engine' : docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) ? 'Fix invalid URLs first' : 'Plan — ⌘↵ also works'"
           @click="submit"
         >
           <span v-if="submitting" class="inline-block w-3 h-3 border-2 border-neutral-400/30 border-t-neutral-900 rounded-full animate-spin mr-1.5" />
@@ -314,7 +314,7 @@
         <button
           class="px-3 py-1.5 rounded border border-neutral-800 text-xs text-neutral-500 hover:border-neutral-600 hover:text-neutral-200 transition-colors disabled:opacity-40 flex-shrink-0"
           :disabled="saving || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !engines.some((e) => e.enabled) || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
-          title="Save config without planning — runs init only"
+          :title="!detected ? 'Detect repo & engines first to continue' : 'Save config without planning — runs init only'"
           @click="saveInit"
         >
           <span v-if="saving" class="inline-block w-3 h-3 border-2 border-neutral-700 border-t-neutral-400 rounded-full animate-spin" />
@@ -324,6 +324,7 @@
       <p class="text-[11px] text-neutral-700 text-center">
         <kbd class="font-mono">⌘↵</kbd> to submit · <kbd class="font-mono">Tab</kbd> to navigate
       </p>
+      <p v-if="!detected" class="text-xs text-amber-400 mt-2" role="alert">⚠ Click "Detect repo &amp; engines" above to enable Plan and Save.</p>
     </div>
   </div>
 </template>
@@ -373,6 +374,7 @@ function saveRepoHistory(path: string) {
 }
 const detecting = ref(false);
 const detectingCwd = ref(false);
+const detected = ref(false);
 
 /** Use server's CWD as repo path — works when user ran `vf ui` from their project root */
 async function useCwd() {
@@ -575,6 +577,7 @@ async function runDetect() {
     detectErr.value = null;
     err.value = null;
     saveRepoHistory(form.repoPath);
+    detected.value = true;
     detecting.value = false; // unblock Plan button before slow preflight call
     // Check engine readiness — warn early if no engine is installed (non-blocking)
     try {
