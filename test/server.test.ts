@@ -1208,7 +1208,49 @@ describe("server split (#186 PR11 sentinel)", () => {
   });
 });
 
+import {
+  clearPending as clearPendingDirect,
+  listPending as listPendingDirect,
+} from "../src/server/pending-hooks.js";
 import { handleMutationRoute, handleProjectsRoute } from "../src/server/routes.js";
+
+// --- handleMutationRoute /api/hook/pending unit tests (covers routes.ts lines 292-302) ---
+
+test("handleMutationRoute POST /api/hook/pending: registers hook and returns ok:true", async () => {
+  clearPendingDirect();
+  const ctx = { getActiveRepo: () => process.cwd(), setActiveRepo: (_r: string) => {} };
+  const req = new Request("http://127.0.0.1/api/hook/pending", {
+    method: "POST",
+    body: JSON.stringify({
+      id: "unit-test-pending-id",
+      input: { event: "pre-command", tool: "Bash", command: "ls" },
+      result: { decision: "require_approval", risk: "high", reasons: ["test"] },
+    }),
+    headers: { "content-type": "application/json" },
+  });
+  const res = await handleMutationRoute(ctx, "POST", "/api/hook/pending", req, new URL(req.url));
+  expect(res).not.toBeNull();
+  expect((res as Response).status).toBe(200);
+  const body = (await (res as Response).json()) as { ok: boolean };
+  expect(body.ok).toBe(true);
+  expect(listPendingDirect().some((p) => p.id === "unit-test-pending-id")).toBe(true);
+  clearPendingDirect();
+});
+
+test("handleMutationRoute POST /api/hook/pending: missing id returns 400", async () => {
+  clearPendingDirect();
+  const ctx = { getActiveRepo: () => process.cwd(), setActiveRepo: (_r: string) => {} };
+  const req = new Request("http://127.0.0.1/api/hook/pending", {
+    method: "POST",
+    body: JSON.stringify({ input: {}, result: {} }),
+    headers: { "content-type": "application/json" },
+  });
+  const res = await handleMutationRoute(ctx, "POST", "/api/hook/pending", req, new URL(req.url));
+  expect(res).not.toBeNull();
+  expect((res as Response).status).toBe(400);
+  clearPendingDirect();
+});
+
 // --- handleProjectsRoute unit tests (covers src/server/routes.ts lines 259-284) ---
 
 test("handleProjectsRoute GET /api/projects returns projects array", () => {
