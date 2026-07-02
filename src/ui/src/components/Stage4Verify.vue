@@ -148,7 +148,14 @@
             :key="f"
             class="flex items-start gap-1.5 text-[11px] text-red-400 font-mono"
           >
-            <span class="shrink-0 mt-px">✗</span><span class="break-all">{{ f }}</span>
+            <span class="shrink-0 mt-px">✗</span>
+            <span class="break-all flex-1">{{ failureText(f) }}</span>
+            <button
+              v-if="fixCommand(f)"
+              class="shrink-0 text-[10px] text-neutral-500 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-600 px-1.5 py-0.5 rounded transition-colors font-sans"
+              :title="`Copy fix command: ${fixCommand(f)}`"
+              @click="copyFixCommand(f)"
+            >Copy</button>
           </div>
         </div>
         <div v-if="policyExpanded" class="p-4 bg-neutral-900/30">
@@ -379,5 +386,25 @@ async function newTask() {
   await api.clearState().catch(() => {});
   store.state = null;
   store.setStage(1);
+}
+
+function failureText(f: string): string {
+  const idx = f.indexOf(" → Fix:");
+  return idx === -1 ? f : f.slice(0, idx);
+}
+
+function fixCommand(f: string): string {
+  const idx = f.indexOf(" → Fix:");
+  return idx === -1 ? "" : f.slice(idx + " → Fix:".length).trim();
+}
+
+async function copyFixCommand(f: string): Promise<void> {
+  const cmd = fixCommand(f);
+  if (!cmd) return;
+  try {
+    await window.navigator.clipboard.writeText(cmd);
+  } catch {
+    /* clipboard unavailable — silent */
+  }
 }
 </script>

@@ -15,7 +15,7 @@
     "requireGit": true
   },
   "memory": true,
-  "updatedAt": "2026-06-30T21:16:33.769Z",
+  "updatedAt": "2026-07-02T01:58:56.119Z",
   "hooks": {
     "templates": [
       "block-destructive",

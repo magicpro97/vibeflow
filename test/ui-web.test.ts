@@ -305,3 +305,56 @@ describe("badgeClass", () => {
     expect(badgeClass("unknown")).toBe("");
   });
 });
+
+// failureText / fixCommand helpers — inlined from Stage4Verify.vue (pure functions, no DOM)
+function failureText(f: string): string {
+  const idx = f.indexOf(" → Fix:");
+  return idx === -1 ? f : f.slice(0, idx);
+}
+
+function fixCommand(f: string): string {
+  const idx = f.indexOf(" → Fix:");
+  return idx === -1 ? "" : f.slice(idx + " → Fix:".length).trim();
+}
+
+describe("failureText", () => {
+  test("returns full string when no → Fix: marker", () => {
+    expect(failureText("no-evidence: unit done but no evidence")).toBe(
+      "no-evidence: unit done but no evidence",
+    );
+  });
+  test("returns part before → Fix: marker", () => {
+    expect(
+      failureText(
+        'no-evidence: "u1" is done but has no recorded evidence → Fix: vf units evidence u1 --add "describe what was done"',
+      ),
+    ).toBe('no-evidence: "u1" is done but has no recorded evidence');
+  });
+});
+
+describe("fixCommand", () => {
+  test("returns empty string when no → Fix: marker", () => {
+    expect(fixCommand("no-evidence: unit done but no evidence")).toBe("");
+  });
+  test("returns command after → Fix: marker", () => {
+    expect(
+      fixCommand(
+        'no-evidence: "u1" is done but has no recorded evidence → Fix: vf units evidence u1 --add "describe what was done"',
+      ),
+    ).toBe('vf units evidence u1 --add "describe what was done"');
+  });
+  test("confidence<1 fix command", () => {
+    expect(
+      fixCommand(
+        'confidence<1: "u1" at 0.5 — investigate/debate before close → Fix: vf units update u1 --confidence 1',
+      ),
+    ).toBe("vf units update u1 --confidence 1");
+  });
+  test("no-workflow-state fix command", () => {
+    expect(
+      fixCommand(
+        "no-workflow-state: .vibeflow/WORKFLOW_STATE.json missing → Fix: run vf init first",
+      ),
+    ).toBe("run vf init first");
+  });
+});
