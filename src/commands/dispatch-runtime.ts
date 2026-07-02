@@ -7,7 +7,10 @@
 
 import { join } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
+import { resolveMemoryProvider } from "../memory/provider.js";
+import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
+import { readSettings } from "../settings.js";
 import {
   CTX_DIR,
   DEFAULT_MAX_ROUNDS,
@@ -176,9 +179,16 @@ export function makeDispatcher(
       .map((m) => m.skill.name);
     // Why the unit is knowledge-heavy: risk class first, else the UX/UI regex, else undefined.
     const knowledgeHeavySource = computeKnowledgeHeavySource(riskClass, unitText);
-    const prompt = buildEnginePrompt(engine, ctx, [
-      { name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap },
-    ]);
+    const memProvider = resolveMemoryProvider(readSettings(base).memory, join(base, CTX_DIR));
+    const memBlock = memProvider
+      ? renderMemoryBlock(memProvider.recall(unitText, { limit: 3 }))
+      : "";
+    const prompt = buildEnginePrompt(
+      engine,
+      ctx,
+      [{ name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }],
+      memBlock,
+    );
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
     const evidence: string[] = [];
     if (prot?.checkpoint) {

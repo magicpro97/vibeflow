@@ -2,8 +2,19 @@
 //
 // bun:sqlite FTS5 index for memory recall. Zero new deps — bun:sqlite is built-in.
 // All functions are best-effort: callers catch externally; these never throw.
+// ponytail: static `import { Database } from "bun:sqlite"` is replaced with a
+// lazy require() to prevent the symbol from leaking into the Node.js dist bundle
+// (bun:sqlite is a Bun-only built-in; Node.js throws ERR_UNSUPPORTED_ESM_URL_SCHEME
+// on static import even when marked --external). The dynamic require is safe because
+// BuiltinMemoryProvider is only constructed when memory mode = "builtin" (user opt-in).
 
-import { Database } from "bun:sqlite";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Database = any;
+function loadSqlite(): { Database: new (path: string) => Database } {
+  // ponytail: replace with `import("bun:sqlite")` if/when bun supports top-level await here
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require("bun:sqlite") as { Database: new (path: string) => Database };
+}
 
 // ponytail: import from ./types.js after Task 2 merges
 export interface MemoryHit {
@@ -21,7 +32,8 @@ export interface RawEntry {
 
 /** Open + migrate the FTS5-backed memory DB. `path` = file path or ":memory:". */
 export function openMemoryDb(path: string): Database {
-  const db = new Database(path);
+  const { Database: Db } = loadSqlite();
+  const db = new Db(path);
   db.run("PRAGMA journal_mode = WAL");
   db.run(`CREATE VIRTUAL TABLE IF NOT EXISTS mem USING fts5(
     id UNINDEXED, title, content,

@@ -13,6 +13,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveMemoryProvider } from "../memory/provider.js";
+import { renderMemoryBlock } from "../memory/render.js";
+import { readSettings } from "../settings.js";
 import { BRIEF_PATH, CTX_DIR, c, cwd, out } from "./_shared.js";
 
 /** The 6 canonical plan sections (match the brief's 6). */
@@ -61,13 +64,18 @@ export function slugify(artifact: string, max = SLUG_MAX): string {
  *  - asks for the JSON summary contract
  *
  *  Returns the prompt string. */
-export function buildPlanPrompt(artifact: string, briefRaw: string | null): string {
+export function buildPlanPrompt(
+  artifact: string,
+  briefRaw: string | null,
+  memoryBlock?: string,
+): string {
   const sections = PLAN_SECTIONS.map((s, i) => `${i + 1}. ${s.replace(/^## \d+\. /, "")}`).join(
     "\n",
   );
   const nonNegotiables = briefRaw
     ? (extractSection(briefRaw, "## 2. Non-negotiables") ?? "(none specified)")
     : "(no brief — running without §2 constraints)";
+  const memory = memoryBlock?.trim() ? `\n\n${memoryBlock.trim()}` : "";
   return `You are a planning engine. Produce a structured plan for the following artifact.
 
 ARTIFACT:
@@ -77,7 +85,7 @@ The plan MUST contain these 6 sections (use exactly these headings, in order):
 ${sections}
 
 §2 NON-NEGOTIABLES from the brief (the plan must respect these):
-${nonNegotiables}
+${nonNegotiables}${memory}
 
 The plan is the OUTPUT. Do not execute it. Just write the plan.
 
@@ -156,7 +164,11 @@ export async function plan(
   // Read the brief (if it exists) for the §2 non-negotiables.
   const briefPath = join(cwd(), BRIEF_PATH);
   const briefRaw = _exists(briefPath) ? _read(briefPath, "utf8") : null;
-  const prompt = buildPlanPrompt(artifact, briefRaw);
+  const base = cwd();
+  const settings = readSettings(base);
+  const memProvider = resolveMemoryProvider(settings.memory, join(base, CTX_DIR));
+  const memBlock = memProvider ? renderMemoryBlock(memProvider.recall(artifact, { limit: 3 })) : "";
+  const prompt = buildPlanPrompt(artifact, briefRaw, memBlock);
 
   // Resolve the output path.
   const slug = slugify(artifact);
