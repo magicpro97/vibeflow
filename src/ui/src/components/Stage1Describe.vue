@@ -122,10 +122,15 @@
         Engine
         <InfoTip tip="AI engine to use: claude (Anthropic), codex (OpenAI), or copilot (GitHub). Auto-detected on scan." />
       </label>
-      <div class="flex gap-4">
-        <label v-for="eng in engines" :key="eng.key" class="flex items-center gap-1.5 text-sm cursor-pointer">
-          <input type="checkbox" v-model="eng.enabled" class="accent-neutral-400" />
-          <span class="text-neutral-200">{{ eng.key }}</span>
+      <div class="flex flex-col gap-2">
+        <label v-for="eng in engines" :key="eng.key" class="flex flex-col cursor-pointer">
+          <div class="flex items-center gap-1.5 text-sm">
+            <input type="radio" :value="eng.key" v-model="selectedEngine" class="accent-neutral-400" />
+            <span class="text-neutral-200">{{ eng.key }}</span>
+            <span v-if="recommendedEngine===eng.key" class="text-[10px] text-yellow-400 ml-1">★ Recommended</span>
+            <span v-if="readyEngines.size>0 && !readyEngines.has(eng.key)" class="text-[10px] text-neutral-700 ml-1">not authenticated</span>
+          </div>
+          <span class="text-[10px] text-neutral-600 block ml-5">{{ ENGINE_HINTS[eng.key] }}</span>
         </label>
       </div>
     </div>
@@ -304,8 +309,8 @@
         <button
           id="plan-btn"
           class="btn-primary flex-1 justify-center"
-          :disabled="submitting || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !engines.some((e) => e.enabled) || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
-          :title="!detected ? 'Detect repo & engines first to continue' : detecting ? 'Detecting repo…' : detectErr ? 'Fix the repository path first' : !form.repoPath.trim() ? 'Enter a repo path first' : !form.goal.trim() ? 'Enter a goal first' : form.goal.trim() === '__CLEAR__' ? 'Reserved value — enter a different goal' : !engines.some((e) => e.enabled) ? 'Select at least one engine' : docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) ? 'Fix invalid URLs first' : 'Plan — ⌘↵ also works'"
+          :disabled="submitting || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !selectedEngine || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
+          :title="!detected ? 'Detect repo & engines first to continue' : detecting ? 'Detecting repo…' : detectErr ? 'Fix the repository path first' : !form.repoPath.trim() ? 'Enter a repo path first' : !form.goal.trim() ? 'Enter a goal first' : form.goal.trim() === '__CLEAR__' ? 'Reserved value — enter a different goal' : !selectedEngine ? 'Select at least one engine' : docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) ? 'Fix invalid URLs first' : 'Plan — ⌘↵ also works'"
           @click="submit"
         >
           <span v-if="submitting" class="inline-block w-3 h-3 border-2 border-neutral-400/30 border-t-neutral-900 rounded-full animate-spin mr-1.5" />
@@ -313,7 +318,7 @@
         </button>
         <button
           class="px-3 py-1.5 rounded border border-neutral-800 text-xs text-neutral-500 hover:border-neutral-600 hover:text-neutral-200 transition-colors disabled:opacity-40 flex-shrink-0"
-          :disabled="saving || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !engines.some((e) => e.enabled) || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
+          :disabled="saving || detecting || !form.goal.trim() || form.goal.trim() === '__CLEAR__' || !form.repoPath.trim() || !selectedEngine || !!detectErr || docSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref)) || taskSources.some(s=>s.type==='url'&&s.ref.trim()&&!isValidUrl(s.ref))"
           :title="!detected ? 'Detect repo & engines first to continue' : 'Save config without planning — runs init only'"
           @click="saveInit"
         >
@@ -340,10 +345,12 @@ interface Source {
   type: "url" | "file";
   ref: string;
 }
-interface EngineToggle {
-  key: string;
-  enabled: boolean;
-}
+
+const ENGINE_HINTS: Record<string, string> = {
+  claude: "Best for complex reasoning, architecture, multi-file changes",
+  codex: "Fast, focused on code generation and completions",
+  copilot: "GitHub-integrated, good for PR-context tasks",
+};
 
 const store = useVfStore();
 
@@ -426,7 +433,9 @@ async function clearTask() {
     taskSources.splice(0);
     workflowSteps.splice(0);
     // Reset engine selection to defaults
-    for (const eng of engines) eng.enabled = eng.key === "claude";
+    selectedEngine.value = "claude";
+    readyEngines.value = new Set();
+    recommendedEngine.value = "claude";
     store.setStage(1); // land on fresh describe form
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
@@ -451,11 +460,10 @@ function isValidUrl(s: string): boolean {
   }
 }
 
-const engines = reactive<EngineToggle[]>([
-  { key: "claude", enabled: true },
-  { key: "codex", enabled: false },
-  { key: "copilot", enabled: false },
-]);
+const engines = reactive([{ key: "claude" }, { key: "codex" }, { key: "copilot" }]);
+const selectedEngine = ref("claude");
+const readyEngines = ref<Set<string>>(new Set());
+const recommendedEngine = ref("claude");
 
 // ── Attachments ────────────────────────────────────────────────────────────
 const attachments = ref<Attachment[]>(existingState?.attachments ?? []);
@@ -469,7 +477,7 @@ function onGlobalKey(e: KeyboardEvent) {
       !submitting.value &&
       form.goal.trim() &&
       form.repoPath.trim() &&
-      engines.some((eng) => eng.enabled) &&
+      !!selectedEngine.value &&
       !detectErr.value
     ) {
       e.preventDefault();
@@ -564,8 +572,10 @@ async function runDetect() {
     if (res.engines) {
       for (const eng of engines) {
         const ready = !!(res.engines[eng.key] || res.clis?.[eng.key]);
-        // Only auto-enable ready engines — never auto-disable what user manually checked
-        if (ready) eng.enabled = true;
+        // Auto-select first ready engine found
+        if (ready && !readyEngines.value.has(eng.key)) {
+          readyEngines.value = new Set([...readyEngines.value, eng.key]);
+        }
       }
     }
     const parts: string[] = [];
@@ -594,6 +604,18 @@ async function runDetect() {
       } else {
         engineWarning.value = null;
       }
+      // Populate readyEngines + recommendedEngine from preflight results
+      const readinessArr = pf?.readiness ?? [];
+      const ENGINE_PRIORITY = ["claude", "copilot", "codex"] as const;
+      const readyKeys = readinessArr
+        .filter((r: { level: string }) => r.level === "ready")
+        .map((r: { engine: string }) => r.engine);
+      readyEngines.value = new Set(readyKeys);
+      const first = ENGINE_PRIORITY.find((e) => readyEngines.value.has(e));
+      if (first) {
+        recommendedEngine.value = first;
+        selectedEngine.value = first;
+      }
     } catch {
       engineWarning.value = null; // preflight failure is non-blocking
     }
@@ -617,7 +639,7 @@ async function callInit(): Promise<boolean> {
     if (detectErr.value) return false;
   }
   err.value = null;
-  const selectedEngines = engines.filter((e) => e.enabled).map((e) => e.key);
+  const selectedEngines = [selectedEngine.value].filter(Boolean);
   await api.init({
     repoPath: form.repoPath,
     goal: form.goal,
