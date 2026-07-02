@@ -89,6 +89,7 @@ SPEC-FIRST questions until the spec is concrete — then map it to a Flow above.
 - After a dispatch/workflow: `vf verify` exits 0 (all gates green) and `vf units status`
   shows the units done at confidence 1.0 with recorded evidence.
 - Validate this skill itself: `vf skills validate`.
+- goalEval gate (ADR-003): pass goal + goalEvalFn to collectVerifyReportAsync for behavioral verification
 
 See `references/flows.md` §Flow D and `references/pitfalls.md` for the full verify loop.
 
