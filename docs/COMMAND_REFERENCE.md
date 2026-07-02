@@ -93,6 +93,8 @@ vf run <engine> --yes           # launch the engine CLI
 vf orchestrate                         # plan + dispatch work units (dry: prompts only)
 vf orchestrate --engine codex          # choose the engine
 vf orchestrate --concurrency 4         # bound the parallel pool (default 3)
+vf orchestrate --review-engine codex  # optional: use different engine for reviewer (ADR-001)
+                                       # default: same engine, fresh session, isolated context
 vf orchestrate --yes                   # real dispatch via the engine CLI
 ```
 

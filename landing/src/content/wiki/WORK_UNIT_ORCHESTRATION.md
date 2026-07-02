@@ -128,6 +128,9 @@ Build     : compiles / type-checks            (never skip)
 Lint      : style, unused imports, formatting  (never skip)
 Test      : logic, regressions, contracts      (never skip)
 Review    : security, design, scope creep      (never skip — separate review agent)
+             Context isolation (ADR-001): reviewer receives ONLY goal + spec + diff.
+             No dispatch prompt, no self-report, no workflow reasoning chain.
+             `buildReviewerPrompt()` enforces this — do not bypass.
 Docs      : README/API/JSDoc/CHANGELOG sync    (skip only for internal refactors)
 QA audit  : cross-check by a different agent    (high-risk changes only: auth/data/billing/infra)
 ```
