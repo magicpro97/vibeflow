@@ -164,7 +164,8 @@ artifacts. Accepted formats:
 Rejected: `"done"`, `"tests pass"`, `"implementation complete"`, any string under 10 chars.
 
 Use `vf units evidence <name> --add 'bun test 2>&1 | tail -3 → "<output>"'` to record.
-Phase 1 (current): warnings only. Phase 2: promoted to gate failures.
+Phase 2 (current): **gate failure** — `vf verify` exits 1 when evidence is free-text.
+Escape hatch: `vf verify --allow-unverified-evidence` / `vf orchestrate --allow-unverified-evidence`.
 ```
 
 This is the file-backed enforcement of the policy rule "no verification, no completion"

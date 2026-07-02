@@ -129,14 +129,17 @@ export function policyGates(state: WorkflowState | null): GateReport {
     passed.push("evidence: every done unit has recorded evidence");
   }
 
-  // ADR-004 phase 1: warn (not fail) on unverifiable evidence strings.
-  for (const u of units.filter((u) => u.status === "done" && u.evidence?.length)) {
-    const bad = (u.evidence ?? []).filter((e) => !isVerifiableEvidence(e));
-    if (bad.length) {
-      warnings.push(
-        `unverifiable-evidence: "${u.name}" has ${bad.length} free-text string(s) ` +
-          `→ Fix: vf units evidence ${u.name} --add 'bun test 2>&1 | tail -3 → "<output>"'`,
-      );
+  // ADR-004 phase 2: fail on unverifiable evidence strings.
+  // Escape hatch: state._allowUnverifiedEvidence=true (set by --allow-unverified-evidence flag).
+  if (!state._allowUnverifiedEvidence) {
+    for (const u of units.filter((u) => u.status === "done" && u.evidence?.length)) {
+      const bad = (u.evidence ?? []).filter((e) => !isVerifiableEvidence(e));
+      if (bad.length) {
+        failures.push(
+          `unverifiable-evidence: "${u.name}" has ${bad.length} free-text string(s) ` +
+            `→ Fix: vf units evidence ${u.name} --add 'bun test 2>&1 | tail -3 → "<output>"'`,
+        );
+      }
     }
   }
 

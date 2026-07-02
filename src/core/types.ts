@@ -74,6 +74,8 @@ export interface WorkflowState {
   attachments?: Attachment[];
   /** The VibeFlow version that last initialized (or updated) this workflow. Absent on pre-#323 workflows. */
   vibeflow_version?: string;
+  /** ADR-004: transient flag — skip unverifiable-evidence failure check (escape hatch). Never persisted. */
+  _allowUnverifiedEvidence?: boolean;
 }
 
 // --- Skills (Anthropic skill-creator standard: SKILL.md folder) ---

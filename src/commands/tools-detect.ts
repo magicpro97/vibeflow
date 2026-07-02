@@ -93,6 +93,7 @@ export async function collectVerifyReportAsync(
     coverage?: boolean;
     goal?: string; // ADR-003
     goalEvalFn?: (goal: string) => Promise<{ covered: boolean; uncovered: string[] }>; // ADR-003
+    allowUnverifiedEvidence?: boolean; // ADR-004 escape hatch
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
@@ -131,7 +132,9 @@ export async function collectVerifyReportAsync(
     }
   }
 
-  const policy = policyGates(readState(base));
+  const rawState = readState(base);
+  if (inject.allowUnverifiedEvidence && rawState) rawState._allowUnverifiedEvidence = true;
+  const policy = policyGates(rawState);
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
 
   // ADR-003: behavioral goal-eval gate (stub — wire real LLM via --goal-eval flag in phase 2)
@@ -149,7 +152,12 @@ export async function collectVerifyReportAsync(
 }
 
 export function verify(
-  inject: { spawner?: typeof spawnSync; journal?: boolean; coverage?: boolean } = {},
+  inject: {
+    spawner?: typeof spawnSync;
+    journal?: boolean;
+    coverage?: boolean;
+    allowUnverifiedEvidence?: boolean;
+  } = {},
 ): number {
   let failed = 0;
   const base = cwd();
@@ -197,7 +205,9 @@ export function verify(
   }
 
   // Policy gates (confidence / evidence / scope) over the workflow ledger.
-  const report = policyGates(readState());
+  const st = readState();
+  if (inject.allowUnverifiedEvidence && st) st._allowUnverifiedEvidence = true;
+  const report = policyGates(st);
   for (const ok of report.passed) out("vf", c.green(`✓ ${ok}`));
   for (const w of report.warnings) out("vf", c.yellow(`⚠ ${w}`));
   for (const f of report.failures) {

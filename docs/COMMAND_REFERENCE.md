@@ -93,7 +93,8 @@ vf run <engine> --yes           # launch the engine CLI
 vf orchestrate                         # plan + dispatch work units (dry: prompts only)
 vf orchestrate --engine codex          # choose the engine
 vf orchestrate --concurrency 4         # bound the parallel pool (default 3)
-vf orchestrate --review-engine codex  # optional: use different engine for reviewer (ADR-001)
+vf orchestrate --review-engine codex           # optional: reviewer engine (ADR-001)
+vf orchestrate --allow-unverified-evidence     # skip evidence format gate (ADR-004 escape hatch)
 vf orchestrate --spec-first           # phase 2: generate spec-first tests before dispatch (ADR-002)
                                        # current: flag accepted but no-op until phase 2 wiring
                                        # default: same engine, fresh session, isolated context
