@@ -1,7 +1,8 @@
 // src/commands/orchestrate.ts
 //
 // `vf orchestrate` subcommand — the multi-unit dispatch loop (issue #80, phase 6/14).
-// The 6 pure resolver helpers live in src/commands/orchestrate/resolve.ts (#186 PR7).
+// Resolver helpers live in orchestrate-resolve.ts (#186 PR7).
+// Reviewer prompt isolation lives in orchestrate-reviewer.ts (ADR-001).
 //
 // Contents:
 // - orchestrate: plans concurrency, builds the spawner, runs orchestrateUnits,
@@ -94,10 +95,8 @@ export function maybeFocus(
   focusTerminal(inject);
 }
 
-// Resolver helpers extracted into orchestrate/resolve.ts (#186 PR7).
+// Resolver helpers in orchestrate-resolve.ts (#186 PR7); facade imports for internal use and re-exports the 5 public test seams.
 import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
-// The facade imports them for internal use AND re-exports the 5 public
-// test seams (resolveRisk is internal to this file, called by orchestrate()).
 import {
   announceLaunch,
   engineReady,
@@ -107,7 +106,6 @@ import {
   resolveRisk,
 } from "./orchestrate-resolve.js";
 
-// Re-export the test seams so the 2 existing importers are unchanged.
 export {
   announceLaunch,
   engineReady,
@@ -115,6 +113,8 @@ export {
   resolveEngine,
   resolveMode,
 } from "./orchestrate-resolve.js";
+export { buildReviewerPrompt } from "./orchestrate-reviewer.js";
+export type { ReviewerPromptOpts } from "./orchestrate-reviewer.js";
 export async function orchestrate(
   flags: Record<string, string | boolean>,
   base: string = cwd(),

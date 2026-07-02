@@ -15,6 +15,7 @@ import {
   announceLaunch,
   applyDispatch,
   applyIntake,
+  buildReviewerPrompt,
   computeKnowledgeHeavySource,
   defaultDiffReader,
   detectRepo,
@@ -5760,5 +5761,32 @@ describe("orchestrate split (#186 PR7 sentinel)", () => {
   });
   test("size-waiver removed", () => {
     expect(facade).not.toMatch(/size-waiver/);
+  });
+});
+
+describe("buildReviewerPrompt (ADR-001)", () => {
+  test("does not include dispatch prompt or self-report in output", () => {
+    const prompt = buildReviewerPrompt({
+      goal: "add X feature",
+      spec: "fn() returns uppercase",
+      diff: "diff --git a/src/fn.ts",
+    });
+    expect(prompt).toContain("add X feature");
+    expect(prompt).toContain("diff --git a/src/fn.ts");
+    expect(prompt).not.toContain("DISPATCH_CONTEXT");
+    expect(prompt).not.toContain("SELF_REPORT");
+  });
+  test("includes goal and diff, omits spec when not provided", () => {
+    const prompt = buildReviewerPrompt({ goal: "fix Y", diff: "diff output here" });
+    expect(prompt).toContain("fix Y");
+    expect(prompt).toContain("diff output here");
+  });
+  test("includes isolation instruction", () => {
+    const prompt = buildReviewerPrompt({ goal: "g", diff: "d" });
+    expect(prompt).toContain("You have NOT seen the implementation process");
+  });
+  test("requires file:line citations in reviewer instructions", () => {
+    const prompt = buildReviewerPrompt({ goal: "g", diff: "d" });
+    expect(prompt).toContain("file:line");
   });
 });

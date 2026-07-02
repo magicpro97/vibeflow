@@ -75,6 +75,7 @@ export {
   announceLaunch,
   readyStub,
   engineReady,
+  buildReviewerPrompt,
 } from "./commands/orchestrate.js";
 // === Re-export the protection cluster (issue #80, phase 6/14) ===
 // These symbols now live in src/commands/protection.ts. The facade
