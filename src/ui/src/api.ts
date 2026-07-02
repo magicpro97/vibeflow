@@ -115,4 +115,9 @@ export const api = {
     delete: (path: string) =>
       req<{ ok: boolean }>("DELETE", `/api/projects?path=${encodeURIComponent(path)}`),
   },
+  hook: {
+    pending: () => req<{ pending: unknown[] }>("GET", "/api/hook/pending"),
+    approve: (id: string, decision: "allow" | "block") =>
+      req<{ ok: boolean }>("POST", "/api/hook/approve", { id, decision }),
+  },
 };

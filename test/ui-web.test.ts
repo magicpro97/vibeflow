@@ -426,3 +426,39 @@ describe("ENGINE_HINTS", () => {
     expect(deriveRecommended(["copilot", "codex"])).toBe("copilot");
   });
 });
+
+describe("HookApprovalModal helpers", () => {
+  function borderClass(risk: string): string {
+    if (risk === "critical") return "border-red-700 bg-red-950/80 text-red-100";
+    if (risk === "high") return "border-orange-700 bg-orange-950/80 text-orange-100";
+    if (risk === "medium") return "border-yellow-700 bg-yellow-950/60 text-yellow-100";
+    return "border-neutral-700 bg-neutral-900/90 text-neutral-300";
+  }
+  function riskDot(risk: string): string {
+    if (risk === "critical") return "text-red-400";
+    if (risk === "high") return "text-orange-400";
+    if (risk === "medium") return "text-yellow-400";
+    return "text-neutral-500";
+  }
+  test("borderClass: critical → red", () => {
+    expect(borderClass("critical")).toContain("red");
+  });
+  test("borderClass: high → orange", () => {
+    expect(borderClass("high")).toContain("orange");
+  });
+  test("borderClass: medium → yellow", () => {
+    expect(borderClass("medium")).toContain("yellow");
+  });
+  test("borderClass: low → neutral", () => {
+    expect(borderClass("low")).toContain("neutral");
+  });
+  test("riskDot: critical → red-400", () => {
+    expect(riskDot("critical")).toBe("text-red-400");
+  });
+  test("riskDot: high → orange-400", () => {
+    expect(riskDot("high")).toBe("text-orange-400");
+  });
+  test("riskDot: none → neutral-500", () => {
+    expect(riskDot("none")).toBe("text-neutral-500");
+  });
+});

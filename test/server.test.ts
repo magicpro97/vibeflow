@@ -1200,12 +1200,57 @@ describe("server split (#186 PR11 sentinel)", () => {
     expect(facade).toMatch(/import\.meta\.url/);
     expect(facade).toMatch(/dist\/ui\/index\.html/);
   });
-  test("size-waiver removed", () => {
-    expect(facade).not.toMatch(/size-waiver/);
+  test("size-waiver: only #462 waiver is present (hook approval plumbing)", () => {
+    // #462 adds pending-hooks integration (~38 lines) requiring a size waiver.
+    // Any OTHER size-waiver in server.ts would indicate unreviewed growth.
+    const matches = [...facade.matchAll(/size-waiver:\s*#(\d+)/g)].map((m) => m[1]);
+    expect(matches).toEqual(["462"]);
   });
 });
 
+import {
+  clearPending as clearPendingDirect,
+  listPending as listPendingDirect,
+} from "../src/server/pending-hooks.js";
 import { handleMutationRoute, handleProjectsRoute } from "../src/server/routes.js";
+
+// --- handleMutationRoute /api/hook/pending unit tests (covers routes.ts lines 292-302) ---
+
+test("handleMutationRoute POST /api/hook/pending: registers hook and returns ok:true", async () => {
+  clearPendingDirect();
+  const ctx = { getActiveRepo: () => process.cwd(), setActiveRepo: (_r: string) => {} };
+  const req = new Request("http://127.0.0.1/api/hook/pending", {
+    method: "POST",
+    body: JSON.stringify({
+      id: "unit-test-pending-id",
+      input: { event: "pre-command", tool: "Bash", command: "ls" },
+      result: { decision: "require_approval", risk: "high", reasons: ["test"] },
+    }),
+    headers: { "content-type": "application/json" },
+  });
+  const res = await handleMutationRoute(ctx, "POST", "/api/hook/pending", req, new URL(req.url));
+  expect(res).not.toBeNull();
+  expect((res as Response).status).toBe(200);
+  const body = (await (res as Response).json()) as { ok: boolean };
+  expect(body.ok).toBe(true);
+  expect(listPendingDirect().some((p) => p.id === "unit-test-pending-id")).toBe(true);
+  clearPendingDirect();
+});
+
+test("handleMutationRoute POST /api/hook/pending: missing id returns 400", async () => {
+  clearPendingDirect();
+  const ctx = { getActiveRepo: () => process.cwd(), setActiveRepo: (_r: string) => {} };
+  const req = new Request("http://127.0.0.1/api/hook/pending", {
+    method: "POST",
+    body: JSON.stringify({ input: {}, result: {} }),
+    headers: { "content-type": "application/json" },
+  });
+  const res = await handleMutationRoute(ctx, "POST", "/api/hook/pending", req, new URL(req.url));
+  expect(res).not.toBeNull();
+  expect((res as Response).status).toBe(400);
+  clearPendingDirect();
+});
+
 // --- handleProjectsRoute unit tests (covers src/server/routes.ts lines 259-284) ---
 
 test("handleProjectsRoute GET /api/projects returns projects array", () => {
@@ -2009,6 +2054,215 @@ test("POST /api/orchestrate dry:false stamps evidence on done units with no evid
   expect(u1?.evidence?.length).toBeGreaterThan(0);
   const persisted = readState(tmp);
   expect(persisted?.work_units[0]?.evidence?.length).toBeGreaterThan(0);
+});
+
+test("POST /api/hook/approve returns 404 for unknown id via live server", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ id: "nonexistent-id", decision: "allow" }),
+    });
+    expect(res.status).toBe(404);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/hook/approve without CSRF returns 403 via live server", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "x", decision: "allow" }),
+    });
+    expect(res.status).toBe(403);
+  } finally {
+    server.stop();
+  }
+});
+
+test("GET /api/hook/response/:id resolves with allow when approved via live server", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { registerPending, clearPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    // Register a pending hook
+    registerPending(
+      "resolve-test-id",
+      { event: "pre-command" as const, tool: "Bash", command: "scp secrets.txt user@host:/tmp/" },
+      { decision: "require_approval" as const, risk: "high" as const, reasons: ["test"] },
+    );
+    const token = await csrfToken(url);
+    // Start long-poll in background, then approve
+    const responsePromise = fetch(`${url}/api/hook/response/resolve-test-id`);
+    // Small delay then approve
+    await new Promise((r) => setTimeout(r, 50));
+    await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ id: "resolve-test-id", decision: "allow" }),
+    });
+    const res = await responsePromise;
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { decision: string };
+    expect(body.decision).toBe("allow");
+  } finally {
+    clearPending();
+    server.stop();
+  }
+});
+
+test("POST /api/hook/approve via CSRF route calls handleMutationRoute (routes.ts coverage)", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { registerPending, clearPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    registerPending(
+      "route-test-id",
+      { event: "pre-command" as const, tool: "Bash", command: "ls" },
+      { decision: "require_approval" as const, risk: "high" as const, reasons: ["test"] },
+    );
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ id: "route-test-id", decision: "block" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  } finally {
+    clearPending();
+    server.stop();
+  }
+});
+
+test("POST /api/hook/pending via CSRF route (routes.ts handler) registers hook", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { clearPending, listPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    const token = await csrfToken(url);
+    // POST via CSRF — goes through handleMutationRoute (routes.ts lines 292-302)
+    const res = await fetch(`${url}/api/hook/pending`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vibeflow-token": token,
+        // Must also pass loopback check (origin header from same host)
+      },
+      body: JSON.stringify({
+        id: "csrf-route-test-id",
+        input: { event: "pre-command", tool: "Bash" },
+        result: { decision: "require_approval", risk: "high", reasons: ["test"] },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+    expect(listPending().some((p) => p.id === "csrf-route-test-id")).toBe(true);
+  } finally {
+    clearPending();
+    server.stop();
+  }
+});
+
+test("POST /api/hook/pending via CSRF with missing id returns 400", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { clearPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/hook/pending`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ input: {}, result: {} }), // no id
+    });
+    expect(res.status).toBe(400);
+  } finally {
+    server.stop();
+  }
+});
+
+test("GET /api/hook/pending returns empty list when no hooks pending", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/api/hook/pending`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { pending: unknown[] };
+    expect(Array.isArray(body.pending)).toBe(true);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/hook/approve resolves pending hook via live server", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { registerPending, clearPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    // Register a pending hook directly
+    registerPending(
+      "test-approve-id",
+      { event: "pre-command" as const, tool: "Bash", command: "ls" },
+      { decision: "require_approval" as const, risk: "high" as const, reasons: ["test"] },
+    );
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ id: "test-approve-id", decision: "allow" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  } finally {
+    clearPending();
+    server.stop();
+  }
+});
+
+test("POST /api/hook/pending via loopback registers hook", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { clearPending, listPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    // POST /api/hook/pending is loopback-only (no CSRF)
+    const res = await fetch(`${url}/api/hook/pending`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "loopback-test-id",
+        input: { event: "pre-command", tool: "Bash" },
+        result: { decision: "require_approval", risk: "high", reasons: ["test"] },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+    expect(listPending().some((p) => p.id === "loopback-test-id")).toBe(true);
+  } finally {
+    clearPending();
+    server.stop();
+  }
+});
+
+test("GET /api/hook/response/:id returns block immediately for unknown id", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  const { clearPending } = await import("../src/server/pending-hooks.js");
+  try {
+    clearPending();
+    const res = await fetch(`${url}/api/hook/response/nonexistent-id`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { decision: string };
+    expect(body.decision).toBe("block");
+  } finally {
+    server.stop();
+  }
 });
 
 test("GET /ui/assets/*.js returns 200 with immutable cache-control (lines 313-330)", async () => {

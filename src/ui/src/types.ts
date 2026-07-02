@@ -92,3 +92,13 @@ export interface VibeSettings {
   hooks?: HookConfig;
   updatedAt?: string;
 }
+
+export interface HookLogPayload {
+  decision: "warn" | "require_approval" | "block";
+  risk: "none" | "low" | "medium" | "high" | "critical";
+  reasons: string[];
+  tool?: string;
+  command?: string;
+  files?: string[];
+  event?: string;
+}
