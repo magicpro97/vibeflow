@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultContext } from "../src/adapters/context-builders.js";
+import { dispatchPrompt } from "../src/adapters/dispatch-prompt.js";
 import type { WorkflowState } from "../src/core.js";
 import {
   buildEnginePrompt,
@@ -336,5 +337,37 @@ describe("skill resolver (demand-driven)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("memory block injection", () => {
+  test("dispatchPrompt: memoryBlock inserted before Constraints", () => {
+    const ctx = { goal: "do x", settings: {} } as unknown as ReturnType<typeof defaultContext>;
+    const out = dispatchPrompt("claude", ctx, [{ name: "u1" }], {
+      memoryBlock: "Relevant past decisions:\n- ADR-001 — use sqlite\n",
+    });
+    const memIdx = out.indexOf("Relevant past decisions");
+    const conIdx = out.indexOf("Constraints:");
+    expect(memIdx).toBeGreaterThan(-1);
+    expect(memIdx).toBeLessThan(conIdx);
+  });
+  test("dispatchPrompt: empty memoryBlock → no injection", () => {
+    const ctx = { goal: "do x", settings: {} } as unknown as ReturnType<typeof defaultContext>;
+    const out = dispatchPrompt("claude", ctx, [{ name: "u1" }], { memoryBlock: "" });
+    expect(out).not.toContain("Relevant past decisions");
+  });
+  test("buildEnginePrompt: passes memoryBlock through", () => {
+    const ctx = { goal: "do x", settings: {} } as unknown as ReturnType<typeof defaultContext>;
+    const out = buildEnginePrompt(
+      "claude",
+      ctx,
+      [{ name: "u1" }],
+      "Relevant past decisions:\n- ADR-001\n",
+    );
+    expect(out).toContain("Relevant past decisions");
+    expect(out).toContain("Constraints:");
+    const memIdx = out.indexOf("Relevant past decisions");
+    const conIdx = out.indexOf("Constraints:");
+    expect(memIdx).toBeLessThan(conIdx);
   });
 });
