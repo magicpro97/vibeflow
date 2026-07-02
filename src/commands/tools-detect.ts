@@ -77,6 +77,8 @@ export interface VerifyReport {
   ok: boolean;
   toolchain: { label: string; pass: boolean }[];
   policy: { passed: string[]; warnings: string[]; failures: string[] };
+  /** ADR-003: behavioral goal-eval result. Only present when goal + goalEvalFn provided AND toolchain passes. */
+  goalEval?: { pass: boolean; uncovered: string[] };
 }
 
 /** Async helper: runs toolchain + policy gates and returns a structured report.
@@ -89,6 +91,8 @@ export async function collectVerifyReportAsync(
   inject: {
     spawner?: (cmd: string, args: string[], opts: object) => Promise<{ status: number | null }>;
     coverage?: boolean;
+    goal?: string; // ADR-003
+    goalEvalFn?: (goal: string) => Promise<{ covered: boolean; uncovered: string[] }>; // ADR-003
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
@@ -130,6 +134,17 @@ export async function collectVerifyReportAsync(
   const policy = policyGates(readState(base));
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
 
+  // ADR-003: behavioral goal-eval gate (stub — wire real LLM via --goal-eval flag in phase 2)
+  if (inject.goal && inject.goalEvalFn && toolchain.every((g) => g.pass)) {
+    const result = await inject.goalEvalFn(inject.goal);
+    const goalEvalOk = result.covered;
+    return {
+      ok: ok && goalEvalOk,
+      toolchain,
+      policy,
+      goalEval: { pass: result.covered, uncovered: result.uncovered },
+    };
+  }
   return { ok, toolchain, policy };
 }
 

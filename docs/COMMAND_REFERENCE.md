@@ -103,6 +103,9 @@ vf orchestrate --yes                   # real dispatch via the engine CLI
                       Writes audit entry to .vibeflow/knowledge/hook-audit.log.
   --yolo              Auto-allow ALL require_approval hooks (blind). Audit logged.
   --allow-all         Alias for --yolo.
+  --goal-eval <goal>  (opt-in, phase 2) Behavioral goal-eval gate: after toolchain
+                      passes, an LLM checks whether <goal> is covered by the changes.
+                      Stub wired in ADR-003; real LLM integration in a future release.
 
 Modes: `--yes` → CLI, else `$VIBEFLOW_AI` → bridge, else dry. Dispatches units in
 parallel, runs an independent reviewer (pass only at confidence `1.0` with evidence),
