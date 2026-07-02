@@ -35,7 +35,7 @@ export function getUnitDiff(cwd: string, scope: string[]): string {
     const args = ["diff", "HEAD~1", "HEAD", "--", ...(scope.length ? scope : ["."])];
     const r = spawnSync("git", args, { encoding: "utf8", cwd });
     return ((r.stdout as string) ?? "").slice(0, 4000);
-  } catch /* coverage-waiver: #475 — spawnSync does not throw on ENOENT in Bun */ {
+  } catch /* coverage-waiver: #477 — spawnSync does not throw on ENOENT in Bun */ {
     return "";
   }
 }

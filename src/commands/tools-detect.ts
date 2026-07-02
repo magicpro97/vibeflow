@@ -33,7 +33,7 @@ export async function defaultGoalEvalFn(
         cwd: process.cwd(),
       });
       return (r.stdout ?? "").slice(0, 3000);
-    } catch /* coverage-waiver: #476 */ {
+    } catch /* coverage-waiver: #478 */ {
       return "";
     }
   })();
@@ -49,7 +49,7 @@ export async function defaultGoalEvalFn(
     const raw = (r.stdout ?? "").trim();
     const covered = /^COVERED/i.test(raw);
     return { covered, uncovered: covered ? [] : [raw.slice(0, 500)] };
-  } catch /* coverage-waiver: #476 */ {
+  } catch /* coverage-waiver: #478 */ {
     return { covered: true, uncovered: [] };
   }
 }
