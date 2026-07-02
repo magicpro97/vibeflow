@@ -16,6 +16,9 @@ function tempProject(scripts: Record<string, string>): string {
   return dir;
 }
 
+// Shared temp dir with package.json (npm toolchain) for goalEval tests.
+const tmp = tempProject({ typecheck: "exit 0", test: "exit 0" });
+
 describe("collectVerifyReportAsync", () => {
   test("runs toolchain gates and returns structured report", async () => {
     const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
@@ -172,5 +175,36 @@ describe("collectVerifyReportAsync", () => {
     expect(called).toHaveLength(1);
     expect(called[0]?.cmd).toBe("flutter");
     expect(called[0]?.args).toEqual(["test"]);
+  });
+
+  test("collectVerifyReportAsync: accepts goalEvalFn inject returning covered", async () => {
+    const spawner = async () => ({ status: 0 });
+    const goalEvalFn = async () => ({ covered: true, uncovered: [] as string[] });
+    const report = await collectVerifyReportAsync(tmp, { spawner, goalEvalFn, goal: "add X" });
+    expect(report.goalEval).toBeDefined();
+    expect(report.goalEval?.pass).toBe(true);
+    expect(report.goalEval?.uncovered).toHaveLength(0);
+  });
+
+  test("collectVerifyReportAsync: goalEvalFn inject returning uncovered items causes goalEval.pass=false", async () => {
+    const spawner = async () => ({ status: 0 });
+    const goalEvalFn = async () => ({ covered: false, uncovered: ["edge case: empty input"] });
+    const report = await collectVerifyReportAsync(tmp, { spawner, goalEvalFn, goal: "add X" });
+    expect(report.goalEval?.pass).toBe(false);
+    expect(report.goalEval?.uncovered).toEqual(["edge case: empty input"]);
+  });
+
+  test("collectVerifyReportAsync: goalEval skipped when no goal provided", async () => {
+    const spawner = async () => ({ status: 0 });
+    const goalEvalFn = async () => ({ covered: false, uncovered: ["should not run"] });
+    const report = await collectVerifyReportAsync(tmp, { spawner, goalEvalFn }); // no goal
+    expect(report.goalEval).toBeUndefined();
+  });
+
+  test("collectVerifyReportAsync: goalEval skipped when toolchain fails", async () => {
+    const spawner = async () => ({ status: 1 }); // toolchain fail
+    const goalEvalFn = async () => ({ covered: false, uncovered: ["should not run"] });
+    const report = await collectVerifyReportAsync(tmp, { spawner, goalEvalFn, goal: "add X" });
+    expect(report.goalEval).toBeUndefined(); // only run when toolchain passes
   });
 });
