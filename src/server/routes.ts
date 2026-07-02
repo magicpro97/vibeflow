@@ -23,6 +23,7 @@ import {
   settingsView,
   syncAttachments,
 } from "./handlers.js";
+import { listPending, resolvePending } from "./pending-hooks.js";
 
 export interface RouteCtx {
   getActiveRepo: () => string;
@@ -277,6 +278,30 @@ export async function handleMutationRoute(
     return Response.json({ ok: report.ok, gates, policy: report.policy });
   }
 
+  // POST /api/hook/approve — user clicked Allow/Block in UI
+  if (path === "/api/hook/approve") {
+    const id = typeof payload.id === "string" ? payload.id : "";
+    const decision = payload.decision === "allow" ? "allow" : "block";
+    if (!id) return Response.json({ error: "id required" }, { status: 400 });
+    const ok = resolvePending(id, decision);
+    if (!ok) return Response.json({ error: "no such pending hook" }, { status: 404 });
+    return Response.json({ ok: true });
+  }
+
+  // POST /api/hook/pending — hook process registers itself for UI approval
+  if (path === "/api/hook/pending") {
+    const id = typeof payload.id === "string" ? payload.id : "";
+    if (!id) return Response.json({ error: "id required" }, { status: 400 });
+    const { registerPending } = await import("./pending-hooks.js");
+    // registerPending returns a Promise — we don't await it here; the long-poll resolves it
+    registerPending(
+      id,
+      payload.input as import("../core/types.js").HookInput,
+      payload.result as import("../core/types.js").HookResult,
+    );
+    return Response.json({ ok: true });
+  }
+
   return null;
 }
 
@@ -284,6 +309,9 @@ export async function handleMutationRoute(
 export function handleProjectsRoute(path: string, url: URL): Response | null {
   if (path === "/api/projects") {
     return Response.json({ projects: readRegistry() });
+  }
+  if (path === "/api/hook/pending") {
+    return Response.json({ pending: listPending() });
   }
   if (path === "/api/projects/state") {
     const repoPath = url.searchParams.get("path") ?? "";

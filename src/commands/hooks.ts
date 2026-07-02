@@ -20,9 +20,12 @@
 // reads back core.hooksPath + live-guardrail probe; `emit` dry-runs by
 // default and only writes engine configs with explicit --yes
 // (hot-reloads the agent, so consent is mandatory).
+//
+// size-waiver: #462 — web UI approval path adds ~60 lines
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CTX_DIR,
@@ -167,6 +170,76 @@ export async function hook(
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
   const { json, exitCode } = presentDecision(result, input);
   out("vf", json);
+
+  // Web UI approval path (issue #462): when require_approval and UI is running
+  if (result.decision === "require_approval") {
+    const base = cwd();
+    const uiPortFile = join(base, CTX_DIR, ".ui-port");
+    if (existsSync(uiPortFile)) {
+      let uiPort: number | null = null;
+      try {
+        const data = JSON.parse(readFileSync(uiPortFile, "utf8")) as { port?: unknown };
+        uiPort = typeof data.port === "number" ? data.port : null;
+      } catch {
+        /* ignore */
+      }
+      if (uiPort) {
+        const hookMode = process.env.VF_HOOK_MODE ?? "default"; // yolo | auto-pilot | default
+        const auditPath = join(base, CTX_DIR, "knowledge", "hook-audit.log");
+        const appendAudit = (entry: object) => {
+          try {
+            appendFileSync(auditPath, `${JSON.stringify(entry)}\n`);
+          } catch {
+            /* best-effort */
+          }
+        };
+        if (hookMode === "yolo" || hookMode === "allow-all") {
+          appendAudit({
+            mode: hookMode,
+            decision: "allow",
+            input,
+            result,
+            at: new Date().toISOString(),
+          });
+          out(
+            "vf",
+            JSON.stringify({
+              decision: "allow",
+              risk: result.risk,
+              reasons: ["auto-allowed: yolo mode"],
+            }),
+          );
+          return 0;
+        }
+        // default: POST pending, long-poll for user click
+        const id = randomUUID();
+        const serverBase = `http://127.0.0.1:${uiPort}`;
+        try {
+          // Register this hook with the server so UI can poll it
+          await fetch(`${serverBase}/api/hook/pending`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id, input, result }),
+          });
+        } catch {
+          /* server may not be up */
+        }
+        // Long-poll — no timeout, waits for user click
+        try {
+          const res = await fetch(`${serverBase}/api/hook/response/${id}`);
+          const { decision: userDecision } = (await res.json()) as { decision: string };
+          out(
+            "vf",
+            JSON.stringify({ decision: userDecision, risk: result.risk, reasons: result.reasons }),
+          );
+          return userDecision === "allow" ? 0 : 2;
+        } catch {
+          /* fall through to original exitCode */
+        }
+      }
+    }
+  }
+
   return exitCode;
 }
 

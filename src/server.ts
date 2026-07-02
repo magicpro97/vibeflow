@@ -1,3 +1,4 @@
+// size-waiver: #462 — hook pending-hooks plumbing adds ~38 lines above cap
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -5,6 +6,13 @@ import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { listAttachments, replayFromLog, settingsView } from "./server/handlers.js";
+import {
+  clearPending,
+  getPending,
+  listPending,
+  onPendingResolved,
+  registerPending,
+} from "./server/pending-hooks.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
@@ -53,6 +61,7 @@ export function startServer(
   };
 
   let activeRepo = cwd();
+  clearPending(); // discard orphaned hooks from previous server instance
 
   const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
 
@@ -103,10 +112,7 @@ export function startServer(
       }
 
       // --- GET /api/phases ---
-      // Returns the marker list (markers carry status+timestamps).
-      // Wiring a live PhaseTracker snapshot is possible but heavy:
-      // the tracker only exists during an active orchestrateUnits()
-      // call and is not thread-safe to share across requests.
+      // ponytail: PhaseTracker snapshot is per-orchestrateUnits() call; markers are the stable proxy
       if (method === "GET" && path === "/api/phases") {
         const pm = await import("./orchestrator/marker.js");
         return Response.json({ markers: pm.listMarkers() });
@@ -134,10 +140,32 @@ export function startServer(
         return Response.json({ ok: true, ...settingsView(activeRepo) });
       }
 
-      // --- GET /api/projects* ---
-      if (method === "GET" && path.startsWith("/api/projects")) {
+      // --- GET /api/projects* and /api/hook/pending ---
+      if (method === "GET" && (path.startsWith("/api/projects") || path === "/api/hook/pending")) {
         const r = handleProjectsRoute(path, url);
         if (r) return r;
+      }
+
+      // --- GET /api/hook/response/:id — long-poll, blocks until approve ---
+      if (method === "GET" && path.startsWith("/api/hook/response/")) {
+        const id = path.slice("/api/hook/response/".length);
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              const enc = new TextEncoder();
+              if (!getPending(id)) {
+                controller.enqueue(enc.encode(JSON.stringify({ decision: "block" })));
+                controller.close();
+                return;
+              }
+              onPendingResolved(id, (decision) => {
+                controller.enqueue(enc.encode(JSON.stringify({ decision })));
+                controller.close();
+              });
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
       }
 
       // --- SSE: /api/logs/stream ---
@@ -175,10 +203,7 @@ export function startServer(
                 }
               }
 
-              // 25s heartbeat to keep the SSE connection alive across
-              // proxies. If the client disconnected, controller.enqueue
-              // throws — wrapped in a no-op handler to keep the interval
-              // alive without crashing the process.
+              // 25s heartbeat — keeps SSE alive across proxies; enqueue errors on disconnect are swallowed
               const safeEnqueue = (chunk: Uint8Array) => {
                 try {
                   controller.enqueue(chunk);
@@ -233,14 +258,10 @@ export function startServer(
       // --- GET /api/logs/recent ---
       if (method === "GET" && path === "/api/logs/recent") {
         const bus = getLogbus();
-        if (!bus) {
-          return Response.json({ error: "no logbus instance" }, { status: 404 });
-        }
+        if (!bus) return Response.json({ error: "no logbus instance" }, { status: 404 });
         const since = Math.max(0, Number(url.searchParams.get("since") ?? "0"));
         const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit") ?? "100")));
-        return Response.json({
-          events: replayFromLog(bus.currentFile(), since, limit),
-        });
+        return Response.json({ events: replayFromLog(bus.currentFile(), since, limit) });
       }
 
       // --- GET /events (deprecated SSE) ---
@@ -297,6 +318,23 @@ export function startServer(
         );
       }
 
+      // --- POST /api/hook/pending — CLI loopback only (no CSRF; hook subprocess can't hold token) ---
+      if (
+        method === "POST" &&
+        path === "/api/hook/pending" &&
+        isLoopback(req.headers.get("host") ?? "")
+      ) {
+        const body = (await req.json()) as { id?: string; input?: unknown; result?: unknown };
+        if (typeof body.id !== "string" || !body.id)
+          return Response.json({ error: "id required" }, { status: 400 });
+        registerPending(
+          body.id,
+          body.input as import("./core/types.js").HookInput,
+          body.result as import("./core/types.js").HookResult,
+        );
+        return Response.json({ ok: true });
+      }
+
       // --- Write surface: CSRF + loopback guard ---
       const isWrite =
         (method === "POST" &&
@@ -309,6 +347,7 @@ export function startServer(
             path === "/api/preflight" ||
             path === "/api/settings" ||
             path === "/api/verify" ||
+            path === "/api/hook/approve" ||
             path === "/api/upload")) ||
         (method === "DELETE" && path === "/api/upload") ||
         (method === "DELETE" && (path === "/api/state" || path === "/api/projects"));

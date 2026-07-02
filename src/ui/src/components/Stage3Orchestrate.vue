@@ -60,6 +60,9 @@
       <span class="text-[11px] font-mono text-neutral-400">{{ engine }}</span>
     </div>
 
+    <!-- Hook approval modal: surfaces require_approval hooks during dispatch -->
+    <HookApprovalModal />
+
     <!-- Work unit table -->
     <WorkUnitTable :units="units" empty-text="No tasks yet — click Run agents to start." />
 
@@ -133,6 +136,7 @@ import { api } from "../api.js";
 import { usePoller } from "../composables/usePoller.js";
 import { useVfStore } from "../store.js";
 import type { Engine } from "../types.js";
+import HookApprovalModal from "./HookApprovalModal.vue";
 import InfoTip from "./InfoTip.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
 

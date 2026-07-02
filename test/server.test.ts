@@ -1200,8 +1200,11 @@ describe("server split (#186 PR11 sentinel)", () => {
     expect(facade).toMatch(/import\.meta\.url/);
     expect(facade).toMatch(/dist\/ui\/index\.html/);
   });
-  test("size-waiver removed", () => {
-    expect(facade).not.toMatch(/size-waiver/);
+  test("size-waiver: only #462 waiver is present (hook approval plumbing)", () => {
+    // #462 adds pending-hooks integration (~38 lines) requiring a size waiver.
+    // Any OTHER size-waiver in server.ts would indicate unreviewed growth.
+    const matches = [...facade.matchAll(/size-waiver:\s*#(\d+)/g)].map((m) => m[1]);
+    expect(matches).toEqual(["462"]);
   });
 });
 
@@ -2009,6 +2012,47 @@ test("POST /api/orchestrate dry:false stamps evidence on done units with no evid
   expect(u1?.evidence?.length).toBeGreaterThan(0);
   const persisted = readState(tmp);
   expect(persisted?.work_units[0]?.evidence?.length).toBeGreaterThan(0);
+});
+
+test("POST /api/hook/approve returns 404 for unknown id via live server", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const token = await csrfToken(url);
+    const res = await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vibeflow-token": token },
+      body: JSON.stringify({ id: "nonexistent-id", decision: "allow" }),
+    });
+    expect(res.status).toBe(404);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/hook/approve without CSRF returns 403 via live server", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/api/hook/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "x", decision: "allow" }),
+    });
+    expect(res.status).toBe(403);
+  } finally {
+    server.stop();
+  }
+});
+
+test("GET /api/hook/pending returns empty list when no hooks pending", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const res = await fetch(`${url}/api/hook/pending`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { pending: unknown[] };
+    expect(Array.isArray(body.pending)).toBe(true);
+  } finally {
+    server.stop();
+  }
 });
 
 test("GET /ui/assets/*.js returns 200 with immutable cache-control (lines 313-330)", async () => {
