@@ -29,7 +29,7 @@ export function printHelp(): number {
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
-    ${c.cyan("config [sub]")}      memory <on|off|status> — read/toggle per-repo settings
+    ${c.cyan("config [sub]")}      memory <builtin|claude-mem|off|status> — read/toggle per-repo settings
     ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | import
     ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
@@ -170,19 +170,21 @@ ${c.bold("Examples:")}
   vf units status
   vf units update auth --status done --confidence 1`,
 
-  config: () => `${c.bold("vf config")} ${c.dim("memory <on|off|status>")}
+  config: () => `${c.bold("vf config")} ${c.dim("memory <builtin|claude-mem|off|status>")}
 Read or toggle per-repo settings in .vibeflow/SETTINGS.json.
 
 ${c.bold("Subcommands:")}
-  memory status        print the current memory setting (default)
-  memory on            enable the claude-mem memory feature
-  memory off           disable the claude-mem memory feature
+  memory status        print the current memory mode (default)
+  memory builtin       enable built-in memory (vibeflow native)
+  memory claude-mem    enable claude-mem integration
+  memory on            alias for builtin (backward compat)
+  memory off           disable memory
 
-${c.dim("The memory setting records your claude-mem opt-in; it does not gate the `vf init` prompt.")}
+${c.dim("The memory setting controls which memory backend is active.")}
 
 ${c.bold("Examples:")}
   vf config memory status
-  vf config memory on`,
+  vf config memory builtin`,
 
   skills: () =>
     `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import | init <name> | draft <name> | crystallize <run-id>]")}
