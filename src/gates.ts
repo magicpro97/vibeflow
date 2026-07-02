@@ -48,7 +48,33 @@ export function findScopeConflicts(
 
 /**
  * The three policy gates that compose with build/lint/test (WORK_UNIT_ORCHESTRATION.md):
- *  - confidence: no work unit may sit below 1.0 (orchestrator is still guessing).
+// ─── ADR-004: Machine-verifiable evidence standard ────────────────────────
+
+/** Accepted evidence format patterns — at least one must match for evidence to be verifiable. */
+const VERIFIABLE_EVIDENCE_PATTERNS = [
+  /→\s*".{2,}"$/, // cmd → "output"
+  /[a-zA-Z0-9/_.-]+\.(ts|js|py|go|rs|vue|md):\d+/, // file:line reference
+  /^commit [0-9a-f]{6,}/, // commit SHA
+  /\s*>\s+\S.+\[[\d.]+ms\]/, // test name > result [ms]
+  /^https?:\/\/\S+\/actions\/runs\/\d+/, // CI run URL
+  /git\s+\S+.*→/, // git command output
+];
+
+/**
+ * Returns true when an evidence string matches at least one machine-verifiable format.
+ * Free-text assertions ("done", "tests pass") return false.
+ * ADR-004 phase 1: used for warnings only; promoted to failures in phase 2.
+ */
+export function isVerifiableEvidence(s: string): boolean {
+  const t = s.trim();
+  if (t.length < 10) return false;
+  return VERIFIABLE_EVIDENCE_PATTERNS.some((re) => re.test(t));
+}
+
+// ─── End ADR-004 ──────────────────────────────────────────────────────────
+
+/**
+ * The three policy gates that compose with build/lint/test (WORK_UNIT_ORCHESTRATION.md):
  *  - evidence:   a unit marked `done` must carry recorded evidence.
  *  - scope:      no two units may declare overlapping file scopes (parallel safety).
  * Pure over a WorkflowState so it is unit-testable and reusable by hooks + `vf verify`.
@@ -101,6 +127,17 @@ export function policyGates(state: WorkflowState | null): GateReport {
     }
   } else {
     passed.push("evidence: every done unit has recorded evidence");
+  }
+
+  // ADR-004 phase 1: warn (not fail) on unverifiable evidence strings.
+  for (const u of units.filter((u) => u.status === "done" && u.evidence?.length)) {
+    const bad = (u.evidence ?? []).filter((e) => !isVerifiableEvidence(e));
+    if (bad.length) {
+      warnings.push(
+        `unverifiable-evidence: "${u.name}" has ${bad.length} free-text string(s) ` +
+          `→ Fix: vf units evidence ${u.name} --add 'bun test 2>&1 | tail -3 → "<output>"'`,
+      );
+    }
   }
 
   // Scope-overlap gate.

@@ -6,6 +6,7 @@ import {
   e2eEvaluateDynamicImportWarning,
   e2eUnicodeSelectorWarning,
   findScopeConflicts,
+  isVerifiableEvidence,
   policyGates,
 } from "../src/gates.js";
 
@@ -464,5 +465,94 @@ describe("e2eEvaluateDynamicImportWarning: multi-line (line 221-235)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("isVerifiableEvidence", () => {
+  test("rejects bare 'done'", () => {
+    expect(isVerifiableEvidence("done")).toBe(false);
+  });
+  test("rejects 'tests pass'", () => {
+    expect(isVerifiableEvidence("tests pass")).toBe(false);
+  });
+  test("rejects 'implementation complete'", () => {
+    expect(isVerifiableEvidence("implementation complete")).toBe(false);
+  });
+  test("rejects too-short string", () => {
+    expect(isVerifiableEvidence("ok")).toBe(false);
+  });
+  test("accepts command output capture", () => {
+    expect(isVerifiableEvidence('bun test 2>&1 | tail -3 → "12 pass, 0 fail"')).toBe(true);
+  });
+  test("accepts git diff stat", () => {
+    expect(isVerifiableEvidence("git diff --stat origin/main HEAD → 3 files changed")).toBe(true);
+  });
+  test("accepts file:line reference", () => {
+    expect(isVerifiableEvidence("src/gates.ts:47 — added Fix command")).toBe(true);
+  });
+  test("accepts commit SHA prefix", () => {
+    expect(isVerifiableEvidence("commit abc1234 — feat: add goalEval gate")).toBe(true);
+  });
+  test("accepts test name:result format", () => {
+    expect(isVerifiableEvidence("pending-hooks > clearPending: removes all entries [0.04ms]")).toBe(
+      true,
+    );
+  });
+  test("accepts CI run URL", () => {
+    expect(isVerifiableEvidence("https://github.com/magicpro97/vibeflow/actions/runs/123")).toBe(
+      true,
+    );
+  });
+});
+
+describe("policyGates: unverifiable-evidence gate (ADR-004 phase1: warn)", () => {
+  const doneUnit = {
+    name: "u1",
+    status: "done" as const,
+    confidence: 1,
+    gates: {
+      build: "pass" as const,
+      lint: "pass" as const,
+      test: "pass" as const,
+      review: "pass" as const,
+    },
+    resources: { agents: 1, tokens: 10, cost_usd: 0, wall_seconds: 1 },
+  };
+  test("emits warning for free-text evidence, not failure", () => {
+    const state = {
+      task_id: "t1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [{ ...doneUnit, evidence: ["tests pass"] }],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.warnings.some((w) => w.includes("unverifiable-evidence"))).toBe(true);
+    expect(r.failures.filter((f) => f.includes("unverifiable-evidence"))).toHaveLength(0);
+    expect(r.warnings[0]).toContain("→ Fix:");
+  });
+  test("no warning for verifiable evidence", () => {
+    const state = {
+      task_id: "t1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [{ ...doneUnit, evidence: ['bun test 2>&1 | tail -3 → "12 pass, 0 fail"'] }],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    expect(
+      policyGates(state).warnings.filter((w) => w.includes("unverifiable-evidence")),
+    ).toHaveLength(0);
+  });
+  test("warns only on unverifiable strings, not verifiable ones in same array", () => {
+    const state = {
+      task_id: "t1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [{ ...doneUnit, evidence: ['bun test 2>&1 → "ok"', "all done"] }],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    expect(
+      policyGates(state).warnings.filter((w) => w.includes("unverifiable-evidence")),
+    ).toHaveLength(1);
   });
 });

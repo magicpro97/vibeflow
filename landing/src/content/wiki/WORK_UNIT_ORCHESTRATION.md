@@ -144,6 +144,26 @@ stores output under `evidence/`.
 - A DONE handoff with no evidence ledger is treated as AMBIGUOUS and requires triage.
 ```
 
+### Verifiable evidence format (ADR-004)
+
+`vf verify` warns when evidence strings are free-text claims rather than machine-verifiable
+artifacts. Accepted formats:
+
+| Format | Example |
+|--------|---------|
+| Command output capture | `bun test 2>&1 \| tail -3 → "12 pass, 0 fail"` |
+| File:line reference | `src/gates.ts:47 — added isVerifiableEvidence()` |
+| Commit SHA | `commit abc1234 — feat: add goalEval gate` |
+| Test name:result | `pending-hooks > clearPending: removes all entries [0.04ms]` |
+| CI run URL | `https://github.com/magicpro97/vibeflow/actions/runs/123` |
+| Git command output | `git diff --stat origin/main HEAD → 3 files changed` |
+
+Rejected: `"done"`, `"tests pass"`, `"implementation complete"`, any string under 10 chars.
+
+Use `vf units evidence <name> --add 'bun test 2>&1 | tail -3 → "<output>"'` to record.
+Phase 1 (current): warnings only. Phase 2: promoted to gate failures.
+```
+
 This is the file-backed enforcement of the policy rule "no verification, no completion"
 (`MASTER_SPEC.md`) and ties directly to the hook `final-verify` and `skill-compliance`
 events in `HOOKS_AND_GUARDRAILS.md`.

@@ -63,3 +63,13 @@ Fields: mode, decision, input {tool,command,files}, result {risk,reasons}, aiDec
 - Automated/unattended run, trusted repo → --auto-pilot
 - Throwaway branch, low-risk experiments → --yolo
 - NEVER use --yolo in production or on repos with sensitive data
+
+## Verifiable evidence format (ADR-004)
+
+When recording evidence with `vf units evidence <name> --add`, use machine-verifiable format:
+- `bun test 2>&1 | tail -3 → "12 pass, 0 fail"` ✓
+- `src/gates.ts:47 — added isVerifiableEvidence()` ✓
+- `commit abc1234 — feat: add gate` ✓
+- `"tests pass"` ✗ — free text, triggers unverifiable-evidence warning
+
+`vf verify` warns on free-text evidence (phase 1). Will fail in phase 2.
