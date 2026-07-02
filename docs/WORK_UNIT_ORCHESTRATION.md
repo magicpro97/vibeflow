@@ -320,3 +320,18 @@ WORKFLOW.md                    → end-to-end run that drives these units
 
 **Related:** [Agent Orchestration Policy](./AGENT_ORCHESTRATION_POLICY.md) · [Skill Discovery and Evolution](./SKILL_DISCOVERY_AND_EVOLUTION.md)
 [Edit this page on GitHub](https://github.com/magicpro97/vibeflow/edit/main/docs/WORK_UNIT_ORCHESTRATION.md)
+
+### Spec-first test generation (ADR-002)
+
+When `work_unit.spec` is non-empty, vf can generate test stubs from the spec BEFORE
+dispatching the implementer. The LLM sees ONLY the spec — no source code, no implementation.
+
+```text
+Phase 1 (current): generateSpecFirstTests() is injectable — opt-in via --spec-first flag (phase 2).
+Phase 2: vf orchestrate --spec-first generates *.spec-first.test.ts before dispatch.
+```
+
+Protection rule: pre-write hook blocks any write to `*.spec-first.*` files during dispatch.
+These files are oracle tests — the implementer must pass them, not change them.
+
+Use `generateSpecFirstTests({ unitName, spec, llmFn })` to generate stubs programmatically.

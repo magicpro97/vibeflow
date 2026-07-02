@@ -5759,8 +5759,10 @@ describe("orchestrate split (#186 PR7 sentinel)", () => {
   test("orchestrate() stays in the facade", () => {
     expect(facade).toMatch(/^export async function\s+orchestrate/m);
   });
-  test("size-waiver removed", () => {
-    expect(facade).not.toMatch(/size-waiver/);
+  test("size-waiver: only #472 waiver present (ADR-001+ADR-002 growth)", () => {
+    // ADR-001 (buildReviewerPrompt re-export) + ADR-002 (generateSpecFirstTests) added ~29 lines
+    const matches = [...facade.matchAll(/size-waiver:\s*#(\d+)/g)].map((m) => m[1]);
+    expect(matches).toEqual(["472"]);
   });
 });
 

@@ -94,6 +94,8 @@ vf orchestrate                         # plan + dispatch work units (dry: prompt
 vf orchestrate --engine codex          # choose the engine
 vf orchestrate --concurrency 4         # bound the parallel pool (default 3)
 vf orchestrate --review-engine codex  # optional: use different engine for reviewer (ADR-001)
+vf orchestrate --spec-first           # phase 2: generate spec-first tests before dispatch (ADR-002)
+                                       # current: flag accepted but no-op until phase 2 wiring
                                        # default: same engine, fresh session, isolated context
 vf orchestrate --yes                   # real dispatch via the engine CLI
 ```
