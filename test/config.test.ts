@@ -36,14 +36,14 @@ async function capture(fn: () => number | Promise<number>): Promise<{ code: numb
 }
 
 describe("config memory on|off", () => {
-  test('`config memory on` persists memory:"builtin" and prints memory: on', async () => {
+  test('`config memory on` persists memory:"builtin" (backward compat)', async () => {
     const dir = tmpRepo();
     try {
       // Seed the opposite so the toggle is observable.
       writeSettings(dir, { memory: false });
       const { code, out } = await capture(() => config("memory", ["on"], dir));
       expect(code).toBe(0);
-      expect(out).toContain("memory: on");
+      expect(out).toContain("builtin");
       expect(readSettings(dir).memory).toBe("builtin");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -61,10 +61,36 @@ describe("config memory on|off", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("`config memory builtin` writes builtin mode", async () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { memory: false });
+      const { code, out } = await capture(() => config("memory", ["builtin"], dir));
+      expect(code).toBe(0);
+      expect(out).toContain("builtin");
+      expect(readSettings(dir).memory).toBe("builtin");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("`config memory claude-mem` writes claude-mem mode", async () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { memory: false });
+      const { code, out } = await capture(() => config("memory", ["claude-mem"], dir));
+      expect(code).toBe(0);
+      expect(out).toContain("claude-mem");
+      expect(readSettings(dir).memory).toBe("claude-mem");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("config memory status", () => {
-  test("`config memory status` prints current state without mutating", async () => {
+  test("`config memory status` prints current mode without mutating", async () => {
     const dir = tmpRepo();
     try {
       writeSettings(dir, { memory: false });
@@ -73,6 +99,18 @@ describe("config memory status", () => {
       expect(out).toContain("memory: off");
       // unchanged
       expect(readSettings(dir).memory).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("`config memory status` prints builtin when enabled", async () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { memory: "builtin" });
+      const { code, out } = await capture(() => config("memory", ["status"], dir));
+      expect(code).toBe(0);
+      expect(out).toContain("builtin");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

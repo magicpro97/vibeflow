@@ -12,13 +12,17 @@ import { type VibeSettings, readSettings, writeSettings } from "../settings.js";
 import { c, cwd, out } from "./_shared.js";
 
 function printMemory(base: string): void {
-  const on = readSettings(base).memory;
-  out("vf", `memory: ${on ? c.green("on") : c.yellow("off")}`);
+  const mode = readSettings(base).memory;
+  const label = mode === false ? c.yellow("off") : c.green(String(mode));
+  out("vf", `memory: ${label}`);
 }
+
+const VALID_MODES = ["on", "off", "builtin", "claude-mem"] as const;
+type MemoryArg = (typeof VALID_MODES)[number];
 
 export function config(key: string | undefined, rest: string[], base: string = cwd()): number {
   if (key !== "memory") {
-    out("vf", c.red("Usage: vf config memory <on|off|status>"), { level: "error" });
+    out("vf", c.red("Usage: vf config memory <builtin|claude-mem|off|status>"), { level: "error" });
     return 2;
   }
   const value = rest[0];
@@ -26,15 +30,23 @@ export function config(key: string | undefined, rest: string[], base: string = c
     printMemory(base);
     return 0;
   }
-  if (value !== "on" && value !== "off") {
-    out("vf", c.red(`Unknown value "${value}". Usage: vf config memory <on|off|status>`), {
-      level: "error",
-    });
+  if (!(VALID_MODES as readonly string[]).includes(value)) {
+    out(
+      "vf",
+      c.red(`Unknown value "${value}". Usage: vf config memory <builtin|claude-mem|off|status>`),
+      { level: "error" },
+    );
     return 2;
   }
-  const next: Partial<VibeSettings> = value === "on" ? { memory: "builtin" } : { memory: false };
-  writeSettings(base, next);
-  out("vf", value === "on" ? c.green("✓ memory: on") : c.yellow("○ memory: off"));
+  const arg = value as MemoryArg;
+  if (arg === "off") {
+    writeSettings(base, { memory: false });
+    out("vf", c.yellow("○ memory: off"));
+  } else {
+    const mode = arg === "on" ? "builtin" : arg;
+    writeSettings(base, { memory: mode as VibeSettings["memory"] });
+    out("vf", c.green(`✓ memory: ${mode}`));
+  }
   return 0;
 }
 
