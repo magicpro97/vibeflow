@@ -146,8 +146,9 @@ import { api } from "../api.js";
 import { usePoller } from "../composables/usePoller.js";
 import { useVfStore } from "../store.js";
 import type { Engine } from "../types.js";
-/** All engine tools — for the "install a 2nd engine" hint (names the others dynamically). */
-const ALL_ENGINES: Engine[] = ["claude", "codex", "copilot"];
+/** All engine tools in canonical priority order — mirrors ENGINES in
+ *  src/core/types.ts (kept in sync; the UI bundle can't import backend types). */
+const ALL_ENGINES: Engine[] = ["claude", "copilot", "codex"];
 import HookApprovalModal from "./HookApprovalModal.vue";
 import InfoTip from "./InfoTip.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";

@@ -408,7 +408,7 @@ export function makeReviewer(
     // ADR-001 phase 2: LLM review after local gate passes.
     if (inject?.goal && llmReviewFn) {
       const llmDiff = getUnitDiff(cwd, unit.scope ?? []);
-      return await runLLMReview({
+      const llmResult = await runLLMReview({
         goal: inject.goal,
         spec: unit.spec,
         diff: llmDiff,
@@ -419,6 +419,10 @@ export function makeReviewer(
           ? { implementer: inject.implementer, available: [...ENGINES] }
           : {}),
       });
+      // Surface the same-tool warning to the audit trail — the Reviewer boundary
+      // only carries { pass, reason }, so emit it here or it's silently dropped.
+      if (llmResult.warning) out("vf", llmResult.warning, { level: "warn" });
+      return { pass: llmResult.pass, reason: llmResult.reason };
     }
     return localResult;
   };

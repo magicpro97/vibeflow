@@ -3658,6 +3658,36 @@ describe("makeReviewer diff injection", () => {
     expect(v.pass).toBe(true);
   });
 
+  // ADR-001: same-tool reviewer warning path must not throw + returns {pass,reason}.
+  // Surfacing to the audit trail happens via `out()`; here we assert the boundary
+  // stays intact (the warning is emitted as a side-effect, never swallowed silently).
+  test("same-tool reviewer warning path returns clean {pass,reason}", async () => {
+    const saved = process.env.VF_LLM_REVIEW;
+    process.env.VF_LLM_REVIEW = "1";
+    try {
+      const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+        " M src/x.ts";
+      const r = makeReviewer("cli", 0.85, {
+        diffReader,
+        goal: "do x",
+        implementer: "claude",
+        llmReviewFn: async () => "COVERED",
+      });
+      const unit = { scope: ["src/x.ts"] } as WorkUnit;
+      const outcome = {
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+        confidence: 0.95,
+        evidence: ["checked"],
+        status: "done" as const,
+      };
+      const v = await r(unit, outcome);
+      expect(typeof v.pass).toBe("boolean");
+      expect(typeof v.reason).toBe("string");
+    } finally {
+      process.env.VF_LLM_REVIEW = saved;
+    }
+  });
+
   test("bypasses diff check in dry mode", async () => {
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
       "diff --git a/src/other.ts b/src/other.ts\n+evil";

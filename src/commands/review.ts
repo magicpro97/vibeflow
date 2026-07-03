@@ -19,6 +19,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ENGINES } from "../core/types.js";
 import { pickReviewerEngine } from "../review-engine.js";
 import { c, cwd, out } from "./_shared.js";
 
@@ -47,8 +48,8 @@ export interface ReviewResult {
   engine: string;
 }
 
-/** Default review engine. */
-export const DEFAULT_REVIEW_ENGINE = "claude";
+/** Default review engine = top canonical priority (single source: ENGINES). */
+export const DEFAULT_REVIEW_ENGINE = ENGINES[0] ?? "claude";
 
 /** Parse a fenced JSON block from the reviewer's response.
  *  Returns null if the block is missing or unparseable. */
