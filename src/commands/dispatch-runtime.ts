@@ -7,6 +7,7 @@
 
 import { join } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
+import { ENGINES } from "../core/types.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
@@ -363,6 +364,8 @@ export function makeReviewer(
     cwd?: string;
     goal?: string;
     llmReviewFn?: (prompt: string) => Promise<string>;
+    /** Implementer engine — so the reviewer auto-routes to a DIFFERENT tool (ADR-001). */
+    implementer?: Engine;
   },
 ): Reviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
@@ -410,6 +413,11 @@ export function makeReviewer(
         spec: unit.spec,
         diff: llmDiff,
         llmFn: llmReviewFn,
+        // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
+        // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
+        ...(inject?.implementer
+          ? { implementer: inject.implementer, available: [...ENGINES] }
+          : {}),
       });
     }
     return localResult;

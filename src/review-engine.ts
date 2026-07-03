@@ -5,7 +5,11 @@
 // vs codex vs copilot) = different ecosystem, system prompt, and harness — enough
 // divergence to reduce correlated approval bias without a 2nd API key.
 
-import { DEFAULT_REVIEW_ENGINE } from "./commands/review.js";
+import { ENGINES, type Engine } from "./core/types.js";
+
+/** Default reviewer engine = the top canonical priority. Sourced from the leaf
+ *  types module (NOT commands/review.js) to avoid an import cycle. */
+const DEFAULT_REVIEW_ENGINE: Engine = ENGINES[0] ?? "claude";
 
 export interface PickOpts {
   /** Explicit --engine flag (highest priority). */
@@ -19,10 +23,13 @@ export interface PickOpts {
 }
 
 /** Resolve the reviewer engine. Priority: flag > env > different-from-implementer
- *  auto-pick > implementer (same-family fallback) > DEFAULT_REVIEW_ENGINE. */
+ *  auto-pick > implementer (same-family fallback) > DEFAULT_REVIEW_ENGINE.
+ *  Flag/env are trimmed on both the guard AND the returned value (no whitespace leak). */
 export function pickReviewerEngine(opts: PickOpts): string {
-  if (opts.flag?.trim()) return opts.flag;
-  if (opts.env?.trim()) return opts.env;
+  const flag = opts.flag?.trim();
+  if (flag) return flag;
+  const env = opts.env?.trim();
+  if (env) return env;
   const available = opts.available ?? [];
   const different = available.find((e) => e !== opts.implementer);
   if (different) return different;
@@ -38,15 +45,21 @@ export interface ResolvedReviewer {
   warning?: string;
 }
 
+/** The engines OTHER than the given one — for a "install a 2nd engine" hint that
+ *  names the right alternatives (never suggests the engine you already run). */
+function otherEngines(engine: string): string {
+  return ENGINES.filter((e) => e !== engine).join("/");
+}
+
 /** Resolve the reviewer engine AND flag the same-family case. When the pick lands
  *  on the implementer's own engine (only one tool available, or explicitly forced),
- *  emit a warning: cross-tool review needs a 2nd engine (codex/copilot) installed. */
+ *  emit a warning naming the OTHER engines to install for cross-tool review. */
 export function resolveReviewerEngine(opts: PickOpts): ResolvedReviewer {
   const engine = pickReviewerEngine(opts);
   if (opts.implementer && engine === opts.implementer) {
     return {
       engine,
-      warning: `review(warn): reviewer engine "${engine}" == implementer — same-tool review has correlated blind spots; install a 2nd engine (codex/copilot) for cross-tool review`,
+      warning: `review(warn): reviewer engine "${engine}" == implementer — same-tool review has correlated blind spots; install a 2nd engine (${otherEngines(engine)}) for cross-tool review`,
     };
   }
   return { engine };

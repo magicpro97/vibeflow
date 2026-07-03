@@ -146,6 +146,8 @@ import { api } from "../api.js";
 import { usePoller } from "../composables/usePoller.js";
 import { useVfStore } from "../store.js";
 import type { Engine } from "../types.js";
+/** All engine tools — for the "install a 2nd engine" hint (names the others dynamically). */
+const ALL_ENGINES: Engine[] = ["claude", "codex", "copilot"];
 import HookApprovalModal from "./HookApprovalModal.vue";
 import InfoTip from "./InfoTip.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
@@ -196,11 +198,11 @@ const reviewerEngine = computed<string>(() => {
   const ready = preflightResult.value?.readiness.filter((r) => r.level === "ready") ?? [];
   return ready.map((r) => r.engine).find((e) => e !== impl) ?? impl;
 });
-const reviewerWarning = computed<string | null>(() =>
-  reviewerEngine.value === engine.value
-    ? `Reviewer engine "${engine.value}" is the same tool as the implementer — same-tool review has correlated blind spots. Install a 2nd engine (codex/copilot) for cross-tool review.`
-    : null,
-);
+const reviewerWarning = computed<string | null>(() => {
+  if (reviewerEngine.value !== engine.value) return null;
+  const others = ALL_ENGINES.filter((e) => e !== engine.value).join("/");
+  return `Reviewer engine "${engine.value}" is the same tool as the implementer — same-tool review has correlated blind spots. Install a 2nd engine (${others}) for cross-tool review.`;
+});
 
 async function runPreflight() {
   preflightLoading.value = true;
