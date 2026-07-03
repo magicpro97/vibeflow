@@ -55,3 +55,19 @@ test("recall: readDecisions throws → [] (catch branch)", () => {
   });
   expect(p.recall("anything")).toEqual([]);
 });
+test("spec: returns decisions.md content (spec oracle seam, Task 4b)", () => {
+  const p = new BuiltinMemoryProvider("/fake", {
+    readDecisions: () => SAMPLE,
+    mtime: () => 1,
+    dbPath: ":memory:",
+  });
+  expect(p.spec()).toContain("ADR-001");
+});
+test("spec: missing decisions → null", () => {
+  const p = new BuiltinMemoryProvider("/fake", {
+    readDecisions: () => null,
+    mtime: () => null,
+    dbPath: ":memory:",
+  });
+  expect(p.spec()).toBeNull();
+});

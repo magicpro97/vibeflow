@@ -796,4 +796,39 @@ describe("policyGates: canary gate (ADR-005)", () => {
     const r = policyGates(state);
     expect(r.failures.some((f) => f.includes("canary-required"))).toBe(false);
   });
+
+  // Task 8: Type B impl-drift gate — injected drift seam. Covered change → WARN,
+  // uncovered change → FAIL, no drift → silent.
+  test("impl-drift gate: uncovered scoped edit → FAILURE", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, impl_fingerprint: { "src/x.ts": "old" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      implDrift: () => ({ drifted: ["src/x.ts"], uncovered: ["src/x.ts"] }),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.failures.some((f) => f.includes("impl-drift"))).toBe(true);
+  });
+  test("impl-drift gate: covered scoped edit → WARN (not fail)", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, impl_fingerprint: { "src/x.ts": "old" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      implDrift: () => ({ drifted: ["src/x.ts"], uncovered: [] }),
+    });
+    expect(r.failures.some((f) => f.includes("impl-drift"))).toBe(false);
+    expect(r.warnings.some((w) => w.includes("impl-drift(warn)"))).toBe(true);
+  });
+  test("impl-drift gate: no fingerprint → not checked", () => {
+    const state = { ...base, work_units: [{ ...khUnit, canary: undefined }] };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      implDrift: () => ({ drifted: ["should-not-run"], uncovered: ["x"] }),
+    });
+    expect(r.failures.some((f) => f.includes("impl-drift"))).toBe(false);
+  });
 });

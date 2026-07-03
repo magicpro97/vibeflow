@@ -47,15 +47,27 @@ function disabledResult(): HookResult {
  * An optional resolved `policy` gates which guardrail clusters run and adds custom
  * rules. Omitting it scores with the all-on default — every existing caller keeps its
  * exact behavior; only the live `vf hook` gate loads the repo's stored policy.
+ *
+ * `specStale` is an ADVISORY seam (Task 4): it returns spec-drift reasons for the
+ * event. Advisory means warn-not-block — a stale signal never blocks and never
+ * raises an existing block/approval to a weaker state; it only surfaces a `warn`
+ * when the base decision was `allow`. Defaults to a no-op so every existing caller
+ * is byte-for-byte unchanged; only the live gate wires the real freshness check.
  */
 export function evaluateHook(
   input: HookInput,
   getEnv: EnvGetter = () => process.env,
   policy?: ResolvedHookPolicy,
+  specStale: (input: HookInput) => string[] = () => [],
 ): HookResult {
   if (hooksDisabled(getEnv())) return disabledResult();
   const { risk, reasons } = policy ? scoreRisk(input, policy) : scoreRisk(input);
-  return { decision: decisionFor(risk), risk, reasons };
+  const decision = decisionFor(risk);
+  const stale = specStale(input);
+  if (stale.length === 0) return { decision, risk, reasons };
+  // Advisory: only escalate a benign `allow` to `warn`; never weaken a stronger decision.
+  const advised = decision === "allow" ? "warn" : decision;
+  return { decision: advised, risk, reasons: [...reasons, ...stale] };
 }
 
 const HOOK_EVENTS = [

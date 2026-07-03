@@ -3,6 +3,8 @@
 // config, no tool installs. All imports through `./_shared.js`.
 
 import { spawnSync as _spawnSync } from "node:child_process";
+import { writeState } from "../core.js";
+import { snapshotImpl } from "../spec-freshness.js";
 import {
   appendJournal,
   autoCrystallizeRun,
@@ -21,6 +23,13 @@ import {
   spawnSync,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
+
+/** The current git HEAD sha for `base`, or "HEAD" when git is unavailable.
+ *  Used as the diff base for Type-B drift detection at the next verify. */
+function readVerifiedSha(base: string): string {
+  const r = _spawnSync("git", ["rev-parse", "HEAD"], { cwd: base, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : "HEAD";
+}
 
 /** ADR-003 phase 2: real LLM eval via VIBEFLOW_AI bridge. Fail-open when bridge not set. */
 export async function defaultGoalEvalFn(
@@ -168,8 +177,29 @@ export async function collectVerifyReportAsync(
 
   const rawState = readState(base);
   if (inject.allowUnverifiedEvidence && rawState) rawState._allowUnverifiedEvidence = true;
-  const policy = policyGates(rawState);
+  const policy = policyGates(rawState, { base });
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
+
+  // Type B drift PRODUCER: when the toolchain gates are all green, fingerprint
+  // each done unit's scoped files + record the verified git SHA, so a LATER
+  // verify can detect an out-of-pipeline edit (impl drift). Without this write
+  // the Type B gate stays silent (impl_fingerprint never set). Best-effort:
+  // a snapshot/persist failure must never fail an otherwise-passing verify.
+  if (ok && rawState?.work_units?.length) {
+    try {
+      const sha = readVerifiedSha(base);
+      let changed = false;
+      for (const u of rawState.work_units) {
+        if (u.status !== "done" || !u.scope?.length) continue;
+        u.impl_fingerprint = snapshotImpl(base, u.scope);
+        u.verified_sha = sha;
+        changed = true;
+      }
+      if (changed) writeState(base, rawState);
+    } catch {
+      // never block a green verify on the drift-snapshot bookkeeping.
+    }
+  }
 
   // ADR-003: behavioral goal-eval gate (stub — wire real LLM via --goal-eval flag in phase 2)
   if (inject.goal && inject.goalEvalFn && toolchain.every((g) => g.pass)) {

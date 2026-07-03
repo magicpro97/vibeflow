@@ -21,6 +21,8 @@
 // so existing callers (`import { applyDispatch } from
 // "../commands.js"`) keep working.
 
+import { resolveMemoryProvider } from "../memory/provider.js";
+import { loadAuthoritativeSpec, writeSpecSnapshot } from "../spec-freshness.js";
 import type { Engine, ProjectContext, WorkUnit, WorkflowState } from "./_shared.js";
 import {
   CTX_DIR,
@@ -29,6 +31,7 @@ import {
   defaultContext,
   dispatchPrompt,
   join,
+  readSettings,
   readState,
   recomputeTotals,
   writeFileSafe,
@@ -73,6 +76,12 @@ export function applyDispatch(
   const prompt = dispatchPrompt(engine, ctx, units);
   const rel = `${CTX_DIR}/dispatch/${engine}.md`;
   writeFileSafe(join(base, rel), prompt);
+  // Task 4: snapshot the authoritative spec the engine is briefed on, so the
+  // hook can later flag spec-drift (advisory) against this baseline. Task 4b
+  // reads it through the MemoryProvider spec() oracle (builtin = decisions.md,
+  // the same file as before; off = null provider → local file).
+  const provider = resolveMemoryProvider(readSettings(base).memory, join(base, CTX_DIR));
+  writeSpecSnapshot(base, state.task_id, loadAuthoritativeSpec(base, provider));
   return { file: rel, prompt };
 }
 
@@ -134,6 +143,9 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
     // Persist the linked canary (ADR-005) across updates — else any `vf units
     // update` would silently strip it via normalizeUnit and reopen the gate.
     canary: input.canary,
+    // Persist the Type-B drift fingerprint + verified SHA across updates too.
+    impl_fingerprint: input.impl_fingerprint,
+    verified_sha: input.verified_sha,
     gates: {
       build: g.build ?? "pending",
       lint: g.lint ?? "pending",

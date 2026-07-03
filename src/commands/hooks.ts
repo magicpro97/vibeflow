@@ -27,6 +27,8 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { HookInput } from "../core.js";
+import { readLocalSpec, specStaleSignals } from "../spec-freshness.js";
 import {
   CTX_DIR,
   type Engine,
@@ -165,7 +167,12 @@ export async function hook(
   // user kept (and any custom rules). readSettings is fail-safe: a missing/garbage
   // SETTINGS.json yields the all-on default, so the gate never silently weakens.
   const policy = resolveHookPolicy(readSettings(cwd()).hooks);
-  const result = evaluateHook(input, () => process.env, policy);
+  // Task 4: advisory spec-drift signal (warn, never block) — compare the current
+  // spec against the dispatch-time snapshot for this task. specStaleSignals is
+  // best-effort (never throws), so the live gate never fails on freshness grounds.
+  const specStale = (hi: HookInput): string[] =>
+    hi.taskId ? specStaleSignals(cwd(), hi.taskId, readLocalSpec(cwd())) : [];
+  const result = evaluateHook(input, () => process.env, policy, specStale);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
   const { json, exitCode } = presentDecision(result, input);

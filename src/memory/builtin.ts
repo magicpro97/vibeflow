@@ -51,4 +51,10 @@ export class BuiltinMemoryProvider implements MemoryProvider {
     const hits = searchEntries(this.db, query, opts?.limit ?? 3);
     return opts?.tier === "titles" ? hits.map((h) => ({ ...h, content: "" })) : hits;
   }
+
+  /** Authoritative spec oracle (Task 4b): decisions.md raw = the local spec source,
+   *  the same file the freshness gate reads today. Zero behavior change. */
+  spec(): string | null {
+    return this.readDecisions();
+  }
 }

@@ -50,6 +50,13 @@ export interface WorkUnit {
    */
   canary?: { file: string; author: string; linkedAt: string };
   /**
+   * Type B drift (ADR spec-freshness): SHA256 of each scoped file captured at the
+   * last GREEN verify, plus the git SHA then. A later verify recomputes them — a
+   * changed scoped file with no re-dispatch is an out-of-pipeline edit (provenance).
+   */
+  impl_fingerprint?: Record<string, string>;
+  verified_sha?: string;
+  /**
    * Security checkpoint result, populated when the orchestrator runs
    * the post-coding security skill on this unit. Structural type to
    * avoid a circular import from core → orchestrator/security-checkpoint.
