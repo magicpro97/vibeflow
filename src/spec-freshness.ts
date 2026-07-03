@@ -4,6 +4,10 @@
 // Zero deps, best-effort. Signals: content hash, key-claim Jaccard overlap.
 
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { CTX_DIR, writeFileSafe } from "./core.js";
+import { decisionsPath } from "./decisions.js";
 
 export type FreshnessStatus = "fresh" | "drift" | "evolved";
 export interface FreshnessResult {
@@ -53,4 +57,34 @@ export function checkFreshness(snapshotSpec: string, currentSpec: string): Fresh
     status: "evolved",
     signals: [`content changed, claims stable (Jaccard ${overlap.toFixed(2)})`],
   };
+}
+
+// ─── Task 4 — spec snapshot at dispatch + advisory drift signal in the hook ──
+
+/** Local spec source: knowledge/decisions.md verbatim (or "" when absent).
+ *  Task 4b generalizes this via loadAuthoritativeSpec + a MemoryProvider oracle. */
+export function readLocalSpec(base: string): string {
+  const p = decisionsPath(base);
+  return existsSync(p) ? readFileSync(p, "utf8") : "";
+}
+
+/** Where the dispatch-time spec snapshot for a task lands. */
+export function specSnapshotPath(base: string, taskId: string): string {
+  return join(base, CTX_DIR, "spec-snapshot", `${taskId}.md`);
+}
+
+/** Snapshot the authoritative spec text at dispatch, so the hook can later
+ *  detect drift against what the engine was actually briefed on. */
+export function writeSpecSnapshot(base: string, taskId: string, specText: string): void {
+  writeFileSafe(specSnapshotPath(base, taskId), specText);
+}
+
+/** Advisory (warn, NOT block) spec-drift signals for a task: compare the
+ *  current spec against the dispatch snapshot. Empty when no snapshot exists,
+ *  or the spec is fresh/evolved — only real `drift` surfaces reasons. */
+export function specStaleSignals(base: string, taskId: string, currentSpec: string): string[] {
+  const snapPath = specSnapshotPath(base, taskId);
+  if (!existsSync(snapPath)) return [];
+  const r = checkFreshness(readFileSync(snapPath, "utf8"), currentSpec);
+  return r.status === "drift" ? [`spec-stale: ${r.signals.join("; ")}`] : [];
 }

@@ -1,5 +1,18 @@
 import { expect, test } from "bun:test";
-import { checkFreshness, extractClaims, jaccard, specHash } from "../src/spec-freshness.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { decisionsPath } from "../src/decisions.js";
+import {
+  checkFreshness,
+  extractClaims,
+  jaccard,
+  readLocalSpec,
+  specHash,
+  specSnapshotPath,
+  specStaleSignals,
+  writeSpecSnapshot,
+} from "../src/spec-freshness.js";
 
 test("extractClaims: pulls must/shall/never sentences", () => {
   const c = extractClaims("The API must return 200. It shall never leak tokens. Nice weather.");
@@ -41,4 +54,50 @@ test("checkFreshness: text changed but claims stable → evolved", () => {
   const r = checkFreshness(old, now);
   expect(r.status).toBe("evolved");
   expect(r.signals[0]).toContain("claims stable");
+});
+
+// ─── Task 4 — snapshot + advisory drift signal ─────────────────────────────
+
+function freshBase(): string {
+  return mkdtempSync(join(tmpdir(), "vf-spec-"));
+}
+
+test("readLocalSpec: missing decisions.md → empty string", () => {
+  expect(readLocalSpec(freshBase())).toBe("");
+});
+test("readLocalSpec: reads decisions.md verbatim", () => {
+  const base = freshBase();
+  const p = decisionsPath(base);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, "The API must return 200.", "utf8");
+  expect(readLocalSpec(base)).toContain("must return 200");
+});
+test("specSnapshotPath: lives under .vibeflow/spec-snapshot/<taskId>.md", () => {
+  expect(specSnapshotPath("/b", "T1")).toBe("/b/.vibeflow/spec-snapshot/T1.md");
+});
+test("specStaleSignals: no snapshot → no signals", () => {
+  expect(specStaleSignals(freshBase(), "T1", "anything")).toEqual([]);
+});
+test("specStaleSignals: snapshot matches current → no signals (fresh)", () => {
+  const base = freshBase();
+  const spec = "The system must validate input.";
+  writeSpecSnapshot(base, "T1", spec);
+  expect(specStaleSignals(base, "T1", spec)).toEqual([]);
+});
+test("specStaleSignals: claims drifted below threshold → spec-stale signal", () => {
+  const base = freshBase();
+  writeSpecSnapshot(base, "T1", "Must validate input. Must log errors. Must retry thrice.");
+  const sig = specStaleSignals(base, "T1", "Must validate input. Must encrypt data. Must audit.");
+  expect(sig.length).toBe(1);
+  expect(sig[0]).toContain("spec-stale");
+});
+test("specStaleSignals: evolved (claims stable) → no signal (advisory, not noisy)", () => {
+  const base = freshBase();
+  writeSpecSnapshot(base, "T1", "The system must validate input. Short.");
+  const sig = specStaleSignals(
+    base,
+    "T1",
+    "The system must validate input. Much longer prose now.",
+  );
+  expect(sig).toEqual([]);
 });

@@ -27,6 +27,53 @@ import {
 } from "../src/hooks/runner.js";
 import { resolveHookPolicy } from "../src/hooks/templates.js";
 
+// --- Task 4: spec-stale advisory signal wired into evaluateHook ---
+describe("evaluateHook: spec-stale advisory signal (Task 4)", () => {
+  const benign: HookInput = { event: "pre-tool-use", tool: "read", taskId: "T1" };
+  test("no stale signals → decision + reasons unchanged", () => {
+    const r = evaluateHook(
+      benign,
+      () => ({}),
+      undefined,
+      () => [],
+    );
+    expect(r.decision).toBe("allow");
+    expect(r.reasons).not.toContain("spec-stale: x");
+  });
+  test("stale signal on an allow → escalates to warn, appends reason", () => {
+    const r = evaluateHook(
+      benign,
+      () => ({}),
+      undefined,
+      () => ["spec-stale: drift"],
+    );
+    expect(r.decision).toBe("warn");
+    expect(r.reasons).toContain("spec-stale: drift");
+  });
+  test("stale signal never weakens a stronger decision (block stays block)", () => {
+    const danger: HookInput = { event: "pre-command", command: "rm -rf /", taskId: "T1" };
+    const withStale = evaluateHook(
+      danger,
+      () => ({}),
+      undefined,
+      () => ["spec-stale: drift"],
+    );
+    const base = evaluateHook(danger, () => ({}));
+    expect(withStale.decision).toBe(base.decision); // unchanged, not downgraded to warn
+    expect(withStale.reasons).toContain("spec-stale: drift");
+  });
+  test("stale seam is ignored when hooks are disabled (kill-switch wins)", () => {
+    const r = evaluateHook(
+      benign,
+      () => ({ VIBEFLOW_HOOKS: "off" }),
+      undefined,
+      () => ["spec-stale: drift"],
+    );
+    expect(r.decision).toBe("allow");
+    expect(r.reasons).not.toContain("spec-stale: drift");
+  });
+});
+
 // --- Defect 1 (issue #79): Copilot now joins the native enforcement tier ---
 describe("adapters: copilot native enforcement (issue #79)", () => {
   test("copilotHookConfig emits the official Copilot hooks schema (version:1, hooks:{...})", () => {

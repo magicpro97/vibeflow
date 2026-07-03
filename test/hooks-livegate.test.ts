@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { armHooks, hook } from "../src/commands/hooks.js";
+import { decisionsPath } from "../src/decisions.js";
+import { writeSpecSnapshot } from "../src/spec-freshness.js";
 
 // End-to-end: the menu's chosen policy → armHooks → SETTINGS.json → the live
 // `vf hook` gate honors it. This is the one cross-module promise of the feature
@@ -89,6 +91,26 @@ describe("vf hook live gate honors the stored policy (end-to-end)", () => {
       expect(await runHook({ event: "pre-command", command: "ls -la" })).toContain(
         '"decision":"allow"',
       );
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Task 4: the advisory spec-stale signal rides the live gate. Seed a dispatch
+  // snapshot whose key-claims diverge from the current decisions.md → a benign
+  // read (would be `allow`) is escalated to `warn` with a spec-stale reason.
+  test("spec-stale advisory: drifted spec escalates a benign action to warn", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-livegate-spec-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      writeSpecSnapshot(dir, "T1", "Must validate input. Must log errors. Must retry thrice.");
+      const dp = decisionsPath(dir);
+      mkdirSync(dirname(dp), { recursive: true });
+      writeFileSync(dp, "Must validate input. Must encrypt data. Must audit access.", "utf8");
+      const emitted = await runHook({ event: "pre-tool-use", tool: "read", taskId: "T1" });
+      expect(emitted).toContain("spec-stale");
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
