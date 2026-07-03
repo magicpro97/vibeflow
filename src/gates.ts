@@ -1,8 +1,10 @@
+// size-waiver: #515 — Type B impl-drift gate pushes policyGates ~20 lines over the cap
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defaultCanaryCheck } from "./canary.js";
 import { type GateState, type WorkUnit, type WorkflowState, strArray } from "./core.js";
 import { thresholdFor } from "./orchestrator/investigate.js";
+import { defaultImplDrift } from "./spec-freshness.js";
 
 export interface GateReport {
   ok: boolean;
@@ -146,7 +148,10 @@ export function computeConfidence(u: {
  */
 export function policyGates(
   state: WorkflowState | null,
-  inject: { canaryCheck?: (u: WorkUnit) => boolean } = {},
+  inject: {
+    canaryCheck?: (u: WorkUnit) => boolean;
+    implDrift?: (u: WorkUnit) => { drifted: string[]; uncovered: string[] };
+  } = {},
 ): GateReport {
   const canaryCheck = inject.canaryCheck ?? defaultCanaryCheck;
   const failures: string[] = [];
@@ -302,6 +307,25 @@ export function policyGates(
     );
   }
   if (canaryCovered) passed.push(`canary: ${canaryCovered} knowledge-heavy unit(s) covered`);
+
+  // Type B drift: a done unit whose scoped files changed since its last GREEN
+  // verify (impl edited out-of-pipeline). Provenance, not semantics — WARN when
+  // the changed lines are test-covered (likely benign), FAIL when uncovered
+  // (can't confirm the spec still holds; needs human). Best-effort + injectable.
+  const drift = inject.implDrift ?? defaultImplDrift;
+  for (const u of state.work_units.filter((x) => x.status === "done" && x.impl_fingerprint)) {
+    const d = drift(u);
+    if (!d.drifted.length) continue;
+    if (d.uncovered.length) {
+      failures.push(
+        `impl-drift: "${u.name}" scoped file(s) edited out-of-pipeline with no test coverage — cannot confirm spec: ${d.uncovered.join(", ")} → Fix: re-run vf verify or add a test pinning the change`,
+      );
+    } else {
+      warnings.push(
+        `impl-drift(warn): "${u.name}" scoped file(s) edited since verify but test-covered: ${d.drifted.join(", ")}`,
+      );
+    }
+  }
 
   return { ok: failures.length === 0, failures, passed, warnings };
 }

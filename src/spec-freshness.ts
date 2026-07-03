@@ -199,3 +199,20 @@ export function driftUncovered(
   const changed = (inject.changedLines ?? defaultChangedLines)(base, rel, sinceRef);
   return changed.some((ln) => !covered.has(ln));
 }
+
+/** Default Type-B drift check for a unit (used by the policyGates seam): hash
+ *  scoped files vs the stored fingerprint, then flag any drifted file whose
+ *  change is uncovered. cwd + the unit's verified_sha is the diff base. */
+export function defaultImplDrift(u: {
+  impl_fingerprint?: ImplFingerprint;
+  verified_sha?: string;
+}): { drifted: string[]; uncovered: string[] } {
+  const base = process.cwd();
+  const drifted = detectImplDrift(base, u.impl_fingerprint);
+  const since = u.verified_sha ?? "HEAD";
+  // A "(deleted)" marker has no line diff to check — always uncovered.
+  const uncovered = drifted.filter((rel) =>
+    rel.endsWith("(deleted)") ? true : driftUncovered(base, rel, since),
+  );
+  return { drifted, uncovered };
+}

@@ -143,6 +143,9 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
     // Persist the linked canary (ADR-005) across updates — else any `vf units
     // update` would silently strip it via normalizeUnit and reopen the gate.
     canary: input.canary,
+    // Persist the Type-B drift fingerprint + verified SHA across updates too.
+    impl_fingerprint: input.impl_fingerprint,
+    verified_sha: input.verified_sha,
     gates: {
       build: g.build ?? "pending",
       lint: g.lint ?? "pending",

@@ -5,10 +5,15 @@ import { dirname, join } from "node:path";
 import { decisionsPath } from "../src/decisions.js";
 import {
   checkFreshness,
+  coveredLines,
+  defaultImplDrift,
+  detectImplDrift,
+  driftUncovered,
   extractClaims,
   jaccard,
   loadAuthoritativeSpec,
   readLocalSpec,
+  snapshotImpl,
   specHash,
   specSnapshotPath,
   specStaleSignals,
@@ -127,4 +132,58 @@ test("loadAuthoritativeSpec: falls back to local when provider omits spec()", ()
 });
 test("loadAuthoritativeSpec: null provider → local (or empty when absent)", () => {
   expect(loadAuthoritativeSpec(freshBase(), null)).toBe("");
+});
+
+// ─── Task 8 — Type B drift (impl fingerprint + diff-coverage) ───────────────
+test("snapshotImpl: hashes each scoped file (injected hasher)", () => {
+  const fp = snapshotImpl("/base", ["src/a.ts", "src/b.ts"], (_b, rel) =>
+    rel === "src/a.ts" ? "hashA" : null,
+  );
+  expect(fp).toEqual({ "src/a.ts": "hashA" }); // b returned null → skipped
+});
+
+test("detectImplDrift: no fingerprint → [] (never verified)", () => {
+  expect(detectImplDrift("/base", undefined)).toEqual([]);
+});
+test("detectImplDrift: changed + deleted scoped files flagged", () => {
+  const fp = { "src/a.ts": "old", "src/gone.ts": "x" };
+  const drift = detectImplDrift("/base", fp, (_b, rel) => (rel === "src/a.ts" ? "NEW" : null));
+  expect(drift).toContain("src/a.ts");
+  expect(drift).toContain("src/gone.ts (deleted)");
+});
+test("detectImplDrift: unchanged file not flagged", () => {
+  const drift = detectImplDrift("/base", { "src/a.ts": "same" }, () => "same");
+  expect(drift).toEqual([]);
+});
+
+test("coveredLines: parses lcov DA lines with hits>0 for the right file", () => {
+  const cov = coveredLines("SF:src/a.ts\nDA:10,3\nDA:11,0\nend_of_record\n", "src/a.ts");
+  expect(cov.has(10)).toBe(true);
+  expect(cov.has(11)).toBe(false);
+});
+test("coveredLines: ignores DA lines under a different file", () => {
+  const cov = coveredLines("SF:src/other.ts\nDA:5,9\n", "src/a.ts");
+  expect(cov.has(5)).toBe(false);
+});
+
+test("driftUncovered: no lcov → treated as uncovered (true)", () => {
+  expect(driftUncovered("/base", "src/a.ts", "HEAD", { changedLines: () => [1] })).toBe(true);
+});
+test("driftUncovered: changed line covered → false (benign)", () => {
+  const out = driftUncovered("/base", "src/a.ts", "HEAD", {
+    lcov: "SF:src/a.ts\nDA:1,4\n",
+    changedLines: () => [1],
+  });
+  expect(out).toBe(false);
+});
+test("driftUncovered: changed line NOT covered → true (needs human)", () => {
+  const out = driftUncovered("/base", "src/a.ts", "HEAD", {
+    lcov: "SF:src/a.ts\nDA:1,4\n",
+    changedLines: () => [2],
+  });
+  expect(out).toBe(true);
+});
+
+test("defaultImplDrift: no fingerprint → empty drift", () => {
+  expect(defaultImplDrift({})).toEqual({ drifted: [], uncovered: [] });
 });
