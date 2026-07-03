@@ -21,7 +21,8 @@
 // so existing callers (`import { applyDispatch } from
 // "../commands.js"`) keep working.
 
-import { readLocalSpec, writeSpecSnapshot } from "../spec-freshness.js";
+import { resolveMemoryProvider } from "../memory/provider.js";
+import { loadAuthoritativeSpec, writeSpecSnapshot } from "../spec-freshness.js";
 import type { Engine, ProjectContext, WorkUnit, WorkflowState } from "./_shared.js";
 import {
   CTX_DIR,
@@ -30,6 +31,7 @@ import {
   defaultContext,
   dispatchPrompt,
   join,
+  readSettings,
   readState,
   recomputeTotals,
   writeFileSafe,
@@ -76,8 +78,10 @@ export function applyDispatch(
   writeFileSafe(join(base, rel), prompt);
   // Task 4: snapshot the authoritative spec the engine is briefed on, so the
   // hook can later flag spec-drift (advisory) against this baseline. Task 4b
-  // generalizes readLocalSpec → loadAuthoritativeSpec (MemoryProvider oracle).
-  writeSpecSnapshot(base, state.task_id, readLocalSpec(base));
+  // reads it through the MemoryProvider spec() oracle (builtin = decisions.md,
+  // the same file as before; off = null provider → local file).
+  const provider = resolveMemoryProvider(readSettings(base).memory, join(base, CTX_DIR));
+  writeSpecSnapshot(base, state.task_id, loadAuthoritativeSpec(base, provider));
   return { file: rel, prompt };
 }
 

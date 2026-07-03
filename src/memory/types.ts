@@ -22,4 +22,9 @@ export interface MemoryHit {
  *  Implementations must be best-effort: never throw, return [] on any error. */
 export interface MemoryProvider {
   recall(query: string, opts?: { limit?: number; tier?: MemoryTier }): MemoryHit[];
+  /** Full authoritative spec/decisions text verbatim, or null if this provider is
+   *  NOT a spec oracle. DISTINCT from recall (ranked fuzzy): deterministic full-doc
+   *  fetch for freshness hashing. Optional — the freshness gate falls back to the
+   *  local decisions.md when a provider omits it. */
+  spec?(): string | null;
 }

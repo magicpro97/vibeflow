@@ -7,6 +7,7 @@ import {
   checkFreshness,
   extractClaims,
   jaccard,
+  loadAuthoritativeSpec,
   readLocalSpec,
   specHash,
   specSnapshotPath,
@@ -100,4 +101,30 @@ test("specStaleSignals: evolved (claims stable) → no signal (advisory, not noi
     "The system must validate input. Much longer prose now.",
   );
   expect(sig).toEqual([]);
+});
+
+// ─── Task 4b — MemoryProvider spec() oracle seam ───────────────────────────
+
+test("loadAuthoritativeSpec: uses provider.spec() when non-null", () => {
+  const fake = { recall: () => [], spec: () => "REMOTE SPEC" };
+  expect(loadAuthoritativeSpec("/base", fake)).toBe("REMOTE SPEC");
+});
+test("loadAuthoritativeSpec: falls back to local when spec() returns null", () => {
+  const base = freshBase();
+  const p = decisionsPath(base);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, "LOCAL DECISIONS", "utf8");
+  const fake = { recall: () => [], spec: () => null };
+  expect(loadAuthoritativeSpec(base, fake)).toBe("LOCAL DECISIONS");
+});
+test("loadAuthoritativeSpec: falls back to local when provider omits spec()", () => {
+  const base = freshBase();
+  const p = decisionsPath(base);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, "NO-ORACLE PROVIDER", "utf8");
+  const fake = { recall: () => [] };
+  expect(loadAuthoritativeSpec(base, fake)).toBe("NO-ORACLE PROVIDER");
+});
+test("loadAuthoritativeSpec: null provider → local (or empty when absent)", () => {
+  expect(loadAuthoritativeSpec(freshBase(), null)).toBe("");
 });

@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CTX_DIR, writeFileSafe } from "./core.js";
 import { decisionsPath } from "./decisions.js";
+import type { MemoryProvider } from "./memory/types.js";
 
 export type FreshnessStatus = "fresh" | "drift" | "evolved";
 export interface FreshnessResult {
@@ -66,6 +67,17 @@ export function checkFreshness(snapshotSpec: string, currentSpec: string): Fresh
 export function readLocalSpec(base: string): string {
   const p = decisionsPath(base);
   return existsSync(p) ? readFileSync(p, "utf8") : "";
+}
+
+/** Task 4b — the authoritative spec text: a MemoryProvider oracle when it is one
+ *  (spec() != null), else the local decisions.md. Precedence, NEVER merge — an
+ *  external store (MCP/RS memory) can BE the spec oracle just by implementing
+ *  spec(), without touching gate logic. builtin returns decisions.md → the same
+ *  file the gate reads today (zero behavior change); off → provider null → local. */
+export function loadAuthoritativeSpec(base: string, provider: MemoryProvider | null): string {
+  const remote = provider?.spec?.();
+  if (remote != null) return remote;
+  return readLocalSpec(base);
 }
 
 /** Where the dispatch-time spec snapshot for a task lands. */
