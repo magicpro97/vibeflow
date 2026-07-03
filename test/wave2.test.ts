@@ -207,6 +207,9 @@ describe("policy gates", () => {
     name: "u",
     status: "done" as const,
     confidence: 1,
+    // ADR-005 cross-review fix: dispatch identity must be set, else the canary
+    // gate treats "unknown owner" as untrusted and blocks. Author differs from it.
+    owner_agent: "codex",
     gates: {
       build: "pass" as const,
       lint: "pass" as const,
