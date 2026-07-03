@@ -151,6 +151,8 @@ export function policyGates(
   inject: {
     canaryCheck?: (u: WorkUnit) => boolean;
     implDrift?: (u: WorkUnit) => { drifted: string[]; uncovered: string[] };
+    /** Project root for Type-B drift file resolution (defaults to cwd). */
+    base?: string;
   } = {},
 ): GateReport {
   const canaryCheck = inject.canaryCheck ?? defaultCanaryCheck;
@@ -312,7 +314,7 @@ export function policyGates(
   // verify (impl edited out-of-pipeline). Provenance, not semantics — WARN when
   // the changed lines are test-covered (likely benign), FAIL when uncovered
   // (can't confirm the spec still holds; needs human). Best-effort + injectable.
-  const drift = inject.implDrift ?? defaultImplDrift;
+  const drift = inject.implDrift ?? ((u: WorkUnit) => defaultImplDrift(u, inject.base));
   for (const u of state.work_units.filter((x) => x.status === "done" && x.impl_fingerprint)) {
     const d = drift(u);
     if (!d.drifted.length) continue;

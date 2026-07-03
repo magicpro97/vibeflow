@@ -67,6 +67,12 @@ import type { GitRunner } from "../src/safety/checkpoint.js";
 import { writeSettings } from "../src/settings.js";
 import { type Spawner, asSpawnSync, makeFakeSpawner } from "./helpers/fake-spawner.js";
 
+// Repo-root-anchored source read for facade/sentinel assertions. Relative
+// readFileSync("src/...") breaks when a sibling test chdir's into a temp dir and
+// times out before restoring cwd (a CI-only cascade). Anchor to the repo root.
+const readSrc = (rel: string): string =>
+  readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+
 // ---------------------------------------------------------------------------
 //  Test helpers
 // ---------------------------------------------------------------------------
@@ -2479,7 +2485,7 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     // src/commands.ts. import.meta.resolve is intentionally avoided —
     // the source file is the canonical source.
     const { readFileSync } = require("node:fs") as typeof import("node:fs");
-    const initSrc = readFileSync("src/commands/init-apply.ts", "utf8");
+    const initSrc = readSrc("src/commands/init-apply.ts");
     // Single declaration of `const DEFAULT_ENGINE`.
     const decls =
       initSrc.match(/^(?:export )?const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
@@ -2492,8 +2498,8 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     // with any caller still importing it from src/commands.ts.
     // The test asserts that BOTH the source file and the facade
     // re-export reference DEFAULT_ENGINE — never a hardcoded string.
-    const src = readFileSync("src/commands.ts", "utf8");
-    const resolveSrc = readFileSync("src/commands/orchestrate-resolve.ts", "utf8");
+    const src = readSrc("src/commands.ts");
+    const resolveSrc = readSrc("src/commands/orchestrate-resolve.ts");
     // The facade must re-export resolveEngine (for back-compat callers).
     expect(src).toMatch(/export \{[^}]*resolveEngine[^}]*\}/);
     // The source-of-truth definition must reference DEFAULT_ENGINE
@@ -5224,7 +5230,10 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+    // Generous timeout: this async init test chdir's into a temp dir; killed at the
+    // 5000ms default mid-run, its finally never restores cwd and every later
+    // relative-path sentinel read fails ENOENT (the CI-only cascade seen on #516).
+  }, 20000);
 
   test("init with a shipped-template phase copies the phase skill (artifacts loop body)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-tmpl-"));
@@ -5427,7 +5436,7 @@ describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", ()
     // The CLI dispatch (cli.ts → main.ts) imports `run` from
     // src/commands.ts. After PR6's extraction, the symbol must
     // be re-exported there so the import path stays stable.
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(/export\s*\{[^}]*\brun\b[^}]*\}\s*from\s*["']\.\/commands\/run\.js["']/);
   });
 
@@ -5435,7 +5444,7 @@ describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", ()
     // Tests (test/commands-coverage.test.ts) still import the
     // public seam from src/commands.ts. PR6 must NOT remove
     // these re-exports as part of the run-extraction.
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     const required = [
       "MS_PER_SECOND",
       "planProtection",
@@ -5460,7 +5469,7 @@ describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", ()
     // Pre-existing: PR5 added these re-exports. PR6 must NOT
     // remove them. Catches the failure mode where a refactor
     // strips the facade re-export block to "clean up".
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\borchestrate\b[^}]*\}\s*from\s*["']\.\/commands\/orchestrate\.js["']/,
     );
@@ -5474,8 +5483,8 @@ describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", ()
     // in commands.ts. This guards against a refactor that
     // re-creates the in-file body and leaves the facade
     // re-export as a thin re-export, defeating the extraction.
-    const commands = readFileSync("src/commands.ts", "utf8");
-    const run = readFileSync("src/commands/run.ts", "utf8");
+    const commands = readSrc("src/commands.ts");
+    const run = readSrc("src/commands/run.ts");
     expect(commands).not.toMatch(/^export\s+async\s+function\s+run\s*\(/m);
     expect(run).toMatch(/^export\s+async\s+function\s+run\s*\(/m);
   });
@@ -5496,21 +5505,21 @@ describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", ()
 
 describe("commands facade re-exports (PR7 sentinel, issue #80 phase 7/14)", () => {
   test("src/commands.ts re-exports `skills` from src/commands/skills.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\bskills\b[^}]*\}\s*from\s*["']\.\/commands\/skills\.js["']/,
     );
   });
 
   test("src/commands.ts re-exports `discover` from src/commands/discover.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\bdiscover\b[^}]*\}\s*from\s*["']\.\/commands\/discover\.js["']/,
     );
   });
 
   test("src/commands.ts re-exports the hooks cluster from src/commands/hooks.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(/export\s*\{[^}]*\bhook\b[^}]*\}\s*from\s*["']\.\/commands\/hooks\.js["']/);
     expect(src).toMatch(
       /export\s*\{[^}]*\bhookSelftest\b[^}]*\}\s*from\s*["']\.\/commands\/hooks\.js["']/,
@@ -5521,10 +5530,10 @@ describe("commands facade re-exports (PR7 sentinel, issue #80 phase 7/14)", () =
   });
 
   test("source-of-truth: skills + discover + hooks bodies live in their per-subcommand files", () => {
-    const commands = readFileSync("src/commands.ts", "utf8");
-    const skills = readFileSync("src/commands/skills.ts", "utf8");
-    const discover = readFileSync("src/commands/discover.ts", "utf8");
-    const hooks = readFileSync("src/commands/hooks.ts", "utf8");
+    const commands = readSrc("src/commands.ts");
+    const skills = readSrc("src/commands/skills.ts");
+    const discover = readSrc("src/commands/discover.ts");
+    const hooks = readSrc("src/commands/hooks.ts");
 
     // The body definitions must be in the per-subcommand files. The `m`
     // flag anchors the regex to start-of-line so it does NOT match the
@@ -5565,7 +5574,7 @@ describe("commands facade re-exports (PR7 sentinel, issue #80 phase 7/14)", () =
 
 describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () => {
   test("src/commands.ts re-exports the tools cluster from src/commands/tools.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\btools\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
@@ -5590,7 +5599,7 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
   });
 
   test("src/commands.ts re-exports the StepSpawner + ToolchainPlan types from split modules", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s+type\s+\{[^}]*\bStepSpawner\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
@@ -5600,7 +5609,7 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
   });
 
   test("src/commands.ts re-exports the workflow cluster from src/commands/workflow.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\bworkflow\b[^}]*\}\s*from\s*["']\.\/commands\/workflow\.js["']/,
     );
@@ -5610,7 +5619,7 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
   });
 
   test("src/commands.ts re-exports the help cluster from src/commands/help.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\bprintHelp\b[^}]*\}\s*from\s*["']\.\/commands\/help\.js["']/,
     );
@@ -5623,12 +5632,12 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
   });
 
   test("source-of-truth: tools + workflow + help bodies live in their per-subcommand files", () => {
-    const commands = readFileSync("src/commands.ts", "utf8");
-    const tools = readFileSync("src/commands/tools.ts", "utf8");
-    const toolsDetect = readFileSync("src/commands/tools-detect.ts", "utf8");
-    const toolsMcp = readFileSync("src/commands/tools-mcp-config.ts", "utf8");
-    const workflow = readFileSync("src/commands/workflow.ts", "utf8");
-    const help = readFileSync("src/commands/help.ts", "utf8");
+    const commands = readSrc("src/commands.ts");
+    const tools = readSrc("src/commands/tools.ts");
+    const toolsDetect = readSrc("src/commands/tools-detect.ts");
+    const toolsMcp = readSrc("src/commands/tools-mcp-config.ts");
+    const workflow = readSrc("src/commands/workflow.ts");
+    const help = readSrc("src/commands/help.ts");
 
     // Public body definitions must be in the per-subcommand files. The `m`
     // flag anchors the regex to start-of-line so it does NOT match the
@@ -5725,7 +5734,7 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
 
 describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () => {
   test("src/commands.ts re-exports the init entry cluster from src/commands/init.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(/export\s*\{[^}]*\binit\b[^}]*\}\s*from\s*["']\.\/commands\/init\.js["']/);
     expect(src).toMatch(
       /export\s*\{[^}]*\breportPreflightRefusal\b[^}]*\}\s*from\s*["']\.\/commands\/init\.js["']/,
@@ -5733,7 +5742,7 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
   });
 
   test("src/commands.ts re-exports the apply cluster from src/commands/init-apply.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\bapplyIntake\b[^}]*\}\s*from\s*["']\.\/commands\/init-apply\.js["']/,
     );
@@ -5746,7 +5755,7 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
   });
 
   test("src/commands.ts re-exports the ctx7 cluster from src/commands/init-ctx7.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\bensureCtx7Auth\b[^}]*\}\s*from\s*["']\.\/commands\/init-ctx7\.js["']/,
     );
@@ -5759,18 +5768,18 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
   });
 
   test("src/commands.ts re-exports runInitAiEnrichment from src/commands/init-ai.js", () => {
-    const src = readFileSync("src/commands.ts", "utf8");
+    const src = readSrc("src/commands.ts");
     expect(src).toMatch(
       /export\s*\{[^}]*\brunInitAiEnrichment\b[^}]*\}\s*from\s*["']\.\/commands\/init-ai\.js["']/,
     );
   });
 
   test("source-of-truth: the init cluster bodies live in their per-file modules", () => {
-    const commands = readFileSync("src/commands.ts", "utf8");
-    const init = readFileSync("src/commands/init.ts", "utf8");
-    const apply = readFileSync("src/commands/init-apply.ts", "utf8");
-    const ctx7 = readFileSync("src/commands/init-ctx7.ts", "utf8");
-    const ai = readFileSync("src/commands/init-ai.ts", "utf8");
+    const commands = readSrc("src/commands.ts");
+    const init = readSrc("src/commands/init.ts");
+    const apply = readSrc("src/commands/init-apply.ts");
+    const ctx7 = readSrc("src/commands/init-ctx7.ts");
+    const ai = readSrc("src/commands/init-ai.ts");
 
     // Public bodies live in their per-subcommand files. The `m` flag
     // anchors to start-of-line so it does NOT match a facade re-export.
@@ -5793,7 +5802,7 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
   });
 
   test("phase-9 invariant: the facade is a PURE re-export surface (zero function bodies)", () => {
-    const commands = readFileSync("src/commands.ts", "utf8");
+    const commands = readSrc("src/commands.ts");
     // No `export function` / `export async function` / bare `function`
     // definitions may remain in the facade — every command body now lives
     // in a src/commands/*.ts module.
@@ -5814,9 +5823,9 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
 });
 
 describe("init split (#186 PR6 sentinel)", () => {
-  const facade = readFileSync("src/commands/init.ts", "utf8");
+  const facade = readSrc("src/commands/init.ts");
   test("artifact phase extracted to init/artifacts.ts", () => {
-    const art = readFileSync("src/commands/init-artifacts.ts", "utf8");
+    const art = readSrc("src/commands/init-artifacts.ts");
     expect(art).toMatch(/^export async function\s+writeInitArtifacts/m);
     expect(facade).toMatch(/writeInitArtifacts/);
   });
@@ -5826,9 +5835,9 @@ describe("init split (#186 PR6 sentinel)", () => {
 });
 
 describe("orchestrate split (#186 PR7 sentinel)", () => {
-  const facade = readFileSync("src/commands/orchestrate.ts", "utf8");
+  const facade = readSrc("src/commands/orchestrate.ts");
   test("resolvers extracted to orchestrate/resolve.ts", () => {
-    const r = readFileSync("src/commands/orchestrate-resolve.ts", "utf8");
+    const r = readSrc("src/commands/orchestrate-resolve.ts");
     expect(r).toMatch(/^export function\s+resolveMode/m);
     expect(facade).not.toMatch(/^export function\s+resolveMode/m);
     expect(facade).toMatch(/from\s*["']\.\/orchestrate-resolve\.js["']/);

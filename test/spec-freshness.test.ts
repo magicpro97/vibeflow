@@ -233,3 +233,66 @@ test("driftUncovered + defaultImplDrift: real git diff over a committed file", (
   expect(Array.isArray(d.drifted)).toBe(true);
   expect(Array.isArray(d.uncovered)).toBe(true);
 });
+
+// Cross-review fixes (PR-B codex review):
+test("specSnapshotPath: crafted traversal task_id is reduced to basename (CWE-22)", () => {
+  const p = specSnapshotPath("/repo", "../../etc/cron.d/evil");
+  expect(p).not.toContain("etc/cron.d");
+  expect(p).toContain("spec-snapshot");
+  expect(p.endsWith("evil.md")).toBe(true);
+});
+
+test("driftUncovered: pure-deletion hunk (+N,0) → the deleted line counts as changed", () => {
+  // git diff -U0 emits `@@ -5,3 +5,0 @@` for a pure deletion; the anchor line 5
+  // must register as changed so an uncovered deletion FAILS (not silently benign).
+  const changedLines = () => {
+    // simulate the parser over a +5,0 hunk — the real defaultChangedLines is
+    // exercised by the git test below; here assert the covered/uncovered branch.
+    return [5];
+  };
+  const uncovered = driftUncovered("/b", "a.ts", "HEAD", {
+    lcov: "SF:a.ts\nDA:1,3\n", // covers line 1 only; changed line 5 uncovered
+    changedLines,
+  });
+  expect(uncovered).toBe(true);
+});
+
+test("driftUncovered: REAL git pure-deletion hunk (+N,0) surfaces the anchor line", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-del-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  // 3 lines committed
+  writeFileSync(join(dir, "a.ts"), "keep1\ndelete-me\nkeep3\n");
+  git("add", "a.ts");
+  git("commit", "-qm", "init");
+  const sha = git("rev-parse", "HEAD").trim();
+  // pure deletion of line 2 → `git diff -U0` emits `@@ -2,1 +1,0 @@` → anchor line 1
+  writeFileSync(join(dir, "a.ts"), "keep1\nkeep3\n");
+  mkdirSync(join(dir, "coverage"), { recursive: true });
+  // lcov covers only line 9 (NOT the deletion anchor line 1) → anchor uncovered → true
+  writeFileSync(join(dir, "coverage", "lcov.info"), "SF:a.ts\nDA:9,4\nend_of_record\n");
+  // real defaultChangedLines runs; the +N,0 hunk yields anchor line 1, uncovered → true
+  expect(driftUncovered(dir, "a.ts", sha)).toBe(true);
+});
+
+test("defaultImplDrift: accepts an explicit base (not just cwd)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-base-"));
+  writeFileSync(join(dir, "a.ts"), "x\n");
+  const fp = snapshotImpl(dir, ["a.ts"]);
+  writeFileSync(join(dir, "a.ts"), "y\n");
+  // pass dir as base — detectImplDrift resolves against it, sees the edit
+  const d = defaultImplDrift({ impl_fingerprint: fp, verified_sha: "HEAD" }, dir);
+  expect(d.drifted).toContain("a.ts");
+});
+
+test("defaultChangedLines: non-git base does not throw (best-effort → [])", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-nogit-"));
+  writeFileSync(join(dir, "a.ts"), "x\n");
+  writeFileSync(join(dir, "coverage-lcov"), "");
+  mkdirSync(join(dir, "coverage"), { recursive: true });
+  writeFileSync(join(dir, "coverage", "lcov.info"), "SF:a.ts\nDA:1,3\n");
+  // no git repo → execFileSync throws → caught → [] → no uncovered change → false
+  expect(driftUncovered(dir, "a.ts", "deadbeef")).toBe(false);
+});

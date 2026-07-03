@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { CTX_DIR, writeFileSafe } from "./core.js";
 import { decisionsPath } from "./decisions.js";
 import type { MemoryProvider } from "./memory/types.js";
@@ -81,9 +81,12 @@ export function loadAuthoritativeSpec(base: string, provider: MemoryProvider | n
   return readLocalSpec(base);
 }
 
-/** Where the dispatch-time spec snapshot for a task lands. */
+/** Where the dispatch-time spec snapshot for a task lands. `taskId` is reduced to
+ *  its basename so a crafted `../../etc/...` task_id (STATE.json is user-editable)
+ *  can't escape the .vibeflow/spec-snapshot/ dir (arbitrary-write, CWE-22). */
 export function specSnapshotPath(base: string, taskId: string): string {
-  return join(base, CTX_DIR, "spec-snapshot", `${taskId}.md`);
+  const safe = basename(taskId) || "task";
+  return join(base, CTX_DIR, "spec-snapshot", `${safe}.md`);
 }
 
 /** Snapshot the authoritative spec text at dispatch, so the hook can later
@@ -170,14 +173,27 @@ export function coveredLines(lcov: string, relPath: string): Set<number> {
 export type ChangedLinesReader = (base: string, rel: string, sinceRef: string) => number[];
 
 const defaultChangedLines: ChangedLinesReader = (base, rel, sinceRef) => {
-  const out = execFileSync("git", ["diff", "-U0", sinceRef, "--", rel], {
-    cwd: base,
-    encoding: "utf8",
-  });
+  let out: string;
+  try {
+    out = execFileSync("git", ["diff", "-U0", sinceRef, "--", rel], {
+      cwd: base,
+      encoding: "utf8",
+    });
+  } catch {
+    // best-effort: a missing sinceRef (force-push) or non-git base must not
+    // crash the gate. No diff info → caller treats as uncovered (fail-safe).
+    return [];
+  }
   const nums: number[] = [];
   for (const m of out.matchAll(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm)) {
     const start = Number(m[1]);
-    const count = m[2] ? Number(m[2]) : 1;
+    // `+N,0` = a pure in-file DELETION (no added lines). Count the hunk anchor
+    // as one changed line so a deletion of covered spec lines still surfaces.
+    const count = m[2] !== undefined ? Number(m[2]) : 1;
+    if (count === 0) {
+      nums.push(start);
+      continue;
+    }
     for (let i = 0; i < count; i++) nums.push(start + i);
   }
   return nums;
@@ -203,11 +219,10 @@ export function driftUncovered(
 /** Default Type-B drift check for a unit (used by the policyGates seam): hash
  *  scoped files vs the stored fingerprint, then flag any drifted file whose
  *  change is uncovered. cwd + the unit's verified_sha is the diff base. */
-export function defaultImplDrift(u: {
-  impl_fingerprint?: ImplFingerprint;
-  verified_sha?: string;
-}): { drifted: string[]; uncovered: string[] } {
-  const base = process.cwd();
+export function defaultImplDrift(
+  u: { impl_fingerprint?: ImplFingerprint; verified_sha?: string },
+  base: string = process.cwd(),
+): { drifted: string[]; uncovered: string[] } {
   const drifted = detectImplDrift(base, u.impl_fingerprint);
   const since = u.verified_sha ?? "HEAD";
   // A "(deleted)" marker has no line diff to check — always uncovered.

@@ -62,6 +62,41 @@ describe("collectVerifyReportAsync", () => {
     expect(Array.isArray(report.toolchain)).toBe(true);
   });
 
+  // Type B PRODUCER (cross-review P0): when gates pass, a done unit's
+  // impl_fingerprint + verified_sha must be WRITTEN back to state, else the
+  // Type B drift gate is permanently silent.
+  test("writes impl_fingerprint on done units when gates pass", async () => {
+    const { mkdirSync } = await import("node:fs");
+    const { writeState, readState } = await import("../src/core.js");
+    const { CTX_DIR } = await import("../src/core.js");
+    const dir = tempProject({ typecheck: "exit 0", test: "exit 0" });
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "x.ts"), "export const x = 1;\n");
+    mkdirSync(join(dir, CTX_DIR), { recursive: true });
+    writeState(dir, {
+      task_id: "T",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u",
+          status: "done",
+          confidence: 1,
+          scope: ["src/x.ts"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+          resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          evidence: ["src/x.ts:1 — done"],
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    } as never);
+    await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0) });
+    const after = readState(dir) as { work_units: Array<{ impl_fingerprint?: object }> };
+    // fingerprint written for the scoped file (best-effort; may be {} if git absent,
+    // but the key must be SET so the gate has something to compare next time).
+    expect(after.work_units[0]?.impl_fingerprint).toBeDefined();
+  });
+
   test("default spawner error handler on non-existent binary", async () => {
     // Create a temp project with a script that calls a non-existent binary.
     // The default spawner's "error" event handler (line 96) resolves { status: 1 }.
