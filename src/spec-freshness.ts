@@ -3,6 +3,7 @@
 // Spec-drift detection via cheap signals (Barr et al. IEEE TSE 2015 oracle-staleness).
 // Zero deps, best-effort. Signals: content hash, key-claim Jaccard overlap.
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -99,4 +100,102 @@ export function specStaleSignals(base: string, taskId: string, currentSpec: stri
   if (!existsSync(snapPath)) return [];
   const r = checkFreshness(readFileSync(snapPath, "utf8"), currentSpec);
   return r.status === "drift" ? [`spec-stale: ${r.signals.join("; ")}`] : [];
+}
+
+// ─── Task 8 — Type B drift: impl edited out-of-pipeline (PROVENANCE, not semantics) ──
+// "Does edited code still match the NL spec?" is the undecidable oracle problem.
+// Flip it: "was scoped code changed since the last green verify, without re-dispatch?"
+// is a trivial hash. Signal A = 100% recall on the provenance event; Signal B =
+// diff-coverage escalation (edited+tested = likely benign warn; edited+untested = fail).
+
+/** relPath -> sha256(content). Snapshot of a unit's scoped files at verify-green. */
+export type ImplFingerprint = Record<string, string>;
+
+/** Injectable file hasher (test seam). Returns null when the file is absent. */
+export type FileHasher = (base: string, rel: string) => string | null;
+
+const defaultHashFile: FileHasher = (base, rel) => {
+  const p = join(base, rel);
+  return existsSync(p) ? createHash("sha256").update(readFileSync(p)).digest("hex") : null;
+};
+
+/** Snapshot scoped-file hashes when a unit verifies GREEN. Store on the unit as
+ *  `impl_fingerprint` (+ `verified_sha` = git HEAD) so a later verify can detect
+ *  an out-of-pipeline edit. */
+export function snapshotImpl(
+  base: string,
+  scope: string[],
+  hashFile: FileHasher = defaultHashFile,
+): ImplFingerprint {
+  const fp: ImplFingerprint = {};
+  for (const rel of scope) {
+    const h = hashFile(base, rel);
+    if (h) fp[rel] = h;
+  }
+  return fp;
+}
+
+/** Type B detector: scoped files that changed (or were deleted) since the last
+ *  green snapshot. Empty when the unit was never verified (no fingerprint). */
+export function detectImplDrift(
+  base: string,
+  fingerprint: ImplFingerprint | undefined,
+  hashFile: FileHasher = defaultHashFile,
+): string[] {
+  if (!fingerprint) return [];
+  const drifted: string[] = [];
+  for (const [rel, oldHash] of Object.entries(fingerprint)) {
+    const now = hashFile(base, rel);
+    if (now === null) drifted.push(`${rel} (deleted)`);
+    else if (now !== oldHash) drifted.push(rel);
+  }
+  return drifted;
+}
+
+/** Parse the covered (hits>0) line numbers for one file out of an lcov report. */
+export function coveredLines(lcov: string, relPath: string): Set<number> {
+  const out = new Set<number>();
+  let cur = "";
+  for (const l of lcov.split("\n")) {
+    if (l.startsWith("SF:")) cur = l.slice(3).trim();
+    else if (l.startsWith("DA:") && cur.endsWith(relPath)) {
+      const [ln, hits] = l.slice(3).split(",");
+      if (Number(hits) > 0) out.add(Number(ln));
+    }
+  }
+  return out;
+}
+
+/** Injectable `git diff -U0` changed-line reader (test seam). */
+export type ChangedLinesReader = (base: string, rel: string, sinceRef: string) => number[];
+
+const defaultChangedLines: ChangedLinesReader = (base, rel, sinceRef) => {
+  const out = execFileSync("git", ["diff", "-U0", sinceRef, "--", rel], {
+    cwd: base,
+    encoding: "utf8",
+  });
+  const nums: number[] = [];
+  for (const m of out.matchAll(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm)) {
+    const start = Number(m[1]);
+    const count = m[2] ? Number(m[2]) : 1;
+    for (let i = 0; i < count; i++) nums.push(start + i);
+  }
+  return nums;
+};
+
+/** Signal B: does a drifted file have ANY changed line WITHOUT test coverage?
+ *  true → cannot confirm the spec still holds (human review); false → the edit
+ *  is pinned by a test (likely benign). No lcov → treat as uncovered (true). */
+export function driftUncovered(
+  base: string,
+  rel: string,
+  sinceRef: string,
+  inject: { changedLines?: ChangedLinesReader; lcov?: string } = {},
+): boolean {
+  const lcovPath = join(base, "coverage", "lcov.info");
+  const lcov = inject.lcov ?? (existsSync(lcovPath) ? readFileSync(lcovPath, "utf8") : null);
+  if (lcov === null) return true;
+  const covered = coveredLines(lcov, rel);
+  const changed = (inject.changedLines ?? defaultChangedLines)(base, rel, sinceRef);
+  return changed.some((ln) => !covered.has(ln));
 }
