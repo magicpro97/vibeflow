@@ -132,6 +132,10 @@ export function aiInitReviewer(
     // the reviewer is the gate, not the dispatcher. Only "blocked" is fatal.
     return { pass: false, reason: "dispatcher reported status=blocked" };
   }
+  // ai-init reviewer runs BEFORE gates execute — `outcome` carries no gate
+  // results, so computeConfidence (gate-derived) can't apply here. Self-report
+  // is the only signal at this stage; the full computed-confidence gate runs
+  // later in the orchestrate path (run.ts / dispatch-runtime.ts).
   if (outcome.confidence < 1) {
     return { pass: false, reason: `confidence=${outcome.confidence} < 1.0` };
   }

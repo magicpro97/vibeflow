@@ -811,6 +811,12 @@ describe("commands.units CRUD", () => {
       applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
       expect(units("add", ["nav"])).toBe(0);
       expect(units("update", ["nav"], { status: "done", confidence: "1" })).toBe(0);
+      // Green gates so the computed-confidence gate clears — this test isolates
+      // the evidence gate (units command has no --gates flag).
+      mutateUnits(dir, "update", {
+        name: "nav",
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+      });
 
       // done with no evidence → policy gate fails
       const before = policyGates(readState(dir));

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  computeConfidence,
   e2eEvaluateDynamicImportWarning,
   e2eUnicodeSelectorWarning,
   findScopeConflicts,
@@ -197,7 +198,7 @@ describe("policyGates branches", () => {
     };
     const r = policyGates(state);
     expect(r.ok).toBe(true);
-    expect(r.passed).toContain("confidence: all units at 1.0");
+    expect(r.passed).toContain("computed-confidence: all units meet their risk threshold");
   });
 
   test("policyGates: still-running units block verify (lines 75-79)", () => {
@@ -250,8 +251,8 @@ describe("policyGates branches", () => {
     };
     const r = policyGates(state);
     expect(r.ok).toBe(false);
-    expect(r.failures.some((f) => f.includes("confidence<1"))).toBe(true);
-    expect(r.failures.some((f) => f.includes("→ Fix:"))).toBe(true);
+    expect(r.failures.some((f) => f.includes("computed-confidence"))).toBe(true);
+    expect(r.failures.some((f) => f.includes("investigate/debate"))).toBe(true);
   });
 
   test("policyGates: no-evidence failure contains → Fix: substring", () => {
@@ -602,7 +603,7 @@ describe("policyGates: goal_eval gate (ADR-003)", () => {
     };
     const r = policyGates(state);
     expect(r.failures.some((f) => f.includes("goal-eval-fail"))).toBe(true);
-    expect(r.failures[0]).toContain("→ Fix:");
+    expect(r.failures.find((f) => f.includes("goal-eval-fail"))).toContain("→ Fix:");
   });
 
   test("emits passed when goal_eval=pass on any unit", () => {
@@ -619,5 +620,71 @@ describe("policyGates: goal_eval gate (ADR-003)", () => {
     const r = policyGates(state);
     expect(r.failures.filter((f) => f.includes("goal-eval-fail"))).toHaveLength(0);
     expect(r.passed.filter((p) => p.includes("goal-eval:"))).toHaveLength(0);
+  });
+});
+
+describe("computeConfidence (Task 5: self-report is a CAP)", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: terse gate fixture for unit tests
+  const G = (o = {}) =>
+    ({ build: "pass", lint: "pass", test: "pass", review: "pass", ...o }) as any;
+
+  test("all green + self 1 → 1.0", () => {
+    expect(computeConfidence({ confidence: 1, gates: G() })).toBe(1);
+  });
+  test("test fail → hard 0", () => {
+    expect(computeConfidence({ confidence: 1, gates: G({ test: "fail" }) })).toBe(0);
+  });
+  test("build fail beats high self-report → 0", () => {
+    expect(computeConfidence({ confidence: 1, gates: G({ build: "fail" }) })).toBe(0);
+  });
+  test("review fail → hard 0", () => {
+    expect(computeConfidence({ confidence: 1, gates: G({ review: "fail" }) })).toBe(0);
+  });
+  test("security fail → hard 0", () => {
+    expect(computeConfidence({ confidence: 1, gates: G({ security: "fail" }) })).toBe(0);
+  });
+  test("goal_eval fail (all other criticals pass) → hard 0", () => {
+    // All build/test/review/security pass so the critical-gate OR-chain is fully
+    // evaluated down to goal_eval.
+    expect(
+      computeConfidence({ confidence: 1, gates: G({ security: "pass", goal_eval: "fail" }) }),
+    ).toBe(0);
+  });
+  test("review pending caps below feature threshold 0.85", () => {
+    expect(computeConfidence({ confidence: 1, gates: G({ review: "pending" }) })).toBeLessThan(
+      0.85,
+    );
+  });
+  test("running gate lowers confidence (running → 0 value)", () => {
+    expect(computeConfidence({ confidence: 1, gates: G({ review: "running" }) })).toBeLessThan(
+      0.85,
+    );
+  });
+  test("honest low self-report lowers it (cap only)", () => {
+    expect(computeConfidence({ confidence: 0.5, gates: G() })).toBe(0.5);
+  });
+  test("missing self-report defaults to 0 (cap)", () => {
+    expect(computeConfidence({ gates: G() } as Parameters<typeof computeConfidence>[0])).toBe(0);
+  });
+  test("weakest-link — lint fail tanks more than arithmetic mean would", () => {
+    // geo-mean penalizes a near-zero signal superlinearly (arithmetic mean → 0.75).
+    const c = computeConfidence({ confidence: 1, gates: G({ lint: "fail" }) });
+    expect(c).toBeLessThan(0.75);
+    expect(c).toBeGreaterThan(0);
+  });
+  // Cross-review P0 fix: computeConfidence must accept UnitOutcome-shaped input
+  // where gates is undefined/partial (the orchestrate/reviewer call sites pass this).
+  test("undefined gates → near-zero (not-run signal, no crash)", () => {
+    // All signals absent → wGeoMean floors every term to EPS(0.05) → objective ≈ 0.05,
+    // which caps confidence far below any threshold. No NaN, no crash.
+    const c = computeConfidence({ confidence: 1 });
+    expect(c).toBeLessThan(0.1);
+    expect(Number.isNaN(c)).toBe(false);
+  });
+  test("partial gates (only test present) → undefined-safe, no NaN", () => {
+    const c = computeConfidence({ confidence: 1, gates: { test: "pass" } });
+    expect(Number.isNaN(c)).toBe(false);
+    expect(c).toBeGreaterThanOrEqual(0);
+    expect(c).toBeLessThanOrEqual(1);
   });
 });

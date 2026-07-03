@@ -385,6 +385,12 @@ export function makeReviewer(
     if (failedGate) {
       return { pass: false, reason: `measured gate failed: ${failedGate}` };
     }
+    // NOTE (cross-review P0 adjudication): this reviewer IS the `review` gate,
+    // which is `pending` by definition while it runs — so computeConfidence
+    // (which weights review) can't apply here without a chicken-and-egg deadlock.
+    // The self-report threshold stays; the FULL computed-confidence gate runs at
+    // the policyGates close gate (run.ts incomplete-check), where all gates incl.
+    // review are settled. That is where the self-certification loop is closed.
     if (outcome.confidence < threshold) {
       return {
         pass: false,

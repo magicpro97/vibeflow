@@ -1,4 +1,5 @@
 import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
+import { computeConfidence } from "../gates.js";
 import { thresholdFor } from "./investigate.js";
 import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
 import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security-checkpoint.js";
@@ -328,7 +329,9 @@ export function goalEval(state: WorkflowState): { verdict: GoalVerdict; reasons:
   const incomplete = units.filter((u) => {
     if (u.status !== "done" || !u.evidence?.length) return true;
     const threshold = thresholdFor(u.riskClass ?? "feature");
-    return u.confidence < threshold;
+    // Use computed confidence (gate-derived), NOT the agent's raw self-report,
+    // or the self-certification loop stays open here (ADR: computed confidence).
+    return computeConfidence(u) < threshold;
   });
   if (incomplete.length) {
     for (const u of incomplete) {

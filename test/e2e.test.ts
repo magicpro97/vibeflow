@@ -59,6 +59,7 @@ describe("e2e golden path", () => {
         name: unit?.name,
         status: "done",
         confidence: 1,
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
         evidence: ["src/gates.ts:47 — verified implementation"],
       });
       const finalState = readState(dir) as WorkflowState;
@@ -188,6 +189,7 @@ describe("e2e golden path", () => {
         name: "solo",
         status: "done",
         confidence: 1,
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
         evidence: ["src/gates.ts:47 — verified implementation"],
       });
 

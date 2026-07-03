@@ -62,7 +62,7 @@
       <div class="p-3 rounded border border-neutral-800/40 bg-transparent">
         <div class="text-xs text-neutral-500 mb-1 flex items-center">
           Avg confidence
-          <InfoTip tip="Agent's confidence in its own work (0–100%). Informational — doesn't affect pass/fail." />
+          <InfoTip tip="Confidence computed from gate results (build · lint · test · review), capped by the agent's self-report. A unit below its risk threshold fails verification." />
         </div>
         <div
           class="text-lg font-medium tabular-nums"

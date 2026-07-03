@@ -3,6 +3,7 @@
 // api.ts requires document.querySelector → not tested here.
 // Types are compile-time only but we can import and do shape checks.
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 // Import the types module to verify it parses without errors.
 // The import itself is the smoke test.
@@ -460,5 +461,24 @@ describe("HookApprovalModal helpers", () => {
   });
   test("riskDot: none → neutral-500", () => {
     expect(riskDot("none")).toBe("text-neutral-500");
+  });
+});
+
+// PR-C: confidence became a GATE (computeConfidence). The two conf tooltips must
+// no longer claim it is "Informational" / "doesn't affect pass/fail" — that was a
+// lie once the close gate started blocking on it.
+describe("confidence tooltips do not lie (PR-C)", () => {
+  const read = (p: string) =>
+    readFileSync(new URL(`../src/ui/src/components/${p}`, import.meta.url), "utf8");
+
+  test("WorkUnitTable conf tooltip is not marked informational", () => {
+    const src = read("WorkUnitTable.vue");
+    expect(src).not.toContain("Informational only");
+    expect(src).toContain("BLOCKS close");
+  });
+  test("Stage4Verify avg-confidence tooltip is not marked informational", () => {
+    const src = read("Stage4Verify.vue");
+    expect(src).not.toContain("doesn't affect pass/fail");
+    expect(src).toContain("fails verification");
   });
 });

@@ -170,7 +170,7 @@ describe("policy gates", () => {
     };
     const r = policyGates(state);
     expect(r.ok).toBe(false);
-    expect(r.failures.some((f) => f.startsWith("confidence<1"))).toBe(true);
+    expect(r.failures.some((f) => f.startsWith("computed-confidence"))).toBe(true);
     expect(r.failures.some((f) => f.startsWith("no-evidence"))).toBe(true);
     expect(r.failures.some((f) => f.startsWith("scope-overlap"))).toBe(true);
   });
