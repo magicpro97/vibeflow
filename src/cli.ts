@@ -24,6 +24,7 @@ import {
   verify,
   workflow,
 } from "./commands.js";
+import { canary } from "./commands/canary.js";
 import { config, decision } from "./commands/config-decision.js";
 import { coord } from "./commands/coord.js";
 import { state } from "./commands/state.js";
@@ -219,6 +220,8 @@ async function main(argv: string[]): Promise<number> {
       return await demo(flags);
     case "workflow":
       return workflow(positionals[0], positionals.slice(1), flags);
+    case "canary":
+      return canary(positionals[0], positionals.slice(1), flags);
     case "units":
       return units(positionals[0], positionals.slice(1), flags);
     case "config":

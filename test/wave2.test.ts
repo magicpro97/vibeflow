@@ -215,6 +215,10 @@ describe("policy gates", () => {
     },
     resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     evidence: ["src/gates.ts:47 — verified implementation"],
+    // ADR-005: a human-authored canary so the knowledge-heavy canary gate is
+    // satisfied — these fixtures exercise the SKILL gate (warn-only), not the
+    // canary gate. Author differs from the (unset) dispatch engine identity.
+    canary: { file: "test/u.canary.test.ts", author: "human", linkedAt: "2026-07-03" },
     ...over,
   });
 

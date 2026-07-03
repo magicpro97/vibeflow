@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaultCanaryCheck } from "../src/canary.js";
 import {
   computeConfidence,
   e2eEvaluateDynamicImportWarning,
@@ -686,5 +687,101 @@ describe("computeConfidence (Task 5: self-report is a CAP)", () => {
     expect(Number.isNaN(c)).toBe(false);
     expect(c).toBeGreaterThanOrEqual(0);
     expect(c).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("policyGates: canary gate (ADR-005)", () => {
+  const base = {
+    task_id: "t1",
+    goal: "g",
+    success_criteria: [] as string[],
+    totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+  };
+  const khUnit = {
+    name: "feature-x",
+    status: "done" as const,
+    knowledge_heavy: true,
+    knowledge_heavy_source: "risk" as const,
+    skills_required: ["s"],
+    skills_used: ["s"],
+    confidence: 1,
+    evidence: ["src/x.ts:1 — done"],
+    scope: ["src/x.ts"],
+    gates: {
+      build: "pass" as const,
+      lint: "pass" as const,
+      test: "pass" as const,
+      review: "pass" as const,
+    },
+    resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+  };
+
+  test("knowledge-heavy done unit without canary → FAILURE", () => {
+    const state = { ...base, work_units: [{ ...khUnit }] };
+    const r = policyGates(state, { canaryCheck: () => false });
+    expect(r.ok).toBe(false);
+    expect(r.failures.some((f) => f.includes("canary-required"))).toBe(true);
+    expect(r.failures.some((f) => f.includes("→ Fix:"))).toBe(true);
+  });
+
+  test("knowledge-heavy with linked canary → passes", () => {
+    const state = {
+      ...base,
+      work_units: [
+        {
+          ...khUnit,
+          canary: { file: "test/x.canary.test.ts", author: "human", linkedAt: "2026-07-03" },
+        },
+      ],
+    };
+    const r = policyGates(state, { canaryCheck: () => true });
+    expect(r.failures.some((f) => f.includes("canary-required"))).toBe(false);
+    expect(r.passed.some((p) => p.includes("canary:"))).toBe(true);
+  });
+
+  test("non-knowledge-heavy unit → no canary required", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, name: "chore-x", knowledge_heavy: false }],
+    };
+    const r = policyGates(state, { canaryCheck: () => false });
+    expect(r.failures.some((f) => f.includes("canary-required"))).toBe(false);
+  });
+
+  test("defaultCanaryCheck: no canary → false", () => {
+    expect(defaultCanaryCheck({ ...khUnit } as never)).toBe(false);
+  });
+
+  test("defaultCanaryCheck: canary authored by the dispatch engine → false", () => {
+    const u = {
+      ...khUnit,
+      owner_agent: "codex",
+      canary: { file: "test/x.canary.test.ts", author: "codex", linkedAt: "2026-07-03" },
+    };
+    expect(defaultCanaryCheck(u as never)).toBe(false);
+  });
+
+  test("defaultCanaryCheck: human canary differing from engine → true", () => {
+    const u = {
+      ...khUnit,
+      owner_agent: "codex",
+      canary: { file: "test/x.canary.test.ts", author: "alice", linkedAt: "2026-07-03" },
+    };
+    expect(defaultCanaryCheck(u as never)).toBe(true);
+  });
+
+  test("defaultCanaryCheck drives the real gate (no inject) — human canary passes", () => {
+    const state = {
+      ...base,
+      work_units: [
+        {
+          ...khUnit,
+          owner_agent: "codex",
+          canary: { file: "test/x.canary.test.ts", author: "alice", linkedAt: "2026-07-03" },
+        },
+      ],
+    };
+    const r = policyGates(state);
+    expect(r.failures.some((f) => f.includes("canary-required"))).toBe(false);
   });
 });

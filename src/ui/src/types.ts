@@ -20,6 +20,10 @@ export interface WorkUnit {
   };
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
+  /** Knowledge-heavy units require a human-authored canary test to close (ADR-005). */
+  knowledge_heavy?: boolean;
+  /** Linked canary test: file + human author + when linked. Absent = not yet covered. */
+  canary?: { file: string; author: string; linkedAt: string };
 }
 
 export interface Attachment {

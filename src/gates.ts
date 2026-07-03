@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { defaultCanaryCheck } from "./canary.js";
 import { type GateState, type WorkUnit, type WorkflowState, strArray } from "./core.js";
 import { thresholdFor } from "./orchestrator/investigate.js";
 
@@ -143,7 +144,11 @@ export function computeConfidence(u: {
  *  - scope:      no two units may declare overlapping file scopes (parallel safety).
  * Pure over a WorkflowState so it is unit-testable and reusable by hooks + `vf verify`.
  */
-export function policyGates(state: WorkflowState | null): GateReport {
+export function policyGates(
+  state: WorkflowState | null,
+  inject: { canaryCheck?: (u: WorkUnit) => boolean } = {},
+): GateReport {
+  const canaryCheck = inject.canaryCheck ?? defaultCanaryCheck;
   const failures: string[] = [];
   const passed: string[] = [];
   const warnings: string[] = [];
@@ -280,6 +285,23 @@ export function policyGates(state: WorkflowState | null): GateReport {
   }
   if (!khDone.length) passed.push("skills: no knowledge-heavy completed units to check");
   if (waived) warnings.push(`skills: ${waived} unit(s) closed under skill waiver`);
+
+  // ADR-005: canary gate — a knowledge-heavy DONE unit must carry a human-authored
+  // canary test to close. FAILURE (blocks close), not a warning: the human-in-the-loop
+  // escape hatch for the confident-wrongness ceiling (agent + reviewer share a training
+  // blind spot; a human canary encodes what neither can). Author must differ from the
+  // dispatch engine identity (checked by defaultCanaryCheck).
+  let canaryCovered = 0;
+  for (const u of khDone) {
+    if (canaryCheck(u)) {
+      canaryCovered++;
+      continue;
+    }
+    failures.push(
+      `canary-required: "${u.name}" is knowledge-heavy but has no human canary test → Fix: write test/**/*.canary.test.ts encoding a domain edge case, then vf canary link ${u.name} <file>`,
+    );
+  }
+  if (canaryCovered) passed.push(`canary: ${canaryCovered} knowledge-heavy unit(s) covered`);
 
   return { ok: failures.length === 0, failures, passed, warnings };
 }

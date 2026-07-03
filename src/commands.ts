@@ -181,6 +181,11 @@ export { repoLanguages, writeToolConfigs } from "./commands/tools-mcp-config.js"
 // `vf workflow` + `printVersion` now live in src/commands/workflow.ts.
 // The facade re-exports them so the CLI dispatch keeps working.
 export { workflow, printVersion } from "./commands/workflow.js";
+// === Re-export the canary cluster (ADR-005, Task 6c) ===
+// `vf canary list|link|check` lives in src/commands/canary.ts. The facade
+// re-exports it so the CLI dispatch keeps working.
+export { canary } from "./commands/canary.js";
+export type { CanaryInject } from "./commands/canary.js";
 // === Re-export the help cluster (issue #80, phase 8/14) ===
 // `printHelp` + `hasCommandHelp` + `printCommandHelp` now live in
 // src/commands/help.ts. The facade re-exports them so the CLI
