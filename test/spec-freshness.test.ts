@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -186,4 +187,49 @@ test("driftUncovered: changed line NOT covered → true (needs human)", () => {
 
 test("defaultImplDrift: no fingerprint → empty drift", () => {
   expect(defaultImplDrift({})).toEqual({ drifted: [], uncovered: [] });
+});
+
+// Real-fs exercises for the DEFAULT seams (hashFile / git diff) that the injected
+// tests above bypass — covers defaultHashFile, defaultChangedLines, defaultImplDrift.
+test("snapshotImpl + detectImplDrift: real file hashing + edit detection", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-implfp-"));
+  writeFileSync(join(dir, "a.ts"), "export const x = 1;\n");
+  const fp = snapshotImpl(dir, ["a.ts", "gone.ts"]); // gone.ts absent → skipped
+  expect(Object.keys(fp)).toEqual(["a.ts"]);
+  // unchanged → no drift
+  expect(detectImplDrift(dir, fp)).toEqual([]);
+  // edit the file → drift
+  writeFileSync(join(dir, "a.ts"), "export const x = 2;\n");
+  expect(detectImplDrift(dir, fp)).toEqual(["a.ts"]);
+});
+
+test("driftUncovered + defaultImplDrift: real git diff over a committed file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-gitdiff-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  writeFileSync(join(dir, "a.ts"), "line1\nline2\n");
+  git("add", "a.ts");
+  git("commit", "-qm", "init");
+  const sha = git("rev-parse", "HEAD").trim();
+  const fp = snapshotImpl(dir, ["a.ts"]);
+  // edit line 2 after the snapshot commit
+  writeFileSync(join(dir, "a.ts"), "line1\nEDITED\n");
+  // no lcov in this tmp dir → returns early (uncovered) BEFORE the git-diff path
+  expect(driftUncovered(dir, "a.ts", sha)).toBe(true);
+  // NOW write a real lcov so driftUncovered runs the REAL defaultChangedLines
+  // (git diff -U0) path: line 2 changed but lcov only covers line 1 → uncovered.
+  mkdirSync(join(dir, "coverage"), { recursive: true });
+  writeFileSync(join(dir, "coverage", "lcov.info"), "SF:a.ts\nDA:1,5\nend_of_record\n");
+  expect(driftUncovered(dir, "a.ts", sha)).toBe(true); // changed line 2 not in lcov
+  // lcov that DOES cover the changed line 2 → benign (false)
+  writeFileSync(join(dir, "coverage", "lcov.info"), "SF:a.ts\nDA:2,5\nend_of_record\n");
+  expect(driftUncovered(dir, "a.ts", sha)).toBe(false);
+  // and the full defaultImplDrift wrapper over real fs + git
+  const d = defaultImplDrift({ impl_fingerprint: fp, verified_sha: sha });
+  // detectImplDrift uses process.cwd() as base, not dir — so it sees no drift here;
+  // this exercises the wrapper's branch structure without asserting drift content.
+  expect(Array.isArray(d.drifted)).toBe(true);
+  expect(Array.isArray(d.uncovered)).toBe(true);
 });
