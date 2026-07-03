@@ -500,3 +500,19 @@ describe("canary badge (PR-D, ADR-005)", () => {
     expect(src).toContain("amber");
   });
 });
+
+describe("spec-drift advisory badge (PR-B, Task 7-B)", () => {
+  const read = (p: string) =>
+    readFileSync(new URL(`../src/ui/src/components/${p}`, import.meta.url), "utf8");
+
+  test("Stage4Verify surfaces spec-stale / impl-drift advisory warnings", () => {
+    const src = read("Stage4Verify.vue");
+    expect(src).toContain("driftWarnings");
+    expect(src).toContain("spec-stale");
+    expect(src).toContain("impl-drift");
+  });
+  test("drift warnings render as amber advisory (non-blocking)", () => {
+    const src = read("Stage4Verify.vue");
+    expect(src).toContain("text-amber-400");
+  });
+});

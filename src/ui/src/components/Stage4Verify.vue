@@ -158,6 +158,21 @@
             >Copy</button>
           </div>
         </div>
+        <!-- Advisory warnings (spec-drift / impl-drift): amber, non-blocking.
+             The spec/impl drifted since dispatch — surface it without failing. -->
+        <div
+          v-if="driftWarnings.length"
+          class="px-4 py-2 space-y-1 border-b border-neutral-800/40"
+        >
+          <div
+            v-for="w in driftWarnings"
+            :key="w"
+            class="flex items-start gap-1.5 text-[11px] text-amber-400 font-mono"
+          >
+            <span class="shrink-0 mt-px">⚠</span>
+            <span class="break-all flex-1">{{ w }}</span>
+          </div>
+        </div>
         <div v-if="policyExpanded" class="p-4 bg-neutral-900/30">
           <pre class="text-xs font-mono text-neutral-300 whitespace-pre-wrap break-all leading-relaxed">{{ (() => { try { return JSON.stringify(result.policy, null, 2) } catch { return String(result.policy) } })() }}</pre>
         </div>
@@ -254,6 +269,14 @@ const avgConfidence = computed<number | null>(() => {
 
 const passCount = computed(() => result.value?.gates.filter((g) => g.pass).length ?? 0);
 const hasUnits = computed(() => (store.state?.work_units?.length ?? 0) > 0);
+
+// Task 7-B: surface spec-drift / impl-drift advisory warnings (non-blocking) so
+// the user sees drift since dispatch without it failing the verdict.
+const driftWarnings = computed<string[]>(() =>
+  (result.value?.policy?.warnings ?? []).filter(
+    (w) => w.includes("spec-stale") || w.includes("impl-drift"),
+  ),
+);
 
 const hasPolicy = computed(() => {
   const p = result.value?.policy;
