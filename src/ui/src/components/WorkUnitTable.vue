@@ -111,6 +111,17 @@
                   class="w-1.5 h-1.5 rounded-full flex-shrink-0"
                   :class="gateClass(u.gates[gate])"
                 />
+                <!-- Canary badge (ADR-005): knowledge-heavy units need a human canary to close -->
+                <span
+                  v-if="u.knowledge_heavy"
+                  :title="u.canary
+                    ? `canary: ${u.canary.file} (by ${u.canary.author})`
+                    : 'knowledge-heavy — needs a human-authored *.canary.test.ts to close (ADR-005)'"
+                  class="ml-1 px-1 py-0.5 rounded text-[9px] font-mono leading-none"
+                  :class="u.canary
+                    ? 'bg-emerald-950/40 border border-emerald-900/40 text-emerald-400'
+                    : 'bg-amber-950/40 border border-amber-900/40 text-amber-400'"
+                >{{ u.canary ? '🛡 canary' : '⚠ needs canary' }}</span>
               </div>
             </td>
 

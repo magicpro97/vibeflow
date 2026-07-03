@@ -43,6 +43,13 @@ export interface WorkUnit {
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
   /**
+   * ADR-005: the human-authored canary test linked to this unit. Knowledge-heavy
+   * units cannot close without one (gate FAILURE). `author` (git-blame) must
+   * differ from the dispatch engine identity — a canary the agent wrote itself
+   * is not a canary. Set by `vf canary link`.
+   */
+  canary?: { file: string; author: string; linkedAt: string };
+  /**
    * Security checkpoint result, populated when the orchestrator runs
    * the post-coding security skill on this unit. Structural type to
    * avoid a circular import from core → orchestrator/security-checkpoint.

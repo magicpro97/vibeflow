@@ -542,6 +542,25 @@ describe("normalizeUnit round-trips skills-first fields (anti-regression)", () =
     });
   });
 
+  // Cross-review P0: a linked canary (ADR-005) must survive a subsequent
+  // mutateUnits update — else `vf units update` silently strips it and reopens
+  // the gate. normalizeUnit must round-trip the canary field.
+  test("an update through mutateUnits→normalizeUnit preserves the linked canary", () => {
+    mutateUnits(dir, "add", { name: "auth" });
+    mutateUnits(dir, "update", {
+      name: "auth",
+      canary: { file: "test/auth.canary.test.ts", author: "alice", linkedAt: "2026-07-03" },
+    });
+    // A later unrelated update must NOT erase the canary.
+    mutateUnits(dir, "update", { name: "auth", confidence: 0.9 });
+    const u = (readState(dir) as WorkflowState).work_units.find((x) => x.name === "auth");
+    expect(u?.canary).toEqual({
+      file: "test/auth.canary.test.ts",
+      author: "alice",
+      linkedAt: "2026-07-03",
+    });
+  });
+
   test("normalizeUnit rejects malformed field values", () => {
     mutateUnits(dir, "add", { name: "auth" });
     mutateUnits(dir, "update", {

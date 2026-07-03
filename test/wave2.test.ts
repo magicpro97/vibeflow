@@ -207,6 +207,9 @@ describe("policy gates", () => {
     name: "u",
     status: "done" as const,
     confidence: 1,
+    // ADR-005 cross-review fix: dispatch identity must be set, else the canary
+    // gate treats "unknown owner" as untrusted and blocks. Author differs from it.
+    owner_agent: "codex",
     gates: {
       build: "pass" as const,
       lint: "pass" as const,
@@ -215,6 +218,10 @@ describe("policy gates", () => {
     },
     resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     evidence: ["src/gates.ts:47 — verified implementation"],
+    // ADR-005: a human-authored canary so the knowledge-heavy canary gate is
+    // satisfied — these fixtures exercise the SKILL gate (warn-only), not the
+    // canary gate. Author differs from the (unset) dispatch engine identity.
+    canary: { file: "test/u.canary.test.ts", author: "human", linkedAt: "2026-07-03" },
     ...over,
   });
 

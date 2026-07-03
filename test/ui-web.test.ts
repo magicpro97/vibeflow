@@ -482,3 +482,21 @@ describe("confidence tooltips do not lie (PR-C)", () => {
     expect(src).toContain("fails verification");
   });
 });
+
+describe("canary badge (PR-D, ADR-005)", () => {
+  const read = (p: string) =>
+    readFileSync(new URL(`../src/ui/src/components/${p}`, import.meta.url), "utf8");
+
+  test("WorkUnitTable renders a canary badge for knowledge-heavy units", () => {
+    const src = read("WorkUnitTable.vue");
+    expect(src).toContain("u.knowledge_heavy");
+    expect(src).toContain("🛡 canary");
+    expect(src).toContain("⚠ needs canary");
+  });
+  test("canary badge distinguishes covered (emerald) vs needed (amber)", () => {
+    const src = read("WorkUnitTable.vue");
+    expect(src).toContain("u.canary");
+    expect(src).toContain("emerald");
+    expect(src).toContain("amber");
+  });
+});

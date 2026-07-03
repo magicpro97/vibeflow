@@ -28,6 +28,7 @@ export function printHelp(): number {
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
+    ${c.cyan("canary [sub]")}      list | link <unit> <file> | check — human-authored canary tests (ADR-005)
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
     ${c.cyan("config [sub]")}      memory <builtin|claude-mem|off|status> — read/toggle per-repo settings
     ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | import
@@ -151,6 +152,24 @@ ${c.bold("Subcommands:")}
 ${c.bold("Examples:")}
   vf workflow delete
   vf workflow import ../other-repo --yes`,
+
+  canary: () => `${c.bold("vf canary")} ${c.dim("<list | link <unit> <file> | check>")}
+Manage human-authored canary tests (ADR-005). A knowledge-heavy unit cannot close
+without a linked canary whose author differs from the dispatch engine — the
+human-in-the-loop escape hatch for the confident-wrongness ceiling.
+
+${c.bold("Subcommands:")}
+  list                     list every test/**/*.canary.test.ts + which unit it covers (default)
+  link <unit> <file>       link a canary to a unit (records git-blame author; refuses self-authored)
+  check                    report knowledge-heavy done units missing a human canary
+
+${c.bold("Convention:")} canary files live at test/**/*.canary.test.ts and declare a
+  \`// canary-scope: <path>,<path>\` header so \`list\` can match them to a unit.
+
+${c.bold("Examples:")}
+  vf canary list
+  vf canary link auth test/auth.canary.test.ts
+  vf canary check`,
 
   units:
     () => `${c.bold("vf units")} ${c.dim("[status | show <name> | resources | evidence <name> | add <name> | update <name> | delete <name>]")}
