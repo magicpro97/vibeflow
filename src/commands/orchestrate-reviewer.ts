@@ -17,8 +17,8 @@ export interface ReviewerPromptOpts {
  */
 export function buildReviewerPrompt(opts: ReviewerPromptOpts): string {
   return [
-    "You are an independent code reviewer. You have NOT seen the implementation process.",
-    "Review only what you see in this diff. Do not infer intent beyond what is explicit.",
+    "You are a hostile code reviewer. Your default assumption is that this diff contains bugs.",
+    "You have NOT seen the implementation process. Review only what is in this diff.",
     "",
     `Goal: ${opts.goal}`,
     opts.spec ? `Spec: ${opts.spec}` : "",
@@ -26,13 +26,12 @@ export function buildReviewerPrompt(opts: ReviewerPromptOpts): string {
     "Diff:",
     opts.diff,
     "",
-    "Answer:",
-    "1. Does this diff implement the goal as stated?",
-    "2. What edge cases from the goal/spec are NOT covered?",
-    "3. Are there tests that only test the happy path?",
+    "STEP 1 — Before reading the diff, list every behavior the goal/spec requires as numbered claims.",
+    "STEP 2 — For each claim, find the EXACT line(s) in the diff that implement it, or write MISSING.",
+    "STEP 3 — List edge cases implied by each claim that have NO test coverage.",
     "",
     "Cite file:line for every finding. No bare opinions.",
-    "Respond COVERED if all goal behaviors are present, or list specific missing behaviors.",
+    "Respond COVERED only if ALL claims have implementing lines AND no critical edge cases are untested.",
   ]
     .filter(Boolean)
     .join("\n");

@@ -5837,4 +5837,24 @@ describe("buildReviewerPrompt (ADR-001)", () => {
     const prompt = buildReviewerPrompt({ goal: "g", diff: "d" });
     expect(prompt).toContain("file:line");
   });
+  test("buildReviewerPrompt: contains hostile default assumption", () => {
+    const out = buildReviewerPrompt({ goal: "g", diff: "d" });
+    expect(out).toContain("hostile");
+    expect(out).toContain("default assumption");
+  });
+  test("buildReviewerPrompt: STEP 1 lists behavioral claims", () => {
+    const out = buildReviewerPrompt({ goal: "g", spec: "s", diff: "d" });
+    expect(out).toContain("STEP 1");
+    expect(out).toContain("claim");
+  });
+  test("buildReviewerPrompt: STEP 2 find EXACT line or MISSING", () => {
+    const out = buildReviewerPrompt({ goal: "g", diff: "d" });
+    expect(out).toContain("STEP 2");
+    expect(out).toContain("MISSING");
+  });
+  test("buildReviewerPrompt: STEP 3 edge cases without test coverage", () => {
+    const out = buildReviewerPrompt({ goal: "g", diff: "d" });
+    expect(out).toContain("STEP 3");
+    expect(out).toContain("edge case");
+  });
 });

@@ -46,6 +46,32 @@ describe("runLLMReview (ADR-001)", () => {
     expect(capturedPrompt).not.toContain("dispatch");
     expect(capturedPrompt).not.toContain("self-report");
   });
+
+  test("cross-tool: reviewerEngine differs from implementer when 2nd engine available", async () => {
+    const llmFn = async () => "COVERED";
+    const r = await runLLMReview({
+      goal: "g",
+      diff: "d",
+      llmFn,
+      implementer: "claude",
+      available: ["claude", "codex"],
+    });
+    expect(r.reviewerEngine).toBe("codex");
+    expect(r.warning).toBeUndefined();
+  });
+
+  test("same-family: warning emitted when only implementer engine available", async () => {
+    const llmFn = async () => "COVERED";
+    const r = await runLLMReview({
+      goal: "g",
+      diff: "d",
+      llmFn,
+      implementer: "claude",
+      available: ["claude"],
+    });
+    expect(r.reviewerEngine).toBe("claude");
+    expect(r.warning).toContain("same-tool review has correlated blind spots");
+  });
 });
 
 // --- ADR-001: getUnitDiff + makeVibflowLLMFn coverage ---

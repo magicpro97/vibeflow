@@ -58,6 +58,16 @@
     <div v-if="units.length" class="flex items-center gap-2">
       <span class="text-[11px] text-neutral-600">{{ anyRunning ? 'running with' : 'dispatched to' }}</span>
       <span class="text-[11px] font-mono text-neutral-400">{{ engine }}</span>
+      <!-- ADR-001 hardening: read-only reviewer-engine hint. The reviewer auto-routes
+           to a DIFFERENT tool than the implementer to reduce correlated approval bias. -->
+      <span class="text-[11px] text-neutral-700">·</span>
+      <span class="text-[11px] text-neutral-600">reviewer</span>
+      <span class="text-[11px] font-mono text-neutral-400">{{ reviewerEngine }}</span>
+      <span
+        v-if="reviewerWarning"
+        class="text-[11px] text-neutral-500"
+        :title="reviewerWarning"
+      >⚠ same-tool review</span>
     </div>
 
     <!-- Hook approval modal: surfaces require_approval hooks during dispatch -->
@@ -176,6 +186,21 @@ const pulsingNext = ref(false);
 const preflightLoading = ref(false);
 const preflightResult = ref<PreflightResult | null>(null);
 const preflightErr = ref<string | null>(null);
+
+// ADR-001 hardening: mirror pickReviewerEngine — auto-route the reviewer to a
+// DIFFERENT ready engine than the implementer. Display-only; the CLI owns the
+// real resolution (src/review-engine.ts). Falls back to the implementer when it
+// is the only ready engine, and flags that same-tool case as a warning.
+const reviewerEngine = computed<string>(() => {
+  const impl = engine.value;
+  const ready = preflightResult.value?.readiness.filter((r) => r.level === "ready") ?? [];
+  return ready.map((r) => r.engine).find((e) => e !== impl) ?? impl;
+});
+const reviewerWarning = computed<string | null>(() =>
+  reviewerEngine.value === engine.value
+    ? `Reviewer engine "${engine.value}" is the same tool as the implementer — same-tool review has correlated blind spots. Install a 2nd engine (codex/copilot) for cross-tool review.`
+    : null,
+);
 
 async function runPreflight() {
   preflightLoading.value = true;
