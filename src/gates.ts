@@ -104,8 +104,11 @@ function wGeoMean(pairs: Array<[number, number]>): number {
 
 /** Objective, execution-anchored confidence in [0,1]. Use THIS at the close
  *  gate, not raw `u.confidence`. */
-export function computeConfidence(u: Pick<WorkUnit, "confidence" | "gates">): number {
-  const g = u.gates;
+export function computeConfidence(u: {
+  confidence: number;
+  gates?: Partial<WorkUnit["gates"]>;
+}): number {
+  const g = u.gates ?? {};
   // Tier 1: an executed-and-FAILED critical gate ⇒ 0.
   if (
     g.build === "fail" ||
@@ -118,11 +121,13 @@ export function computeConfidence(u: Pick<WorkUnit, "confidence" | "gates">): nu
   // Tier 2: weighted geo-mean. test = strongest (execution); review = independent
   // but LLM; build cheap+deterministic; lint weak. (Weights = engineering
   // judgment from relative signal strength, NOT an optimized study result.)
+  // A gate not yet present (undefined) scores 0 — floored to EPS in wGeoMean.
+  const val = (s: GateState | undefined): number => (s ? GATE_VAL[s] : 0);
   const objective = wGeoMean([
-    [GATE_VAL[g.build], 1.5],
-    [GATE_VAL[g.test], 3],
-    [GATE_VAL[g.lint], 1],
-    [GATE_VAL[g.review], 2],
+    [val(g.build), 1.5],
+    [val(g.test), 3],
+    [val(g.lint), 1],
+    [val(g.review), 2],
   ]);
   // Tier 3: self-report caps (Kadavath 2022) — lowers only, never inflates.
   return Math.round(Math.min(u.confidence ?? 0, objective) * 100) / 100;

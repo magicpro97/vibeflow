@@ -188,12 +188,18 @@ describe("parallel runner + goal-eval", () => {
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     });
 
+    // Gate results settle to `pass` by the time goalEval runs (units have been
+    // dispatched + verified). computeConfidence caps the self-report by these
+    // gates, so a `done` unit at goalEval carries passing gates. #90 asserts the
+    // self-report threshold band still governs met-vs-partial ON TOP of that.
+    const passGates = { build: "pass", lint: "pass", test: "pass", review: "pass" } as const;
     // 1) docs unit at confidence 0.70 (threshold met) → met
     const docsMet: WorkUnit = {
       ...unit("a", ["src/a/"]),
       status: "done",
       confidence: 0.7,
       riskClass: "docs",
+      gates: passGates,
       evidence: ["e.log"],
     };
     expect(goalEval(stateFor(docsMet)).verdict).toBe("met");
@@ -208,6 +214,7 @@ describe("parallel runner + goal-eval", () => {
       status: "done",
       confidence: 0.94,
       riskClass: "security",
+      gates: passGates,
       evidence: ["e.log"],
     };
     expect(goalEval(stateFor(secBelow)).verdict).toBe("partial");
@@ -221,6 +228,7 @@ describe("parallel runner + goal-eval", () => {
       ...unit("a", ["src/a/"]),
       status: "done",
       confidence: 0.84,
+      gates: passGates,
       evidence: ["e.log"],
     };
     expect(goalEval(stateFor(defaultBelow)).verdict).toBe("partial");

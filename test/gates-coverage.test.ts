@@ -672,4 +672,19 @@ describe("computeConfidence (Task 5: self-report is a CAP)", () => {
     expect(c).toBeLessThan(0.75);
     expect(c).toBeGreaterThan(0);
   });
+  // Cross-review P0 fix: computeConfidence must accept UnitOutcome-shaped input
+  // where gates is undefined/partial (the orchestrate/reviewer call sites pass this).
+  test("undefined gates → near-zero (not-run signal, no crash)", () => {
+    // All signals absent → wGeoMean floors every term to EPS(0.05) → objective ≈ 0.05,
+    // which caps confidence far below any threshold. No NaN, no crash.
+    const c = computeConfidence({ confidence: 1 });
+    expect(c).toBeLessThan(0.1);
+    expect(Number.isNaN(c)).toBe(false);
+  });
+  test("partial gates (only test present) → undefined-safe, no NaN", () => {
+    const c = computeConfidence({ confidence: 1, gates: { test: "pass" } });
+    expect(Number.isNaN(c)).toBe(false);
+    expect(c).toBeGreaterThanOrEqual(0);
+    expect(c).toBeLessThanOrEqual(1);
+  });
 });
