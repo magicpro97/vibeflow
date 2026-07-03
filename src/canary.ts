@@ -49,7 +49,7 @@ export function canaryForUnit(
   const unitScope = unit.scope ?? [];
   for (const canaryFile of canaries) {
     const cScope = readScope(canaryFile);
-    if (cScope.some((cs) => unitScope.some((us) => cs.startsWith(us) || us.startsWith(cs)))) {
+    if (cScope.some((cs) => unitScope.some((us) => pathPrefixOverlap(cs, us)))) {
       return canaryFile;
     }
   }
@@ -61,7 +61,24 @@ function defaultReadCanaryScope(file: string): string[] {
   if (!existsSync(file)) return [];
   const head = readFileSync(file, "utf8").slice(0, 500);
   const m = head.match(/\/\/\s*canary-scope:\s*(.+)/);
-  return m?.[1] ? m[1].split(",").map((s) => s.trim()) : [];
+  // Drop empty entries so a stray `,` in the header can't produce an "" that
+  // prefix-matches every scope.
+  return m?.[1]
+    ? m[1]
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+}
+
+/** True when two scope paths overlap at a PATH BOUNDARY (not a bare substring).
+ *  `src/a` must NOT match `src/auth`; it matches `src/a`, `src/a/x`, or a parent. */
+function pathPrefixOverlap(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const under = (parent: string, child: string) =>
+    child.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
+  return under(a, b) || under(b, a);
 }
 
 /**
@@ -73,5 +90,9 @@ function defaultReadCanaryScope(file: string): string[] {
 export function defaultCanaryCheck(u: WorkUnit): boolean {
   const canary = u.canary;
   if (!canary?.file || !canary.author) return false;
+  // Unknown dispatch identity = no trust: without owner_agent we can't prove the
+  // canary author differs from the agent, so `author !== undefined` would pass
+  // trivially for ANY author. Treat a missing owner_agent as uncovered (block).
+  if (!u.owner_agent) return false;
   return canary.author !== u.owner_agent;
 }

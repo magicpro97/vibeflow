@@ -770,6 +770,18 @@ describe("policyGates: canary gate (ADR-005)", () => {
     expect(defaultCanaryCheck(u as never)).toBe(true);
   });
 
+  // Cross-review P0 (both reviewers): undefined owner_agent must NOT pass. Without
+  // a known dispatch identity, `author !== undefined` is trivially true for any
+  // author string — hollowing out the human-canary invariant. Missing identity = block.
+  test("defaultCanaryCheck: undefined owner_agent → false (no trust without identity)", () => {
+    const u = {
+      ...khUnit,
+      owner_agent: undefined,
+      canary: { file: "test/x.canary.test.ts", author: "anyone", linkedAt: "2026-07-03" },
+    };
+    expect(defaultCanaryCheck(u as never)).toBe(false);
+  });
+
   test("defaultCanaryCheck drives the real gate (no inject) — human canary passes", () => {
     const state = {
       ...base,

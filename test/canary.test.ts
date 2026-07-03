@@ -62,6 +62,25 @@ test("canaryForUnit: no overlap → null", () => {
   expect(match).toBeNull();
 });
 
+// Cross-review P1: prefix match must anchor at a path boundary — `src/a` must NOT
+// match `src/auth` (sibling dir), or a canary for one module falsely covers another.
+test("canaryForUnit: sibling-prefix does NOT match (src/a vs src/auth)", () => {
+  const match = canaryForUnit(
+    { name: "u", scope: ["src/auth"] } as never,
+    ["test/a.canary.test.ts"],
+    { readCanaryScope: () => ["src/a"] },
+  );
+  expect(match).toBeNull();
+});
+test("canaryForUnit: real path-boundary overlap matches (src/a covers src/a/x)", () => {
+  const match = canaryForUnit(
+    { name: "u", scope: ["src/a/x.ts"] } as never,
+    ["test/a.canary.test.ts"],
+    { readCanaryScope: () => ["src/a"] },
+  );
+  expect(match).toBe("test/a.canary.test.ts");
+});
+
 test("canaryForUnit: unit with no scope → null", () => {
   const match = canaryForUnit({ name: "z" } as never, ["test/x.canary.test.ts"], {
     readCanaryScope: () => ["src/x.ts"],

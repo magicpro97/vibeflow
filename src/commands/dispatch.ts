@@ -131,6 +131,9 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
         : undefined,
     scope: input.scope,
     spec: input.spec,
+    // Persist the linked canary (ADR-005) across updates — else any `vf units
+    // update` would silently strip it via normalizeUnit and reopen the gate.
+    canary: input.canary,
     gates: {
       build: g.build ?? "pending",
       lint: g.lint ?? "pending",

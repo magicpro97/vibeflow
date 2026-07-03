@@ -2385,6 +2385,7 @@ describe("commands.help branches", () => {
     expect(printCommandHelp("state")).toBe(0);
     expect(printCommandHelp("coord")).toBe(0);
     expect(printCommandHelp("decision")).toBe(0);
+    expect(printCommandHelp("canary")).toBe(0);
   });
 
   test("printCommandHelp for unknown subcommand falls back to printHelp (line 2943-2944)", () => {
