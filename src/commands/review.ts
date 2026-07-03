@@ -19,6 +19,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ENGINES } from "../core/types.js";
+import { pickReviewerEngine } from "../review-engine.js";
 import { c, cwd, out } from "./_shared.js";
 
 /** A4 (issue #170) — supported target types. */
@@ -46,8 +48,8 @@ export interface ReviewResult {
   engine: string;
 }
 
-/** Default review engine. */
-export const DEFAULT_REVIEW_ENGINE = "claude";
+/** Default review engine = top canonical priority (single source: ENGINES). */
+export const DEFAULT_REVIEW_ENGINE = ENGINES[0] ?? "claude";
 
 /** Parse a fenced JSON block from the reviewer's response.
  *  Returns null if the block is missing or unparseable. */
@@ -239,10 +241,15 @@ export async function review(
     });
     return 2;
   }
-  const engine =
-    typeof flags.engine === "string" && flags.engine.length > 0
-      ? flags.engine
-      : DEFAULT_REVIEW_ENGINE;
+  const engine = pickReviewerEngine({
+    flag: typeof flags.engine === "string" ? flags.engine : undefined,
+    env: process.env.VF_REVIEW_ENGINE,
+    // `vf review` has no implementer / ready-engine context in scope, so ship
+    // flag > env > default here. The cross-tool auto-pick (route the reviewer
+    // to a DIFFERENT engine than the implementer) lives in the dispatch path
+    // where the implementer engine is known — see src/review-engine.ts.
+    available: [],
+  });
 
   // Read the target's content.
   const targetContent = readTargetContent(target, targetId, inject, inject.revParseShow);

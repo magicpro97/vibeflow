@@ -19,7 +19,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  DEFAULT_REVIEW_ENGINE,
   type ReviewTarget,
   type ReviewVerdict,
   c,
