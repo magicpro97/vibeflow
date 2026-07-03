@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { type WorkflowState, strArray } from "./core.js";
+import { type GateState, type WorkUnit, type WorkflowState, strArray } from "./core.js";
+import { thresholdFor } from "./orchestrator/investigate.js";
 
 export interface GateReport {
   ok: boolean;
@@ -73,6 +74,64 @@ export function isVerifiableEvidence(s: string): boolean {
 
 // ─── End ADR-004 ──────────────────────────────────────────────────────────
 
+// ─── Computed confidence: self-report is a CAP, not an input ───────────────
+// Agent self-report is unreliable (Kadavath et al. 2022, arXiv:2207.05221) →
+// it may only LOWER confidence, never inflate it. Objective signals combine via
+// WEIGHTED GEOMETRIC MEAN (weakest-link: a near-zero signal tanks the result
+// superlinearly, unlike an arithmetic mean which hides it). A failed *critical*
+// gate is a hard zero.
+
+const GATE_VAL: Record<GateState, number> = {
+  pass: 1,
+  pending: 0.4, // not-yet-run: partial credit, never full
+  running: 0,
+  fail: 0,
+};
+
+/** Weighted geometric mean of [value,weight], values in [0,1]. EPS floors soft
+ *  signals so one 0 on a non-critical signal doesn't zero all (critical gates
+ *  are zeroed separately, before this). */
+function wGeoMean(pairs: Array<[number, number]>): number {
+  const EPS = 0.05;
+  let acc = 0;
+  let wSum = 0;
+  for (const [v, w] of pairs) {
+    acc += w * Math.log(Math.max(v, EPS));
+    wSum += w;
+  }
+  return wSum === 0 ? 0 : Math.exp(acc / wSum);
+}
+
+/** Objective, execution-anchored confidence in [0,1]. Use THIS at the close
+ *  gate, not raw `u.confidence`. */
+export function computeConfidence(u: Pick<WorkUnit, "confidence" | "gates">): number {
+  const g = u.gates;
+  // Tier 1: an executed-and-FAILED critical gate ⇒ 0.
+  if (
+    g.build === "fail" ||
+    g.test === "fail" ||
+    g.review === "fail" ||
+    g.security === "fail" ||
+    g.goal_eval === "fail"
+  )
+    return 0;
+  // Tier 2: weighted geo-mean. test = strongest (execution); review = independent
+  // but LLM; build cheap+deterministic; lint weak. (Weights = engineering
+  // judgment from relative signal strength, NOT an optimized study result.)
+  const objective = wGeoMean([
+    [GATE_VAL[g.build], 1.5],
+    [GATE_VAL[g.test], 3],
+    [GATE_VAL[g.lint], 1],
+    [GATE_VAL[g.review], 2],
+  ]);
+  // Tier 3: self-report caps (Kadavath 2022) — lowers only, never inflates.
+  return Math.round(Math.min(u.confidence ?? 0, objective) * 100) / 100;
+}
+// ponytail: test signal = EXISTENCE not ADEQUACY. add mutation score
+// (StrykerJS) as a 5th weighted signal when riskClass ∈ {security,deploy}.
+
+// ─── End computed confidence ───────────────────────────────────────────────
+
 /**
  * The three policy gates that compose with build/lint/test (WORK_UNIT_ORCHESTRATION.md):
  *  - evidence:   a unit marked `done` must carry recorded evidence.
@@ -105,16 +164,23 @@ export function policyGates(state: WorkflowState | null): GateReport {
     }
   }
 
-  // Confidence gate — only applies to non-running units
-  const lowConf = units.filter((u) => u.status !== "running" && (u.confidence ?? 0) < 1);
+  // Computed-confidence gate — self-report is only a CAP; the objective value
+  // (gate results via weighted geometric mean) must clear the unit's risk
+  // threshold. Only applies to non-running units.
+  const lowConf = units.filter((u) => {
+    if (u.status === "running") return false;
+    return computeConfidence(u) < thresholdFor(u.riskClass ?? "feature");
+  });
   if (lowConf.length) {
     for (const u of lowConf) {
+      const computed = computeConfidence(u);
+      const threshold = thresholdFor(u.riskClass ?? "feature");
       failures.push(
-        `confidence<1: "${u.name}" at ${u.confidence} — investigate/debate before close → Fix: vf units update ${u.name} --confidence 1`,
+        `computed-confidence: "${u.name}" self=${u.confidence} computed=${computed.toFixed(2)} < ${threshold} — investigate/debate before close`,
       );
     }
   } else {
-    passed.push("confidence: all units at 1.0");
+    passed.push("computed-confidence: all units meet their risk threshold");
   }
 
   // Evidence gate.

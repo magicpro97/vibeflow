@@ -21,7 +21,7 @@
             <span class="flex items-center gap-0.5">Checks<InfoTip tip="build · lint · test · review results. White = passed, red = failed, dim = not run. Hover a dot for details." /></span>
           </th>
           <th class="text-right py-2 pr-2 text-[11px] text-neutral-600 font-medium">
-            <span class="flex items-center justify-end gap-0.5">Conf<InfoTip tip="Agent's confidence in its own work (0–100%). Informational only — doesn't affect pass/fail." /></span>
+            <span class="flex items-center justify-end gap-0.5">Conf<InfoTip tip="Confidence (0–100%). Computed from gate results (build · lint · test · review) — the agent's self-report can only CAP it, never raise it. Below the unit's risk threshold BLOCKS close." /></span>
           </th>
         </tr>
       </thead>
