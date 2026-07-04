@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EXIT_MERGE_FAIL,
+  EXIT_SHIP_TAMPER,
   EXIT_TIMEOUT,
   defaultRunCommandSync,
   mergeWhenGreen,
@@ -81,6 +82,7 @@ describe("vf pr merge-when-green (A9 #175)", () => {
             stderr: "",
             status: 0,
           },
+          { stdout: '{"files":[]}', stderr: "", status: 0 },
           { stdout: "Merged #3", stderr: "", status: 0 },
         ]),
         sleep: async () => {},
@@ -132,6 +134,7 @@ describe("vf pr merge-when-green (A9 #175)", () => {
             stderr: "",
             status: 0,
           },
+          { stdout: '{"files":[]}', stderr: "", status: 0 },
           { stdout: "Merged #5", stderr: "", status: 0 },
         ]),
         sleep: async () => {},
@@ -171,6 +174,7 @@ describe("vf pr merge-when-green (A9 #175)", () => {
             stderr: "",
             status: 0,
           },
+          { stdout: '{"files":[]}', stderr: "", status: 0 },
           { stdout: "", stderr: "Merge conflict", status: 1 },
         ]),
         sleep: async () => {},
@@ -204,6 +208,7 @@ describe("vf pr merge-when-green (A9 #175)", () => {
             stderr: "",
             status: 0,
           },
+          { stdout: '{"files":[]}', stderr: "", status: 0 },
           { stdout: "Merged #11", stderr: "", status: 0 },
         ]),
         sleep: async () => {},
@@ -242,6 +247,7 @@ describe("vf pr merge-when-green (A9 #175)", () => {
     expect(EXIT_IO).toBe(5);
     expect(EXIT_MERGE_FAIL).toBe(8);
     expect(EXIT_TIMEOUT).toBe(9);
+    expect(EXIT_SHIP_TAMPER).toBe(10);
   });
 
   test("(m) defaultRunCommandSync runs a real harmless command", () => {
@@ -270,5 +276,115 @@ describe("vf pr merge-when-green (A9 #175)", () => {
         { existsSync: (p: string) => p.includes(".merge-queue.lock") },
       ),
     ).toThrow(/moveToBack could not acquire lock/);
+  });
+
+  // ---- #520 ship transport-only: scoped-file digest guard ----
+  /** Green-CI response then a prScope `--json files` listing then a merge OK. */
+  function greenScopeMerge(files: string[]) {
+    return [
+      {
+        stdout: JSON.stringify({
+          statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+        }),
+        stderr: "",
+        status: 0,
+      },
+      { stdout: JSON.stringify({ files: files.map((path) => ({ path })) }), stderr: "", status: 0 },
+      { stdout: "Merged", stderr: "", status: 0 },
+    ];
+  }
+
+  test("(p) digests unchanged across merge → EXIT_OK (no false block)", async () => {
+    addEntry({ pr: 20, branch: "feat/stable" });
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenScopeMerge(["src/a.ts"])),
+        sleep: async () => {},
+        hashFile: () => "same-hash", // identical before + after
+      },
+    );
+    expect(code).toBe(EXIT_OK);
+  });
+
+  test("(q) a scoped file hash changes across merge → EXIT_SHIP_TAMPER", async () => {
+    addEntry({ pr: 21, branch: "feat/tamper" });
+    let n = 0;
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenScopeMerge(["src/a.ts"])),
+        sleep: async () => {},
+        hashFile: () => (++n === 1 ? "h1" : "h2"), // snapshot h1, drift h2
+      },
+    );
+    expect(code).toBe(EXIT_SHIP_TAMPER);
+  });
+
+  test("(r) a scoped file deleted across merge → EXIT_SHIP_TAMPER", async () => {
+    addEntry({ pr: 22, branch: "feat/deleted" });
+    let n = 0;
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenScopeMerge(["src/a.ts"])),
+        sleep: async () => {},
+        hashFile: () => (++n === 1 ? "h1" : null), // present, then gone
+      },
+    );
+    expect(code).toBe(EXIT_SHIP_TAMPER);
+  });
+
+  test("(s) prScope [] when gh --json files fails → empty scope, no false block → EXIT_OK", async () => {
+    addEntry({ pr: 23, branch: "feat/scopefail" });
+    let hashCalls = 0;
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun([
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
+          // gh pr view --json files fails → prScope returns []
+          { stdout: "", stderr: "gh: not found", status: 1 },
+          { stdout: "Merged", stderr: "", status: 0 },
+        ]),
+        sleep: async () => {},
+        hashFile: () => {
+          hashCalls++;
+          return "x";
+        },
+      },
+    );
+    expect(code).toBe(EXIT_OK);
+    // Empty scope → snapshotImpl/detectImplDrift iterate nothing → hashFile never called.
+    expect(hashCalls).toBe(0);
+  });
+
+  test("(t) prScope malformed JSON → empty scope → EXIT_OK", async () => {
+    addEntry({ pr: 24, branch: "feat/badscope" });
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun([
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
+          { stdout: "not-json", stderr: "", status: 0 }, // prScope try/catch → []
+          { stdout: "Merged", stderr: "", status: 0 },
+        ]),
+        sleep: async () => {},
+        hashFile: () => "x",
+      },
+    );
+    expect(code).toBe(EXIT_OK);
   });
 });
