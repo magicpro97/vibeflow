@@ -235,7 +235,11 @@ export function defaultCodeTime(base: string, unit: { scope?: string[] }): strin
   const iso = out.trim();
   if (!iso) return null; // scoped files have no commit
   // Normalize to UTC Z so ISO strings sort lexicographically against evidence_at.
-  return new Date(iso).toISOString();
+  // Guard a malformed %cI (unreachable in practice, but keeps the gate fail-open
+  // rather than throwing a RangeError out of policyGates).
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms).toISOString();
 }
 
 /** Default Type-B drift check for a unit (used by the policyGates seam): hash

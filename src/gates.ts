@@ -234,12 +234,15 @@ export function policyGates(
   // (adding the field never hardens a green gate). ISO UTC strings sort lexically.
   const codeTime = inject.codeTimeFn ?? ((u: WorkUnit) => defaultCodeTime(inject.base ?? ".", u));
   for (const u of units.filter((x) => x.status === "done" && x.evidence_at && x.scope?.length)) {
-    const ct = codeTime(u);
-    if (!ct) continue; // non-git / no commit ⇒ fail-open
+    // Compute the newest evidence timestamp FIRST — an empty evidence_at map
+    // has none, so skip before spawning a `git log` subprocess needlessly.
     const newest = Object.values(u.evidence_at ?? {})
       .sort()
       .at(-1);
-    if (newest && newest < ct) {
+    if (!newest) continue;
+    const ct = codeTime(u);
+    if (!ct) continue; // non-git / no commit ⇒ fail-open
+    if (newest < ct) {
       warnings.push(
         `evidence-stale(warn): "${u.name}" newest evidence ${newest} predates code ${ct} → re-run gates after the last edit`,
       );
