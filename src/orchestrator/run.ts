@@ -257,7 +257,14 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       // Post-coding security checkpoint. Runs between dispatcher and reviewer
       // so security issues block the unit BEFORE the independent reviewer
       // is even consulted (a `fail` verdict is a hard gate, not advisory).
-      if (security) {
+      // #519 two-stage escalation: skip this expensive/interactive pass when a
+      // cheap gate already failed — the unit is doomed anyway and the reviewer
+      // (:261) still blocks it. Don't prompt the user to security-review a build
+      // that doesn't even compile.
+      const cheapFailed = (["build", "lint", "test"] as const).some(
+        (k) => outcome.gates?.[k] === "fail",
+      );
+      if (security && !cheapFailed) {
         const sec = await runSecurityCheckpoint(u, security.base, {
           askFn: security.askFn,
           runSkillFn: security.runSkillFn,

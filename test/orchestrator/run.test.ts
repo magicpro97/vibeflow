@@ -80,6 +80,67 @@ describe("orchestrateUnits — security checkpoint (lines 205-215)", () => {
   });
 });
 
+describe("orchestrateUnits — two-stage escalation (#519)", () => {
+  test("cheap gate failed → security checkpoint SKIPPED, unit still blocked", async () => {
+    let asked = 0;
+    const spyAsk = () => () => {
+      asked++;
+      return Promise.resolve("run" as const);
+    };
+    const { units } = await orchestrateUnits({
+      units: [unit("cheap-fail")],
+      // dispatcher reports a failing cheap gate (test) → blocked before expensive stage
+      dispatcher: async () => ({
+        status: "blocked" as const,
+        confidence: 0,
+        evidence: ["e.log"],
+        gates: { test: "fail" as const },
+      }),
+      // Production reviewer blocks a failed cheap gate (dispatch-runtime.ts:382);
+      // model that here so the unit stays blocked without the security pass.
+      reviewer: () => ({ pass: false, reason: "cheap gate test=fail" }),
+      security: {
+        base: "/tmp",
+        askFn: spyAsk,
+        runSkillFn: async () => secResult("pass"),
+      },
+    });
+    const u = units.find((x) => x.name === "cheap-fail");
+    // askFn NOT called — the expensive/interactive security pass was skipped.
+    expect(asked).toBe(0);
+    // unit is still blocked (dispatcher status + no security pass to lift it).
+    expect(u?.status).toBe("blocked");
+    // no security verdict was attached because the checkpoint never ran.
+    expect(u?.gates.security).toBeUndefined();
+  });
+
+  test("regression: cheap gates pass → security checkpoint runs (askFn called once)", async () => {
+    let asked = 0;
+    const spyAsk = () => (_q: string) => {
+      asked++;
+      return Promise.resolve("run" as const);
+    };
+    const { units } = await orchestrateUnits({
+      units: [unit("cheap-pass")],
+      dispatcher: async () => ({
+        status: "done" as const,
+        confidence: 0.9,
+        evidence: ["e.log"],
+        gates: { build: "pass" as const, lint: "pass" as const, test: "pass" as const },
+      }),
+      reviewer: passReviewer,
+      security: {
+        base: "/tmp",
+        askFn: spyAsk,
+        runSkillFn: async () => secResult("pass"),
+      },
+    });
+    const u = units.find((x) => x.name === "cheap-pass");
+    expect(asked).toBe(1);
+    expect(u?.gates.security).toBe("pass");
+  });
+});
+
 describe("runParallel — AbortSignal", () => {
   test("stops pulling new items once the signal aborts", async () => {
     const started: number[] = [];
