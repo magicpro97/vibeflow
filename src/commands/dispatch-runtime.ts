@@ -241,6 +241,7 @@ export function makeDispatcher(
               // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
               // both see engine progress without a second read of the spawner.
               out("engine-stdout", text, {
+                level: "info",
                 unit: u.name,
                 meta: { engine, unit: u.name },
               });
@@ -268,7 +269,11 @@ export function makeDispatcher(
                 appendFileSafe(streamPath, line);
               }
               if (r.stdout) {
-                out("engine-stdout", r.stdout, { unit: u.name, meta: { engine, unit: u.name } });
+                out("engine-stdout", r.stdout, {
+                  level: "info",
+                  unit: u.name,
+                  meta: { engine, unit: u.name },
+                });
               }
               // Stderr: AsyncSpawner's return type only has { status, stdout, timedOut? };
               // the base spawner may not surface stderr. The composed callback stays
