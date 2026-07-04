@@ -7,6 +7,7 @@ import { decisionsPath } from "../src/decisions.js";
 import {
   checkFreshness,
   coveredLines,
+  defaultCodeTime,
   defaultImplDrift,
   detectImplDrift,
   driftUncovered,
@@ -295,4 +296,51 @@ test("defaultChangedLines: non-git base does not throw (best-effort → [])", ()
   writeFileSync(join(dir, "coverage", "lcov.info"), "SF:a.ts\nDA:1,3\n");
   // no git repo → execFileSync throws → caught → [] → no uncovered change → false
   expect(driftUncovered(dir, "a.ts", "deadbeef")).toBe(false);
+});
+
+// #517: defaultCodeTime — newest commit time (ISO %cI) of a unit's scoped files.
+test("defaultCodeTime: returns the commit time of scoped files (real git)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-codetime-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  writeFileSync(join(dir, "a.ts"), "x\n");
+  git("add", "a.ts");
+  git("commit", "-qm", "init");
+  const ct = defaultCodeTime(dir, { scope: ["a.ts"] });
+  expect(ct).not.toBeNull();
+  // %cI is a strict ISO-8601 string parseable by Date
+  expect(Number.isNaN(Date.parse(ct as string))).toBe(false);
+});
+
+test("defaultCodeTime: null on non-git base", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-codetime-nogit-"));
+  writeFileSync(join(dir, "a.ts"), "x\n");
+  expect(defaultCodeTime(dir, { scope: ["a.ts"] })).toBeNull();
+});
+
+test("defaultCodeTime: null when scope has no commit (uncommitted file)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-codetime-nc-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  writeFileSync(join(dir, "committed.ts"), "x\n");
+  git("add", "committed.ts");
+  git("commit", "-qm", "init");
+  // scope points at a never-committed file → git log emits nothing → null
+  expect(defaultCodeTime(dir, { scope: ["never.ts"] })).toBeNull();
+});
+
+test("defaultCodeTime: null when scope is empty/absent", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-codetime-empty-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  writeFileSync(join(dir, "a.ts"), "x\n");
+  git("add", "a.ts");
+  git("commit", "-qm", "init");
+  expect(defaultCodeTime(dir, {})).toBeNull();
 });

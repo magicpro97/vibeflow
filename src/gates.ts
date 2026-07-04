@@ -1,10 +1,10 @@
-// size-waiver: #515 — Type B impl-drift gate pushes policyGates ~20 lines over the cap
+// size-waiver: #515 — Type B impl-drift gate pushes policyGates ~20 lines over the cap; #517 — evidence-freshness warn block adds ~20 more
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defaultCanaryCheck } from "./canary.js";
 import { type GateState, type WorkUnit, type WorkflowState, strArray } from "./core.js";
 import { thresholdFor } from "./orchestrator/investigate.js";
-import { defaultImplDrift } from "./spec-freshness.js";
+import { defaultCodeTime, defaultImplDrift } from "./spec-freshness.js";
 
 export interface GateReport {
   ok: boolean;
@@ -151,6 +151,8 @@ export function policyGates(
   inject: {
     canaryCheck?: (u: WorkUnit) => boolean;
     implDrift?: (u: WorkUnit) => { drifted: string[]; uncovered: string[] };
+    /** #517: newest commit time (ISO UTC) of a unit's scoped files, or null (fail-open). */
+    codeTimeFn?: (u: WorkUnit) => string | null;
     /** Project root for Type-B drift file resolution (defaults to cwd). */
     base?: string;
   } = {},
@@ -223,6 +225,24 @@ export function policyGates(
             `→ Fix: vf units evidence ${u.name} --add 'bun test 2>&1 | tail -3 → "<output>"'`,
         );
       }
+    }
+  }
+
+  // #517: evidence-freshness (WARN-only, phase 1). Evidence recorded BEFORE the
+  // code it verifies is stale — a green run captured before the last edit doesn't
+  // cover the current code. FAIL-OPEN: no evidence_at OR null codeTime ⇒ no warning
+  // (adding the field never hardens a green gate). ISO UTC strings sort lexically.
+  const codeTime = inject.codeTimeFn ?? ((u: WorkUnit) => defaultCodeTime(inject.base ?? ".", u));
+  for (const u of units.filter((x) => x.status === "done" && x.evidence_at && x.scope?.length)) {
+    const ct = codeTime(u);
+    if (!ct) continue; // non-git / no commit ⇒ fail-open
+    const newest = Object.values(u.evidence_at ?? {})
+      .sort()
+      .at(-1);
+    if (newest && newest < ct) {
+      warnings.push(
+        `evidence-stale(warn): "${u.name}" newest evidence ${newest} predates code ${ct} → re-run gates after the last edit`,
+      );
     }
   }
 

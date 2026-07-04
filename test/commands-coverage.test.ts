@@ -445,6 +445,17 @@ describe("commands.mutateUnits branches", () => {
     expect(u?.evidence).toEqual(["e1"]);
   });
 
+  // #517: normalizeUnit must round-trip evidence_at or `vf units update` strips it.
+  test("mutateUnits round-trips evidence_at (#517)", () => {
+    const dir = freshDir("vf-mut-evat-");
+    writeFixture(dir);
+    const s = mutateUnits(dir, "update", {
+      name: "unit-a",
+      evidence_at: { e1: "2020-01-01T00:00:00.000Z" },
+    });
+    expect(s?.work_units[0]?.evidence_at).toEqual({ e1: "2020-01-01T00:00:00.000Z" });
+  });
+
   // HOTFIX pr48-regression: ai-init-workflow-state-writer can persist a
   // state with no `work_units` key (the spec explicitly tells the engine
   // to omit it when the user supplied no phases). mutateUnits used to

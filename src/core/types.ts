@@ -43,6 +43,13 @@ export interface WorkUnit {
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
   /**
+   * #517: capture time (ISO-8601 UTC) of each evidence string, keyed by the
+   * evidence STRING so it survives the Set-dedup in applyOutcome. Stamp-once:
+   * a re-dispatch never rewrites an existing key. ABSENT ⇒ freshness gate
+   * fails open (no warning) — adding this field never hardens a green gate.
+   */
+  evidence_at?: Record<string, string>;
+  /**
    * ADR-005: the human-authored canary test linked to this unit. Knowledge-heavy
    * units cannot close without one (gate FAILURE). `author` (git-blame) must
    * differ from the dispatch engine identity — a canary the agent wrote itself

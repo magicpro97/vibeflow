@@ -260,3 +260,47 @@ describe("orchestrateUnits — onProgress callback", () => {
     expect(reviews).toHaveLength(1);
   });
 });
+
+describe("orchestrateUnits — evidence freshness stamp (#517)", () => {
+  test("stamps new evidence keys with the injected clock", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("stamp-me")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+      now: () => "2021-06-06T00:00:00.000Z",
+    });
+    const u = units.find((x) => x.name === "stamp-me");
+    expect(u?.evidence_at?.["e.log"]).toBe("2021-06-06T00:00:00.000Z");
+  });
+
+  test("re-dispatch does NOT overwrite an existing timestamp (stamp-once)", async () => {
+    // Seed a unit that already carries evidence + a timestamp, re-run with a NEW clock.
+    const seeded: WorkUnit = {
+      ...unit("keep-ts"),
+      evidence: ["e.log"],
+      evidence_at: { "e.log": "2020-01-01T00:00:00.000Z" },
+    };
+    const { units } = await orchestrateUnits({
+      units: [seeded],
+      dispatcher: passDispatcher, // re-reports evidence ["e.log"]
+      reviewer: passReviewer,
+      concurrency: 1,
+      now: () => "2099-12-31T00:00:00.000Z",
+    });
+    const u = units.find((x) => x.name === "keep-ts");
+    expect(u?.evidence_at?.["e.log"]).toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  test("default clock stamps a valid ISO string when now is omitted", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("default-clock")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+    });
+    const ts = units[0]?.evidence_at?.["e.log"];
+    expect(typeof ts).toBe("string");
+    expect(ts).toBe(new Date(ts as string).toISOString());
+  });
+});

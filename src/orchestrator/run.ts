@@ -103,10 +103,20 @@ export type Reviewer = (
 const SELF_REPORT_CAP = 0.5;
 
 /** A reviewer separate from the implementer (WORK_UNIT_ORCHESTRATION review gate). */
-function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
+function applyOutcome(
+  unit: WorkUnit,
+  outcome: UnitOutcome,
+  now: () => string = () => new Date().toISOString(),
+): WorkUnit {
   // Dedupe evidence: a re-dispatched unit must not accumulate the same path (e.g.
   // `claude.result.json`) twice across runs — keep first-seen order, drop repeats.
   const evidence = [...new Set([...(unit.evidence ?? []), ...(outcome.evidence ?? [])])];
+  // #517: stamp each evidence string's capture time, keyed by the string so it
+  // survives the Set-dedup. Stamp-once — a re-dispatch never rewrites an existing
+  // key, so the recorded time stays that of the FIRST capture (fail-open: units
+  // with no evidence get an empty map, which the freshness gate skips).
+  const evidence_at = { ...(unit.evidence_at ?? {}) };
+  for (const e of evidence) if (!(e in evidence_at)) evidence_at[e] = now();
   return {
     ...unit,
     status: outcome.status,
@@ -114,6 +124,7 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
     // the close threshold when corroborated by a measured gate.
     confidence: Math.min(outcome.confidence, SELF_REPORT_CAP),
     evidence,
+    evidence_at,
     gates: { ...unit.gates, ...(outcome.gates ?? {}) },
     resources: { ...unit.resources, ...(outcome.resources ?? {}) },
     // Skills-first fields: only override when the outcome carries them, so a dispatcher that
@@ -192,6 +203,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
     /** Override the default skill runner (which just reads the SKILL.md). */
     runSkillFn?: (unit: WorkUnit, base: string) => Promise<string>;
   };
+  /** #517: injectable clock stamped onto NEW evidence keys. Test seam; defaults to real time. */
+  now?: () => string;
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   // Log initial markers for visibility before the first unit dispatches.
@@ -257,7 +270,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
           outcome.gates = { ...(outcome.gates ?? {}), security: "pass" };
         }
       }
-      const reviewed = applyOutcome(u, outcome);
+      const reviewed = applyOutcome(u, outcome, opts.now);
       const review = await opts.reviewer(reviewed, outcome);
       reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
       opts.onProgress?.({

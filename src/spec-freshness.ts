@@ -216,6 +216,28 @@ export function driftUncovered(
   return changed.some((ln) => !covered.has(ln));
 }
 
+/** #517: newest commit time (ISO-8601 UTC via `git log -1 --format=%cI`) of a
+ *  unit's scoped files — when the code it verifies last changed. Returns null on
+ *  a non-git base, an empty/absent scope, or scoped files with no commit
+ *  (fail-open: the freshness gate skips the unit rather than false-warning). */
+export function defaultCodeTime(base: string, unit: { scope?: string[] }): string | null {
+  const scope = unit.scope ?? [];
+  if (!scope.length) return null;
+  let out: string;
+  try {
+    out = execFileSync("git", ["log", "-1", "--format=%cI", "--", ...scope], {
+      cwd: base,
+      encoding: "utf8",
+    });
+  } catch {
+    return null; // non-git base / bad ref
+  }
+  const iso = out.trim();
+  if (!iso) return null; // scoped files have no commit
+  // Normalize to UTC Z so ISO strings sort lexicographically against evidence_at.
+  return new Date(iso).toISOString();
+}
+
 /** Default Type-B drift check for a unit (used by the policyGates seam): hash
  *  scoped files vs the stored fingerprint, then flag any drifted file whose
  *  change is uncovered. cwd + the unit's verified_sha is the diff base. */

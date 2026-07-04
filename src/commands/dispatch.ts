@@ -161,6 +161,9 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
     evidence: Array.isArray(input.evidence)
       ? input.evidence.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
       : input.evidence,
+    // #517: persist evidence capture-times across updates — else every `vf units
+    // update` would strip evidence_at via normalizeUnit and reopen the freshness gate.
+    evidence_at: input.evidence_at,
   };
 }
 
