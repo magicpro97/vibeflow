@@ -281,7 +281,16 @@ export function makeDispatcher(
             return r;
           };
     try {
-      const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
+      const result = await runDispatchAsync({
+        engine,
+        prompt,
+        mode,
+        spawner: streamSpawner,
+        // #526 item 7: copilot writes its prompt to .vibeflow/dispatch/<unit>.md and
+        // gets a short pointer arg (argv-limit fix); claude/codex ignore these (stdin).
+        unit: u.name,
+        base,
+      });
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
       // side-effect. It must never write result JSON nor append to the persisted evidence
       // ledger, so the dispatch outcome is reported in-memory only.

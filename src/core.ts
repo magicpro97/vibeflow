@@ -161,6 +161,27 @@ export function strArray(v: unknown): string[] {
 }
 
 /**
+ * Sanitize a work-unit name to a safe slug. The name flows from the planner
+ * (an LLM) / WORKFLOW_STATE.json — untrusted input — into git branch refs
+ * (`vibeflow/<name>`), worktree paths (`vf-unit-<name>`), and dispatch/guidance
+ * file paths (`.vibeflow/dispatch/<name>.md`). Without this, a crafted name
+ * like `../../../../tmp/pwned` would resolve OUTSIDE the repo (PoC confirmed),
+ * and a name with shell/ref metacharacters would break `git worktree add -b`.
+ * Allow only `[A-Za-z0-9._-]`; collapse every other run to `-`; strip
+ * leading/trailing separators + leading dots (so the result can never start a
+ * path-traversal segment or a hidden file). Falls back to `unit` when nothing
+ * survives. Lives in core.js (a leaf module) so both the commands layer and the
+ * dispatch layer can use it without an ESM import cycle.
+ */
+export function sanitizeUnitName(raw: string): string {
+  const slug = raw
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/\.\.+/g, "-") // never leave a `..` traversal segment
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return slug.length > 0 ? slug : "unit";
+}
+
+/**
  * Symlink-safe path check: if `p` is a symlink, follow it and assert the
  * resolved target is still inside `base` (the project root). Throws on
  * symlink escape. Prevents CWE-59 (Improper Link Resolution Before File
