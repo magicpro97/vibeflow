@@ -3534,6 +3534,85 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.pass).toBe(false);
     expect(v.reason).toBe("measured gate failed: lint");
   });
+
+  // ---- #522: structured acceptance criteria ----
+  test("acceptance: MUST criterion with a failing verification → pass:false, reason names MUST", async () => {
+    const runCmd = () => ({ status: 1 as number | null, stdout: "assert failed" });
+    const r = makeReviewer("cli", 0.85, { runCmd });
+    const unit = {
+      name: "u",
+      acceptance_criteria: [
+        { id: "AC1", criterion: "endpoint returns 200", verification: "curl x", priority: "MUST" },
+      ],
+    };
+    const v = await r(unit as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("MUST criteria unverified");
+    expect(v.reason).toContain("AC1: endpoint returns 200");
+    // evidence line was auto-appended to the unit before the fail return
+    expect((unit as { evidence?: string[] }).evidence).toContain('curl x → "assert failed"');
+  });
+
+  test("acceptance: SHOULD failure warns but reviewer still passes; evidence appended", async () => {
+    const runCmd = () => ({ status: 1 as number | null, stdout: "lint nit" });
+    const r = makeReviewer("cli", 0.85, { runCmd, diffReader: () => "", cwd: "/tmp" });
+    const unit = {
+      name: "u",
+      scope: [],
+      evidence: ["pre"],
+      acceptance_criteria: [
+        { id: "AC2", criterion: "no lint nits", verification: "lint", priority: "SHOULD" },
+      ],
+    };
+    const v = await r(unit as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(true);
+    expect(unit.evidence).toEqual(["pre", 'lint → "lint nit"']);
+  });
+
+  test("acceptance: default runCmd (no inject) runs the verification via defaultRun", async () => {
+    // No runCmd injected → falls back to defaultRun; `false` exits non-zero (harmless, no FS/net).
+    const r = makeReviewer("cli", 0.85);
+    const unit = {
+      name: "u",
+      acceptance_criteria: [
+        { id: "AC3", criterion: "must hold", verification: "false", priority: "MUST" },
+      ],
+    };
+    const v = await r(unit as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("MUST criteria unverified");
+  });
+
+  test("acceptance: regression — a unit without acceptance_criteria is unchanged", async () => {
+    const runCmd = () => {
+      throw new Error("runCmd must not be called without acceptance_criteria");
+    };
+    const r = makeReviewer("cli", 0.85, { runCmd, diffReader: () => "", cwd: "/tmp" });
+    const unit = { name: "u", scope: [], evidence: ["pre"] };
+    const v = await r(unit as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(true);
+    expect(unit.evidence).toEqual(["pre"]);
+  });
 });
 
 // ---- analyzeDiff ----------------------------------------------------------------
