@@ -109,8 +109,14 @@ export function writeDispatchPrompt(
   opts: { base?: string; writeFile?: (path: string, content: string) => void } = {},
 ): string {
   const rel = `${CTX_DIR}/dispatch/${sanitizeUnitName(unit)}.md`;
-  (opts.writeFile ?? writeFileSafe)(join(opts.base ?? cwd(), rel), prompt);
-  return `Read ${rel} and follow it`;
+  // Absolute path: copilot resolves the pointer against ITS cwd, which is not
+  // always `base` (e.g. `--isolate` runs the engine in a worktree; the server
+  // orchestrates a registered repo ≠ process.cwd()). A relative pointer would
+  // then miss the file and copilot would silently run on an empty prompt — worse
+  // than the pre-#526 loud argv-limit failure. An absolute pointer is cwd-safe.
+  const abs = join(opts.base ?? cwd(), rel);
+  (opts.writeFile ?? writeFileSafe)(abs, prompt);
+  return `Read ${abs} and follow it`;
 }
 
 /** Prompt actually fed to materializePrompt: the short file-pointer for copilot

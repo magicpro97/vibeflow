@@ -111,7 +111,11 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     if (!call) throw new Error("expected one spawner call");
     expect(call.cmd).toBe("copilot");
     // argv carries the POINTER, never the raw prompt, and keeps --allow-all after it
-    expect(call.args).toEqual(["-p", "Read .vibeflow/dispatch/u1.md and follow it", "--allow-all"]);
+    expect(call.args).toEqual([
+      "-p",
+      "Read /tmp/base/.vibeflow/dispatch/u1.md and follow it",
+      "--allow-all",
+    ]);
     expect(call.input).toBe("");
     // the real prompt landed in the file (via the injected writer, no real FS)
     expect(written).toEqual([
@@ -127,10 +131,20 @@ describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () =
       base: "/repo",
       writeFile: (path, content) => written.push({ path, content }),
     });
-    expect(pointer).toBe("Read .vibeflow/dispatch/my-unit.md and follow it");
+    expect(pointer).toBe("Read /repo/.vibeflow/dispatch/my-unit.md and follow it");
     expect(written).toEqual([
       { path: "/repo/.vibeflow/dispatch/my-unit.md", content: "the big prompt" },
     ]);
+  });
+
+  test("pointer is ABSOLUTE so it survives copilot cwd ≠ base (#526 P1)", () => {
+    // Regression for the --isolate / remote-repo case: the engine's cwd is a
+    // worktree (≠ base), so a relative pointer would miss the file and copilot
+    // would silently run on an empty prompt. The pointer must be the absolute
+    // path under `base`, resolvable from ANY cwd.
+    const pointer = writeDispatchPrompt("u", "P", { base: "/repo/root", writeFile: () => {} });
+    expect(pointer).toBe("Read /repo/root/.vibeflow/dispatch/u.md and follow it");
+    expect(pointer.includes("/repo/root/")).toBe(true);
   });
 
   test("sanitizes an untrusted unit name (path-traversal defense)", () => {
@@ -209,7 +223,7 @@ describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () =
     expect(r.ok).toBe(true);
     expect(calls[0]?.args).toEqual([
       "-p",
-      "Read .vibeflow/dispatch/u2.md and follow it",
+      "Read /b/.vibeflow/dispatch/u2.md and follow it",
       "--allow-all",
     ]);
     expect(written[0]?.content).toBe("async prompt");

@@ -90,7 +90,17 @@ export function makeResearcher(
     const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
       `research round ${round}`,
     ]);
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner: researchSpawner });
+    // Pass a unit slug so copilot's prompt goes to a file, not argv (#526 item 7);
+    // research prompts carry full project context and can re-hit the ~32K argv
+    // limit otherwise. Research runs at the repo root (no --isolate), so the
+    // default base (cwd) resolves the pointer correctly.
+    const result = await runDispatchAsync({
+      engine,
+      prompt,
+      mode,
+      spawner: researchSpawner,
+      unit: `research-round-${round}`,
+    });
     const confidence = result.summary?.confidence ?? 0;
     // Build findings: prefer the summary's uncertainty field, then plain raw evidence.
     const findings: string[] = [];

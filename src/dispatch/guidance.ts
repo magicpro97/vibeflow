@@ -50,7 +50,7 @@ export function applyGuidance(
   const note = read(path);
   if (note === undefined) return prompt;
   (opts.clearGuidance ?? defaultClearGuidance)(path);
-  return `${note}\n\n${prompt}`;
+  return `${note.trimEnd()}\n\n${prompt}`;
 }
 
 function defaultReadGuidance(path: string): string | undefined {

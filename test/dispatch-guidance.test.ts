@@ -86,7 +86,7 @@ describe("guidance default FS seams (real tmpdir round-trip)", () => {
       const file = join(dir, ".vibeflow", "guidance", "u1.md");
       expect(readFileSync(file, "utf8")).toBe("STEER NOTE\n");
       const prompt = applyGuidance("u1", "BODY", { base: dir });
-      expect(prompt).toBe("STEER NOTE\n\n\nBODY");
+      expect(prompt).toBe("STEER NOTE\n\nBODY");
       // file consumed exactly once
       expect(existsSync(file)).toBe(false);
     } finally {
