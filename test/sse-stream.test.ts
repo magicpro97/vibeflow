@@ -190,4 +190,72 @@ describe("M3 SSE stream endpoint", () => {
       server.stop();
     }
   });
+
+  // #525: read live SSE chunks until `marker` appears or the stream ends.
+  // Structural reader type so the Bun/DOM ReadableStream reader clash is avoided.
+  async function drainUntil(
+    reader: { read(): Promise<{ value?: Uint8Array; done: boolean }> },
+    marker: string,
+  ): Promise<string> {
+    const decoder = new TextDecoder();
+    let text = "";
+    for (let i = 0; i < 8; i++) {
+      const { value, done } = await reader.read();
+      if (value) text += decoder.decode(value, { stream: true });
+      if (done || text.includes(marker)) break;
+    }
+    return text;
+  }
+
+  test("SSE ?unit=A streams only unit-A events live (#525)", async () => {
+    const { server, url } = await startServer(0);
+    try {
+      const resp = await fetch(`${url}/api/logs/stream?unit=A`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
+      await reader.read(); // past initial comment + any catch-up
+
+      out("engine-stdout", "u525-B-live", { unit: "B" });
+      out("vf", "u525-novf-live");
+      out("engine-stdout", "u525-A-live", { unit: "A" });
+      await new Promise((r) => setTimeout(r, 100));
+
+      const text = await drainUntil(reader, "u525-A-live");
+      expect(text).toContain("u525-A-live");
+      expect(text).not.toContain("u525-B-live");
+      expect(text).not.toContain("u525-novf-live");
+      reader.cancel();
+    } catch {
+      // Timeout acceptable
+    } finally {
+      await new Promise((r) => setTimeout(r, 200));
+      server.stop();
+    }
+  });
+
+  test("SSE with no ?unit= streams every event (back-compat, #525)", async () => {
+    const { server, url } = await startServer(0);
+    try {
+      const resp = await fetch(`${url}/api/logs/stream`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
+      await reader.read(); // past initial comment + any catch-up
+
+      out("engine-stdout", "u525-all-unit", { unit: "Z" });
+      out("vf", "u525-all-novf");
+      await new Promise((r) => setTimeout(r, 100));
+
+      const text = await drainUntil(reader, "u525-all-novf");
+      expect(text).toContain("u525-all-unit");
+      expect(text).toContain("u525-all-novf");
+      reader.cancel();
+    } catch {
+      // Timeout acceptable
+    } finally {
+      await new Promise((r) => setTimeout(r, 200));
+      server.stop();
+    }
+  });
 });

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
-import { type LogEvent, getLogbus } from "./logbus.js";
+import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { listAttachments, replayFromLog, settingsView } from "./server/handlers.js";
 import {
@@ -171,6 +171,8 @@ export function startServer(
       // --- SSE: /api/logs/stream ---
       if (method === "GET" && path === "/api/logs/stream") {
         const bus = getLogbus();
+        // #525: scope this stream to one unit; empty `?unit=` means no filter.
+        const unitFilter = url.searchParams.get("unit") || undefined;
         let cleanup: (() => void) | undefined;
         return new Response(
           new ReadableStream({
@@ -194,6 +196,7 @@ export function startServer(
                   }
                   const caught = replayFromLog(bus.currentFile(), startSeq, 1000);
                   for (const ev of caught) {
+                    if (!matchesUnitFilter(ev, unitFilter)) continue;
                     controller.enqueue(
                       new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
                     );
@@ -217,6 +220,7 @@ export function startServer(
               );
 
               const unsub = bus?.subscribe((ev: LogEvent) => {
+                if (!matchesUnitFilter(ev, unitFilter)) return;
                 safeEnqueue(
                   new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
                 );
