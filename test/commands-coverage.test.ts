@@ -3555,7 +3555,9 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
     expect(v.reason).toContain("MUST criteria unverified");
     expect(v.reason).toContain("AC1: endpoint returns 200");
     // evidence line was auto-appended to the unit before the fail return
-    expect((unit as { evidence?: string[] }).evidence).toContain('curl x → "assert failed"');
+    expect((unit as { evidence?: string[] }).evidence).toContain(
+      'acceptance AC1: curl x → "assert failed"',
+    );
   });
 
   test("acceptance: SHOULD failure warns but reviewer still passes; evidence appended", async () => {
@@ -3576,7 +3578,7 @@ describe("commands.makeReviewer W-C fail-closed gate", () => {
       gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
     });
     expect(v.pass).toBe(true);
-    expect(unit.evidence).toEqual(["pre", 'lint → "lint nit"']);
+    expect(unit.evidence).toEqual(["pre", 'acceptance AC2: lint → "lint nit"']);
   });
 
   test("acceptance: default runCmd (no inject) runs the verification via defaultRun", async () => {

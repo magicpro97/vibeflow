@@ -30,9 +30,11 @@ export function verifyAcceptance(
     const nl = trimmed.lastIndexOf("\n");
     const snippet = (nl >= 0 ? trimmed.slice(nl + 1) : trimmed).slice(0, 120);
     // Fall back to the exit code when there is no printable output, so the
-    // evidence line stays ≥2 quoted chars (ADR-004 pattern[0]).
+    // evidence line stays ≥2 quoted chars (ADR-004 pattern[0]). The `acceptance
+    // <id>:` prefix also guarantees the whole line clears isVerifiableEvidence's
+    // ≥10-char floor (gates.ts) even for a tiny cmd+tail like `ls → "ok"`.
     const tail = snippet.length >= 2 ? snippet : `exit ${r.status}`;
-    evidence.push(`${c.verification} → "${tail}"`);
+    evidence.push(`acceptance ${c.id}: ${c.verification} → "${tail}"`);
     if (r.status === 0) continue;
     (c.priority === "MUST" ? hardFail : warn).push(`${c.id}: ${c.criterion}`);
   }

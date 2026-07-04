@@ -86,7 +86,7 @@ describe("verifyAcceptance", () => {
     expect(v.hardFail).toEqual([]);
     expect(v.warn).toEqual([]);
     expect(v.evidence).toHaveLength(1);
-    expect(v.evidence[0]).toBe('bun test → "ok 42 pass"');
+    expect(v.evidence[0]).toBe('acceptance AC6: bun test → "ok 42 pass"');
     expect(isVerifiableEvidence(v.evidence[0] as string)).toBe(true);
   });
 
@@ -109,7 +109,7 @@ describe("verifyAcceptance", () => {
     expect(seenCwd).toBe("/work");
     expect(v.hardFail).toEqual([]);
     expect(v.warn).toEqual([]);
-    expect(v.evidence[0]).toBe('test -f x → "exit 0"');
+    expect(v.evidence[0]).toBe('acceptance AC7: test -f x → "exit 0"');
     expect(isVerifiableEvidence(v.evidence[0] as string)).toBe(true);
   });
 
@@ -126,7 +126,21 @@ describe("verifyAcceptance", () => {
       () => ({ status: 0, stdout: `first\nsecond\n${long}` }),
       "/tmp",
     );
-    expect(v.evidence[0]).toBe(`cmd → "${"x".repeat(120)}"`);
+    expect(v.evidence[0]).toBe(`acceptance AC8: cmd → "${"x".repeat(120)}"`);
+    expect(isVerifiableEvidence(v.evidence[0] as string)).toBe(true);
+  });
+
+  test("tiny cmd + tiny stdout → prefixed line still clears the 10-char floor (P3)", () => {
+    // `ls → "ok"` is 9 chars and would fail isVerifiableEvidence's ≥10 floor
+    // (gates.ts) — the `acceptance <id>:` prefix guarantees it clears.
+    const c: AcceptanceCriterion = {
+      id: "AC9",
+      criterion: "listing",
+      verification: "ls",
+      priority: "MUST",
+    };
+    const v = verifyAcceptance([c], () => ({ status: 0, stdout: "ok" }), "/tmp");
+    expect(v.evidence[0]).toBe('acceptance AC9: ls → "ok"');
     expect(isVerifiableEvidence(v.evidence[0] as string)).toBe(true);
   });
 });
