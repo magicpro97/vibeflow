@@ -348,6 +348,7 @@ export function startServer(
             path === "/api/settings" ||
             path === "/api/verify" ||
             path === "/api/hook/approve" ||
+            path.startsWith("/api/guidance/") ||
             path === "/api/upload")) ||
         (method === "DELETE" && path === "/api/upload") ||
         (method === "DELETE" && (path === "/api/state" || path === "/api/projects"));

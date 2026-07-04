@@ -67,6 +67,9 @@ export const api = {
   orchestrate: (payload?: unknown) => req<unknown>("POST", "/api/orchestrate", payload ?? {}),
   preflight: () => req<unknown>("POST", "/api/preflight", {}),
   verify: (signal?: AbortSignal) => req<unknown>("POST", "/api/verify", {}, signal),
+  // #526: drop a pre-dispatch steering note for a QUEUED unit (fire-and-forget).
+  guidance: (unit: string, note: string) =>
+    req<{ ok: boolean }>("POST", `/api/guidance/${encodeURIComponent(unit)}`, { note }),
   upload: async (file: File) => {
     const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
       method: "POST",

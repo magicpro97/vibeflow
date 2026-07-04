@@ -8,6 +8,7 @@
 import { join } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { ENGINES } from "../core/types.js";
+import { applyGuidance } from "../dispatch/guidance.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
@@ -184,11 +185,15 @@ export function makeDispatcher(
     const memBlock = memProvider
       ? renderMemoryBlock(memProvider.recall(unitText, { limit: 3 }))
       : "";
-    const prompt = buildEnginePrompt(
-      engine,
-      ctx,
-      [{ name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }],
-      memBlock,
+    const prompt = applyGuidance(
+      u.name,
+      buildEnginePrompt(
+        engine,
+        ctx,
+        [{ name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }],
+        memBlock,
+      ),
+      { base },
     );
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
     const evidence: string[] = [];

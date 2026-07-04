@@ -202,6 +202,31 @@
                   <span v-if="u.resources.cost_usd > 0">${{ fmtCost(u.resources.cost_usd) }}</span>
                 </div>
 
+                <!-- #526: pre-dispatch guidance — steer a unit still QUEUED
+                     (fire-and-forget POST; not a running unit). -->
+                <div v-if="u.status === 'pending'" class="border-t border-neutral-800/40 pt-3">
+                  <label :for="`guidance-${u.name}`" class="text-[10px] text-neutral-600 font-medium">
+                    steer this queued unit
+                  </label>
+                  <textarea
+                    :id="`guidance-${u.name}`"
+                    v-model="guidanceNote[u.name]"
+                    rows="2"
+                    placeholder="e.g. focus on the auth edge cases"
+                    class="mt-1.5 w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-neutral-300 font-mono text-[11px] resize-y focus:outline-none focus:border-neutral-600"
+                  />
+                  <div class="flex items-center gap-2 mt-1.5">
+                    <button
+                      type="button"
+                      class="px-2 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[10px] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                      :disabled="!guidanceNote[u.name]?.trim() || guidanceSent.has(u.name)"
+                      @click="submitGuidance(u.name)"
+                    >
+                      {{ guidanceSent.has(u.name) ? 'sent ✓' : 'Submit guidance' }}
+                    </button>
+                  </div>
+                </div>
+
                 <!-- No detail fallback -->
                 <p
                   v-if="!u.scope?.length && !u.evidence?.length && !u.spec"
@@ -220,6 +245,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import { api } from "../api.js";
 import type { GateState, WorkUnit } from "../types.js";
 import InfoTip from "./InfoTip.vue";
 
@@ -227,6 +253,20 @@ const props = defineProps<{ units: WorkUnit[]; emptyText?: string }>();
 const GATE_KEYS = ["build", "lint", "test", "review"] as const;
 
 const expanded = ref(new Set<string>());
+
+// #526: pre-dispatch guidance — per-unit draft note + sent markers.
+const guidanceNote = ref<Record<string, string>>({});
+const guidanceSent = ref(new Set<string>());
+async function submitGuidance(name: string) {
+  const note = guidanceNote.value[name]?.trim();
+  if (!note) return;
+  try {
+    await api.guidance(name, note);
+    guidanceSent.value = new Set(guidanceSent.value).add(name);
+  } catch {
+    /* fire-and-forget: a failed steer is non-fatal, the unit still runs */
+  }
+}
 
 // Prune stale names from expanded set when units change (prevents ghost expansion)
 watch(

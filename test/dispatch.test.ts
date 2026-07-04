@@ -111,11 +111,7 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     if (!call) throw new Error("expected one spawner call");
     expect(call.cmd).toBe("copilot");
     // argv carries the POINTER, never the raw prompt, and keeps --allow-all after it
-    expect(call.args).toEqual([
-      "-p",
-      "Read .vibeflow/dispatch/u1.md and follow it",
-      "--allow-all",
-    ]);
+    expect(call.args).toEqual(["-p", "Read .vibeflow/dispatch/u1.md and follow it", "--allow-all"]);
     expect(call.input).toBe("");
     // the real prompt landed in the file (via the injected writer, no real FS)
     expect(written).toEqual([
