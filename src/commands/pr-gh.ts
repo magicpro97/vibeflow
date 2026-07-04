@@ -31,6 +31,8 @@ export const EXIT_ACCOUNT = 3;
 export const EXIT_DCO = 4;
 export const EXIT_PUSH = 5;
 export const EXIT_PR_CREATE = 6;
+/** #518: created a PR but gh could not confirm it persisted. */
+export const EXIT_PR_UNVERIFIED = 7;
 
 /** Verify the active gh account matches REQUIRED_GH_ACCOUNT.
  *  Returns {ok: true, account} on match, {ok: false, account, reason} on mismatch. */
@@ -155,6 +157,47 @@ export function createPr(
     stderr: result.stderr,
     status: result.status,
   };
+}
+
+/** Parse the PR number from a gh PR URL. Returns null on a non-PR URL. */
+export function prNumberFromUrl(url: string): number | null {
+  const m = /\/pull\/(\d+)/.exec(url);
+  return m ? Number(m[1]) : null;
+}
+
+/** #518: re-query gh to CONFIRM a PR exists after we think we created it.
+ *  Exit-code + URL-regex is not proof it persisted (an agent could hallucinate
+ *  the whole side-effect). One retry, then hard-fail with "Agent HALLUCINATED". */
+export async function verifyPrExists(
+  pr: number,
+  inject: {
+    runCommandSync?: (
+      cmd: string,
+      args: string[],
+    ) => { stdout: string; stderr: string; status: number };
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<{ ok: boolean; state?: string; reason?: string }> {
+  const run = inject.runCommandSync ?? defaultRunCommandSync;
+  const sleep = inject.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
+  const query = (): string | null => {
+    const r = run("gh", ["pr", "view", String(pr), "--json", "state"]);
+    if (r.status !== 0) return null;
+    try {
+      return (JSON.parse(r.stdout)?.state ?? null) as string | null;
+    } catch {
+      return null;
+    }
+  };
+  let state = query();
+  if (state == null) {
+    await sleep(1000);
+    state = query();
+  }
+  if (state == null) {
+    return { ok: false, reason: `Agent HALLUCINATED: PR #${pr} not found after retry` };
+  }
+  return { ok: true, state };
 }
 
 /** Add the PR to a Project. */
