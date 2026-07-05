@@ -395,4 +395,34 @@ describe("orchestrateUnits — evidence freshness stamp (#517)", () => {
     expect(typeof ts).toBe("string");
     expect(ts).toBe(new Date(ts as string).toISOString());
   });
+
+  // #534: stamp ONLY the current outcome's fresh evidence — legacy evidence
+  // (carried on the unit but NOT re-produced this run) has an unknown true
+  // capture time and must NOT get a fresh `now()` (that would mask staleness).
+  test("legacy evidence not re-produced by the outcome is NOT stamped (#534)", async () => {
+    const seeded: WorkUnit = {
+      ...unit("legacy-mix"),
+      evidence: ["legacy.log"], // predates evidence_at, dispatcher won't re-report it
+      // no evidence_at → migration-era unit
+    };
+    const { units } = await orchestrateUnits({
+      units: [seeded],
+      // dispatcher produces DIFFERENT, fresh evidence this run
+      dispatcher: async () => ({
+        status: "done" as const,
+        confidence: 0.9,
+        evidence: ["fresh.log"],
+      }),
+      reviewer: passReviewer,
+      concurrency: 1,
+      now: () => "2099-01-01T00:00:00.000Z",
+    });
+    const u = units.find((x) => x.name === "legacy-mix");
+    // fresh evidence IS stamped with the clock…
+    expect(u?.evidence_at?.["fresh.log"]).toBe("2099-01-01T00:00:00.000Z");
+    // …but legacy evidence is left UNSTAMPED (no fabricated capture time).
+    expect(u?.evidence_at?.["legacy.log"]).toBeUndefined();
+    // union still carries both strings for retention.
+    expect(u?.evidence).toEqual(["legacy.log", "fresh.log"]);
+  });
 });

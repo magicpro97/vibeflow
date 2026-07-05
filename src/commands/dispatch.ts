@@ -150,9 +150,21 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
     evidence: Array.isArray(input.evidence)
       ? input.evidence.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
       : input.evidence,
-    // #517: persist evidence capture-times across updates — else every `vf units
-    // update` would strip evidence_at via normalizeUnit and reopen the freshness gate.
-    evidence_at: input.evidence_at,
+    // #517/#534: persist evidence capture-times across updates — else every `vf
+    // units update` would strip evidence_at via normalizeUnit and reopen the
+    // freshness gate. #534: validate at the persistence trust boundary (mirror
+    // the `evidence` string-filter above) — evidence_at is hand-editable, so keep
+    // only plain string→string entries and drop a non-object/array/garbage value
+    // (Array.isArray guard: an array is typeof "object" and would otherwise
+    // survive as an index-keyed {"0":…} map).
+    evidence_at:
+      input.evidence_at &&
+      typeof input.evidence_at === "object" &&
+      !Array.isArray(input.evidence_at)
+        ? Object.fromEntries(
+            Object.entries(input.evidence_at).filter(([, v]) => typeof v === "string"),
+          )
+        : undefined,
   };
 }
 

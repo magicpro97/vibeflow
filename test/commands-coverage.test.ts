@@ -457,6 +457,48 @@ describe("commands.mutateUnits branches", () => {
     expect(s?.work_units[0]?.evidence_at).toEqual({ e1: "2020-01-01T00:00:00.000Z" });
   });
 
+  // #534: evidence_at is a persistence trust boundary (hand-editable). normalizeUnit
+  // must drop non-string values (mirror the `evidence` string-filter) so a doctored
+  // ledger can't inject a non-ISO value the freshness gate would choke on.
+  test("mutateUnits drops non-string evidence_at values (#534)", () => {
+    const dir = freshDir("vf-mut-evat-bad-");
+    writeFixture(dir);
+    const s = mutateUnits(dir, "update", {
+      name: "unit-a",
+      // cast: the field is typed Record<string,string> but the on-disk ledger is
+      // hand-editable and may carry garbage at runtime.
+      evidence_at: { good: "2020-01-01T00:00:00.000Z", bad: 12345 } as unknown as Record<
+        string,
+        string
+      >,
+    });
+    expect(s?.work_units[0]?.evidence_at).toEqual({ good: "2020-01-01T00:00:00.000Z" });
+  });
+
+  // #534: a wholly non-object evidence_at (e.g. a string) → undefined, not a
+  // char-indexed object. Object.values("garbage") would otherwise be a char array.
+  test("mutateUnits drops non-object evidence_at (#534)", () => {
+    const dir = freshDir("vf-mut-evat-nonobj-");
+    writeFixture(dir);
+    const s = mutateUnits(dir, "update", {
+      name: "unit-a",
+      evidence_at: "garbage" as unknown as Record<string, string>,
+    });
+    expect(s?.work_units[0]?.evidence_at).toBeUndefined();
+  });
+
+  // #534: an ARRAY is typeof "object" — the Array.isArray guard must reject it so
+  // it can't survive as an index-keyed {"0":…} map at the trust boundary.
+  test("mutateUnits drops array evidence_at (#534)", () => {
+    const dir = freshDir("vf-mut-evat-arr-");
+    writeFixture(dir);
+    const s = mutateUnits(dir, "update", {
+      name: "unit-a",
+      evidence_at: ["2020-01-01T00:00:00.000Z"] as unknown as Record<string, string>,
+    });
+    expect(s?.work_units[0]?.evidence_at).toBeUndefined();
+  });
+
   // HOTFIX pr48-regression: ai-init-workflow-state-writer can persist a
   // state with no `work_units` key (the spec explicitly tells the engine
   // to omit it when the user supplied no phases). mutateUnits used to

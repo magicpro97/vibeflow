@@ -1,4 +1,4 @@
-// size-waiver: #515 — Type B impl-drift gate pushes policyGates ~20 lines over the cap; #517 — evidence-freshness warn block adds ~20 more
+// size-waiver: #515 — Type B impl-drift gate pushes policyGates ~20 lines over the cap; #517 — evidence-freshness warn block adds ~20 more; #534 — ISO-normalize both sides adds ~8 more
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defaultCanaryCheck } from "./canary.js";
@@ -234,17 +234,25 @@ export function policyGates(
   // (adding the field never hardens a green gate). ISO UTC strings sort lexically.
   const codeTime = inject.codeTimeFn ?? ((u: WorkUnit) => defaultCodeTime(inject.base ?? ".", u));
   for (const u of units.filter((x) => x.status === "done" && x.evidence_at && x.scope?.length)) {
-    // Compute the newest evidence timestamp FIRST — an empty evidence_at map
-    // has none, so skip before spawning a `git log` subprocess needlessly.
+    // #534: evidence_at is persisted and hand-editable — a non-UTC-Z value
+    // (`+07:00`) or garbage string breaks the lexical==chronological invariant
+    // that in-process producers (toISOString()) uphold. Date.parse-normalize
+    // BOTH sides and drop unparseable entries before comparing numerically, so
+    // a doctored timestamp can never silently mask (or spuriously raise) the
+    // staleness warning. Warn-only in phase 1, but this is the phase-2 prereq.
     const newest = Object.values(u.evidence_at ?? {})
-      .sort()
+      .map((s) => Date.parse(s))
+      .filter((ms) => !Number.isNaN(ms))
+      .sort((a, b) => a - b)
       .at(-1);
-    if (!newest) continue;
-    const ct = codeTime(u);
+    if (newest === undefined) continue; // empty map OR all-unparseable ⇒ fail-open
+    const ct = codeTime(u); // already UTC-Z normalized by defaultCodeTime
     if (!ct) continue; // non-git / no commit ⇒ fail-open
-    if (newest < ct) {
+    const codeMs = Date.parse(ct);
+    if (Number.isNaN(codeMs)) continue; // defensive: unparseable code time ⇒ fail-open
+    if (newest < codeMs) {
       warnings.push(
-        `evidence-stale(warn): "${u.name}" newest evidence ${newest} predates code ${ct} → re-run gates after the last edit`,
+        `evidence-stale(warn): "${u.name}" newest evidence ${new Date(newest).toISOString()} predates code ${ct} → re-run gates after the last edit`,
       );
     }
   }
