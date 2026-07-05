@@ -192,8 +192,16 @@ describe("M3 SSE stream endpoint", () => {
   });
 
   // #525: read live SSE chunks until `marker` appears or a soft deadline.
-  // Races each read against a timeout so a missing marker returns partial text
+  // Races the read against a timeout so a missing marker returns partial text
   // (the assertions then fail loudly) instead of hanging or throwing an abort.
+  //
+  // #535: keep a SINGLE pending read across ticks. Issuing a fresh reader.read()
+  // every loop orphaned the prior one; when its chunk landed, that orphan
+  // consumed it and its value was discarded → the marker chunk was silently
+  // lost → a spurious toContain() failure. A dedicated TICK sentinel also keeps
+  // a real end-of-stream (done:true) distinct from a timeout tick, so EOF breaks
+  // instead of spinning to the deadline.
+  const TICK = Symbol("tick");
   async function drainUntil(
     reader: { read(): Promise<{ value?: Uint8Array; done: boolean }> },
     marker: string,
@@ -201,17 +209,60 @@ describe("M3 SSE stream endpoint", () => {
     const decoder = new TextDecoder();
     let text = "";
     const deadline = Date.now() + 2000;
+    let pending: Promise<{ value?: Uint8Array; done: boolean }> | null = null;
     while (Date.now() < deadline && !text.includes(marker)) {
-      const timeout = new Promise<{ value?: Uint8Array; done: boolean }>((r) =>
-        setTimeout(() => r({ value: undefined, done: true }), 300),
-      );
-      const { value, done } = await Promise.race([reader.read(), timeout]);
-      if (value) text += decoder.decode(value, { stream: true });
-      if (done && !value) continue; // soft timeout tick — retry until deadline
-      if (done) break;
+      if (!pending) pending = reader.read();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<typeof TICK>((r) => {
+        timer = setTimeout(() => r(TICK), 300);
+      });
+      const res = await Promise.race([pending, timeout]);
+      clearTimeout(timer); // don't leave a 300ms tick timer dangling when the read wins
+      if (res === TICK) continue; // soft timeout — reuse `pending`, retry until deadline
+      pending = null; // read settled — a fresh one may be issued next loop
+      if (res.value) text += decoder.decode(res.value, { stream: true });
+      if (res.done) break;
     }
     return text;
   }
+
+  test("drainUntil keeps a chunk that lands after a timeout tick (#535)", async () => {
+    const marker = "u535-late-chunk";
+    const chunk = new TextEncoder().encode(`x ${marker} y`);
+    let reads = 0;
+    const reader = {
+      read(): Promise<{ value?: Uint8Array; done: boolean }> {
+        reads++;
+        // First read resolves AFTER the 300ms internal tick — the old
+        // fresh-read-per-loop code orphaned it and dropped this chunk.
+        if (reads === 1)
+          return new Promise((r) => setTimeout(() => r({ value: chunk, done: false }), 350));
+        // A second read must NOT be issued while the first is still pending.
+        return new Promise(() => {}); // never resolves
+      },
+    };
+    const text = await drainUntil(reader, marker);
+    expect(text).toContain(marker); // chunk survived the tick
+    expect(reads).toBe(1); // single pending read reused, not re-issued
+  });
+
+  test("drainUntil keeps a final chunk delivered WITH done:true (#535 EOF path)", async () => {
+    // EOF that carries the last chunk (value + done:true in one read). The loop
+    // must append the value THEN break — not drop it on the done branch.
+    const marker = "u535-eof-chunk";
+    let reads = 0;
+    const reader = {
+      read(): Promise<{ value?: Uint8Array; done: boolean }> {
+        reads++;
+        if (reads === 1)
+          return Promise.resolve({ value: new TextEncoder().encode(marker), done: true });
+        return Promise.resolve({ value: undefined, done: true });
+      },
+    };
+    const text = await drainUntil(reader, marker);
+    expect(text).toContain(marker); // final chunk not lost on EOF
+    expect(reads).toBe(1); // broke on done:true, no extra read
+  });
 
   test("SSE ?unit=A streams only unit-A events live (#525)", async () => {
     const { server, url } = await startServer(0);
