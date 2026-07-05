@@ -13,6 +13,17 @@ export const ENGINES: Engine[] = ["claude", "copilot", "codex"];
 
 export type GateState = "pass" | "fail" | "running" | "pending";
 
+/** #522: one structured acceptance criterion. `verification`/`priority` optional so prose-only
+ *  criteria still parse and adding this field never retroactively hardens a green gate. */
+export interface AcceptanceCriterion {
+  id: string;
+  criterion: string;
+  /** Shell command / test filter / URL the reviewer EXECUTES. Absent ⇒ prose-only, skipped. */
+  verification?: string;
+  /** Absent ⇒ treated as SHOULD (warn-only) so adding this field never hardens a green gate. */
+  priority?: "MUST" | "SHOULD" | "NICE";
+}
+
 export interface WorkUnit {
   name: string;
   status: "pending" | "running" | "verifying" | "done" | "blocked";
@@ -42,6 +53,9 @@ export interface WorkUnit {
   };
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
+  /** #522: structured acceptance. Reviewer runs each `verification`; a failing MUST is a
+   *  review FAILURE. Optional — prose spec/acceptance still valid. */
+  acceptance_criteria?: AcceptanceCriterion[];
   /**
    * #517: capture time (ISO-8601 UTC) of each evidence string, keyed by the
    * evidence STRING so it survives the Set-dedup in applyOutcome. Stamp-once:
