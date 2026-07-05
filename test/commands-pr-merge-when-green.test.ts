@@ -335,6 +335,81 @@ describe("vf pr merge-when-green (A9 #175)", () => {
     expect(code).toBe(EXIT_SHIP_TAMPER);
   });
 
+  // #532 no-release-on-merged: the ship-tamper path fires AFTER the PR merged, so
+  // it must KEEP the claim (a merged PR must not re-enter the free pool). This is
+  // the post-condition test the issue asked for — asserts the claim is NOT released.
+  test("(r2) ship-tamper KEEPS the claim (does not release a merged PR) (#532)", async () => {
+    addEntry({ pr: 25, branch: "feat/tamper-keep" });
+    let n = 0;
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenScopeMerge(["src/a.ts"])),
+        sleep: async () => {},
+        hashFile: () => (++n === 1 ? "h1" : "h2"), // drift → tamper
+      },
+    );
+    expect(code).toBe(EXIT_SHIP_TAMPER);
+    // claim retained: the entry is still "claimed", NOT back in the free pool.
+    const entry = readQueue().find((e) => e.pr === 25);
+    expect(entry?.status).toBe("claimed");
+  });
+
+  // #532 no-release-on-merged: the success path also KEEPS the claim (the PR left
+  // the queue by merging; releasing would let a merged PR be re-claimed).
+  test("(r3) success KEEPS the claim (merged PR not re-freed) (#532)", async () => {
+    addEntry({ pr: 26, branch: "feat/ok-keep" });
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenScopeMerge(["src/a.ts"])),
+        sleep: async () => {},
+        hashFile: () => "same-hash", // no drift → EXIT_OK
+      },
+    );
+    expect(code).toBe(EXIT_OK);
+    const entry = readQueue().find((e) => e.pr === 26);
+    expect(entry?.status).toBe("claimed");
+  });
+
+  // #532: a filesystem race (hashFile throws mid-ship) must FAIL OPEN — the merge
+  // already landed, so a snapshot/detect throw must not crash it into an unhandled
+  // rejection. Guard wraps snapshotImpl + detectImplDrift → treat as no-drift.
+  test("(r4) hashFile throws during SNAPSHOT → fail-open, no crash → EXIT_OK (#532)", async () => {
+    addEntry({ pr: 27, branch: "feat/race" });
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenScopeMerge(["src/a.ts"])),
+        sleep: async () => {},
+        hashFile: () => {
+          throw new Error("EISDIR: illegal operation on a directory");
+        },
+      },
+    );
+    expect(code).toBe(EXIT_OK); // snapshot-catch swallowed the throw, merge succeeded
+  });
+
+  // #532: the mirror — snapshot succeeds (records a hash) but the POST-merge
+  // detect throws (file raced away). The detect-catch must fail open too.
+  test("(r5) hashFile throws only during DETECT → fail-open → EXIT_OK (#532)", async () => {
+    addEntry({ pr: 28, branch: "feat/race2" });
+    let n = 0;
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenScopeMerge(["src/a.ts"])),
+        sleep: async () => {},
+        // 1st call (snapshot) succeeds; 2nd call (detect) throws.
+        hashFile: () => {
+          if (++n === 1) return "h1";
+          throw new Error("EISDIR mid-detect");
+        },
+      },
+    );
+    expect(code).toBe(EXIT_OK); // detect-catch swallowed the throw
+  });
+
   test("(s) prScope [] when gh --json files fails → empty scope, no false block → EXIT_OK", async () => {
     addEntry({ pr: 23, branch: "feat/scopefail" });
     let hashCalls = 0;

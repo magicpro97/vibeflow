@@ -30,6 +30,7 @@ import {
 } from "../src/commands/pr.js";
 
 import { EXIT_NOT_FOUND } from "../src/commands/pr-queue.js";
+import { type LogEvent, getLogbus, installLogbus } from "../src/logbus.js";
 let origCwd: string;
 let dir: string;
 
@@ -602,6 +603,21 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
     expect(r.state).toBe("OPEN");
   });
 
+  // #532 explicit decision: a CLOSED or MERGED PR still COUNTS as exists — the
+  // check proves the create side-effect persisted, not that the PR is still open.
+  test("(kk2) verifyPrExists: CLOSED state still counts as exists (#532)", async () => {
+    const run = () => ({ stdout: '{"state":"CLOSED"}', stderr: "", status: 0 });
+    const r = await verifyPrExists(518, { runCommandSync: run as never, sleep: async () => {} });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe("CLOSED");
+  });
+  test("(kk3) verifyPrExists: MERGED state still counts as exists (#532)", async () => {
+    const run = () => ({ stdout: '{"state":"MERGED"}', stderr: "", status: 0 });
+    const r = await verifyPrExists(518, { runCommandSync: run as never, sleep: async () => {} });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe("MERGED");
+  });
+
   test("(ll) verifyPrExists: retries once then succeeds (run called twice)", async () => {
     let n = 0;
     const run = () =>
@@ -708,6 +724,37 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
       { runCommandSync: run as never, createPr: fakeCreatePr as unknown as typeof createPr },
     );
     expect(code).toBe(EXIT_PR_CREATE);
+  });
+
+  // #532: the parse-fail message must INCLUDE the raw URL so an enterprise-host /
+  // extra-path-segment mismatch is diagnosable. Capture the logbus event + assert.
+  test("(qq2) unparseable PR URL → error message includes the URL (#532)", async () => {
+    installLogbus({ dir });
+    const events: LogEvent[] = [];
+    const bus = getLogbus();
+    const unsub = bus?.subscribe((ev) => events.push(ev));
+    const badUrl = "https://ghe.corp.example/org/repo/commits/abc";
+    const run = (cmd: string, args: string[]) => {
+      if (cmd === "gh" && args[0] === "auth") {
+        return { stdout: "github.com\n  account magicpro97\n", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "log" && args[1] === "-1" && args[2] === "--format=%B") {
+        return { stdout: "Signed-off-by: test <test@local>\n", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "push") return { stdout: "ok\n", stderr: "", status: 0 };
+      return { stdout: "", stderr: "", status: 0 };
+    };
+    const fakeCreatePr = () => ({ ok: true, url: badUrl, stderr: "", status: 0 });
+    const code = await pr(
+      ["create", "#173"],
+      { head: "orch/a7" },
+      { runCommandSync: run as never, createPr: fakeCreatePr as unknown as typeof createPr },
+    );
+    unsub?.();
+    expect(code).toBe(EXIT_PR_CREATE);
+    const parseFail = events.find((e) => e.text.includes("could not parse PR number"));
+    expect(parseFail).toBeDefined();
+    expect(parseFail?.text).toContain(badUrl);
   });
 
   test("(rr) EXIT_PR_UNVERIFIED is 7", () => {

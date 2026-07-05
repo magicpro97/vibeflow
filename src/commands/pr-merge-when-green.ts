@@ -7,7 +7,12 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type FileHasher, detectImplDrift, snapshotImpl } from "../spec-freshness.js";
+import {
+  type FileHasher,
+  type ImplFingerprint,
+  detectImplDrift,
+  snapshotImpl,
+} from "../spec-freshness.js";
 import { c, cwd, out } from "./_shared.js";
 import {
   EXIT_IO,
@@ -233,8 +238,17 @@ export async function mergeWhenGreen(
         meta: { kind: "merge-when-green-ci", pr: target.pr, status: "pass" },
       });
       // #520: snapshot scoped-file digests before the transport-only merge.
+      // #532: the snapshot + drift-detect are best-effort integrity bookkeeping.
+      // A filesystem race (a scoped file vanishing mid-merge → statSync/readFile
+      // throw) must NOT crash an otherwise-successful merge — fail open to
+      // no-drift, exactly like the verify-time snapshot in tools-detect.ts.
       const scope = prScope(target.pr, run);
-      const before = snapshotImpl(cwd(), scope, inject.hashFile);
+      let before: ImplFingerprint = {};
+      try {
+        before = snapshotImpl(cwd(), scope, inject.hashFile);
+      } catch {
+        before = {}; // snapshot failed → nothing to compare → no false tamper
+      }
       const merge = mergePr(target.pr, noDeleteBranch, run);
       if (!merge.ok) {
         out("vf", c.red(`merge-when-green: gh pr merge failed: ${merge.stderr.trim()}`), {
@@ -244,17 +258,28 @@ export async function mergeWhenGreen(
         return EXIT_MERGE_FAIL;
       }
       // #520: the ship step must be transport-only — no scoped file may change.
-      const drifted = detectImplDrift(cwd(), before, inject.hashFile);
+      let drifted: string[] = [];
+      try {
+        drifted = detectImplDrift(cwd(), before, inject.hashFile);
+      } catch {
+        drifted = []; // race during detect → fail open (the merge already landed)
+      }
       if (drifted.length > 0) {
         out("vf", c.red(`ship-tamper: scoped files changed during merge: ${drifted.join(", ")}`), {
           level: "error",
           meta: { kind: "ship-tamper", pr: target.pr, files: drifted },
         });
+        // #532 no-release-on-merged: the PR is already merged — do NOT releaseClaim.
+        // A merged PR must not re-enter the free pool (unlike the pre-merge
+        // fail/timeout paths below, which release to requeue). Tamper is a
+        // post-merge integrity alarm, not a retry signal.
         return EXIT_SHIP_TAMPER;
       }
       out("vf", c.green(`✓ merged #${target.pr} (${target.branch})`), {
         meta: { kind: "merge-when-green-merge", pr: target.pr, branch: target.branch },
       });
+      // #532 no-release-on-merged: success also KEEPS the claim — the PR left the
+      // queue by merging, so releasing would let a merged PR be re-claimed.
       return EXIT_OK;
     }
 

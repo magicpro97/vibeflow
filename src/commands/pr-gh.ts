@@ -197,6 +197,10 @@ export async function verifyPrExists(
   if (state == null) {
     return { ok: false, reason: `Agent HALLUCINATED: PR #${pr} not found after retry` };
   }
+  // #532 explicit decision: ANY returned state (OPEN / CLOSED / MERGED) proves the
+  // PR PERSISTED — the anti-hallucination check is "did the create side-effect
+  // land", not "is it still open". A PR merged/closed between create and re-query
+  // is still real, so it counts as exists. `state` is surfaced for the caller.
   return { ok: true, state };
 }
 

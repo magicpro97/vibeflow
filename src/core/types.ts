@@ -74,8 +74,9 @@ export interface WorkUnit {
    * Type B drift (ADR spec-freshness): SHA256 of each scoped file captured at the
    * last GREEN verify, plus the git SHA then. A later verify recomputes them — a
    * changed scoped file with no re-dispatch is an out-of-pipeline edit (provenance).
+   * #532: a `null` value is the absent-at-snapshot sentinel (create detection).
    */
-  impl_fingerprint?: Record<string, string>;
+  impl_fingerprint?: Record<string, string | null>;
   verified_sha?: string;
   /**
    * Security checkpoint result, populated when the orchestrator runs
