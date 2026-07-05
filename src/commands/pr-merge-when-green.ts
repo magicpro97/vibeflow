@@ -7,6 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { type FileHasher, detectImplDrift, snapshotImpl } from "../spec-freshness.js";
 import { c, cwd, out } from "./_shared.js";
 import {
   EXIT_IO,
@@ -27,6 +28,8 @@ import {
 export const EXIT_MERGE_FAIL = 8;
 /** Sentinel: CI poll timed out (5 min). */
 export const EXIT_TIMEOUT = 9;
+/** #520: scoped source files changed across the (transport-only) merge step. */
+export const EXIT_SHIP_TAMPER = 10;
 
 /** Default shell runner. */
 export function defaultRunCommandSync(
@@ -86,6 +89,21 @@ function mergePr(
   if (!noDeleteBranch) args.push("--delete-branch");
   const result = runCommandSync("gh", args);
   return { ok: result.status === 0, stderr: result.stderr };
+}
+
+/** #520: scoped file paths of a PR via gh. Empty on failure (fail-open — the
+ *  digest guard then runs on an empty scope and can never false-block). */
+function prScope(
+  pr: number,
+  run: (cmd: string, args: string[]) => { stdout: string; stderr: string; status: number },
+): string[] {
+  const r = run("gh", ["pr", "view", String(pr), "--json", "files"]);
+  if (r.status !== 0) return [];
+  try {
+    return ((JSON.parse(r.stdout)?.files ?? []) as { path: string }[]).map((f) => f.path);
+  } catch {
+    return [];
+  }
 }
 
 /** Release claim + move entry to back of queue in one atomic operation.
@@ -152,6 +170,8 @@ export interface MergeWhenGreenInject {
   mkdirSync?: (p: string, opts: { recursive: boolean }) => void;
   rmSync?: (p: string, opts: { recursive: boolean }) => void;
   sleep?: (ms: number) => Promise<void>;
+  /** #520: injectable file hasher for the transport-only digest guard. */
+  hashFile?: FileHasher;
 }
 
 /**
@@ -212,6 +232,9 @@ export async function mergeWhenGreen(
       out("vf", c.green(`✓ CI green for #${target.pr} — merging…`), {
         meta: { kind: "merge-when-green-ci", pr: target.pr, status: "pass" },
       });
+      // #520: snapshot scoped-file digests before the transport-only merge.
+      const scope = prScope(target.pr, run);
+      const before = snapshotImpl(cwd(), scope, inject.hashFile);
       const merge = mergePr(target.pr, noDeleteBranch, run);
       if (!merge.ok) {
         out("vf", c.red(`merge-when-green: gh pr merge failed: ${merge.stderr.trim()}`), {
@@ -219,6 +242,15 @@ export async function mergeWhenGreen(
         });
         releaseClaim(target.pr, inject);
         return EXIT_MERGE_FAIL;
+      }
+      // #520: the ship step must be transport-only — no scoped file may change.
+      const drifted = detectImplDrift(cwd(), before, inject.hashFile);
+      if (drifted.length > 0) {
+        out("vf", c.red(`ship-tamper: scoped files changed during merge: ${drifted.join(", ")}`), {
+          level: "error",
+          meta: { kind: "ship-tamper", pr: target.pr, files: drifted },
+        });
+        return EXIT_SHIP_TAMPER;
       }
       out("vf", c.green(`✓ merged #${target.pr} (${target.branch})`), {
         meta: { kind: "merge-when-green-merge", pr: target.pr, branch: target.branch },

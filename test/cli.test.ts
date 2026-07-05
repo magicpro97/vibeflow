@@ -803,6 +803,30 @@ describe("commands.units CRUD", () => {
     }
   });
 
+  // #517: manual evidence add stamps a UTC capture time, stamp-once on re-add.
+  test("evidence --add stamps evidence_at (UTC), stamp-once on re-add", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-evat-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      expect(units("add", ["nav"])).toBe(0);
+      const key = "compiled green: BUILD SUCCESSFUL";
+      expect(units("evidence", ["nav"], { add: key })).toBe(0);
+      let nav = readState(dir)?.work_units.find((u) => u.name === "nav");
+      const t1 = nav?.evidence_at?.[key];
+      expect(typeof t1).toBe("string");
+      expect(t1).toBe(new Date(t1 as string).toISOString()); // normalized UTC Z
+      // re-add the SAME string → stamp-once: the timestamp must not move
+      expect(units("evidence", ["nav"], { add: key })).toBe(0);
+      nav = readState(dir)?.work_units.find((u) => u.name === "nav");
+      expect(nav?.evidence_at?.[key]).toBe(t1);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("evidence-add resolves the no-evidence policy gate dead-end", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-unitsgate-"));
     const orig = process.cwd();

@@ -831,4 +831,51 @@ describe("policyGates: canary gate (ADR-005)", () => {
     });
     expect(r.failures.some((f) => f.includes("impl-drift"))).toBe(false);
   });
+
+  // #517: evidence-freshness — evidence recorded BEFORE the code it verifies is stale (WARN-only).
+  test("evidence-freshness: stale evidence (2020 < code 2021) → warning", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, evidence_at: { e1: "2020-01-01T00:00:00.000Z" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => "2021-01-01T00:00:00.000Z",
+    });
+    expect(r.ok).toBe(true); // warn-only, never fails
+    expect(r.warnings.some((w) => w.includes("evidence-stale(warn)"))).toBe(true);
+  });
+
+  test("evidence-freshness: fresh evidence (2022 > code 2021) → no warning", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, evidence_at: { e1: "2022-01-01T00:00:00.000Z" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => "2021-01-01T00:00:00.000Z",
+    });
+    expect(r.warnings.some((w) => w.includes("evidence-stale"))).toBe(false);
+  });
+
+  test("evidence-freshness: fail-open when evidence_at absent → no warning", () => {
+    const state = { ...base, work_units: [{ ...khUnit }] }; // no evidence_at
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => "2021-01-01T00:00:00.000Z",
+    });
+    expect(r.warnings.some((w) => w.includes("evidence-stale"))).toBe(false);
+  });
+
+  test("evidence-freshness: fail-open when codeTimeFn returns null → no warning", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, evidence_at: { e1: "2020-01-01T00:00:00.000Z" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => null, // non-git / no commit
+    });
+    expect(r.warnings.some((w) => w.includes("evidence-stale"))).toBe(false);
+  });
 });

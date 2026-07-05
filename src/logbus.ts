@@ -363,3 +363,12 @@ export function getLogbus(): Logbus | null {
 export function setLogbusForTests(bus: Logbus | null): void {
   active = bus;
 }
+
+/** #525: true if an event should be sent to a stream scoped to `unit`.
+ *  No filter (undefined/empty) ⇒ everything passes. With a filter ⇒ only
+ *  events for that exact unit (events with no `unit` are session-level and
+ *  are excluded from a unit-scoped stream). */
+export function matchesUnitFilter(ev: { unit?: string }, unit: string | undefined): boolean {
+  if (!unit) return true;
+  return ev.unit === unit;
+}

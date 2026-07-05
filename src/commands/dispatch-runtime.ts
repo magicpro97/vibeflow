@@ -11,7 +11,9 @@ import { ENGINES } from "../core/types.js";
 import { applyGuidance } from "../dispatch/guidance.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
+import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
+import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
 import { readSettings } from "../settings.js";
 import {
   CTX_DIR,
@@ -259,6 +261,7 @@ export function makeDispatcher(
               // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
               // both see engine progress without a second read of the spawner.
               out("engine-stdout", text, {
+                level: "info",
                 unit: u.name,
                 meta: { engine, unit: u.name },
               });
@@ -286,7 +289,11 @@ export function makeDispatcher(
                 appendFileSafe(streamPath, line);
               }
               if (r.stdout) {
-                out("engine-stdout", r.stdout, { unit: u.name, meta: { engine, unit: u.name } });
+                out("engine-stdout", r.stdout, {
+                  level: "info",
+                  unit: u.name,
+                  meta: { engine, unit: u.name },
+                });
               }
               // Stderr: AsyncSpawner's return type only has { status, stdout, timedOut? };
               // the base spawner may not surface stderr. The composed callback stays
@@ -393,6 +400,8 @@ export function makeReviewer(
     llmReviewFn?: (prompt: string) => Promise<string>;
     /** Implementer engine — so the reviewer auto-routes to a DIFFERENT tool (ADR-001). */
     implementer?: Engine;
+    /** #522: command runner for acceptance-criteria verification. Defaults to defaultRun. */
+    runCmd?: GateRunner;
   },
 ): Reviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
@@ -425,6 +434,17 @@ export function makeReviewer(
       };
     }
     if (!outcome.evidence?.length) return { pass: false, reason: "no recorded evidence" };
+
+    // #522: run each structured acceptance criterion. A failing MUST is a review
+    // FAILURE; SHOULD/NICE/absent-priority failures warn only. Prose-only skip.
+    if (unit.acceptance_criteria?.length) {
+      const runCmd = inject?.runCmd ?? defaultRun;
+      const v = verifyAcceptance(unit.acceptance_criteria, runCmd, cwd);
+      unit.evidence = [...(unit.evidence ?? []), ...v.evidence];
+      for (const w of v.warn) out("vf", `acceptance(warn): ${w}`, { level: "warn" });
+      if (v.hardFail.length)
+        return { pass: false, reason: `MUST criteria unverified: ${v.hardFail.join("; ")}` };
+    }
 
     // Read and analyze the unit's actual diff (cwd is the run dir, not the
     // process cwd — #359: whole-tree diff now sees ALL changed files, so it
