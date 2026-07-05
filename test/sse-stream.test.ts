@@ -190,4 +190,85 @@ describe("M3 SSE stream endpoint", () => {
       server.stop();
     }
   });
+
+  // #525: read live SSE chunks until `marker` appears or a soft deadline.
+  // Races each read against a timeout so a missing marker returns partial text
+  // (the assertions then fail loudly) instead of hanging or throwing an abort.
+  async function drainUntil(
+    reader: { read(): Promise<{ value?: Uint8Array; done: boolean }> },
+    marker: string,
+  ): Promise<string> {
+    const decoder = new TextDecoder();
+    let text = "";
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && !text.includes(marker)) {
+      const timeout = new Promise<{ value?: Uint8Array; done: boolean }>((r) =>
+        setTimeout(() => r({ value: undefined, done: true }), 300),
+      );
+      const { value, done } = await Promise.race([reader.read(), timeout]);
+      if (value) text += decoder.decode(value, { stream: true });
+      if (done && !value) continue; // soft timeout tick — retry until deadline
+      if (done) break;
+    }
+    return text;
+  }
+
+  test("SSE ?unit=A streams only unit-A events live (#525)", async () => {
+    const { server, url } = await startServer(0);
+    let text = "";
+    try {
+      const resp = await fetch(`${url}/api/logs/stream?unit=A`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
+      // Prime: block on the initial comment chunk so the SSE start()/subscribe
+      // has run before we emit — otherwise the live events miss the subscriber.
+      await reader.read();
+
+      out("engine-stdout", "u525-B-live", { level: "info", unit: "B" });
+      out("vf", "u525-novf-live");
+      out("engine-stdout", "u525-A-live", { level: "info", unit: "A" });
+      await new Promise((r) => setTimeout(r, 100));
+
+      text = await drainUntil(reader, "u525-A-live");
+      reader.cancel();
+    } catch (e) {
+      // Only a stream timeout/abort is acceptable — a broken filter must NOT be
+      // swallowed here (else the assertions below can never fail the test).
+      if (!(e instanceof DOMException)) throw e;
+    } finally {
+      await new Promise((r) => setTimeout(r, 200));
+      server.stop();
+    }
+    expect(text).toContain("u525-A-live");
+    expect(text).not.toContain("u525-B-live");
+    expect(text).not.toContain("u525-novf-live");
+  });
+
+  test("SSE with no ?unit= streams every event (back-compat, #525)", async () => {
+    const { server, url } = await startServer(0);
+    let text = "";
+    try {
+      const resp = await fetch(`${url}/api/logs/stream`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
+      // Prime: block on the initial comment so the subscribe is active first.
+      await reader.read();
+
+      out("engine-stdout", "u525-all-unit", { level: "info", unit: "Z" });
+      out("vf", "u525-all-novf");
+      await new Promise((r) => setTimeout(r, 100));
+
+      text = await drainUntil(reader, "u525-all-novf");
+      reader.cancel();
+    } catch (e) {
+      if (!(e instanceof DOMException)) throw e;
+    } finally {
+      await new Promise((r) => setTimeout(r, 200));
+      server.stop();
+    }
+    expect(text).toContain("u525-all-unit");
+    expect(text).toContain("u525-all-novf");
+  });
 });
