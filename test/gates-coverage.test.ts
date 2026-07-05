@@ -878,4 +878,68 @@ describe("policyGates: canary gate (ADR-005)", () => {
     });
     expect(r.warnings.some((w) => w.includes("evidence-stale"))).toBe(false);
   });
+
+  // #534: evidence_at is persisted + hand-editable. A positive offset can make a
+  // string sort LEXICALLY newer while the true instant is OLDER — the exact case
+  // the old `.sort()` (raw string compare) got wrong. "2021-01-01T05:00:00+07:00"
+  // == 2020-12-31T22:00:00Z, genuinely older than code 2021-01-01T00:00:00Z, so a
+  // warning is CORRECT. Old code: lexical "…T05…" > "…T00…" → newest<ct false → NO
+  // warn (MISSES real staleness). New code normalizes → warns. Discriminates.
+  test("evidence-freshness: offset lexically-newer-but-actually-older → warns (#534)", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, evidence_at: { e1: "2021-01-01T05:00:00+07:00" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => "2021-01-01T00:00:00.000Z",
+    });
+    expect(r.ok).toBe(true); // warn-only
+    expect(r.warnings.some((w) => w.includes("evidence-stale(warn)"))).toBe(true);
+  });
+
+  // #534: the mirror case — a negative offset sorts LEXICALLY older while the true
+  // instant is NEWER. "2021-01-01T00:00:00-07:00" == 2021-01-01T07:00:00Z, genuinely
+  // newer than code 2021-01-01T03:00:00Z, so NO warning is correct. Old code: lexical
+  // "…T00…" < "…T03…" → newest<ct true → FALSE warn. New code normalizes → no warn.
+  test("evidence-freshness: offset lexically-older-but-actually-newer → no false warn (#534)", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, evidence_at: { e1: "2021-01-01T00:00:00-07:00" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => "2021-01-01T03:00:00.000Z",
+    });
+    expect(r.warnings.some((w) => w.includes("evidence-stale"))).toBe(false);
+  });
+
+  // #534: a garbage / non-ISO value (Date.parse → NaN) is dropped, not treated
+  // as a char array. With NO other parseable entry → fail-open (no warning),
+  // never a crash or spurious warn.
+  test("evidence-freshness: unparseable evidence_at value → fail-open, no crash (#534)", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, evidence_at: { e1: "not-a-date" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => "2021-01-01T00:00:00.000Z",
+    });
+    expect(r.warnings.some((w) => w.includes("evidence-stale"))).toBe(false);
+  });
+
+  // #534: a mix — one garbage + one valid stale entry — drops the garbage and
+  // still warns off the valid one (garbage must not mask a real staleness).
+  test("evidence-freshness: mixed garbage + valid stale → drops garbage, still warns (#534)", () => {
+    const state = {
+      ...base,
+      work_units: [{ ...khUnit, evidence_at: { bad: "garbage", e1: "2020-01-01T00:00:00.000Z" } }],
+    };
+    const r = policyGates(state, {
+      canaryCheck: () => true,
+      codeTimeFn: () => "2021-01-01T00:00:00.000Z",
+    });
+    expect(r.warnings.some((w) => w.includes("evidence-stale(warn)"))).toBe(true);
+  });
 });

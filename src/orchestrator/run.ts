@@ -110,13 +110,18 @@ function applyOutcome(
 ): WorkUnit {
   // Dedupe evidence: a re-dispatched unit must not accumulate the same path (e.g.
   // `claude.result.json`) twice across runs — keep first-seen order, drop repeats.
-  const evidence = [...new Set([...(unit.evidence ?? []), ...(outcome.evidence ?? [])])];
+  const fresh = outcome.evidence ?? [];
+  const evidence = [...new Set([...(unit.evidence ?? []), ...fresh])];
   // #517: stamp each evidence string's capture time, keyed by the string so it
   // survives the Set-dedup. Stamp-once — a re-dispatch never rewrites an existing
   // key, so the recorded time stays that of the FIRST capture (fail-open: units
   // with no evidence get an empty map, which the freshness gate skips).
+  // #534: stamp ONLY evidence the current `outcome` produced (`fresh`), NOT the
+  // union with pre-existing `unit.evidence`. Legacy evidence (predates the
+  // evidence_at field) has an unknown true capture time; stamping it `now()` on
+  // re-dispatch would make newest > codeTime and mask staleness.
   const evidence_at = { ...(unit.evidence_at ?? {}) };
-  for (const e of evidence) if (!(e in evidence_at)) evidence_at[e] = now();
+  for (const e of fresh) if (!(e in evidence_at)) evidence_at[e] = now();
   return {
     ...unit,
     status: outcome.status,
