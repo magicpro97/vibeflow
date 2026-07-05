@@ -137,11 +137,13 @@ test("loadAuthoritativeSpec: null provider → local (or empty when absent)", ()
 });
 
 // ─── Task 8 — Type B drift (impl fingerprint + diff-coverage) ───────────────
-test("snapshotImpl: hashes each scoped file (injected hasher)", () => {
+test("snapshotImpl: records each scoped file's hash, null for absent (#532)", () => {
   const fp = snapshotImpl("/base", ["src/a.ts", "src/b.ts"], (_b, rel) =>
     rel === "src/a.ts" ? "hashA" : null,
   );
-  expect(fp).toEqual({ "src/a.ts": "hashA" }); // b returned null → skipped
+  // #532: absent file recorded as null sentinel (was previously skipped) so a
+  // later create is detectable.
+  expect(fp).toEqual({ "src/a.ts": "hashA", "src/b.ts": null });
 });
 
 test("detectImplDrift: no fingerprint → [] (never verified)", () => {
@@ -155,6 +157,16 @@ test("detectImplDrift: changed + deleted scoped files flagged", () => {
 });
 test("detectImplDrift: unchanged file not flagged", () => {
   const drift = detectImplDrift("/base", { "src/a.ts": "same" }, () => "same");
+  expect(drift).toEqual([]);
+});
+// #532: null sentinel = absent-at-snapshot. A file that appears during the ship
+// window (null → present) is a CREATE drift; still-absent (null → null) is clean.
+test("detectImplDrift: absent-at-snapshot file created during window → (created)", () => {
+  const drift = detectImplDrift("/base", { "src/new.ts": null }, () => "fresh-hash");
+  expect(drift).toEqual(["src/new.ts (created)"]);
+});
+test("detectImplDrift: absent-at-snapshot file still absent → not flagged (#532)", () => {
+  const drift = detectImplDrift("/base", { "src/new.ts": null }, () => null);
   expect(drift).toEqual([]);
 });
 
@@ -195,13 +207,33 @@ test("defaultImplDrift: no fingerprint → empty drift", () => {
 test("snapshotImpl + detectImplDrift: real file hashing + edit detection", () => {
   const dir = mkdtempSync(join(tmpdir(), "vf-implfp-"));
   writeFileSync(join(dir, "a.ts"), "export const x = 1;\n");
-  const fp = snapshotImpl(dir, ["a.ts", "gone.ts"]); // gone.ts absent → skipped
-  expect(Object.keys(fp)).toEqual(["a.ts"]);
-  // unchanged → no drift
+  const fp = snapshotImpl(dir, ["a.ts", "gone.ts"]); // gone.ts absent → null sentinel
+  expect(fp).toEqual({ "a.ts": expect.any(String), "gone.ts": null });
+  // unchanged (a.ts same, gone.ts still absent) → no drift
   expect(detectImplDrift(dir, fp)).toEqual([]);
   // edit the file → drift
   writeFileSync(join(dir, "a.ts"), "export const x = 2;\n");
   expect(detectImplDrift(dir, fp)).toEqual(["a.ts"]);
+});
+
+// #532: a scoped file ABSENT at snapshot then CREATED during the ship window is
+// caught via the null sentinel — the exact copilot-2 gap. Real-fs end-to-end.
+test("snapshotImpl + detectImplDrift: absent→created file flagged (#532)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-implfp-create-"));
+  const fp = snapshotImpl(dir, ["late.ts"]); // absent at snapshot → { "late.ts": null }
+  expect(fp).toEqual({ "late.ts": null });
+  expect(detectImplDrift(dir, fp)).toEqual([]); // still absent → clean
+  writeFileSync(join(dir, "late.ts"), "export const y = 1;\n"); // created during window
+  expect(detectImplDrift(dir, fp)).toEqual(["late.ts (created)"]);
+});
+
+// #532 P3: a scoped path that is a DIRECTORY must fail open (null = absent), not
+// crash the gate with EISDIR out of readFileSync.
+test("defaultHashFile: directory scoped path → null, no EISDIR crash (#532)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-implfp-dir-"));
+  mkdirSync(join(dir, "adir"), { recursive: true });
+  expect(() => snapshotImpl(dir, ["adir"])).not.toThrow();
+  expect(snapshotImpl(dir, ["adir"])).toEqual({ adir: null });
 });
 
 test("driftUncovered + defaultImplDrift: real git diff over a committed file", () => {

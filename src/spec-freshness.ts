@@ -5,7 +5,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { CTX_DIR, writeFileSafe } from "./core.js";
 import { decisionsPath } from "./decisions.js";
@@ -111,35 +111,40 @@ export function specStaleSignals(base: string, taskId: string, currentSpec: stri
 // is a trivial hash. Signal A = 100% recall on the provenance event; Signal B =
 // diff-coverage escalation (edited+tested = likely benign warn; edited+untested = fail).
 
-/** relPath -> sha256(content). Snapshot of a unit's scoped files at verify-green. */
-export type ImplFingerprint = Record<string, string>;
+/** relPath -> sha256(content), or null when the file was ABSENT at snapshot
+ *  time (#532 null-sentinel: lets detectImplDrift catch an absent→created file
+ *  during the ship window, not just edit/delete of a file present at snapshot). */
+export type ImplFingerprint = Record<string, string | null>;
 
 /** Injectable file hasher (test seam). Returns null when the file is absent. */
 export type FileHasher = (base: string, rel: string) => string | null;
 
 const defaultHashFile: FileHasher = (base, rel) => {
   const p = join(base, rel);
-  return existsSync(p) ? createHash("sha256").update(readFileSync(p)).digest("hex") : null;
+  // #532 P3: statSync-guard so a scoped path that is a DIRECTORY fails open
+  // (null = "absent") instead of readFileSync throwing EISDIR out of the gate.
+  if (!existsSync(p) || !statSync(p).isFile()) return null;
+  return createHash("sha256").update(readFileSync(p)).digest("hex");
 };
 
 /** Snapshot scoped-file hashes when a unit verifies GREEN. Store on the unit as
  *  `impl_fingerprint` (+ `verified_sha` = git HEAD) so a later verify can detect
- *  an out-of-pipeline edit. */
+ *  an out-of-pipeline edit. #532: record ABSENT scoped files as a null sentinel
+ *  so a file created during the ship window is caught by detectImplDrift. */
 export function snapshotImpl(
   base: string,
   scope: string[],
   hashFile: FileHasher = defaultHashFile,
 ): ImplFingerprint {
   const fp: ImplFingerprint = {};
-  for (const rel of scope) {
-    const h = hashFile(base, rel);
-    if (h) fp[rel] = h;
-  }
+  for (const rel of scope) fp[rel] = hashFile(base, rel);
   return fp;
 }
 
-/** Type B detector: scoped files that changed (or were deleted) since the last
- *  green snapshot. Empty when the unit was never verified (no fingerprint). */
+/** Type B detector: scoped files that changed, were deleted, or were CREATED
+ *  since the last green snapshot. Empty when the unit was never verified (no
+ *  fingerprint). A null sentinel means "absent at snapshot": null→present is a
+ *  create (#532), present→null is a delete, hash mismatch is an edit. */
 export function detectImplDrift(
   base: string,
   fingerprint: ImplFingerprint | undefined,
@@ -149,7 +154,10 @@ export function detectImplDrift(
   const drifted: string[] = [];
   for (const [rel, oldHash] of Object.entries(fingerprint)) {
     const now = hashFile(base, rel);
-    if (now === null) drifted.push(`${rel} (deleted)`);
+    if (oldHash === null) {
+      // absent at snapshot: only drift if it now EXISTS (created during ship).
+      if (now !== null) drifted.push(`${rel} (created)`);
+    } else if (now === null) drifted.push(`${rel} (deleted)`);
     else if (now !== oldHash) drifted.push(rel);
   }
   return drifted;
@@ -251,9 +259,12 @@ export function defaultImplDrift(
 ): { drifted: string[]; uncovered: string[] } {
   const drifted = detectImplDrift(base, u.impl_fingerprint);
   const since = u.verified_sha ?? "HEAD";
-  // A "(deleted)" marker has no line diff to check — always uncovered.
+  // A "(deleted)" or "(created)" marker has no old→new line diff to check —
+  // always uncovered (a ship-window create/delete can't be pinned by a test).
   const uncovered = drifted.filter((rel) =>
-    rel.endsWith("(deleted)") ? true : driftUncovered(base, rel, since),
+    rel.endsWith("(deleted)") || rel.endsWith("(created)")
+      ? true
+      : driftUncovered(base, rel, since),
   );
   return { drifted, uncovered };
 }

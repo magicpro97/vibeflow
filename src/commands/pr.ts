@@ -239,7 +239,9 @@ async function prCreate(
   //     Exit-code + URL-regex is not proof it persisted; re-query gh.
   const prNo = prNumberFromUrl(pr.url);
   if (prNo == null) {
-    out("vf", c.red("vf pr create: could not parse PR number from gh output"), {
+    // #532: include the raw URL so an enterprise-host / extra-path-segment
+    // mismatch is diagnosable instead of an opaque "could not parse".
+    out("vf", c.red(`vf pr create: could not parse PR number from gh output: ${pr.url}`), {
       level: "error",
     });
     return EXIT_PR_CREATE;
