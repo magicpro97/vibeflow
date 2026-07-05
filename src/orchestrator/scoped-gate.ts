@@ -52,7 +52,14 @@ export interface ScopedGateResult {
 
 /** Default runner: spawnSync the command string, capture stdout+stderr.
  *  Exported for direct unit testing (so the seam's own logic is covered
- *  without driving the whole scopedGate pipeline through real tools). */
+ *  without driving the whole scopedGate pipeline through real tools).
+ *  #533: this splits on spaces (`cmd.split(" ").filter(Boolean)`, so runs of
+ *  spaces collapse) and runs `spawnSync(bin, args)` with NO `shell:true`, so
+ *  shell metacharacters (pipes, quotes, redirects, `$()`, globs) are passed as
+ *  LITERAL args, not interpreted.
+ *  Intentional — it keeps the injection surface off (a unit-supplied
+ *  `verification` can't chain `;`/`|` commands) at the cost of not supporting
+ *  shell syntax. Callers needing a pipeline must invoke a script binary. */
 export function defaultRun(cmd: string, cwd: string): GateRunResult {
   const parts = cmd.split(" ").filter((s) => s.length > 0);
   const bin = parts[0] ?? "";
