@@ -143,4 +143,79 @@ describe("verifyAcceptance", () => {
     expect(v.evidence[0]).toBe('acceptance AC9: ls → "ok"');
     expect(isVerifiableEvidence(v.evidence[0] as string)).toBe(true);
   });
+
+  // #533: a case-typo priority must NOT silently downgrade a MUST to warn-only.
+  test("case-typo MUST ('must'/'Must') still hard-fails (#533)", () => {
+    for (const p of ["must", "Must", " MUST "]) {
+      const c = {
+        id: "AC10",
+        criterion: "critical",
+        verification: "make",
+        priority: p,
+      } as unknown as AcceptanceCriterion;
+      const v = verifyAcceptance([c], () => failRes, "/tmp");
+      expect(v.hardFail).toEqual(["AC10: critical"]);
+      // no spurious unknown-priority warning for a recognized (mis-cased) value
+      expect(v.warn).toEqual([]);
+    }
+  });
+
+  // #533: an UNRECOGNIZED priority warns (surfaces the typo) AND fails open to
+  // SHOULD (warn-only) — it never hardens a green gate, never crashes.
+  test("unknown priority → warns + treated as SHOULD, no hardFail (#533)", () => {
+    const c = {
+      id: "AC11",
+      criterion: "runs",
+      verification: "run",
+      priority: "CRITICAL",
+    } as unknown as AcceptanceCriterion;
+    const v = verifyAcceptance([c], () => failRes, "/tmp");
+    expect(v.hardFail).toEqual([]);
+    expect(v.warn).toEqual([
+      'AC11: unknown priority "CRITICAL" — treated as SHOULD (warn-only)',
+      "AC11: runs",
+    ]);
+  });
+
+  // #533: an unknown priority on a PASSING criterion still surfaces the typo
+  // warning (so a doctored MUST typo is visible even when the check happens to pass).
+  test("unknown priority on a passing criterion still warns (#533)", () => {
+    const c = {
+      id: "AC12",
+      criterion: "ok",
+      verification: "true",
+      priority: "shold",
+    } as unknown as AcceptanceCriterion;
+    const v = verifyAcceptance([c], () => ({ status: 0, stdout: "yes" }), "/tmp");
+    expect(v.hardFail).toEqual([]);
+    expect(v.warn).toEqual(['AC12: unknown priority "shold" — treated as SHOULD (warn-only)']);
+  });
+
+  // #533: status === null (killed by a signal) → evidence renders `exit signal`,
+  // not the misleading `exit null`. Still a non-zero outcome ⇒ classified as fail.
+  test("status null (signal-killed) → 'exit signal' tail, MUST hard-fails (#533)", () => {
+    const c: AcceptanceCriterion = {
+      id: "AC13",
+      criterion: "no hang",
+      verification: "sleep 999",
+      priority: "MUST",
+    };
+    const v = verifyAcceptance([c], () => ({ status: null, stdout: "" }), "/tmp");
+    expect(v.evidence[0]).toBe('acceptance AC13: sleep 999 → "exit signal"');
+    expect(isVerifiableEvidence(v.evidence[0] as string)).toBe(true);
+    expect(v.hardFail).toEqual(["AC13: no hang"]);
+  });
+
+  // Regression guard (not a #533-specific proof — passes on old code too): a
+  // mixed multi-criteria unit routes each failing criterion to the right bucket.
+  test("mixed MUST + SHOULD across criteria → each classified independently", () => {
+    const criteria: AcceptanceCriterion[] = [
+      { id: "M1", criterion: "must-thing", verification: "a", priority: "MUST" },
+      { id: "S1", criterion: "should-thing", verification: "b", priority: "SHOULD" },
+    ];
+    const v = verifyAcceptance(criteria, () => failRes, "/tmp");
+    expect(v.hardFail).toEqual(["M1: must-thing"]);
+    expect(v.warn).toEqual(["S1: should-thing"]);
+    expect(v.evidence).toHaveLength(2);
+  });
 });
