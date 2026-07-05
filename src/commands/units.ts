@@ -102,7 +102,12 @@ export function units(
           return 2;
         }
         const cur = u.evidence ?? [];
-        const next = mu(cwd(), "update", { name, evidence: [...cur, text] });
+        // #517: stamp the new evidence string's capture time (UTC), stamp-once —
+        // a re-add of the same string keeps its original timestamp. Keyed by the
+        // string so it survives Set-dedup elsewhere.
+        const evidence_at = { ...(u.evidence_at ?? {}) };
+        if (!(text in evidence_at)) evidence_at[text] = new Date().toISOString();
+        const next = mu(cwd(), "update", { name, evidence: [...cur, text], evidence_at });
         if (!next) {
           out("vf", c.red(`No such work unit: ${name}`), {
             level: "error",

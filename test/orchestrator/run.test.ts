@@ -80,6 +80,98 @@ describe("orchestrateUnits — security checkpoint (lines 205-215)", () => {
   });
 });
 
+describe("orchestrateUnits — two-stage escalation (#519)", () => {
+  test("cheap gate failed → security checkpoint SKIPPED, unit still blocked", async () => {
+    let asked = 0;
+    const spyAsk = () => () => {
+      asked++;
+      return Promise.resolve("run" as const);
+    };
+    const { units } = await orchestrateUnits({
+      units: [unit("cheap-fail")],
+      // dispatcher reports a failing cheap gate (test) → blocked before expensive stage
+      dispatcher: async () => ({
+        status: "blocked" as const,
+        confidence: 0,
+        evidence: ["e.log"],
+        gates: { test: "fail" as const },
+      }),
+      // Production reviewer blocks a failed cheap gate (dispatch-runtime.ts:382);
+      // model that here so the unit stays blocked without the security pass.
+      reviewer: () => ({ pass: false, reason: "cheap gate test=fail" }),
+      security: {
+        base: "/tmp",
+        askFn: spyAsk,
+        runSkillFn: async () => secResult("pass"),
+      },
+    });
+    const u = units.find((x) => x.name === "cheap-fail");
+    // askFn NOT called — the expensive/interactive security pass was skipped.
+    expect(asked).toBe(0);
+    // unit is still blocked (dispatcher status + no security pass to lift it).
+    expect(u?.status).toBe("blocked");
+    // no security verdict was attached because the checkpoint never ran.
+    expect(u?.gates.security).toBeUndefined();
+  });
+
+  test("regression: cheap gates pass → security checkpoint runs (askFn called once)", async () => {
+    let asked = 0;
+    const spyAsk = () => (_q: string) => {
+      asked++;
+      return Promise.resolve("run" as const);
+    };
+    const { units } = await orchestrateUnits({
+      units: [unit("cheap-pass")],
+      dispatcher: async () => ({
+        status: "done" as const,
+        confidence: 0.9,
+        evidence: ["e.log"],
+        gates: { build: "pass" as const, lint: "pass" as const, test: "pass" as const },
+      }),
+      reviewer: passReviewer,
+      security: {
+        base: "/tmp",
+        askFn: spyAsk,
+        runSkillFn: async () => secResult("pass"),
+      },
+    });
+    const u = units.find((x) => x.name === "cheap-pass");
+    expect(asked).toBe(1);
+    expect(u?.gates.security).toBe("pass");
+  });
+
+  test("dispatcher THREW → blocked outcome (no gates) → security checkpoint SKIPPED", async () => {
+    let asked = 0;
+    const spyAsk = () => () => {
+      asked++;
+      return Promise.resolve("run" as const);
+    };
+    const { units } = await orchestrateUnits({
+      units: [unit("throw-unit")],
+      // Dispatcher throws → run.ts catches it into `{ status: "blocked" }` with
+      // NO `gates` key. Guard must still short-circuit on the blocked status.
+      dispatcher: async () => {
+        throw new Error("dispatcher boom");
+      },
+      // Production reviewer blocks a blocked outcome (dispatch-runtime.ts:382);
+      // model that so the unit stays blocked without the security pass.
+      reviewer: () => ({ pass: false, reason: "dispatcher threw" }),
+      security: {
+        base: "/tmp",
+        askFn: spyAsk,
+        runSkillFn: async () => secResult("pass"),
+      },
+    });
+    const u = units.find((x) => x.name === "throw-unit");
+    // askFn NOT called — the expensive/interactive security pass was skipped.
+    expect(asked).toBe(0);
+    // unit is still blocked (dispatcher-throw outcome, no security pass to lift it).
+    expect(u?.status).toBe("blocked");
+    // no security verdict was attached because the checkpoint never ran.
+    expect(u?.gates.security).toBeUndefined();
+  });
+});
+
 describe("runParallel — AbortSignal", () => {
   test("stops pulling new items once the signal aborts", async () => {
     const started: number[] = [];
@@ -258,5 +350,49 @@ describe("orchestrateUnits — onProgress callback", () => {
     });
     expect(units).toHaveLength(1);
     expect(reviews).toHaveLength(1);
+  });
+});
+
+describe("orchestrateUnits — evidence freshness stamp (#517)", () => {
+  test("stamps new evidence keys with the injected clock", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("stamp-me")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+      now: () => "2021-06-06T00:00:00.000Z",
+    });
+    const u = units.find((x) => x.name === "stamp-me");
+    expect(u?.evidence_at?.["e.log"]).toBe("2021-06-06T00:00:00.000Z");
+  });
+
+  test("re-dispatch does NOT overwrite an existing timestamp (stamp-once)", async () => {
+    // Seed a unit that already carries evidence + a timestamp, re-run with a NEW clock.
+    const seeded: WorkUnit = {
+      ...unit("keep-ts"),
+      evidence: ["e.log"],
+      evidence_at: { "e.log": "2020-01-01T00:00:00.000Z" },
+    };
+    const { units } = await orchestrateUnits({
+      units: [seeded],
+      dispatcher: passDispatcher, // re-reports evidence ["e.log"]
+      reviewer: passReviewer,
+      concurrency: 1,
+      now: () => "2099-12-31T00:00:00.000Z",
+    });
+    const u = units.find((x) => x.name === "keep-ts");
+    expect(u?.evidence_at?.["e.log"]).toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  test("default clock stamps a valid ISO string when now is omitted", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("default-clock")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+    });
+    const ts = units[0]?.evidence_at?.["e.log"];
+    expect(typeof ts).toBe("string");
+    expect(ts).toBe(new Date(ts as string).toISOString());
   });
 });
