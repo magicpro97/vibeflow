@@ -193,7 +193,16 @@ async function launchEngine(
         });
       },
     });
-  const result = await runDispatchAsync({ engine, prompt, mode: "cli", spawner });
+  // #526 item 7: copilot writes its prompt to a file + gets a short pointer arg.
+  // `vf run` is single-unit with no unit name, so use a stable "run" slug.
+  const result = await runDispatchAsync({
+    engine,
+    prompt,
+    mode: "cli",
+    spawner,
+    unit: "run",
+    base,
+  });
   spinner.succeed(result.ok ? `${engine} finished` : `${engine} failed`);
   if (!result.ok) {
     handleUnitFailure(prot, base);

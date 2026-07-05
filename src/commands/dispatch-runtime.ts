@@ -8,6 +8,7 @@
 import { join } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { ENGINES } from "../core/types.js";
+import { applyGuidance } from "../dispatch/guidance.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
@@ -91,7 +92,17 @@ export function makeResearcher(
     const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
       `research round ${round}`,
     ]);
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner: researchSpawner });
+    // Pass a unit slug so copilot's prompt goes to a file, not argv (#526 item 7);
+    // research prompts carry full project context and can re-hit the ~32K argv
+    // limit otherwise. Research runs at the repo root (no --isolate), so the
+    // default base (cwd) resolves the pointer correctly.
+    const result = await runDispatchAsync({
+      engine,
+      prompt,
+      mode,
+      spawner: researchSpawner,
+      unit: `research-round-${round}`,
+    });
     const confidence = result.summary?.confidence ?? 0;
     // Build findings: prefer the summary's uncertainty field, then plain raw evidence.
     const findings: string[] = [];
@@ -186,11 +197,18 @@ export function makeDispatcher(
     const memBlock = memProvider
       ? renderMemoryBlock(memProvider.recall(unitText, { limit: 3 }))
       : "";
-    const prompt = buildEnginePrompt(
-      engine,
-      ctx,
-      [{ name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }],
-      memBlock,
+    const prompt = applyGuidance(
+      u.name,
+      buildEnginePrompt(
+        engine,
+        ctx,
+        [{ name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }],
+        memBlock,
+      ),
+      // A dry run is a READ-ONLY preview (see :309): it must still READ + PREPEND the
+      // queued guidance so CONTEXT.md shows it, but MUST NOT consume (delete) the file —
+      // else the next REAL run loses its steering. No-op clearGuidance in dry mode.
+      { base, ...(mode === "dry" ? { clearGuidance: () => {} } : {}) },
     );
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
     const evidence: string[] = [];
@@ -288,7 +306,16 @@ export function makeDispatcher(
             return r;
           };
     try {
-      const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
+      const result = await runDispatchAsync({
+        engine,
+        prompt,
+        mode,
+        spawner: streamSpawner,
+        // #526 item 7: copilot writes its prompt to .vibeflow/dispatch/<unit>.md and
+        // gets a short pointer arg (argv-limit fix); claude/codex ignore these (stdin).
+        unit: u.name,
+        base,
+      });
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
       // side-effect. It must never write result JSON nor append to the persisted evidence
       // ledger, so the dispatch outcome is reported in-memory only.

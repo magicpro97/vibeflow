@@ -12,6 +12,7 @@ import {
 import { collectVerifyReportAsync, defaultGoalEvalFn } from "../commands/tools-detect.js";
 import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../core.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
+import { writeGuidance } from "../dispatch/guidance.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
 import {
   ATTACH_CAP,
@@ -306,6 +307,18 @@ export async function handleMutationRoute(
       payload.input as import("../core/types.js").HookInput,
       payload.result as import("../core/types.js").HookResult,
     );
+    return Response.json({ ok: true });
+  }
+
+  // POST /api/guidance/:unit — UI drops a steering note for a QUEUED unit.
+  // Fire-and-forget: append to .vibeflow/guidance/<unit>.md (consumed once at
+  // dispatch). ponytail: steers queued units only, not a running one.
+  if (path.startsWith("/api/guidance/")) {
+    const unit = decodeURIComponent(path.slice("/api/guidance/".length));
+    const note = typeof payload.note === "string" ? payload.note : "";
+    if (!unit || !note.trim())
+      return Response.json({ error: "unit and note required" }, { status: 400 });
+    writeGuidance(unit, note, { base: ctx.getActiveRepo() });
     return Response.json({ ok: true });
   }
 

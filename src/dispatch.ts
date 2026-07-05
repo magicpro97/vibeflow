@@ -1,5 +1,13 @@
 import { join } from "node:path";
-import { type Engine, hasCommand, resolveCommand, writeFileSafe } from "./core.js";
+import {
+  CTX_DIR,
+  type Engine,
+  cwd,
+  hasCommand,
+  resolveCommand,
+  sanitizeUnitName,
+  writeFileSafe,
+} from "./core.js";
 import { parseEngineSummary } from "./dispatch/prompt.js";
 import {
   defaultAsyncSpawner,
@@ -66,6 +74,18 @@ interface DispatchOpts {
   /** Injectable PATH-presence probe so tests can force absent without spawning a real engine. */
   has?: (cmd: string) => boolean;
   /**
+   * Work-unit name for file-based copilot dispatch (#526 item 7). When set and the
+   * resolved engine takes its prompt via argv (copilot, promptMode "arg"), the
+   * prompt is written to `.vibeflow/dispatch/<unit>.md` and a short pointer arg is
+   * passed instead — sidestepping copilot's ~32K argv limit. claude/codex read
+   * stdin and are untouched.
+   */
+  unit?: string;
+  /** Repo root for the dispatch file (defaults to cwd()). */
+  base?: string;
+  /** Test seam: injected writer so unit tests capture the dispatch file without real FS. */
+  writeDispatchFile?: (path: string, content: string) => void;
+  /**
    * Bridge-mode stderr sink. The async path streams stderr
    * per-chunk via the spawner's onStderrChunk; the bridge path
    * uses Bun.spawnSync and can only emit the full stderr after
@@ -73,6 +93,40 @@ interface DispatchOpts {
    * channel so both paths are visible.
    */
   onStderrChunk?: (text: string) => void;
+}
+
+/**
+ * Copilot's CLI takes the prompt as an argv arg (promptMode "arg"), but argv is
+ * capped at ~32K, so large prompts fail (documented at ai-init/run.ts:211).
+ * #526 item 7: write the assembled prompt to `.vibeflow/dispatch/<unit>.md` and
+ * return a SHORT pointer prompt for copilot to read instead. Bounded regardless
+ * of the real prompt size (the whole point). `unit` is untrusted (planner/LLM
+ * origin), so it is sanitized against path traversal via sanitizeUnitName.
+ */
+export function writeDispatchPrompt(
+  unit: string,
+  prompt: string,
+  opts: { base?: string; writeFile?: (path: string, content: string) => void } = {},
+): string {
+  const rel = `${CTX_DIR}/dispatch/${sanitizeUnitName(unit)}.md`;
+  // Absolute path: copilot resolves the pointer against ITS cwd, which is not
+  // always `base` (e.g. `--isolate` runs the engine in a worktree; the server
+  // orchestrates a registered repo ≠ process.cwd()). A relative pointer would
+  // then miss the file and copilot would silently run on an empty prompt — worse
+  // than the pre-#526 loud argv-limit failure. An absolute pointer is cwd-safe.
+  const abs = join(opts.base ?? cwd(), rel);
+  (opts.writeFile ?? writeFileSafe)(abs, prompt);
+  return `Read ${abs} and follow it`;
+}
+
+/** Prompt actually fed to materializePrompt: the short file-pointer for copilot
+ *  (when a unit name is supplied), else the prompt unchanged. */
+function preparePrompt(cli: { promptMode?: "stdin" | "arg" }, opts: DispatchOpts): string {
+  if (cli.promptMode !== "arg" || opts.unit === undefined) return opts.prompt;
+  return writeDispatchPrompt(opts.unit, opts.prompt, {
+    base: opts.base,
+    writeFile: opts.writeDispatchFile,
+  });
 }
 
 function copilotCommand(probe: EngineProbe): EngineCommandResult {
@@ -231,7 +285,7 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
-  const invocation = materializePrompt(cli, prompt);
+  const invocation = materializePrompt(cli, preparePrompt(cli, opts));
   return buildResult(
     opts,
     spawn(invocation.cmd, invocation.args, invocation.input),
@@ -261,7 +315,7 @@ export async function runDispatchAsync(
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
-  const invocation = materializePrompt(cli, prompt);
+  const invocation = materializePrompt(cli, preparePrompt(cli, opts));
   return buildResult(
     opts,
     await spawn(invocation.cmd, invocation.args, invocation.input),

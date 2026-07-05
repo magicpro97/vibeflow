@@ -59,6 +59,7 @@ import {
   writeState,
 } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
+import { writeGuidance } from "../src/dispatch/guidance.js";
 import { claudeHookConfig } from "../src/hooks/adapters.js";
 import { type LogEvent, Logbus, getLogbus, setLogbusForTests } from "../src/logbus.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
@@ -2688,6 +2689,50 @@ describe("commands.computeKnowledgeHeavySource (test seam)", () => {
 });
 
 describe("commands.makeDispatcher (test seam)", () => {
+  // #526 P2: a dry-run PREVIEW must READ + PREPEND the queued guidance (so CONTEXT.md
+  // shows it) but MUST NOT consume (delete) the file — else the next REAL run loses its
+  // steering. Without the `mode === "dry"` no-op clearGuidance, this test fails: the
+  // guidance file is deleted by the preview.
+  test("makeDispatcher: dry run PREPENDS guidance into CONTEXT.md but does NOT delete the file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-dry-guidance-"));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const guidanceFile = join(dir, CTX_DIR, "guidance", "u1.md");
+      writeGuidance("u1", "STEER: preview only", { base: dir });
+      // dry mode returns early in runDispatchAsync (no engine spawn), so no Bun.spawn mock.
+      const dispatcher = makeDispatcher("claude", {} as never, dir, "dry", "simple-code");
+      const r = await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      expect(r.status).toBe("verifying");
+      // guidance READ + PREPENDED into the preview…
+      const ctx = readFileSync(join(dir, CTX_DIR, "workunits", "u1", "CONTEXT.md"), "utf8");
+      expect(ctx.startsWith("STEER: preview only")).toBe(true);
+      // …but NOT consumed: the file survives for the next real run.
+      expect(existsSync(guidanceFile)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("makeDispatcher: streamSpawner factory callbacks fire (line 918-938)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-makedispatcher-"));
     try {

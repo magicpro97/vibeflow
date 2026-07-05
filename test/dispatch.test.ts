@@ -13,6 +13,7 @@ import {
   parseEngineSummary,
   runDispatch,
   runDispatchAsync,
+  writeDispatchPrompt,
 } from "../src/dispatch.js";
 
 describe("engineCommand — exact argv per engine (defect #1)", () => {
@@ -88,20 +89,144 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     expect(r.reason).toMatch(/copilot/i);
   });
 
-  test("cli mode passes Copilot prompt as -p argument, not stdin", () => {
+  test("cli mode passes Copilot a short file-pointer arg, not the raw prompt (#526)", () => {
     const calls: { cmd: string; args: string[]; input: string }[] = [];
     const spawner = (cmd: string, args: string[], input: string) => {
       calls.push({ cmd, args, input });
       return { status: 0, stdout: "done" };
     };
-    const r = runDispatch({ engine: "copilot", prompt: "hello copilot", mode: "cli", spawner });
+    const written: { path: string; content: string }[] = [];
+    const r = runDispatch({
+      engine: "copilot",
+      prompt: "hello copilot",
+      mode: "cli",
+      spawner,
+      unit: "u1",
+      base: "/tmp/base",
+      writeDispatchFile: (path, content) => written.push({ path, content }),
+    });
     expect(r.ok).toBe(true);
     expect(calls).toHaveLength(1);
     const call = calls[0];
     if (!call) throw new Error("expected one spawner call");
     expect(call.cmd).toBe("copilot");
-    expect(call.args).toEqual(["-p", "hello copilot", "--allow-all"]);
+    // argv carries the POINTER, never the raw prompt, and keeps --allow-all after it
+    expect(call.args).toEqual([
+      "-p",
+      "Read /tmp/base/.vibeflow/dispatch/u1.md and follow it",
+      "--allow-all",
+    ]);
     expect(call.input).toBe("");
+    // the real prompt landed in the file (via the injected writer, no real FS)
+    expect(written).toEqual([
+      { path: "/tmp/base/.vibeflow/dispatch/u1.md", content: "hello copilot" },
+    ]);
+  });
+});
+
+describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () => {
+  test("writes the prompt to .vibeflow/dispatch/<unit>.md and returns a short pointer", () => {
+    const written: { path: string; content: string }[] = [];
+    const pointer = writeDispatchPrompt("my-unit", "the big prompt", {
+      base: "/repo",
+      writeFile: (path, content) => written.push({ path, content }),
+    });
+    expect(pointer).toBe("Read /repo/.vibeflow/dispatch/my-unit.md and follow it");
+    expect(written).toEqual([
+      { path: "/repo/.vibeflow/dispatch/my-unit.md", content: "the big prompt" },
+    ]);
+  });
+
+  test("pointer is ABSOLUTE so it survives copilot cwd ≠ base (#526 P1)", () => {
+    // Regression for the --isolate / remote-repo case: the engine's cwd is a
+    // worktree (≠ base), so a relative pointer would miss the file and copilot
+    // would silently run on an empty prompt. The pointer must be the absolute
+    // path under `base`, resolvable from ANY cwd.
+    const pointer = writeDispatchPrompt("u", "P", { base: "/repo/root", writeFile: () => {} });
+    expect(pointer).toBe("Read /repo/root/.vibeflow/dispatch/u.md and follow it");
+    expect(pointer.includes("/repo/root/")).toBe(true);
+  });
+
+  test("sanitizes an untrusted unit name (path-traversal defense)", () => {
+    const written: { path: string; content: string }[] = [];
+    writeDispatchPrompt("../../etc/passwd", "x", {
+      base: "/repo",
+      writeFile: (path, content) => written.push({ path, content }),
+    });
+    expect(written[0]?.path).toBe("/repo/.vibeflow/dispatch/etc-passwd.md");
+  });
+
+  test("pointer stays a few hundred bytes even for a 50KB prompt (argv bound)", () => {
+    const huge = "x".repeat(50_000);
+    let captured = "";
+    const spawner = (_cmd: string, args: string[]) => {
+      captured = args.join(" ");
+      return { status: 0, stdout: "" };
+    };
+    const written: { path: string; content: string }[] = [];
+    const r = runDispatch({
+      engine: "copilot",
+      prompt: huge,
+      mode: "cli",
+      spawner,
+      unit: "big",
+      base: "/b",
+      writeDispatchFile: (path, content) => written.push({ path, content }),
+    });
+    expect(r.ok).toBe(true);
+    // argv is bounded regardless of prompt size — that's the whole point
+    expect(captured.length).toBeLessThan(300);
+    expect(captured).not.toContain("xxxx");
+    // the 50KB really went to the file
+    expect(written[0]?.content.length).toBe(50_000);
+  });
+
+  test("claude is unchanged — prompt goes to stdin, no dispatch file written", () => {
+    const calls: { cmd: string; args: string[]; input: string }[] = [];
+    const spawner = (cmd: string, args: string[], input: string) => {
+      calls.push({ cmd, args, input });
+      return { status: 0, stdout: "done" };
+    };
+    let wrote = false;
+    const r = runDispatch({
+      engine: "claude",
+      prompt: "claude prompt",
+      mode: "cli",
+      spawner,
+      unit: "u1",
+      writeDispatchFile: () => {
+        wrote = true;
+      },
+    });
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.input).toBe("claude prompt");
+    expect(calls[0]?.args).toEqual(["-p", "--output-format", "json"]);
+    expect(wrote).toBe(false);
+  });
+
+  test("async path: copilot also gets the pointer + file write", async () => {
+    const calls: { cmd: string; args: string[]; input: string }[] = [];
+    const spawner: AsyncSpawner = async (cmd, args, input) => {
+      calls.push({ cmd, args, input });
+      return { status: 0, stdout: "done" };
+    };
+    const written: { path: string; content: string }[] = [];
+    const r = await runDispatchAsync({
+      engine: "copilot",
+      prompt: "async prompt",
+      mode: "cli",
+      spawner,
+      unit: "u2",
+      base: "/b",
+      writeDispatchFile: (path, content) => written.push({ path, content }),
+    });
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.args).toEqual([
+      "-p",
+      "Read /b/.vibeflow/dispatch/u2.md and follow it",
+      "--allow-all",
+    ]);
+    expect(written[0]?.content).toBe("async prompt");
   });
 });
 

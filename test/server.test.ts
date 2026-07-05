@@ -88,6 +88,44 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/guidance/:unit with a note returns 200 (#526)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/guidance/my-unit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ note: "focus on the auth edge cases" }),
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/guidance/:unit with an empty note returns 400 (#526)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/guidance/my-unit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ note: "   " }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/note/i);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("POST /api/init without x-vibeflow-token returns 403", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
