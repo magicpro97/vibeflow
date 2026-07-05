@@ -12,6 +12,7 @@ import {
   EXIT_DCO,
   EXIT_OK,
   EXIT_PR_CREATE,
+  EXIT_PR_UNVERIFIED,
   EXIT_PUSH,
   EXIT_USAGE,
   REQUIRED_GH_ACCOUNT,
@@ -21,9 +22,11 @@ import {
   detectActiveBranch,
   findCommitsLackingDco,
   pr,
+  prNumberFromUrl,
   pushBranch,
   readBodyFile,
   verifyGhAccount,
+  verifyPrExists,
 } from "../src/commands/pr.js";
 
 import { EXIT_NOT_FOUND } from "../src/commands/pr-queue.js";
@@ -307,6 +310,9 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
       if (cmd === "git" && args[0] === "push") {
         return { stdout: "ok\n", stderr: "", status: 0 };
       }
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "view") {
+        return { stdout: '{"state":"OPEN"}', stderr: "", status: 0 };
+      }
       if (cmd === "gh" && args[0] === "pr" && args[1] === "create") {
         return {
           stdout: "https://github.com/magicpro97/vibeflow/pull/999\n",
@@ -400,6 +406,9 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
       if (cmd === "git" && args[0] === "push") {
         return { stdout: "ok\n", stderr: "", status: 0 };
       }
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "view") {
+        return { stdout: '{"state":"OPEN"}', stderr: "", status: 0 };
+      }
       if (cmd === "gh" && args[0] === "pr" && args[1] === "create") {
         return {
           stdout: "https://github.com/magicpro97/vibeflow/pull/1001\n",
@@ -437,6 +446,9 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
       }
       if (cmd === "git" && args[0] === "push") {
         return { stdout: "ok\n", stderr: "", status: 0 };
+      }
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "view") {
+        return { stdout: '{"state":"OPEN"}', stderr: "", status: 0 };
       }
       if (cmd === "gh" && args[0] === "pr" && args[1] === "create") {
         return {
@@ -521,6 +533,9 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
       if (cmd === "git" && args[0] === "push") {
         return { stdout: "ok\n", stderr: "", status: 0 };
       }
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "view") {
+        return { stdout: '{"state":"OPEN"}', stderr: "", status: 0 };
+      }
       if (cmd === "gh" && args[0] === "pr" && args[1] === "create") {
         // Verify the body file content is what got passed to gh.
         // createPr invokes: gh pr create --title <t> --body <body>
@@ -568,6 +583,135 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
   test("(hh) pr merge-when-green dispatches → exit not-found (empty queue)", async () => {
     const code = await pr(["merge-when-green"], {}, { existsSync: () => false });
     expect(code).toBe(EXIT_NOT_FOUND);
+  });
+
+  // ---- #518 anti-hallucination: verify PR exists after create ----
+  test("(ii) prNumberFromUrl parses the PR number from a gh URL", () => {
+    expect(prNumberFromUrl("https://github.com/magicpro97/vibeflow/pull/518")).toBe(518);
+  });
+
+  test("(jj) prNumberFromUrl returns null on a non-PR URL", () => {
+    expect(prNumberFromUrl("not a url")).toBeNull();
+    expect(prNumberFromUrl("https://github.com/magicpro97/vibeflow")).toBeNull();
+  });
+
+  test("(kk) verifyPrExists: ok when gh returns a state", async () => {
+    const run = () => ({ stdout: '{"state":"OPEN"}', stderr: "", status: 0 });
+    const r = await verifyPrExists(518, { runCommandSync: run as never, sleep: async () => {} });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe("OPEN");
+  });
+
+  test("(ll) verifyPrExists: retries once then succeeds (run called twice)", async () => {
+    let n = 0;
+    const run = () =>
+      ++n === 1
+        ? { stdout: "", stderr: "no pr", status: 1 }
+        : { stdout: '{"state":"OPEN"}', stderr: "", status: 0 };
+    const r = await verifyPrExists(518, { runCommandSync: run as never, sleep: async () => {} });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe("OPEN");
+    expect(n).toBe(2);
+  });
+
+  test("(mm) verifyPrExists: HALLUCINATED when absent after retry", async () => {
+    const run = () => ({ stdout: "", stderr: "no pr", status: 1 });
+    const r = await verifyPrExists(518, { runCommandSync: run as never, sleep: async () => {} });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("HALLUCINATED");
+    expect(r.reason).toContain("#518");
+  });
+
+  test("(nn) verifyPrExists: retry after malformed JSON then HALLUCINATED", async () => {
+    // status 0 but non-JSON stdout → query() catch → null both times.
+    const run = () => ({ stdout: "garbage-not-json", stderr: "", status: 0 });
+    const r = await verifyPrExists(518, { runCommandSync: run as never, sleep: async () => {} });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("HALLUCINATED");
+  });
+
+  test("(oo) verifyPrExists: default sleep is used when none injected", async () => {
+    // No sleep inject → the real setTimeout(1000) path runs. First query
+    // absent forces the retry; second succeeds. Kept fast: the fake run
+    // returns synchronously; the 1s timer is the only wait.
+    let n = 0;
+    const run = () =>
+      ++n === 1
+        ? { stdout: "", stderr: "", status: 1 }
+        : { stdout: '{"state":"OPEN"}', stderr: "", status: 0 };
+    const r = await verifyPrExists(1, { runCommandSync: run as never });
+    expect(r.ok).toBe(true);
+    expect(n).toBe(2);
+  }, 5000);
+
+  test("(pp) pr create OK but gh pr view absent → exit EXIT_PR_UNVERIFIED", async () => {
+    const run = (cmd: string, args: string[]) => {
+      if (cmd === "gh" && args[0] === "auth") {
+        return { stdout: "github.com\n  account magicpro97\n", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "log" && args[1] === "--format=%H") {
+        return { stdout: "", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "log" && args[1] === "-1" && args[2] === "--format=%B") {
+        return { stdout: "Signed-off-by: test <test@local>\n", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "push") {
+        return { stdout: "ok\n", stderr: "", status: 0 };
+      }
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "create") {
+        return {
+          stdout: "https://github.com/magicpro97/vibeflow/pull/4242\n",
+          stderr: "",
+          status: 0,
+        };
+      }
+      // gh pr view absent both times (retry) → HALLUCINATED
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "view") {
+        return { stdout: "", stderr: "no pr", status: 1 };
+      }
+      return { stdout: "", stderr: "unmocked", status: 1 };
+    };
+    const code = await pr(
+      ["create", "#173"],
+      { head: "orch/a7" },
+      { runCommandSync: run as never, sleep: async () => {} },
+    );
+    expect(code).toBe(EXIT_PR_UNVERIFIED);
+  });
+
+  test("(qq) pr create with an unparseable PR URL → exit EXIT_PR_CREATE", async () => {
+    // createPr seam returns ok+url that has no /pull/<n> → prNumberFromUrl null.
+    const run = (cmd: string, args: string[]) => {
+      if (cmd === "gh" && args[0] === "auth") {
+        return { stdout: "github.com\n  account magicpro97\n", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "log" && args[1] === "--format=%H") {
+        return { stdout: "", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "log" && args[1] === "-1" && args[2] === "--format=%B") {
+        return { stdout: "Signed-off-by: test <test@local>\n", stderr: "", status: 0 };
+      }
+      if (cmd === "git" && args[0] === "push") {
+        return { stdout: "ok\n", stderr: "", status: 0 };
+      }
+      return { stdout: "", stderr: "unmocked", status: 1 };
+    };
+    const fakeCreatePr = () => ({
+      ok: true,
+      url: "https://github.com/magicpro97/vibeflow/commits/abc",
+      stderr: "",
+      status: 0,
+    });
+    const code = await pr(
+      ["create", "#173"],
+      { head: "orch/a7" },
+      { runCommandSync: run as never, createPr: fakeCreatePr as unknown as typeof createPr },
+    );
+    expect(code).toBe(EXIT_PR_CREATE);
+  });
+
+  test("(rr) EXIT_PR_UNVERIFIED is 7", () => {
+    expect(EXIT_PR_UNVERIFIED).toBe(7);
   });
 });
 
