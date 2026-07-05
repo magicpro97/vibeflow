@@ -18,14 +18,17 @@ import {
   EXIT_DCO,
   EXIT_OK,
   EXIT_PR_CREATE,
+  EXIT_PR_UNVERIFIED,
   EXIT_PUSH,
   EXIT_USAGE,
   addPrToProject,
   createPr,
   detectActiveBranch,
   findCommitsLackingDco,
+  prNumberFromUrl,
   pushBranch,
   verifyGhAccount,
+  verifyPrExists,
 } from "./pr-gh.js";
 import { mergeWhenGreen } from "./pr-merge-when-green.js";
 import { prQueue } from "./pr-queue.js";
@@ -37,6 +40,8 @@ export {
   createPr,
   addPrToProject,
   detectActiveBranch,
+  prNumberFromUrl,
+  verifyPrExists,
   REQUIRED_GH_ACCOUNT,
   EXIT_OK,
   EXIT_USAGE,
@@ -44,6 +49,7 @@ export {
   EXIT_DCO,
   EXIT_PUSH,
   EXIT_PR_CREATE,
+  EXIT_PR_UNVERIFIED,
 } from "./pr-gh.js";
 
 /** The PR body template. The operator can override via --body-file
@@ -104,6 +110,7 @@ export async function pr(
     mkdirSync?: (p: string, opts: { recursive: boolean }) => void;
     rmSync?: (p: string, opts: { recursive: boolean }) => void;
     sleep?: (ms: number) => Promise<void>;
+    createPr?: typeof createPr;
   } = {},
 ): Promise<number> {
   const subcommand = args[0];
@@ -139,6 +146,7 @@ async function prCreate(
     mkdirSync?: (p: string, opts: { recursive: boolean }) => void;
     rmSync?: (p: string, opts: { recursive: boolean }) => void;
     sleep?: (ms: number) => Promise<void>;
+    createPr?: typeof createPr;
   } = {},
 ): Promise<number> {
   const issue = args[0];
@@ -219,12 +227,27 @@ async function prCreate(
     return EXIT_PUSH;
   }
   // 7. Create the PR.
-  const pr = createPr({ title, body, base, head }, inject);
+  const _createPr = inject.createPr ?? createPr;
+  const pr = _createPr({ title, body, base, head }, inject);
   if (!pr.ok || !pr.url) {
     out("vf", c.red(`vf pr create: gh pr create failed: ${pr.stderr.trim()}`), {
       level: "error",
     });
     return EXIT_PR_CREATE;
+  }
+  // 7b. #518 — CONFIRM the PR actually exists before trusting the create.
+  //     Exit-code + URL-regex is not proof it persisted; re-query gh.
+  const prNo = prNumberFromUrl(pr.url);
+  if (prNo == null) {
+    out("vf", c.red("vf pr create: could not parse PR number from gh output"), {
+      level: "error",
+    });
+    return EXIT_PR_CREATE;
+  }
+  const verified = await verifyPrExists(prNo, inject);
+  if (!verified.ok) {
+    out("vf", c.red(`vf pr create: ${verified.reason}`), { level: "error" });
+    return EXIT_PR_UNVERIFIED;
   }
   // 8. Add to Project (if requested).
   const project = typeof flags.project === "string" ? Number(flags.project) : 6;
