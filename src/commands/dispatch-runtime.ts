@@ -203,7 +203,10 @@ export function makeDispatcher(
         [{ name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }],
         memBlock,
       ),
-      { base },
+      // A dry run is a READ-ONLY preview (see :309): it must still READ + PREPEND the
+      // queued guidance so CONTEXT.md shows it, but MUST NOT consume (delete) the file —
+      // else the next REAL run loses its steering. No-op clearGuidance in dry mode.
+      { base, ...(mode === "dry" ? { clearGuidance: () => {} } : {}) },
     );
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
     const evidence: string[] = [];
