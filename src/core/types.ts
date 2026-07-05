@@ -21,10 +21,11 @@ export interface AcceptanceCriterion {
   /**
    * Command the reviewer EXECUTES to verify this criterion. Absent ⇒ prose-only,
    * skipped. #533: the default runner (`defaultRun`, scoped-gate.ts) splits on
-   * spaces and `spawnSync(bin, args)` with NO shell — so pipes, quotes,
-   * redirects, `$()`, globs and URLs are NOT interpreted (`grep foo | wc` runs
-   * `grep` with literal args `["foo","|","wc"]`). Provide a single binary + args,
-   * or a test filter; wrap shell logic in a script and invoke that.
+   * spaces and `spawnSync(bin, args)` with NO shell — so shell metacharacters
+   * (pipes, quotes, redirects, `$()`, globs) are NOT interpreted (`grep foo | wc`
+   * runs `grep` with literal args `["foo","|","wc"]`). A URL is fine as a plain
+   * arg (`curl https://…`); it just can't be used as shell. Provide a single
+   * binary + args, or a test filter; wrap shell logic in a script and invoke that.
    * TRUST BOUNDARY: the reviewer runs this string unsandboxed with no prompt
    * (unlike the security checkpoint). Safe for user-authored plans; treat as
    * arbitrary code execution if criteria can originate from untrusted LLM output.
