@@ -1,5 +1,94 @@
 # Changelog
 
+## [0.12.0](https://github.com/magicpro97/vibeflow/compare/v0.11.0...v0.12.0) (2026-07-05)
+
+
+### Features
+
+* **canary:** first-class canary test feature + gate (ADR-005) ([#514](https://github.com/magicpro97/vibeflow/issues/514)) ([da46938](https://github.com/magicpro97/vibeflow/commit/da46938a8fe14cc6aa19f8bc5e9dd92176eb1e47))
+* **config:** vf config memory accepts builtin|claude-mem|off ([#505](https://github.com/magicpro97/vibeflow/issues/505)) ([41aad5e](https://github.com/magicpro97/vibeflow/commit/41aad5e55de8cbda9807982d87ab270211c7216d)), closes [#490](https://github.com/magicpro97/vibeflow/issues/490)
+* **dispatch:** file-based dispatch prompt + pre-dispatch guidance ([#526](https://github.com/magicpro97/vibeflow/issues/526)) ([#531](https://github.com/magicpro97/vibeflow/issues/531)) ([70ec982](https://github.com/magicpro97/vibeflow/commit/70ec982efff560f88b625e0e27f737c871253007))
+* **gates:** ADR-004 machine-verifiable evidence standard (phase 1: warn) ([#469](https://github.com/magicpro97/vibeflow/issues/469)) ([b8f3653](https://github.com/magicpro97/vibeflow/commit/b8f36530fb343a33ba1d9655ad4c96199c079dbd))
+* **gates:** ADR-004 phase 2 — unverifiable-evidence is now a gate failure ([#474](https://github.com/magicpro97/vibeflow/issues/474)) ([74bf0f6](https://github.com/magicpro97/vibeflow/commit/74bf0f68bdb1ce34279ed8daef453f854c308885))
+* **gates:** computed confidence closes self-certification loop ([#513](https://github.com/magicpro97/vibeflow/issues/513)) ([098eb9b](https://github.com/magicpro97/vibeflow/commit/098eb9b48ad2efd7a88c18c052b9bd0a0e2c70b3))
+* **gates:** evidence freshness warning + two-stage security escalation ([#517](https://github.com/magicpro97/vibeflow/issues/517), [#519](https://github.com/magicpro97/vibeflow/issues/519)) ([#529](https://github.com/magicpro97/vibeflow/issues/529)) ([909631a](https://github.com/magicpro97/vibeflow/commit/909631aea04bf4264f0edcb75f398542b7b1709a))
+* **init:** add engine to logic gen tool + change question get hooks ([#428](https://github.com/magicpro97/vibeflow/issues/428)) ([d8cf278](https://github.com/magicpro97/vibeflow/commit/d8cf2784b2b8f7058c718dc04d1dd41eb5698efc))
+* **init:** add skip option to hooks setup menu ([#402](https://github.com/magicpro97/vibeflow/issues/402)) ([72b562a](https://github.com/magicpro97/vibeflow/commit/72b562a1da6713abfaeb7666e95266dc21a62be1))
+* **init:** usage guide ([#387](https://github.com/magicpro97/vibeflow/issues/387)) ([d25789b](https://github.com/magicpro97/vibeflow/commit/d25789b52cf8ebc4c63411ddf4ab4c11014ece5e))
+* **issue-438:** add Dart/Flutter language detection to scanner ([#444](https://github.com/magicpro97/vibeflow/issues/444)) ([d2f7439](https://github.com/magicpro97/vibeflow/commit/d2f7439e9c316fde644042d67cddebbec13a54ff)), closes [#438](https://github.com/magicpro97/vibeflow/issues/438)
+* **issue-440:** add Flutter toolchain detection to vf verify ([#446](https://github.com/magicpro97/vibeflow/issues/446)) ([d35dc41](https://github.com/magicpro97/vibeflow/commit/d35dc41787192b295b15fbc20f375afb944d492a))
+* **issue-441:** seed knowledge/log.md during vf init ([#447](https://github.com/magicpro97/vibeflow/issues/447)) ([e258b41](https://github.com/magicpro97/vibeflow/commit/e258b41d52695272cdaf670fb110c179602fd8e5)), closes [#441](https://github.com/magicpro97/vibeflow/issues/441)
+* **memory:** bun:sqlite FTS5 index layer — zero dep BM25 recall ([#494](https://github.com/magicpro97/vibeflow/issues/494)) ([14f5091](https://github.com/magicpro97/vibeflow/commit/14f5091157f409a850c1fa75545a1bca29a9195a))
+* **memory:** inject recall block into dispatch prompt (Skills→memory→Constraints) ([#501](https://github.com/magicpro97/vibeflow/issues/501)) ([200bd01](https://github.com/magicpro97/vibeflow/commit/200bd018440813dd09c57c5a78abec9adb95f302)), closes [#487](https://github.com/magicpro97/vibeflow/issues/487)
+* **memory:** MemoryProvider seam types (MemoryHit, MemoryTier, MemoryProvider) ([#493](https://github.com/magicpro97/vibeflow/issues/493)) ([54c347e](https://github.com/magicpro97/vibeflow/commit/54c347e4a2622ad9501883790cae2107f82152a3)), closes [#481](https://github.com/magicpro97/vibeflow/issues/481)
+* **memory:** parse decisions.md into indexable entries ([#496](https://github.com/magicpro97/vibeflow/issues/496)) ([a32d15a](https://github.com/magicpro97/vibeflow/commit/a32d15a79f8f9ef144dadbd591f9650e8827f254))
+* **memory:** provider factory + prompt block renderer ([#500](https://github.com/magicpro97/vibeflow/issues/500)) ([e2e06d2](https://github.com/magicpro97/vibeflow/commit/e2e06d29a5386a263137e53f8cf6ebe197f66cd7))
+* **memory:** wire recall into makeDispatcher + vf plan; fix bun:sqlite bundle leak ([#506](https://github.com/magicpro97/vibeflow/issues/506)) ([99c10f4](https://github.com/magicpro97/vibeflow/commit/99c10f4d23e16d28e32cfa5ce8fa2327e15a8a04)), closes [#488](https://github.com/magicpro97/vibeflow/issues/488) [#489](https://github.com/magicpro97/vibeflow/issues/489)
+* **orchestrate:** ADR-001 reviewer context isolation — buildReviewerPrompt ([#471](https://github.com/magicpro97/vibeflow/issues/471)) ([5c44e8a](https://github.com/magicpro97/vibeflow/commit/5c44e8afb4c35d61bb418eec40e28f5671265907))
+* **orchestrate:** ADR-002 spec-first test generation stub + hook protection ([#473](https://github.com/magicpro97/vibeflow/issues/473)) ([403b90f](https://github.com/magicpro97/vibeflow/commit/403b90f2e7f6ce7c340f17c5d0e58b0480136428))
+* **pr:** anti-hallucination PR verify + transport-only ship assert ([#518](https://github.com/magicpro97/vibeflow/issues/518), [#520](https://github.com/magicpro97/vibeflow/issues/520)) ([#527](https://github.com/magicpro97/vibeflow/issues/527)) ([5d397e7](https://github.com/magicpro97/vibeflow/commit/5d397e78df8327614c2e849aa87adaf8e10b065a))
+* **reviewer:** adversarial prompt + cross-tool auto-review (ADR-001 hardening) ([#512](https://github.com/magicpro97/vibeflow/issues/512)) ([ec9b073](https://github.com/magicpro97/vibeflow/commit/ec9b073b3019d76d7fd8b799642da22624b2477e))
+* **reviewer:** structured acceptance criteria with verification + MUST gate ([#522](https://github.com/magicpro97/vibeflow/issues/522)) ([#528](https://github.com/magicpro97/vibeflow/issues/528)) ([633c72f](https://github.com/magicpro97/vibeflow/commit/633c72fb6a36d92c7092016d019317de02cadec1))
+* **server:** scope the SSE log stream to a single unit via ?unit= ([#525](https://github.com/magicpro97/vibeflow/issues/525)) ([#530](https://github.com/magicpro97/vibeflow/issues/530)) ([af99bda](https://github.com/magicpro97/vibeflow/commit/af99bda3bef3ed0cb89205d77e26b036c376a4f9))
+* **settings:** memory mode union (false|builtin|claude-mem), legacy true→builtin ([#492](https://github.com/magicpro97/vibeflow/issues/492)) ([651da09](https://github.com/magicpro97/vibeflow/commit/651da0925e557258fc242bc0ff327d93bfdc8040)), closes [#480](https://github.com/magicpro97/vibeflow/issues/480)
+* **skills:** add `vf skills verify` to promote local skills to verified (closes [#424](https://github.com/magicpro97/vibeflow/issues/424)) ([#433](https://github.com/magicpro97/vibeflow/issues/433)) ([49cdbb0](https://github.com/magicpro97/vibeflow/commit/49cdbb0f6fee25bff5f18a0c93f0bad96d188342))
+* **skills:** surface unverified local matches as available instead of missing (closes [#425](https://github.com/magicpro97/vibeflow/issues/425)) ([#435](https://github.com/magicpro97/vibeflow/issues/435)) ([c272ced](https://github.com/magicpro97/vibeflow/commit/c272ceddd45062877f6df94abc7041030529aca4))
+* **spec:** spec-drift detection — Type A + Type B + MemoryProvider spec oracle ([#516](https://github.com/magicpro97/vibeflow/issues/516)) ([bc53aa5](https://github.com/magicpro97/vibeflow/commit/bc53aa58a403390417bf0eb882616b0d42120688))
+* **ui:** done toast notification + log session dividers ([#460](https://github.com/magicpro97/vibeflow/issues/460)) ([#466](https://github.com/magicpro97/vibeflow/issues/466)) ([58bcc91](https://github.com/magicpro97/vibeflow/commit/58bcc91f99b81b9e6b10b39b95d8d0bf2acd29aa))
+* **ui:** engine radio + recommendation badge + capability hints ([#458](https://github.com/magicpro97/vibeflow/issues/458)) ([#465](https://github.com/magicpro97/vibeflow/issues/465)) ([eeadd14](https://github.com/magicpro97/vibeflow/commit/eeadd143ecd87a4ce7d7909630cb1f03f2f39b5e))
+* **ui:** explain disabled Plan/Save + gate failure fix commands ([#457](https://github.com/magicpro97/vibeflow/issues/457) [#461](https://github.com/magicpro97/vibeflow/issues/461)) ([#464](https://github.com/magicpro97/vibeflow/issues/464)) ([60b7430](https://github.com/magicpro97/vibeflow/commit/60b743077fcaf76a48ab6a0492595ea7cd79b9b1))
+* **ui:** hook approval modal + auto-pilot/yolo modes ([#462](https://github.com/magicpro97/vibeflow/issues/462)) ([#468](https://github.com/magicpro97/vibeflow/issues/468)) ([792960a](https://github.com/magicpro97/vibeflow/commit/792960ad0882ffc2c916f06144b7379682b40089))
+* **ui:** project list status badges + always-visible action buttons ([#459](https://github.com/magicpro97/vibeflow/issues/459)) ([#463](https://github.com/magicpro97/vibeflow/issues/463)) ([9adb25f](https://github.com/magicpro97/vibeflow/commit/9adb25ff58ead2ccc314202db114b153b3bf8ebe))
+* **verify:** ADR-003 behavioral goal-eval gate stub (#ADR-003) ([#470](https://github.com/magicpro97/vibeflow/issues/470)) ([236090c](https://github.com/magicpro97/vibeflow/commit/236090cc530cc51d511b2181a97e03b718c057d2))
+
+
+### Bug Fixes
+
+* address reviewer backlog from PRs [#443](https://github.com/magicpro97/vibeflow/issues/443)–[#454](https://github.com/magicpro97/vibeflow/issues/454) ([#456](https://github.com/magicpro97/vibeflow/issues/456)) ([8f21592](https://github.com/magicpro97/vibeflow/commit/8f21592717ae328979ef9dd554c57fd8983a6e0d))
+* **build:** mark bun:sqlite external to fix Node smoke test; update size-waiver to [#503](https://github.com/magicpro97/vibeflow/issues/503) ([#502](https://github.com/magicpro97/vibeflow/issues/502)) ([f5fc538](https://github.com/magicpro97/vibeflow/commit/f5fc53895b3ee843a85bdcd60b3101dd26dc10d9))
+* **cli,skills:** route state+coord commands, fix skills sync trailing arrow ([#420](https://github.com/magicpro97/vibeflow/issues/420)) ([9b9ee03](https://github.com/magicpro97/vibeflow/commit/9b9ee0337354d8d282909ab81c87b5ccd3cae530))
+* **config,help:** distinct feedback for memory toggle, add demo command help ([#423](https://github.com/magicpro97/vibeflow/issues/423)) ([946e0d1](https://github.com/magicpro97/vibeflow/commit/946e0d14b44f04ea0b7da3d58449292c4f104f4c))
+* **doctor,hooks:** add missing { level: error } to failure summary lines ([#431](https://github.com/magicpro97/vibeflow/issues/431)) ([6c0f5be](https://github.com/magicpro97/vibeflow/commit/6c0f5be0aea285296121eedb3c11251997f3fe95))
+* **doctor,tools:** replace embedded \n with separate out("vf") blank-line calls ([#410](https://github.com/magicpro97/vibeflow/issues/410)) ([e1cdc94](https://github.com/magicpro97/vibeflow/commit/e1cdc9420881cac52ca5db99a43baa8c16716973))
+* **help:** add missing pr and decision commands to vf --help ([#419](https://github.com/magicpro97/vibeflow/issues/419)) ([cb034ea](https://github.com/magicpro97/vibeflow/commit/cb034ea072aefdbd3dee4e58e47b1b871998190b))
+* **help:** add state and coord commands to vf --help ([#422](https://github.com/magicpro97/vibeflow/issues/422)) ([bf7bca2](https://github.com/magicpro97/vibeflow/commit/bf7bca2c0869b96a3ae06cebbee234f61c51d90a))
+* **help:** align command description column in vf --help ([#434](https://github.com/magicpro97/vibeflow/issues/434)) ([a00616b](https://github.com/magicpro97/vibeflow/commit/a00616b36f036ccc85666ea171c655c4a1352b68))
+* **hooks,help:** show guardrail status after install, fix init alignment ([#426](https://github.com/magicpro97/vibeflow/issues/426)) ([4304703](https://github.com/magicpro97/vibeflow/commit/430470367ce3fe88338890d6284657fffc565119))
+* **hooks,init:** blank line in hooks status, remove ➥ spinner prefix ([#416](https://github.com/magicpro97/vibeflow/issues/416)) ([07a5d50](https://github.com/magicpro97/vibeflow/commit/07a5d501e03f0dda9c28fba5c294ede3966db053))
+* **init-ai:** replace embedded \n with separate out("vf") blank-line calls ([#413](https://github.com/magicpro97/vibeflow/issues/413)) ([b6db330](https://github.com/magicpro97/vibeflow/commit/b6db330c5a206954649c2a50be1604e7d4bc4bdd))
+* **init,doctor:** level consistency, missing blank line, leftover embedded \n ([#414](https://github.com/magicpro97/vibeflow/issues/414)) ([35d888a](https://github.com/magicpro97/vibeflow/commit/35d888af3badd82a203a28d51f19aae2b74a80a2))
+* **init,tools:** replace embedded \n with separate out("vf") blank-line calls ([#409](https://github.com/magicpro97/vibeflow/issues/409)) ([f1743b8](https://github.com/magicpro97/vibeflow/commit/f1743b84cb498c9641c115159fe5b862545583e4))
+* **init:** fix 3 terminal UX concerns observed in vf init ([#404](https://github.com/magicpro97/vibeflow/issues/404)) ([cf436dd](https://github.com/magicpro97/vibeflow/commit/cf436dd1a045cede573b8c0bc4bbd409c4ec09ef))
+* **init:** normalize output formatting — panels and blank lines ([#407](https://github.com/magicpro97/vibeflow/issues/407)) ([04041d8](https://github.com/magicpro97/vibeflow/commit/04041d8a71b419918fdb0ee957ab369f53cbc34c))
+* **init:** remove blank line noise and duplicate Copilot instructions ([#405](https://github.com/magicpro97/vibeflow/issues/405)) ([4817f8b](https://github.com/magicpro97/vibeflow/commit/4817f8b02d900a1b36d4316eeee7b919a92b3f96))
+* **init:** remove index-present noise, normalize Copilot blank line ([#408](https://github.com/magicpro97/vibeflow/issues/408)) ([3208c92](https://github.com/magicpro97/vibeflow/commit/3208c927e3d2d00e5ab1fb54201bdcdc89e112b9))
+* **init:** repair main CI red from [#428](https://github.com/magicpro97/vibeflow/issues/428) (test label + hook-branch coverage) ([#430](https://github.com/magicpro97/vibeflow/issues/430)) ([c6bf013](https://github.com/magicpro97/vibeflow/commit/c6bf0139579f637437e91a35a934009dbae742a2))
+* **issue-437:** npm wrapper unquoted Windows path in global install ([#443](https://github.com/magicpro97/vibeflow/issues/443)) ([c1f475f](https://github.com/magicpro97/vibeflow/commit/c1f475f2d0d9094b62fd9e2ecd0db5bd8a13ed5b))
+* **issue-439:** quote engine probe path with spaces on Windows ([#445](https://github.com/magicpro97/vibeflow/issues/445)) ([f1ec376](https://github.com/magicpro97/vibeflow/commit/f1ec3768cc374e6bb08743ce97939554e26510a8)), closes [#439](https://github.com/magicpro97/vibeflow/issues/439)
+* **issue-448:** reject control characters in unit names ([#449](https://github.com/magicpro97/vibeflow/issues/449)) ([e1f0bd3](https://github.com/magicpro97/vibeflow/commit/e1f0bd3f033951ced943eacc80cfe4a52c6ce275)), closes [#448](https://github.com/magicpro97/vibeflow/issues/448)
+* **issue-451:** reject path separators in unit names ([#453](https://github.com/magicpro97/vibeflow/issues/453)) ([f22762c](https://github.com/magicpro97/vibeflow/commit/f22762ceac773308d56635ff9df519f96132ae80)), closes [#451](https://github.com/magicpro97/vibeflow/issues/451)
+* **memory:** wrap full ensureIndexed in try/catch; add throw-coverage test; remove builtin.ts waiver ([#495](https://github.com/magicpro97/vibeflow/issues/495)) ([#498](https://github.com/magicpro97/vibeflow/issues/498)) ([14d7d94](https://github.com/magicpro97/vibeflow/commit/14d7d94ad8c7ba98b42e8c65579ab533af6c991e))
+* **orchestrate,run,hooks,tools-detect:** replace embedded \n with separate out("vf") calls ([#412](https://github.com/magicpro97/vibeflow/issues/412)) ([e7a4bd6](https://github.com/magicpro97/vibeflow/commit/e7a4bd63271614c6b7f09e2e0ccaa1ea30367f00))
+* **run,protection,init-artifacts:** \n cleanup, missing level annotations ([#415](https://github.com/magicpro97/vibeflow/issues/415)) ([9b397d2](https://github.com/magicpro97/vibeflow/commit/9b397d2bdd0b465ef6819833723f225f7967dac4))
+* **server:** wire DELETE /api/projects through CSRF guard in isWrite whitelist ([cb0604c](https://github.com/magicpro97/vibeflow/commit/cb0604c467283e1ffe3c3404c502fd569cbeb752))
+* **server:** wire DELETE /api/projects through CSRF guard in isWrite whitelist ([#455](https://github.com/magicpro97/vibeflow/issues/455)) ([4b4e4fa](https://github.com/magicpro97/vibeflow/commit/4b4e4fa43857a6a1d2de9d9f6724487b42e90206))
+* **skills:** improve validate message when no skills exist ([#418](https://github.com/magicpro97/vibeflow/issues/418)) ([a86d379](https://github.com/magicpro97/vibeflow/commit/a86d379758035abe12aa693e2dcef7b1587cdc38))
+* **state:** route 'vf state brief' to brief() and remove level:error from usage ([#421](https://github.com/magicpro97/vibeflow/issues/421)) ([c0dfd60](https://github.com/magicpro97/vibeflow/commit/c0dfd600d7f45f977cf404b4128666d953d9bd5e))
+* **ui:** comprehensive UX/UI audit — 40+ rounds ([#450](https://github.com/magicpro97/vibeflow/issues/450)) ([3856271](https://github.com/magicpro97/vibeflow/commit/38562719707041bbb0e4eed238aadfc3f5691005))
+* **verify,units:** \n cleanup and level annotation in tools-detect, units ([#417](https://github.com/magicpro97/vibeflow/issues/417)) ([5ac9751](https://github.com/magicpro97/vibeflow/commit/5ac97519e0c034625537ac41d38a023b4b0c1b21))
+* **workflow:** replace embedded \n with separate out("vf") blank-line calls ([#411](https://github.com/magicpro97/vibeflow/issues/411)) ([c63472a](https://github.com/magicpro97/vibeflow/commit/c63472a774818d3ce02e08cdcb63718d0cedaacf))
+
+
+### Documentation
+
+* add hook approval modal + auto-pilot/yolo docs and skills ([#462](https://github.com/magicpro97/vibeflow/issues/462)) ([#467](https://github.com/magicpro97/vibeflow/issues/467)) ([03180f4](https://github.com/magicpro97/vibeflow/commit/03180f4e1a78f046403014d44b6e72c02f4ce93a))
+* **memory:** document builtin recall; update COMMAND_REFERENCE, USER_GUIDE, MASTER_SPEC, GENERATED_FILES; add memory.db to gitignore ([#507](https://github.com/magicpro97/vibeflow/issues/507)) ([72e29fb](https://github.com/magicpro97/vibeflow/commit/72e29fb7091b750afdc89bcbd4333de246be4759)), closes [#491](https://github.com/magicpro97/vibeflow/issues/491)
+
+
+### Tests
+
+* **init:** add regression guard for writeToolConfigs engine gating (closes [#427](https://github.com/magicpro97/vibeflow/issues/427)) ([#432](https://github.com/magicpro97/vibeflow/issues/432)) ([4f6ae54](https://github.com/magicpro97/vibeflow/commit/4f6ae5472c972617f84460bb37d6c696c1923786))
+
 ## [0.11.0](https://github.com/magicpro97/vibeflow/compare/v0.10.0...v0.11.0) (2026-06-29)
 
 
