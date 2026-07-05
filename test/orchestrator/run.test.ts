@@ -139,6 +139,37 @@ describe("orchestrateUnits — two-stage escalation (#519)", () => {
     expect(asked).toBe(1);
     expect(u?.gates.security).toBe("pass");
   });
+
+  test("dispatcher THREW → blocked outcome (no gates) → security checkpoint SKIPPED", async () => {
+    let asked = 0;
+    const spyAsk = () => () => {
+      asked++;
+      return Promise.resolve("run" as const);
+    };
+    const { units } = await orchestrateUnits({
+      units: [unit("throw-unit")],
+      // Dispatcher throws → run.ts catches it into `{ status: "blocked" }` with
+      // NO `gates` key. Guard must still short-circuit on the blocked status.
+      dispatcher: async () => {
+        throw new Error("dispatcher boom");
+      },
+      // Production reviewer blocks a blocked outcome (dispatch-runtime.ts:382);
+      // model that so the unit stays blocked without the security pass.
+      reviewer: () => ({ pass: false, reason: "dispatcher threw" }),
+      security: {
+        base: "/tmp",
+        askFn: spyAsk,
+        runSkillFn: async () => secResult("pass"),
+      },
+    });
+    const u = units.find((x) => x.name === "throw-unit");
+    // askFn NOT called — the expensive/interactive security pass was skipped.
+    expect(asked).toBe(0);
+    // unit is still blocked (dispatcher-throw outcome, no security pass to lift it).
+    expect(u?.status).toBe("blocked");
+    // no security verdict was attached because the checkpoint never ran.
+    expect(u?.gates.security).toBeUndefined();
+  });
 });
 
 describe("runParallel — AbortSignal", () => {
