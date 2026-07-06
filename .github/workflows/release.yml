@@ -59,8 +59,8 @@ jobs:
         if: steps.remote.outputs.exists == 'false'
         run: |
           bun install --frozen-lockfile
-          bun run check
           bun run build
+          bun run check
 
       - name: Upload dist for publish job
         if: steps.remote.outputs.exists == 'false'
