@@ -33,35 +33,11 @@ let hitBranches = 0;
 const perFile = [];
 
 // Per-file coverage waivers. Files listed here are exempt from the
-// per-file 100% line-coverage requirement. Use sparingly; add a
-// `// coverage-waiver: #<issue>` comment in the source file to
-// reference the waiver reason. The waiver MUST be tracked as a
-// follow-up issue OR a follow-up PR (see the A0 coverage
-// backstop pattern).
-//
-// Why these files are waived:
-// - src/commands/init-ai.ts: phonnt's PR #137 init flow — split module
-//   that init.ts wires in via import. The runner tests cover the
-//   module through init, but the standalone function is only partially
-//   covered. Tracking issue: TBD.
-// - src/skills/curator-cache.ts, curator.ts, validator.ts, workflow-artifacts.ts:
-//   Phases of the skill curation pipeline. Each has a small number of
-//   uncovered error branches. Tracking issue: TBD.
-// - src/commands/init.ts: init flow has many branches gated by user
-//   TTY/AI flags. The end-to-end test covers the happy path; the
-//   branch coverage on edge cases needs a separate refactor. TBD.
-// - src/ai-init.ts: same — phonnt's adapter workflow has many error
-//   branches. TBD.
-// - test/helpers/tty-mock.ts: helper file used by init-intake.test.ts.
-//   Branches in the error path (setRawModeThrows, etc.) aren't tested.
-//   TBD.
-// - src/commands/tools.ts, src/preflight/check-async.ts, src/ui-focus.ts:
-//   pre-existing gaps, covered by direct calls but uncovered error branches.
-const COVERAGE_WAIVERS = new Set([
-  "src/commands/dispatch-reviewer-llm.ts", // #477: catch branches unreachable in Bun test env (spawnSync returns status:null, doesn't throw)
-  "src/commands/tools-detect.ts",          // #478: defaultGoalEvalFn catch branches unreachable in Bun test env
-  "src/memory/claude-mem.ts",              // #499: default spawner branch unreachable in test env
-]);
+// per-file 100% line-coverage requirement. Use sparingly, and only with a
+// tracked follow-up issue. Empty = every source file must hit 100% (the
+// #477/#478/#499 catch-branch waivers were retired once real injected-throw
+// tests covered them).
+const COVERAGE_WAIVERS = new Set([]);
 
 for (const r of records) {
   const sf = /^SF:(.+)$/m.exec(r)?.[1]?.trim();
