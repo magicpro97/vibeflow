@@ -32,3 +32,11 @@ test("recall: bad JSON → []", () => {
   const p = new ClaudeMemProvider({ spawner: () => ({ status: 0, stdout: "not-json" }) });
   expect(p.recall("q")).toEqual([]);
 });
+test("recall: default spawner (no inject) runs real spawnSync without throwing", () => {
+  // No inject → exercises the built-in spawnSync arm. Assert the shape, not a
+  // fixed value: on a box where claude-mem is absent Bun returns status:null → [],
+  // but on a box with claude-mem installed it could return real hits — either way
+  // recall must return an array and never throw.
+  const p = new ClaudeMemProvider();
+  expect(Array.isArray(p.recall("q"))).toBe(true);
+});
