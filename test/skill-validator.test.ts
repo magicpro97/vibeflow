@@ -72,16 +72,92 @@ describe("validateSkillDir — Anthropic skill format", () => {
     expect(result.warnings.some((w) => w.includes("folder"))).toBe(true);
   });
 
-  test("warns on unsupported top-level child directory", () => {
+  test("does not warn on an extra top-level child directory (spec allows any dir)", () => {
     const dir = tmpSkill("extra-dir-skill");
     mkdirSync(join(dir, "random"));
     writeSkill(
       dir,
-      "---\nname: extra-dir-skill\ndescription: Test skill with unsupported child directory.\n---\n\n# Test\n\nEnough actionable content for this skill body to be valid.\n",
+      "---\nname: extra-dir-skill\ndescription: Test skill with an extra child directory.\n---\n\n# Test\n\nEnough actionable content for this skill body to be valid.\n",
     );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(true);
-    expect(result.warnings.some((w) => w.includes("unsupported"))).toBe(true);
+    // Spec allows "any additional files or directories" — an extra dir is NOT flagged.
+    expect(result.warnings.some((w) => w.includes("unsupported"))).toBe(false);
+  });
+
+  test("accepts an Anthropic-style skill with extra top-level dirs (agents/, eval-viewer/)", () => {
+    const dir = tmpSkill("skill-creator");
+    mkdirSync(join(dir, "agents"));
+    writeFileSync(join(dir, "agents", "analyzer.md"), "agent");
+    mkdirSync(join(dir, "eval-viewer"));
+    writeFileSync(join(dir, "eval-viewer", "viewer.html"), "<html></html>");
+    writeSkill(
+      dir,
+      "---\nname: skill-creator\ndescription: Create and improve skills.\n---\n\n# Skill Creator\n\nActionable content that makes this skill body long enough to validate.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("agents"))).toBe(false);
+    expect(result.warnings.some((w) => w.includes("eval-viewer"))).toBe(false);
+  });
+
+  test("rejects name longer than 64 chars (spec MAX 64)", () => {
+    const longName = "a".repeat(65);
+    const dir = tmpSkill(longName);
+    writeSkill(
+      dir,
+      `---\nname: ${longName}\ndescription: Name is one char over the spec limit.\n---\n\n# Long Name\n\nEnough actionable content for this skill body to be valid here.\n`,
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("64"))).toBe(true);
+  });
+
+  test("rejects description containing angle brackets", () => {
+    const dir = tmpSkill("angle-desc");
+    writeSkill(
+      dir,
+      "---\nname: angle-desc\ndescription: Use the <tag> element when parsing.\n---\n\n# Angle\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("angle brackets"))).toBe(true);
+  });
+
+  test("rejects compatibility longer than 500 chars", () => {
+    const dir = tmpSkill("long-compat");
+    const longCompat = "x".repeat(501);
+    writeSkill(
+      dir,
+      `---\nname: long-compat\ndescription: Compatibility field is over the spec limit.\ncompatibility: ${longCompat}\n---\n\n# Compat\n\nEnough actionable content for this skill body to be valid here.\n`,
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("compatibility"))).toBe(true);
+  });
+
+  test("accepts all six standard frontmatter fields without warning", () => {
+    const dir = tmpSkill("full-frontmatter");
+    writeSkill(
+      dir,
+      "---\nname: full-frontmatter\ndescription: A skill using every standard field.\nlicense: Apache-2.0\nallowed-tools: bash python\ncompatibility: node>=18\nmetadata:\n  author: example\n---\n\n# Full\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key"))).toBe(false);
+  });
+
+  test("warns (not errors) on a non-standard frontmatter key", () => {
+    const dir = tmpSkill("legacy-keys");
+    writeSkill(
+      dir,
+      "---\nname: legacy-keys\ndescription: A skill carrying a legacy non-spec key.\nstatus: draft\n---\n\n# Legacy\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: status"))).toBe(
+      true,
+    );
   });
 });
 

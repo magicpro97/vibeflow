@@ -53,6 +53,25 @@ description: Clear description of when this skill should be used
 Instructions...
 ```
 
+## Validation (`vf skills validate`)
+
+VibeFlow validates skills against the official Agent Skills spec
+(<https://agentskills.io/specification>) — the enforced subset lives in
+`src/skills/ANTHROPIC_SKILL_STANDARD.md`. Rules:
+
+- `name`: required, lowercase kebab-case, 1–64 chars (error otherwise).
+- `description`: required, <= 1024 chars, no angle brackets `<`/`>` (they
+  corrupt XML tool-call parsing).
+- Standard frontmatter fields — `name`, `description`, `license`,
+  `allowed-tools`, `metadata`, `compatibility` (<= 500 chars) — are recognized.
+  Any other key is a **warning** (not an error), so legacy VibeFlow keys
+  (`status`/`version`/`triggers`/`requires`) keep validating.
+- Optional dirs `scripts/`, `references/`, `assets/` are emptiness-checked; the
+  spec allows **any additional top-level file or directory**, so extras are not
+  flagged (Anthropic's own `skill-creator` ships `agents/` and `eval-viewer/`).
+- Body must be actionable (>= 50 chars, not a TODO placeholder).
+
+
 ## Skill metadata
 
 Skill metadata lives in the `SKILL.md` YAML frontmatter. The orchestrator parses that frontmatter for deterministic capability matching — there is no separate metadata file.

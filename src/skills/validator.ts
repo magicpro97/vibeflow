@@ -4,8 +4,26 @@ import { CTX_DIR } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 
-const ALLOWED_CHILDREN = new Set(["SKILL.md", "LICENSE.txt", "scripts", "references", "assets"]);
 const ALLOWED_DIRS = new Set(["scripts", "references", "assets"]);
+
+// Standard SKILL.md frontmatter fields per the Agent Skills spec
+// (https://agentskills.io/specification). Anthropic's own reference
+// validator (skills/skill-creator/scripts/quick_validate.py) uses the
+// same set. Unknown keys are WARNED (not errored): 55 existing repo
+// skills carry non-spec keys (status/version/triggers/requires), so a
+// hard error would break the store. Promote to error in a future major.
+const STANDARD_FRONTMATTER = new Set([
+  "name",
+  "description",
+  "license",
+  "allowed-tools",
+  "metadata",
+  "compatibility",
+]);
+
+const NAME_MAX = 64;
+const DESCRIPTION_MAX = 1024;
+const COMPATIBILITY_MAX = 500;
 
 export interface SkillValidationResult {
   ok: boolean;
@@ -62,13 +80,38 @@ export function validateSkillDir(
   const description = typeof data.description === "string" ? data.description.trim() : "";
 
   if (!name) errors.push("frontmatter.name is required");
-  else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
-    errors.push("frontmatter.name must be lowercase kebab-case");
+  else {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+      errors.push("frontmatter.name must be lowercase kebab-case");
+    }
+    if (name.length > NAME_MAX) {
+      errors.push(`frontmatter.name must be <= ${NAME_MAX} chars`);
+    }
   }
 
   if (!description) errors.push("frontmatter.description is required");
-  else if (description.length > 1024) {
-    errors.push("frontmatter.description must be <= 1024 chars");
+  else {
+    if (description.length > DESCRIPTION_MAX) {
+      errors.push(`frontmatter.description must be <= ${DESCRIPTION_MAX} chars`);
+    }
+    if (/[<>]/.test(description)) {
+      errors.push("frontmatter.description must not contain angle brackets (< or >)");
+    }
+  }
+
+  // compatibility is optional; when present it is a string capped at 500 chars.
+  const compatibility = typeof data.compatibility === "string" ? data.compatibility.trim() : "";
+  if (compatibility && compatibility.length > COMPATIBILITY_MAX) {
+    errors.push(`frontmatter.compatibility must be <= ${COMPATIBILITY_MAX} chars`);
+  }
+
+  // Warn (not error) on frontmatter keys outside the spec's standard set,
+  // so typos surface without breaking the 55 existing skills that carry
+  // legacy keys (status/version/triggers/requires).
+  for (const key of Object.keys(data)) {
+    if (!STANDARD_FRONTMATTER.has(key)) {
+      warnings.push(`non-standard frontmatter key: ${key}`);
+    }
   }
 
   const folder = basename(dir);
@@ -107,14 +150,14 @@ export function validateSkillDir(
 
   try {
     for (const entry of _readdirSync(dir)) {
-      if (!ALLOWED_CHILDREN.has(entry)) {
-        warnings.push(`unsupported top-level child: ${entry}`);
-      }
+      // Spec allows "any additional files or directories", so extra
+      // top-level entries are NOT flagged. Only the standard optional
+      // dirs get an emptiness check.
       const full = join(dir, entry);
       if (ALLOWED_DIRS.has(entry)) {
         try {
           if (_statSync(full).isDirectory()) {
-            const count = _readdirSync(full).filter((x) => !x.startsWith(".")).length;
+            const count = _readdirSync(full).filter((x: string) => !x.startsWith(".")).length;
             if (count === 0) warnings.push(`${entry}/ is empty`);
           }
         } catch {

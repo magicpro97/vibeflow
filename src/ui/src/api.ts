@@ -53,7 +53,14 @@ export const api = {
       req<{ settings: VibeSettings }>("POST", "/api/settings", s).then((r) => r.settings),
   },
   skills: () =>
-    req<{ skills: string[]; needs: unknown }>("GET", "/api/skills").then((r) => r.skills),
+    req<{
+      skills: string[];
+      needs: unknown;
+      validation?: { errors: string[]; warnings: string[] };
+    }>("GET", "/api/skills").then((r) => ({
+      skills: r.skills,
+      validation: r.validation ?? { errors: [], warnings: [] },
+    })),
   attachments: () =>
     req<{ attachments: unknown[] }>("GET", "/api/attachments").then((r) => r.attachments),
   logsRecent: (since = 0, limit = 200) =>

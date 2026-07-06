@@ -1170,13 +1170,16 @@ describe("server orchestration endpoints", () => {
         body: JSON.stringify({ goal: "ship feature", engines: ["claude"] }),
       });
 
-      // /api/skills returns discovered skills + demand-driven needs
+      // /api/skills returns discovered skills + demand-driven needs + validation
       const sk = (await fetch(`${url}/api/skills`).then((r) => r.json())) as {
         skills: unknown[];
         needs: unknown[];
+        validation: { errors: unknown[]; warnings: unknown[] };
       };
       expect(Array.isArray(sk.skills)).toBe(true);
       expect(Array.isArray(sk.needs)).toBe(true);
+      expect(Array.isArray(sk.validation.errors)).toBe(true);
+      expect(Array.isArray(sk.validation.warnings)).toBe(true);
 
       // discovery requires approval unless approved=true
       const gated = (await fetch(`${url}/api/discover`, {
