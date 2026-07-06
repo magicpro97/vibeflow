@@ -41,6 +41,7 @@ export function printHelp(): number {
     ${c.cyan("state [sub]")}       brief [--consult] — read the coordinator brief
     ${c.cyan("coord")}             consult brief + enforce freshness gate before non-trivial actions
     ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
+    ${c.cyan("update-check")}      check npm for a newer VibeFlow release
     ${c.cyan("help, --version")}   show help / version
 
   ${c.dim("Run `vf <command> --help` for command-specific usage.")}
@@ -337,6 +338,14 @@ ${c.bold("Subcommands:")}
 ${c.bold("Examples:")}
   vf decision add --title "Use YAML frontmatter" --context "Anthropic spec" --decision "Keep YAML"
   vf decision list`,
+
+  "update-check": () => `${c.bold("vf update-check")}
+Check the npm registry for a newer VibeFlow release and print how to upgrade.
+VibeFlow also nudges you automatically (once a day) when a command runs in an
+interactive shell; set ${c.cyan("VIBEFLOW_NO_UPDATE_CHECK=1")} to silence that.
+
+${c.bold("Examples:")}
+  vf update-check`,
 };
 
 /** True when `cmd` is a known subcommand that carries its own help block. */
