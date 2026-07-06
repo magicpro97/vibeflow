@@ -100,6 +100,17 @@ describe("scopedGate", () => {
     expect(r).toHaveProperty("stdout");
   });
 
+  test("#533: defaultRun kills a command that exceeds the timeout (no event-loop hang)", () => {
+    // A verification command that hangs must be killed, not block the orchestrator.
+    // `sleep 30` with a 200ms timeout → spawnSync SIGTERMs it → status null (signal-killed),
+    // and the call returns promptly instead of blocking for 30s.
+    const start = Date.now();
+    const r = defaultRun("sleep 30", process.cwd(), 200);
+    const elapsedMs = Date.now() - start;
+    expect(r.status).toBeNull(); // killed by signal, not a clean exit
+    expect(elapsedMs).toBeLessThan(5000); // returned promptly, did not wait out the 30s sleep
+  });
+
   // #275-C: typecheck verdict caching
   test("scopedGate with a passing typecheckVerdict skips running tsc", () => {
     const cmds: string[] = [];
