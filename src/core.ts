@@ -225,10 +225,17 @@ export function assertInsideBase(
 }
 
 /** Append content to a file, creating the parent dir if absent. Unlike writeFileSafe this never
- * truncates and never mutates the input — callers control exact spacing (e.g. the work journal). */
+ * truncates and never mutates the input — callers control exact spacing (e.g. the work journal).
+ * On FIRST creation, tightens the file to 0o600 like writeFileSafe (#536): the append targets —
+ * guidance notes (sensitive steering text) and the work journal — may carry private context and
+ * must not land world-readable at umask-default 0644. The chmod is gated on creation so the
+ * per-SSE-chunk stream.log appends (dispatch-runtime) don't pay a redundant chmod syscall on
+ * every write; the mode is already 0o600 after the first append. */
 export function appendFileSafe(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
+  const isNew = !existsSync(path);
   appendFileSync(path, content);
+  if (isNew) chmodSync(path, 0o600);
 }
 
 /** Path to the append-only work journal (knowledge/log.md) under the context dir. */
