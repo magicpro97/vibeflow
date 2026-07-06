@@ -16,6 +16,7 @@ import {
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
+import { validateSkillRoots } from "./skills/validator.js";
 
 // Re-export the 4 test seams so the 5 importers don't change
 export { repoLanguages, toolViews, settingsView, replayFromLog } from "./server/handlers.js";
@@ -132,7 +133,13 @@ export function startServer(
           task: state?.goal,
           profile: scanRepo(activeRepo),
         });
-        return Response.json({ ok: true, skills: discoverSkills(activeRepo), needs });
+        const validation = validateSkillRoots(activeRepo);
+        return Response.json({
+          ok: true,
+          skills: discoverSkills(activeRepo),
+          needs,
+          validation: { errors: validation.errors, warnings: validation.warnings },
+        });
       }
 
       // --- GET /api/settings ---
