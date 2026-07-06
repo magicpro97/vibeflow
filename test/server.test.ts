@@ -126,6 +126,66 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/guidance/:unit with an over-cap note returns 400 (#536)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // 100KB cap → 100KB+1 must be rejected at the trust boundary.
+      const res = await fetch(`${url}/api/guidance/my-unit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ note: "x".repeat(100 * 1024 + 1) }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/too large/i);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/guidance/:unit WITHOUT a CSRF token returns 403 (#536)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      // No x-vibeflow-token header → the write-surface guard must 403 before
+      // the note ever reaches writeGuidance.
+      const res = await fetch(`${url}/api/guidance/my-unit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: "steer" }),
+      });
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toMatch(/forbidden/i);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/guidance/:unit with a malformed %-escape in the unit returns 400 (#536)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // `%zz` is not a valid percent-escape → decodeURIComponent throws → the
+      // server's write-surface try/catch turns it into a 400, not a 500.
+      const res = await fetch(`${url}/api/guidance/bad%zz`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ note: "steer" }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("POST /api/init without x-vibeflow-token returns 403", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
