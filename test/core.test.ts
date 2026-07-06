@@ -224,9 +224,11 @@ describe("core.appendFileSafe (CWE-732, #536)", () => {
     expect(statSync(target).mode & 0o777).toBe(0o600);
   });
 
-  test("second append accumulates (no truncate) and re-tightens to 0o600", () => {
+  test("second append accumulates (no truncate) and stays 0o600", () => {
     // appendFileSafe never truncates — the second call must add to the first.
-    // The chmod is idempotent: an already-0o600 file stays 0o600.
+    // The chmod runs only on CREATE (#536 perf: no per-append chmod on the SSE
+    // stream.log hot path), but the mode set on the first append persists, so a
+    // second append leaves the file at 0o600.
     const target = join(dir, "log.md");
     appendFileSafe(target, "a\n");
     appendFileSafe(target, "b\n");
@@ -234,6 +236,20 @@ describe("core.appendFileSafe (CWE-732, #536)", () => {
     if (process.platform !== "win32") {
       expect(statSync(target).mode & 0o777).toBe(0o600);
     }
+  });
+
+  test("does NOT re-tighten a pre-existing loose file (chmod gated on create)", () => {
+    // Documents the perf tradeoff: appendFileSafe only chmods on creation. A file
+    // that already exists with looser perms (e.g. created before this fix) is left
+    // as-is on append. Acceptable: the write surfaces we own always go through the
+    // create path, so they get 0o600; this only affects externally-created files.
+    if (process.platform === "win32") return;
+    const target = join(dir, "preexisting.md");
+    fsWriteFileSync(target, "old\n");
+    chmodSync(target, 0o644);
+    appendFileSafe(target, "new\n");
+    expect(readFileSync(target, "utf8")).toBe("old\nnew\n");
+    expect(statSync(target).mode & 0o777).toBe(0o644);
   });
 });
 

@@ -133,11 +133,33 @@ describe("server HTTP API handlers", () => {
     };
     try {
       const token = await csrfToken(url);
-      // 100KB cap → 100KB+1 must be rejected at the trust boundary.
+      // 100KB byte cap → 100KB+1 ASCII bytes must be rejected at the trust boundary.
       const res = await fetch(`${url}/api/guidance/my-unit`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
         body: JSON.stringify({ note: "x".repeat(100 * 1024 + 1) }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/too large/i);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/guidance/:unit caps by BYTE length, not UTF-16 units (#536)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // "🚀" is 2 UTF-16 code units but 4 UTF-8 bytes. 30K rockets = 60K String.length
+      // (under the 100K cap by .length) but 120K bytes (over the 100K byte cap). A
+      // String.length check would WRONGLY accept this; the byte check must reject it.
+      const res = await fetch(`${url}/api/guidance/my-unit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ note: "🚀".repeat(30 * 1024) }),
       });
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toMatch(/too large/i);

@@ -324,8 +324,10 @@ export async function handleMutationRoute(
       return Response.json({ error: "unit and note required" }, { status: 400 });
     // Cap note length at the trust boundary (#536): the note is untrusted UI input
     // that appends unbounded to an on-disk file. Loopback + CSRF-guarded so this is
-    // low-sev, but every other write surface caps (cf. ATTACH_CAP) — match it.
-    if (note.length > GUIDANCE_NOTE_CAP)
+    // low-sev, but every other write surface caps (cf. ATTACH_CAP) — match it. Use
+    // BYTE length (not String.length UTF-16 units) so a multibyte payload can't write
+    // up to ~3-4x the intended cap to disk.
+    if (Buffer.byteLength(note, "utf8") > GUIDANCE_NOTE_CAP)
       return Response.json({ error: "note too large" }, { status: 400 });
     writeGuidance(unit, note, { base: ctx.getActiveRepo() });
     return Response.json({ ok: true });
