@@ -286,6 +286,34 @@ test("defaultGoalEvalFn: catch block — git diff throws → still returns cover
   expect(result.covered).toBe(true); // fail-open
 });
 
+test("defaultGoalEvalFn: injected spawner throws → diff catch → covered=true (no bridge)", async () => {
+  const origEnv = process.env.VIBEFLOW_AI;
+  process.env.VIBEFLOW_AI = undefined;
+  let calls = 0;
+  const result = await defaultGoalEvalFn("any goal", () => {
+    calls++;
+    throw new Error("ENOENT: git not found");
+  });
+  if (origEnv !== undefined) process.env.VIBEFLOW_AI = origEnv;
+  else process.env.VIBEFLOW_AI = undefined;
+  expect(calls).toBe(1); // diff spawner attempted, bridge skipped
+  expect(result).toEqual({ covered: true, uncovered: [] });
+});
+
+test("defaultGoalEvalFn: injected spawner throws with bridge set → bridge catch → covered=true", async () => {
+  const origEnv = process.env.VIBEFLOW_AI;
+  process.env.VIBEFLOW_AI = "echo COVERED";
+  let calls = 0;
+  const result = await defaultGoalEvalFn("any goal", () => {
+    calls++;
+    throw new Error("ENOENT: bridge binary not found");
+  });
+  if (origEnv === undefined) process.env.VIBEFLOW_AI = undefined;
+  else process.env.VIBEFLOW_AI = origEnv;
+  expect(calls).toBe(2); // both diff + bridge spawners attempted and threw
+  expect(result).toEqual({ covered: true, uncovered: [] });
+});
+
 test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI not set", async () => {
   const origEnv = process.env.VIBEFLOW_AI;
   process.env.VIBEFLOW_AI = undefined;
