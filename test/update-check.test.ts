@@ -72,6 +72,16 @@ describe("fetchLatest", () => {
       await fetchLatest({ fetch: async () => res(true, { version: "0.13.0\x1b[31mX" }) }),
     ).toBeNull();
   });
+  test("requests the URL-encoded scoped-package path (%40scope%2Fname)", async () => {
+    const urls: string[] = [];
+    await fetchLatest({
+      fetch: async (url) => {
+        urls.push(url);
+        return res(true, { version: "1.0.0" });
+      },
+    });
+    expect(urls[0]).toBe("https://registry.npmjs.org/%40magicpro97%2Fvibeflow/latest");
+  });
   test("returns null when fetch throws (network/timeout)", async () => {
     expect(
       await fetchLatest({
@@ -101,6 +111,16 @@ describe("readCache / writeCache", () => {
       readCache({
         readFileSync: () => JSON.stringify({ checkedAt: 5, latest: "9.9.9\x1b[31mX" }),
       }),
+    ).toBeNull();
+  });
+  test("readCache returns null when checkedAt is not a finite number (corrupt-cache guard)", () => {
+    // A corrupt/hand-edited cache can carry a null/string/NaN checkedAt. A bare
+    // `typeof === "number"` would still pass NaN and wedge the TTL math
+    // (now - NaN > TTL === false → refresh never fires); Number.isFinite rejects
+    // null, NaN, and Infinity alike.
+    expect(readCache({ readFileSync: () => '{"checkedAt": null, "latest": "1.2.3"}' })).toBeNull();
+    expect(
+      readCache({ readFileSync: () => '{"checkedAt": "oops", "latest": "1.2.3"}' }),
     ).toBeNull();
   });
   test("readCache returns null when the file is missing (read throws)", () => {

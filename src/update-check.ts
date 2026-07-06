@@ -6,16 +6,12 @@
 //   (A) `vf update-check`  — explicit, always fetches live, reports + caches.
 //   (B) notifyUpdate()     — passive 1-line nudge printed on any command. The
 //                             nudge itself is instant (read from a 24h cache, no
-//                             await). When the cache is stale it kicks a
-//                             fire-and-forget refresh; that un-awaited fetch is
-//                             NOT detached, so on the ~once-a-day stale run the
-//                             process can stay alive until the fetch settles
-//                             (≤ FETCH_TIMEOUT_MS, longer under Node if the
-//                             socket lingers). The command's OUTPUT is never
-//                             delayed — only process exit, once a day, and only
-//                             in an interactive TTY. A detached/unref'd refresh
-//                             would remove even that; skipped as over-engineering
-//                             for a best-effort nudge (ponytail).
+//                             await). When the cache is stale it schedules a
+//                             refresh on an UNREF'd timer, so a short-lived
+//                             command exits immediately without waiting on the
+//                             fetch; a long-lived command (`vf ui`) refreshes
+//                             opportunistically. Never delays command output or
+//                             (thanks to unref) process exit.
 //
 // Design notes (ponytail):
 //   - No `update-notifier`/`semver` dep — a 6-line compare + a `fetch` call to
@@ -34,6 +30,9 @@ import { out } from "./logbus.js";
 import type { Channel } from "./logbus.js";
 
 const PKG = "@magicpro97/vibeflow";
+// npm registry expects a scoped name URL-encoded (`%40scope%2Fname`); a raw
+// `@scope/name` can misroute on some proxies/mirrors → intermittent 404.
+const REGISTRY_URL = `https://registry.npmjs.org/${encodeURIComponent(PKG)}/latest`;
 const CACHE_PATH = join(homedir(), ".vibeflow", "update-check.json");
 const TTL_MS = 24 * 60 * 60 * 1000; // one passive network refresh per day
 const FETCH_TIMEOUT_MS = 2000; // never make the CLI wait on a slow registry
@@ -88,7 +87,7 @@ export function cmpSemver(a: string, b: string): number {
 export async function fetchLatest(inject: { fetch?: FetchFn } = {}): Promise<string | null> {
   const _fetch: FetchFn = inject.fetch ?? (fetch as unknown as FetchFn);
   try {
-    const res = await _fetch(`https://registry.npmjs.org/${PKG}/latest`, {
+    const res = await _fetch(REGISTRY_URL, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: { accept: "application/json" },
     });
@@ -110,7 +109,7 @@ export function readCache(
   try {
     const data = JSON.parse(_read(CACHE_PATH, "utf8")) as UpdateCache;
     if (
-      typeof data.checkedAt === "number" &&
+      Number.isFinite(data.checkedAt) &&
       typeof data.latest === "string" &&
       isValidVersion(data.latest)
     ) {
@@ -198,10 +197,9 @@ export async function refreshCacheInBackground(
 }
 
 /** Passive nudge: print "update available" from the cache (instant — no await),
- *  and kick a fire-and-forget refresh when the cache is missing or older than the
- *  TTL. The nudge never delays command OUTPUT; the un-awaited refresh can delay
- *  process EXIT by up to FETCH_TIMEOUT_MS on the once-a-day stale run (see the
- *  file header). Best-effort — never throws. */
+ *  and when the cache is missing or older than the TTL, schedule a refresh on an
+ *  unref'd timer (see `defaultRefresh`) so command output AND process exit are
+ *  never delayed. Best-effort — never throws. */
 export function notifyUpdate(
   inject: {
     env?: NodeJS.ProcessEnv;
@@ -222,6 +220,17 @@ export function notifyUpdate(
     outFn("vf", updateAvailableLine(current, cache.latest));
   }
   if (!cache || now - cache.checkedAt > TTL_MS) {
-    (inject.refresh ?? (() => void refreshCacheInBackground()))();
+    (inject.refresh ?? defaultRefresh)();
   }
+}
+
+/** Default stale-cache refresh: kick `refreshCacheInBackground` on an UNREF'd
+ *  timer. `unref()` means the timer does not keep the event loop alive, so a
+ *  short-lived command (`vf units status`) exits immediately without waiting on
+ *  the pending `fetch` — the exit-delay the passive check must never cause. A
+ *  long-lived command (`vf ui`) keeps the loop alive, so the timer fires and the
+ *  cache refreshes opportunistically; `vf update-check` always refreshes live. */
+function defaultRefresh(): void {
+  const t = setTimeout(() => void refreshCacheInBackground(), 0) as { unref?: () => void };
+  t.unref?.();
 }
