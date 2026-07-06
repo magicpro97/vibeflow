@@ -2703,6 +2703,25 @@ describe("commands.makeResearcher (test seam)", () => {
     expect(r.findings.some((f) => f === "research failed")).toBe(true);
     expect(r.blocked).toBe(true);
   });
+
+  test("threads `base` into the copilot dispatch file (#536: lands under active repo, not cwd)", async () => {
+    // copilot takes its prompt via argv (promptMode "arg"), so runDispatchAsync writes
+    // the assembled prompt to <base>/.vibeflow/dispatch/<unit>.md (#526 item 7). Before
+    // #536 makeResearcher dropped `base`, so on a server orchestrating a registered repo
+    // ≠ process.cwd() the file landed under cwd(). Passing base fixes the target.
+    const dir = mkdtempSync(join(tmpdir(), "vf-research-base-"));
+    try {
+      // Injected spawner → resolveCli treats copilot as present without touching PATH,
+      // and no real engine is spawned. status 0 so the dispatch is "ok".
+      const fakeSpawner = async () => ({ status: 0, stdout: "", stderr: "", timedOut: false });
+      const researcher = makeResearcher("copilot", {} as never, "cli", fakeSpawner, dir);
+      await researcher(1, "test question");
+      const dispatchFile = join(dir, ".vibeflow", "dispatch", "research-round-1.md");
+      expect(existsSync(dispatchFile)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commands.computeKnowledgeHeavySource (test seam)", () => {

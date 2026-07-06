@@ -35,7 +35,17 @@ export function writeGuidance(
 }
 
 /** Read a unit's guidance (if any), prepend it to `prompt`, and clear the file.
- *  Guidance absent → the prompt is returned unchanged (back-compat). */
+ *  Guidance absent → the prompt is returned unchanged (back-compat).
+ *
+ *  ponytail: read→clear is intentionally NON-atomic (#536). A UI POST landing in the
+ *  window between the read and the unlink is lost (its append is deleted unread). This
+ *  is accepted, not a bug: (1) a truly atomic consume (rename-then-read) conflicts with
+ *  the dry-run preview contract, which MUST read WITHOUT consuming (see the
+ *  `clearGuidance: () => {}` no-op at the dispatch call site); (2) a note that arrives
+ *  during consume is a note for an already-dispatching unit, which the module contract
+ *  ("steers QUEUED units only, not a running one") says is already too late — dropping it
+ *  is consistent with that guarantee. Upgrade path: per-unit mutex only if mid-run
+ *  injection is ever added. */
 export function applyGuidance(
   unit: string,
   prompt: string,

@@ -84,6 +84,7 @@ export function makeResearcher(
   ctx: ProjectContext,
   mode: "cli" | "bridge" | "dry",
   dispatchSpawner?: AsyncSpawner,
+  base?: string,
 ): AsyncResearcher {
   // Research rounds are read-only and should be fast — use a per-round timeout (180s)
   // so investigation never cascades into a multi-hour hang when a round's engine stalls.
@@ -94,14 +95,17 @@ export function makeResearcher(
     ]);
     // Pass a unit slug so copilot's prompt goes to a file, not argv (#526 item 7);
     // research prompts carry full project context and can re-hit the ~32K argv
-    // limit otherwise. Research runs at the repo root (no --isolate), so the
-    // default base (cwd) resolves the pointer correctly.
+    // limit otherwise. Pass `base` too (#536): when the server orchestrates a
+    // registered repo ≠ process.cwd(), the copilot dispatch pointer/file must land
+    // under the active repo, not cwd(). Falls back to cwd() inside writeDispatchPrompt
+    // when base is undefined (the CLI path, where the repo IS cwd).
     const result = await runDispatchAsync({
       engine,
       prompt,
       mode,
       spawner: researchSpawner,
       unit: `research-round-${round}`,
+      base,
     });
     const confidence = result.summary?.confidence ?? 0;
     // Build findings: prefer the summary's uncertainty field, then plain raw evidence.
@@ -337,7 +341,7 @@ export function makeDispatcher(
             `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
           ),
         );
-        const research = makeResearcher(engine, ctx, mode, spawner);
+        const research = makeResearcher(engine, ctx, mode, spawner, base);
         const outcome = await investigateUnit(
           { name: u.name, confidence, owner_agent: u.owner_agent },
           { riskClass, research },
