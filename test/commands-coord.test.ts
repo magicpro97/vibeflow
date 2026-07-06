@@ -330,6 +330,33 @@ describe("coord shim (A1 #167 + #194)", () => {
     }
   });
 
+  // ---- #556: defaultEngineSpawner scrubs the host env before spawn.
+  //      Seed a denied secret + VF_DENY_TOOLS in the spawn env; the audit
+  //      log must list the secret as dropped and NOT drop VF_DENY_TOOLS
+  //      (VF_* is in ALWAYS_KEEP, so the deny-list hint survives). ----
+  test("(defaultEngineSpawner) scrubs a host secret, keeps VF_DENY_TOOLS (#556)", async () => {
+    if (process.platform === "win32") return;
+    const writes: Array<{ text: string; meta?: Record<string, unknown> }> = [];
+    setLogbusForTests({ write: (msg: any) => writes.push(msg) } as any);
+    try {
+      const spawnEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        AWS_SECRET_ACCESS_KEY: "leak-me",
+        VF_DENY_TOOLS: "Write,Edit",
+      };
+      const code = await defaultEngineSpawner("/usr/bin/true", [], spawnEnv);
+      expect(code).toBe(0);
+      const scrub = writes.find((w) => w.meta?.kind === "coord-env-scrub");
+      expect(scrub).toBeDefined();
+      const dropped = scrub?.meta?.dropped as string[];
+      expect(dropped).toContain("AWS_SECRET_ACCESS_KEY");
+      expect(dropped).not.toContain("VF_DENY_TOOLS");
+      expect(dropped).not.toContain("PATH");
+    } finally {
+      setLogbusForTests(null);
+    }
+  });
+
   // ---- A1 FU #198: spawner is called WITH the env that includes
   //      VF_DENY_TOOLS. The test verifies the contract (spawnEnv is
   //      passed) but not the enforcement (the wrapper is a followup). ----

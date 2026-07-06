@@ -1,4 +1,5 @@
 import type { Engine } from "../core.js";
+import type { EnvPolicy } from "./env-filter.js";
 
 // Re-export of `Bun.spawn` under a stable name so the test seam (`AsyncSpawnerOpts.spawn`)
 // can be typed as `typeof bunSpawn` and tests can pass any function with the same
@@ -144,6 +145,15 @@ export interface AsyncSpawnerOpts {
    *  children) run rooted here instead of process.cwd() — the per-unit worktree
    *  isolation seam (W1). Omitted → inherits the parent cwd (unchanged default). */
   cwd?: string;
+
+  /** #556: env-scrub policy. The child env is `filterEnv(process.env, envPolicy)` — secret-shaped
+   *  host vars are dropped before they reach the third-party agent CLI. Omitted → conservative
+   *  default (drop known secrets, pass the rest). */
+  envPolicy?: EnvPolicy;
+
+  /** #556: called ONCE at spawner-build with the sorted names (never values) the env filter
+   *  dropped, so a caller can audit the scrub via `out()`. Default: no-op. */
+  onAudit?: (dropped: string[]) => void;
 }
 
 /** Probe seam so engine-availability / version checks are injectable in tests. */

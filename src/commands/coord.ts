@@ -29,6 +29,8 @@
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { filterEnv } from "../dispatch/env-filter.js";
+import { readSettings } from "../settings.js";
 import {
   BRIEF_FRESH_MS,
   BRIEF_PATH,
@@ -256,10 +258,27 @@ export async function defaultEngineSpawner(
   // not pulled into the test bundle (most unit tests inject a
   // stub spawner and never reach this code).
   const { spawn } = await import("node:child_process");
+  // #556: scrub the host env before handing it to the engine subprocess so
+  // AWS_*/STRIPE_*/DB URLs/unrelated tokens never leak to a third-party agent
+  // CLI. VF_DENY_TOOLS (layered by coord() at :195) is in ALWAYS_KEEP's VF_*
+  // prefix, so the deny-list hint survives the filter. Audit the dropped NAMES
+  // (never values) via the existing out() channel.
+  const policy = readSettings(cwd()).envPolicy ?? {};
+  const { env: filteredEnv, dropped } = filterEnv(spawnEnv, policy);
+  if (dropped.length > 0) {
+    // NOTE: out() only consumes the trailing opts bag when it carries a `level`
+    // field (logbus/out.ts extractOptsAndParts). A bare { meta } is joined into
+    // the text and the meta is dropped — so `level` is REQUIRED for the audit
+    // meta ({ kind, dropped }) to reach the bus for `vf logs`/tests.
+    out("vf", c.dim(`coord: env scrub dropped ${dropped.length} host var(s) before spawn`), {
+      level: "info",
+      meta: { kind: "coord-env-scrub", dropped },
+    });
+  }
   return await new Promise<number>((resolve) => {
     const child = spawn(engine, _args, {
       stdio: "inherit",
-      env: { ...spawnEnv },
+      env: filteredEnv,
     });
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));

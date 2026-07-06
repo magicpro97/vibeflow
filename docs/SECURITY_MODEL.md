@@ -145,6 +145,54 @@ Rules:
 - do not send secrets to external docs/skill services
 ```
 
+## Spawned engine env scrub
+
+Every engine subprocess vf launches (`claude`, `codex`, `copilot`, …) used to inherit
+the **entire** host environment. An agent run to fix a CSS bug would receive
+`AWS_SECRET_ACCESS_KEY`, `STRIPE_SECRET_KEY`, database URLs, and any other secret in the
+operator's shell. VibeFlow now **filters the env** at both spawn sites
+(`src/dispatch/spawners.ts`, `src/commands/coord.ts`) via a single `filterEnv()` helper —
+no Docker, no new dependency.
+
+**Default policy (conservative — drop known secrets, pass the rest):**
+
+```text
+ALWAYS KEEP (never dropped, even in strict mode):
+  PATH HOME SHELL USER LOGNAME LANG TERM TMPDIR TMP TEMP PWD, LC_* prefix,
+  vf's own VF_* / VIBEFLOW_* (so the VF_DENY_TOOLS hint survives),
+  engine auth vars: ANTHROPIC_API_KEY OPENAI_API_KEY GH_TOKEN GITHUB_TOKEN GEMINI_API_KEY,
+  (Windows also: SYSTEMROOT PATHEXT COMSPEC APPDATA LOCALAPPDATA USERPROFILE)
+
+DEFAULT DENY (globs; ALWAYS_KEEP overrides any match):
+  AWS_* AZURE_* GCP_* GOOGLE_APPLICATION_CREDENTIALS STRIPE_* TWILIO_* SLACK_*
+  SENTRY_* NPM_TOKEN DOCKER_* DATABASE_URL
+  *_SECRET *_SECRET_KEY *_PRIVATE_KEY *_PASSWORD *_TOKEN *_API_KEY
+```
+
+Note `*_TOKEN` / `*_API_KEY` are denied by default (secret-shaped) — the specific engine
+auth vars above are in ALWAYS_KEEP, so they ride through while every other token/key is dropped.
+
+**Configuring the policy** (per-repo, `.vibeflow/SETTINGS.json`, absent = default):
+
+```bash
+vf config env-policy status          # print the effective policy + what WOULD be dropped now
+vf config env-policy deny 'MY_APP_*' # add a glob to drop on top of the built-in denylist
+vf config env-policy allow 'MY_*'    # add a glob; a non-empty allow[] = STRICT pass-only mode
+vf config env-policy reset           # clear config, back to the conservative default
+```
+
+In **strict mode** (any `allow` glob set) ONLY `ALWAYS_KEEP` + `allow`-matching vars pass;
+everything else is dropped. On **Windows** name matching is case-insensitive (`Path` == `PATH`).
+
+> **Trusted namespace caveat:** `VF_*` / `VIBEFLOW_*` are treated as vf's own signalling
+> namespace and are kept unconditionally (so `VF_DENY_TOOLS` survives). Do not store an
+> unrelated secret under a `VF_`/`VIBEFLOW_` name — the scrub will not drop it.
+
+**Audit:** dropped variable NAMES (never values) are logged once per dispatch (the coord path
+emits `{ kind: "coord-env-scrub", dropped }` to `vf logs`), matching the tool deny-list audit pattern.
+
+The read-only policy summary is surfaced in the web UI Settings panel ("Env scrub").
+
 ## Local web server
 
 The `vf ui` server is the interactive console (intake → generate → dispatch). Because it now

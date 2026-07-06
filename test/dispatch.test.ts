@@ -1417,6 +1417,93 @@ describe("makeAsyncSpawner — cwd seam (W1 per-unit worktree isolation)", () =>
   });
 });
 
+// ── #556: host-env scrub for spawned engine subprocesses ──
+describe("makeAsyncSpawner — env scrub (#556)", () => {
+  const stubProc = () =>
+    ({
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => ({ read: async () => ({ done: true, value: undefined }) }),
+      },
+      stderr: {
+        getReader: () => ({ read: async () => ({ done: true, value: undefined }) }),
+      },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    }) as unknown as ReturnType<typeof Bun.spawn>;
+
+  test("child env drops a denied host secret but keeps PATH", async () => {
+    const prevSecret = process.env.AWS_SECRET_ACCESS_KEY;
+    process.env.AWS_SECRET_ACCESS_KEY = "leak-me";
+    let seenEnv: NodeJS.ProcessEnv | undefined;
+    const fakeSpawn = ((_argv: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+      seenEnv = opts.env;
+      return stubProc();
+    }) as unknown as typeof Bun.spawn;
+    try {
+      await makeAsyncSpawner({ spawn: fakeSpawn })("claude", ["-p"], "hi");
+      expect(seenEnv).toBeDefined();
+      expect(seenEnv?.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      expect(seenEnv?.PATH).toBe(process.env.PATH);
+    } finally {
+      // biome-ignore lint/performance/noDelete: env restore needs a true unset, not `= undefined`
+      if (prevSecret === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
+      else process.env.AWS_SECRET_ACCESS_KEY = prevSecret;
+    }
+  });
+
+  // #556 cross-review P1: a CONFIGURED envPolicy (strict allowlist) must reach the
+  // spawner — the primary dispatch path threads readSettings(base).envPolicy in.
+  test("child env honors a configured strict allowlist policy", async () => {
+    const prevA = process.env.MY_APP_VAR;
+    const prevB = process.env.OTHER_VAR;
+    process.env.MY_APP_VAR = "wanted";
+    process.env.OTHER_VAR = "unwanted";
+    let seenEnv: NodeJS.ProcessEnv | undefined;
+    const fakeSpawn = ((_argv: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+      seenEnv = opts.env;
+      return stubProc();
+    }) as unknown as typeof Bun.spawn;
+    try {
+      // Strict mode: allow only MY_* (+ ALWAYS_KEEP). OTHER_VAR must be dropped.
+      await makeAsyncSpawner({ spawn: fakeSpawn, envPolicy: { allow: ["MY_*"] } })(
+        "claude",
+        ["-p"],
+        "hi",
+      );
+      expect(seenEnv?.MY_APP_VAR).toBe("wanted");
+      expect(seenEnv?.OTHER_VAR).toBeUndefined(); // strict: not on the allowlist
+      expect(seenEnv?.PATH).toBe(process.env.PATH); // ALWAYS_KEEP still passes
+    } finally {
+      // biome-ignore lint/performance/noDelete: env restore needs a true unset, not `= undefined`
+      if (prevA === undefined) delete process.env.MY_APP_VAR;
+      else process.env.MY_APP_VAR = prevA;
+      // biome-ignore lint/performance/noDelete: env restore needs a true unset, not `= undefined`
+      if (prevB === undefined) delete process.env.OTHER_VAR;
+      else process.env.OTHER_VAR = prevB;
+    }
+  });
+
+  test("onAudit receives the sorted dropped names once at build", async () => {
+    const prevSecret = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_SECRET_KEY = "sk_live_leak";
+    const audits: string[][] = [];
+    try {
+      makeAsyncSpawner({
+        spawn: stubProc as unknown as typeof Bun.spawn,
+        onAudit: (d) => audits.push(d),
+      });
+      expect(audits.length).toBe(1);
+      expect(audits[0]).toContain("STRIPE_SECRET_KEY");
+      expect(audits[0]).toEqual([...(audits[0] ?? [])].sort());
+    } finally {
+      // biome-ignore lint/performance/noDelete: env restore needs a true unset, not `= undefined`
+      if (prevSecret === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = prevSecret;
+    }
+  });
+});
+
 // ── dispatch split sentinel (#186 PR8) ──
 describe("dispatch split (#186 PR8 sentinel)", () => {
   const facade = readFileSync("src/dispatch.ts", "utf8");

@@ -51,6 +51,10 @@ export interface VibeSettings {
    * truth-tell on `vf config memory status`).
    */
   memory: MemoryMode;
+  /** #556: env-scrub policy for spawned engine subprocesses. Absent = conservative
+   *  default (filterEnv drops known secret-shaped vars, keeps essentials + engine
+   *  auth vars). `allow` non-empty switches to strict pass-only mode. */
+  envPolicy?: { deny?: string[]; allow?: string[] };
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -125,6 +129,25 @@ function coerceFailureProtection(raw: unknown): FailureProtection {
   return out;
 }
 
+/** #556: validate a stored envPolicy block → {deny?, allow?} of string[] only, or
+ *  undefined when absent/garbage (so the conservative filterEnv default applies). */
+function coerceEnvPolicy(raw: unknown): { deny?: string[]; allow?: string[] } | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const obj = raw as { deny?: unknown; allow?: unknown };
+  const strArr = (v: unknown): string[] | undefined => {
+    if (!Array.isArray(v)) return undefined;
+    const s = v.filter((x): x is string => typeof x === "string" && x.length > 0);
+    return s.length ? s : undefined;
+  };
+  const deny = strArr(obj.deny);
+  const allow = strArr(obj.allow);
+  if (!deny && !allow) return undefined;
+  const out: { deny?: string[]; allow?: string[] } = {};
+  if (deny) out.deny = deny;
+  if (allow) out.allow = allow;
+  return out;
+}
+
 /** Merge a partial/old/unknown stored object over the defaults into a complete VibeSettings. */
 function coerce(raw: unknown): VibeSettings {
   const out = defaults();
@@ -151,6 +174,15 @@ function coerce(raw: unknown): VibeSettings {
   // scoring time) and SETTINGS.json stays free of churn. A present-but-garbage
   // block coerces to the all-on default rather than throwing.
   if ("hooks" in obj) out.hooks = coerceHookConfig(obj.hooks);
+
+  // #556: materialize envPolicy ONLY when the stored file carries it (like hooks),
+  // so repos that never configured it keep an absent block (conservative default
+  // applies at filterEnv). Validate both arrays to string[]; a present-but-garbage
+  // block (non-object, or arrays of non-strings) coerces to undefined → default.
+  if ("envPolicy" in obj) {
+    const ep = coerceEnvPolicy(obj.envPolicy);
+    if (ep) out.envPolicy = ep;
+  }
 
   if (Array.isArray(obj.lspServers)) {
     const servers = obj.lspServers.filter(
@@ -197,6 +229,12 @@ export function writeSettings(
   // re-expanded by the previous value. Keep the prior block when `next` omits it.
   const hooks = next.hooks ?? current.hooks;
   if (hooks) merged.hooks = hooks;
+  // #556: envPolicy is replace-on-write like hooks — `vf config env-policy` hands a
+  // complete block. Keep the prior block when `next` omits it; a caller clearing the
+  // policy passes `envPolicy: undefined` explicitly (via the `reset` subcommand path,
+  // which writes without the key so the default re-applies).
+  const envPolicy = "envPolicy" in next ? next.envPolicy : current.envPolicy;
+  if (envPolicy) merged.envPolicy = envPolicy;
   const servers = next.lspServers ?? current.lspServers;
   if (servers?.length) merged.lspServers = [...servers];
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
