@@ -31,6 +31,7 @@ import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
 import { installLogbus, out } from "./logbus.js";
 import { startServer } from "./server.js";
+import { notifyUpdate, updateCheck } from "./update-check.js";
 
 function openBrowser(url: string): void {
   const cmd =
@@ -197,6 +198,14 @@ async function main(argv: string[]): Promise<number> {
   // the global help when there's no command or the command IS help/--help/-h itself.
   if (wantsHelp && hasCommandHelp(cmd)) return printCommandHelp(cmd as string);
   if (cmd === "help" || cmd === "--help" || cmd === "-h" || wantsHelp) return printHelp();
+
+  // `vf update-check` — explicit, always hits the network.
+  if (cmd === "update-check") return await updateCheck();
+
+  // Passive nudge for every real command: prints a one-line "update available"
+  // from the 24h cache (zero latency) and refreshes the cache in the background
+  // when stale. Silent in CI / non-TTY / when opted out. Best-effort.
+  notifyUpdate();
 
   switch (cmd) {
     case "pr":

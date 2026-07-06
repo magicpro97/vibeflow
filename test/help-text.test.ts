@@ -48,4 +48,9 @@ describe("help text", () => {
     expect(hasCommandHelp("demo")).toBe(true);
     expect(printCommandHelp("demo")).toBe(0);
   });
+
+  test("update-check has a per-command help block (covers the COMMAND_HELP['update-check'] arm)", () => {
+    expect(hasCommandHelp("update-check")).toBe(true);
+    expect(printCommandHelp("update-check")).toBe(0);
+  });
 });
