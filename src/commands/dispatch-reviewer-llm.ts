@@ -47,12 +47,12 @@ export async function runLLMReview(opts: LLMReviewOpts): Promise<LLMReviewResult
 }
 
 /** Get git diff for a set of file paths relative to cwd */
-export function getUnitDiff(cwd: string, scope: string[]): string {
+export function getUnitDiff(cwd: string, scope: string[], _spawn = spawnSync): string {
   try {
     const args = ["diff", "HEAD~1", "HEAD", "--", ...(scope.length ? scope : ["."])];
-    const r = spawnSync("git", args, { encoding: "utf8", cwd });
+    const r = _spawn("git", args, { encoding: "utf8", cwd });
     return ((r.stdout as string) ?? "").slice(0, 4000);
-  } catch /* coverage-waiver: #477 — spawnSync does not throw on ENOENT in Bun */ {
+  } catch {
     return "";
   }
 }
