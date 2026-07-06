@@ -1,5 +1,4 @@
 // src/commands/orchestrate.ts
-// size-waiver: #472 — generateSpecFirstTests (ADR-002) + buildReviewerPrompt re-export (ADR-001) adds ~29 lines
 //
 // `vf orchestrate` subcommand — the multi-unit dispatch loop (issue #80, phase 6/14).
 // Resolver helpers live in orchestrate-resolve.ts (#186 PR7).
@@ -63,38 +62,10 @@ import {
 } from "./_shared.js";
 import type { PreflightFn } from "./_shared.js";
 
-// ponytail: inlined from seams.ts (#391) — once-only tip state
-export const tipState = { shown: false };
-export function resetTipStateForTests(): void {
-  tipState.shown = false;
-}
-
-// ponytail: inlined from ui-focus.ts (#390)
-import { spawnSync as _spawnSync } from "node:child_process";
-export function focusTerminal(
-  inject: {
-    platform?: string;
-    run?: (cmd: string, args: string[]) => void;
-    termProgram?: string;
-  } = {},
-): void {
-  if ((inject.platform ?? process.platform) !== "darwin") return;
-  const run =
-    inject.run ??
-    ((c, a) => {
-      _spawnSync(c, a, { stdio: "ignore" });
-    });
-  const app =
-    (inject.termProgram ?? process.env.TERM_PROGRAM) === "iTerm.app" ? "iTerm" : "Terminal";
-  run("osascript", ["-e", `tell application "${app}" to activate`]);
-}
-export function maybeFocus(
-  flags: { focus?: boolean; isTTY?: boolean },
-  inject?: Parameters<typeof focusTerminal>[0],
-): void {
-  if (flags.focus !== true || flags.isTTY !== true) return;
-  focusTerminal(inject);
-}
+// Terminal-focus + tip-state seam in orchestrate-focus.ts (#472); imported for
+// internal use, re-exported below as public test seams (same facade pattern as
+// orchestrate-resolve.ts #186 PR7).
+import { maybeFocus, tipState } from "./orchestrate-focus.js";
 
 // Resolver helpers in orchestrate-resolve.ts (#186 PR7); facade imports for internal use and re-exports the 5 public test seams.
 import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
@@ -114,6 +85,14 @@ export {
   resolveEngine,
   resolveMode,
 } from "./orchestrate-resolve.js";
+export {
+  focusTerminal,
+  maybeFocus,
+  resetTipStateForTests,
+  tipState,
+} from "./orchestrate-focus.js";
+export { generateSpecFirstTests } from "./orchestrate-specfirst.js";
+export type { SpecFirstOpts } from "./orchestrate-specfirst.js";
 export { buildReviewerPrompt } from "./orchestrate-reviewer.js";
 export type { ReviewerPromptOpts } from "./orchestrate-reviewer.js";
 export async function orchestrate(
@@ -405,32 +384,3 @@ export async function orchestrate(
   }
   return verdict.verdict === "blocked" ? 1 : 0;
 }
-
-// ─── ADR-002: Spec-first test generation ─────────────────────────────────────
-
-export interface SpecFirstOpts {
-  unitName: string;
-  spec: string;
-  /** Injectable LLM call — production uses engine dispatch; tests use a fake. */
-  llmFn: (prompt: string) => Promise<string>;
-}
-
-/**
- * Generate test stubs from a unit's spec BEFORE the implementer is dispatched.
- * The LLM sees ONLY the spec — no source code, no implementation context.
- * Returns null when spec is empty (spec-first skipped for that unit).
- * ADR-002: written files are protected from implementer writes via pre-write hook.
- * ponytail: llmFn is injected; production wiring via --spec-first flag in phase 2.
- */
-export async function generateSpecFirstTests(opts: SpecFirstOpts): Promise<string | null> {
-  if (!opts.spec.trim()) return null;
-  const prompt = [
-    "You are a test author. Given ONLY the spec below (no implementation), write failing test stubs.",
-    "Return ONLY the test code — no explanation, no markdown fences, no implementation.",
-    `Unit: ${opts.unitName}`,
-    `Spec: ${opts.spec}`,
-  ].join("\n");
-  return opts.llmFn(prompt);
-}
-
-// ─── End ADR-002 ─────────────────────────────────────────────────────────────
