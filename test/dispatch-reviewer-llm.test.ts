@@ -86,6 +86,16 @@ describe("getUnitDiff (ADR-001)", () => {
     const diff = getUnitDiff(process.cwd(), []);
     expect(typeof diff).toBe("string");
   });
+
+  test("spawner throws (ENOENT) → catch returns empty string", () => {
+    let called = false;
+    const diff = getUnitDiff(process.cwd(), ["src/"], () => {
+      called = true;
+      throw new Error("ENOENT: git not found");
+    });
+    expect(called).toBe(true);
+    expect(diff).toBe("");
+  });
 });
 
 describe("makeVibflowLLMFn (ADR-001)", () => {

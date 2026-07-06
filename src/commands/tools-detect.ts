@@ -34,15 +34,16 @@ function readVerifiedSha(base: string): string {
 /** ADR-003 phase 2: real LLM eval via VIBEFLOW_AI bridge. Fail-open when bridge not set. */
 export async function defaultGoalEvalFn(
   goal: string,
+  _spawn = _spawnSync,
 ): Promise<{ covered: boolean; uncovered: string[] }> {
   const diff = (() => {
     try {
-      const r = _spawnSync("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
+      const r = _spawn("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
         encoding: "utf8",
         cwd: process.cwd(),
       });
       return (r.stdout ?? "").slice(0, 3000);
-    } catch /* coverage-waiver: #478 */ {
+    } catch {
       return "";
     }
   })();
@@ -51,14 +52,14 @@ export async function defaultGoalEvalFn(
   if (!bridge) return { covered: true, uncovered: [] };
   try {
     const parts = bridge.split(" ");
-    const r = _spawnSync(parts[0] ?? "", [...parts.slice(1), prompt], {
+    const r = _spawn(parts[0] ?? "", [...parts.slice(1), prompt], {
       encoding: "utf8",
       timeout: 30000,
     });
     const raw = (r.stdout ?? "").trim();
     const covered = /^COVERED/i.test(raw);
     return { covered, uncovered: covered ? [] : [raw.slice(0, 500)] };
-  } catch /* coverage-waiver: #478 */ {
+  } catch {
     return { covered: true, uncovered: [] };
   }
 }
