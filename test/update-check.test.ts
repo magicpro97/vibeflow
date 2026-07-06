@@ -4,6 +4,7 @@ import {
   type UpdateCache,
   cmpSemver,
   fetchLatest,
+  isValidVersion,
   notifyUpdate,
   readCache,
   refreshCacheInBackground,
@@ -42,6 +43,19 @@ describe("cmpSemver", () => {
   });
 });
 
+describe("isValidVersion", () => {
+  test("accepts plain and suffixed semver", () => {
+    for (const v of ["1.2.3", "0.12.1", "1.0.0-rc.1", "1.2.3+build", "10.20.30-beta.2+meta"]) {
+      expect(isValidVersion(v)).toBe(true);
+    }
+  });
+  test("rejects ANSI/control chars, junk, and short forms", () => {
+    for (const v of ["0.13.0\x1b[31mINJECTED", "\x1b[2Jhack", "1.2", "latest", "", "1.2.x"]) {
+      expect(isValidVersion(v)).toBe(false);
+    }
+  });
+});
+
 describe("fetchLatest", () => {
   test("returns the version string on a 2xx JSON body", async () => {
     const v = await fetchLatest({ fetch: async () => res(true, { version: "9.9.9" }) });
@@ -52,6 +66,11 @@ describe("fetchLatest", () => {
   });
   test("returns null when version is missing/non-string", async () => {
     expect(await fetchLatest({ fetch: async () => res(true, { version: 1 }) })).toBeNull();
+  });
+  test("returns null when version is a string but not valid semver (ANSI-injection guard)", async () => {
+    expect(
+      await fetchLatest({ fetch: async () => res(true, { version: "0.13.0\x1b[31mX" }) }),
+    ).toBeNull();
   });
   test("returns null when fetch throws (network/timeout)", async () => {
     expect(
@@ -76,6 +95,13 @@ describe("readCache / writeCache", () => {
   });
   test("readCache returns null on wrong shape", () => {
     expect(readCache({ readFileSync: () => JSON.stringify({ latest: 1 }) })).toBeNull();
+  });
+  test("readCache returns null on a poisoned non-semver latest (ANSI-injection guard)", () => {
+    expect(
+      readCache({
+        readFileSync: () => JSON.stringify({ checkedAt: 5, latest: "9.9.9\x1b[31mX" }),
+      }),
+    ).toBeNull();
   });
   test("readCache returns null when the file is missing (read throws)", () => {
     expect(
@@ -291,5 +317,37 @@ describe("default fallbacks", () => {
     // isTTY:false disables deterministically (no network, no output) while
     // leaving `env` to its process.env default — covering the default-arg arm.
     expect(() => notifyUpdate({ isTTY: false })).not.toThrow();
+  });
+  test("notifyUpdate default refresh arm runs the real background refresh (production wiring)", async () => {
+    // opencode P2: every other test injects `refresh`, so the real default
+    // `() => void refreshCacheInBackground()` arm — the one that could delay
+    // exit — was never executed. Here we let it run with an injected fetch and
+    // a stale/absent cache, then confirm it neither throws nor blocks.
+    const fetched: string[] = [];
+    // Stub the module-level fetch so the default refresh hits no network.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      fetched.push("hit");
+      return res(true, { version: "0.0.1" });
+    }) as unknown as typeof fetch;
+    try {
+      // No `refresh` inject → the default arm fires refreshCacheInBackground().
+      // No `readCache` inject with a stale-but-newer cache → stale (checkedAt 0)
+      // so the refresh branch is taken; readCache stub returns a current cache
+      // so no banner prints.
+      notifyUpdate({
+        env: {},
+        isTTY: true,
+        now: () => Number.MAX_SAFE_INTEGER,
+        current: "0.0.1",
+        readCache: () => ({ checkedAt: 0, latest: "0.0.1" }),
+        outFn: () => {},
+      });
+      // The default refresh is fire-and-forget; give the microtask/await a tick.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(fetched.length).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
