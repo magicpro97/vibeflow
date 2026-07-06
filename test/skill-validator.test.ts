@@ -136,6 +136,17 @@ describe("validateSkillDir — Anthropic skill format", () => {
     expect(result.errors.some((e) => e.includes("compatibility"))).toBe(true);
   });
 
+  test("rejects a non-string compatibility field", () => {
+    const dir = tmpSkill("nonstring-compat");
+    writeSkill(
+      dir,
+      "---\nname: nonstring-compat\ndescription: Compatibility given as a list, not a string.\ncompatibility:\n  - node>=18\n---\n\n# Compat\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("compatibility must be a string"))).toBe(true);
+  });
+
   test("accepts all six standard frontmatter fields without warning", () => {
     const dir = tmpSkill("full-frontmatter");
     writeSkill(

@@ -9,9 +9,10 @@ const ALLOWED_DIRS = new Set(["scripts", "references", "assets"]);
 // Standard SKILL.md frontmatter fields per the Agent Skills spec
 // (https://agentskills.io/specification). Anthropic's own reference
 // validator (skills/skill-creator/scripts/quick_validate.py) uses the
-// same set. Unknown keys are WARNED (not errored): 55 existing repo
-// skills carry non-spec keys (status/version/triggers/requires), so a
-// hard error would break the store. Promote to error in a future major.
+// same set. Unknown keys are WARNED (not errored): some existing repo
+// skills carry legacy non-spec keys (status/version/triggers/requires/
+// when_to_load), so a hard error would break them. Promote to error in
+// a future major.
 const STANDARD_FRONTMATTER = new Set([
   "name",
   "description",
@@ -99,15 +100,19 @@ export function validateSkillDir(
     }
   }
 
-  // compatibility is optional; when present it is a string capped at 500 chars.
+  // compatibility is optional; when present it must be a string <= 500 chars
+  // (parity with quick_validate.py: a non-string compatibility is an error).
+  if (data.compatibility !== undefined && typeof data.compatibility !== "string") {
+    errors.push("frontmatter.compatibility must be a string");
+  }
   const compatibility = typeof data.compatibility === "string" ? data.compatibility.trim() : "";
   if (compatibility && compatibility.length > COMPATIBILITY_MAX) {
     errors.push(`frontmatter.compatibility must be <= ${COMPATIBILITY_MAX} chars`);
   }
 
   // Warn (not error) on frontmatter keys outside the spec's standard set,
-  // so typos surface without breaking the 55 existing skills that carry
-  // legacy keys (status/version/triggers/requires).
+  // so typos surface without breaking existing skills that carry legacy
+  // keys (status/version/triggers/requires/when_to_load).
   for (const key of Object.keys(data)) {
     if (!STANDARD_FRONTMATTER.has(key)) {
       warnings.push(`non-standard frontmatter key: ${key}`);
