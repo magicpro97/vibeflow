@@ -418,6 +418,15 @@ describe("tryLock / releaseLock", () => {
         }),
       );
 
+      // Scope the /tmp audit to THIS run's children. The critical-section
+      // markers live in the shared /tmp namespace, so a marker leaked by a
+      // PREVIOUS run that was SIGKILL'd mid-critical-section (its 100ms-sleep
+      // unlink never ran) would otherwise be counted as a concurrent "overlap"
+      // here and fail the safety assertion — a false positive that has nothing
+      // to do with the lock. Filtering by the PIDs we spawned makes any foreign
+      // /tmp/.vf-critical-* file invisible to this test.
+      const childPids = new Set(procs.map((p) => p.pid));
+
       // Track child exit so the audit loop runs until EVERY child has finished
       // its critical section — not a fixed wall-clock window. On a slow/loaded
       // CI runner, spawning 8 bun processes can lag past a fixed 4s window, so a
@@ -450,7 +459,7 @@ describe("tryLock / releaseLock", () => {
         const files = readdirSync("/tmp").filter((f) => f.startsWith(".vf-critical-"));
         const livePids = files
           .map((f) => Number(f.replace(".vf-critical-", "")))
-          .filter((n) => Number.isFinite(n) && n > 0);
+          .filter((n) => Number.isFinite(n) && n > 0 && childPids.has(n));
         if (livePids.length > 1) {
           seenOverlaps.push([...livePids]);
         }
@@ -502,6 +511,14 @@ describe("tryLock / releaseLock", () => {
 
       // Cleanup.
       releaseLock(u);
+      // Best-effort: remove any of THIS run's critical-section markers still in
+      // /tmp so a child that was killed before its own unlink ran can't leak a
+      // marker into a future test run (the failure mode this test just fixed).
+      for (const pid of childPids) {
+        try {
+          rmSync(`/tmp/.vf-critical-${pid}`, { force: true });
+        } catch {}
+      }
     },
     15000,
   );
