@@ -24,6 +24,15 @@ export interface GateRunResult {
  *  (the unit's worktree under W1 isolation, or the repo root otherwise). */
 export type GateRunner = (cmd: string, cwd: string) => GateRunResult;
 
+/** #533: default wall-clock cap for a single gate/verification command, so a
+ *  hanging command can't block the orchestrator *indefinitely*. Set well ABOVE
+ *  any legitimate check (a real `tsc --noEmit` / `bun test` on a large repo can
+ *  take tens of seconds) — this bounds a genuinely stuck command (an interactive
+ *  prompt, an infinite loop) without false-failing a slow-but-finishing one.
+ *  Callers that know their own bound (e.g. the scoped test gate uses its own
+ *  `bun test --timeout`) can pass a tighter value. */
+const GATE_RUN_TIMEOUT_MS = 300000;
+
 /** Which gate failed, for a precise, actionable message. */
 // NB: scopedGate no longer emits "coverage" — the final `bun run check` owns coverage. Kept in the union for back-compat.
 export type FailedGate = "typecheck" | "biome" | "test" | "coverage";
@@ -60,14 +69,23 @@ export interface ScopedGateResult {
  *  Intentional — it keeps the injection surface off (a unit-supplied
  *  `verification` can't chain `;`/`|` commands) at the cost of not supporting
  *  shell syntax. Callers needing a pipeline must invoke a script binary. */
-export function defaultRun(cmd: string, cwd: string): GateRunResult {
+export function defaultRun(
+  cmd: string,
+  cwd: string,
+  timeoutMs = GATE_RUN_TIMEOUT_MS,
+): GateRunResult {
   const parts = cmd.split(" ").filter((s) => s.length > 0);
   const bin = parts[0] ?? "";
   // Guard an empty command — spawnSync("") throws ENOENT; surface it as a
   // non-zero status instead so the gate treats it as a failure, not a crash.
   if (bin.length === 0) return { status: 1, stdout: "" };
   const args = parts.slice(1);
-  const r = spawnSync(bin, args, { cwd, encoding: "utf8" });
+  // #533: cap the run so a hanging verification command (a unit-supplied
+  // `verification` that never returns) can't block the orchestrator
+  // *indefinitely*. spawnSync is synchronous and still blocks up to timeoutMs;
+  // on timeout it SIGTERMs the child → status null, which the gate already
+  // treats as a failure (and acceptance-verify renders "exit signal").
+  const r = spawnSync(bin, args, { cwd, encoding: "utf8", timeout: timeoutMs });
   const stdout =
     (typeof r.stdout === "string" ? r.stdout : "") + (typeof r.stderr === "string" ? r.stderr : "");
   return { status: r.status, stdout };
