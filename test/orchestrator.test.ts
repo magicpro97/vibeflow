@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { WorkUnit } from "../src/core.js";
+import { computeConfidence } from "../src/gates.js";
 import { investigateUnit, thresholdFor } from "../src/orchestrator/investigate.js";
 import { DEFAULT_CONCURRENCY, orchestrateUnits, runParallel } from "../src/orchestrator/run.js";
 
@@ -100,6 +101,36 @@ describe("orchestrateUnits — reviewer blocks on failed review (defect #4)", ()
     const a = units.find((u) => u.name === "a");
     expect(a?.status).toBe("done"); // would fail without fix
     expect(a?.gates.review).toBe("pass");
+  });
+
+  test("#545: a reviewer's calibrated score is persisted onto the unit (goal_score wire)", async () => {
+    // B1 regression: the score must land on the UNIT, not just the report — otherwise
+    // computeConfidence(u) never sees it and the graded-confidence feature is dead.
+    const { units } = await orchestrateUnits({
+      units: [unit("a")],
+      dispatcher: async () => ({ status: "verifying", confidence: 1, evidence: ["e.log"] }),
+      reviewer: () => ({ pass: true, reason: "COVERED", score: 0.42 }),
+    });
+    const a = units.find((u) => u.name === "a");
+    expect(a?.goal_score).toBe(0.42);
+    // and it actually moves the needle: computed confidence with the score differs
+    // from the same unit without it.
+    const withScore = computeConfidence(a as Parameters<typeof computeConfidence>[0]);
+    const withoutScore = computeConfidence({
+      ...(a as Parameters<typeof computeConfidence>[0]),
+      goal_score: undefined,
+    });
+    expect(withScore).not.toBe(withoutScore);
+    expect(withScore).toBeLessThan(withoutScore); // a 0.42 score pulls confidence down
+  });
+
+  test("#545: no score from the reviewer leaves goal_score unset (fail-open)", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("a")],
+      dispatcher: async () => ({ status: "verifying", confidence: 1, evidence: ["e.log"] }),
+      reviewer: () => ({ pass: true, reason: "ok" }),
+    });
+    expect(units.find((u) => u.name === "a")?.goal_score).toBeUndefined();
   });
 
   test("failed review transitions status to blocked regardless of dispatcher status", async () => {

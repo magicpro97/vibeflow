@@ -32,6 +32,7 @@ export function buildReviewerPrompt(opts: ReviewerPromptOpts): string {
     "",
     "Cite file:line for every finding. No bare opinions.",
     "Respond COVERED only if ALL claims have implementing lines AND no critical edge cases are untested.",
+    "End your response with a calibrated confidence on its OWN line: `SCORE: 0.NN` — your probability (0..1) that the goal is fully met.",
   ]
     .filter(Boolean)
     .join("\n");

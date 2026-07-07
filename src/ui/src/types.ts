@@ -18,6 +18,7 @@ export interface WorkUnit {
     security?: GateState;
     goal_eval?: GateState; // ADR-003
   };
+  goal_score?: number; // #545: calibrated judge score 0..1
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
   /** Knowledge-heavy units require a human-authored canary test to close (ADR-005). */

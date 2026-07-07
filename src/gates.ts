@@ -107,6 +107,8 @@ function wGeoMean(pairs: Array<[number, number]>): number {
 export function computeConfidence(u: {
   confidence: number;
   gates?: Partial<WorkUnit["gates"]>;
+  /** #545: calibrated judge score 0..1. Graded signal; absent ⇒ omitted (fail-open). */
+  goal_score?: number;
 }): number {
   const g = u.gates ?? {};
   // Tier 1: an executed-and-FAILED critical gate ⇒ 0.
@@ -123,12 +125,24 @@ export function computeConfidence(u: {
   // judgment from relative signal strength, NOT an optimized study result.)
   // A gate not yet present (undefined) scores 0 — floored to EPS in wGeoMean.
   const val = (s: GateState | undefined): number => (s ? GATE_VAL[s] : 0);
-  const objective = wGeoMean([
+  const pairs: Array<[number, number]> = [
     [val(g.build), 1.5],
     [val(g.test), 3],
     [val(g.lint), 1],
     [val(g.review), 2],
-  ]);
+  ];
+  // #545: the calibrated judge score is a graded signal (weight ~ review). Only
+  // folded in when present AND finite so units without a judge run are unchanged
+  // (fail-open), and a non-finite score can't turn the geo-mean into NaN (NaN <
+  // threshold === false would silently pass the gate — computeConfidence is public
+  // API, so we defend the fold directly, not just at the parseGoalScore clamp).
+  // NOTE: grading trusts the judge in BOTH directions — a high score raises the
+  // objective term (up to the self-report cap applied below), a low one lowers it.
+  // The Math.min cap still bounds the final value, so a hallucinated high score
+  // can never exceed self-report, but CAN lift confidence toward that ceiling.
+  if (typeof u.goal_score === "number" && Number.isFinite(u.goal_score))
+    pairs.push([Math.min(1, Math.max(0, u.goal_score)), 2]);
+  const objective = wGeoMean(pairs);
   // Tier 3: self-report caps (Kadavath 2022) — lowers only, never inflates.
   return Math.round(Math.min(u.confidence ?? 0, objective) * 100) / 100;
 }
