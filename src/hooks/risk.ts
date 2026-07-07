@@ -1,5 +1,6 @@
 import { resolve, sep } from "node:path";
 import type { HookInput, RiskLevel } from "../core.js";
+import { type SemanticJudge, shouldConsultSemantic } from "./risk-semantic.js";
 import {
   type ForceKind,
   anyMatch,
@@ -20,7 +21,7 @@ const DANGEROUS_COMMAND = [
   /\b(drop\s+(database|table)|truncate\s+table)\b/i,
   /\b(mkfs|dd\s+if=|:\(\)\s*\{)/,
   /\bchmod\s+-R\s+777\b/,
-  /\bcurl\b.*\|\s*(sh|bash)\b/,
+  /\b(curl|wget|fetch)\b.*\|\s*(sh|bash|zsh)\b/,
   /\bsudo\b/,
 ];
 
@@ -86,6 +87,7 @@ function escapesWorkspace(filePath: string, workspace: string): boolean {
 export function scoreRisk(
   input: HookInput,
   policy: ResolvedHookPolicy = resolveHookPolicy(undefined),
+  judge?: SemanticJudge,
 ): { risk: RiskLevel; reasons: string[] } {
   const reasons: string[] = [];
   let risk: RiskLevel = "none";
@@ -101,6 +103,17 @@ export function scoreRisk(
   for (const hit of applyCustomRules(policy.custom, input)) {
     bump(hit.risk);
     reasons.push(hit.reason);
+  }
+
+  // Optional semantic (LLM) tier: a soft signal that can only RAISE risk, never lower a
+  // deterministic verdict. Off by default — runs only when a judge is injected AND the
+  // deterministic floor is low/none on a non-trivial command (no wasted call on `ls`).
+  if (judge && shouldConsultSemantic(risk, input.command ?? "")) {
+    const llm = judge(input.command ?? "");
+    if (llm && RISK_ORDER.indexOf(llm) > RISK_ORDER.indexOf(risk)) {
+      bump(llm);
+      reasons.push(`semantic tier raised risk to ${llm}`);
+    }
   }
 
   if (reasons.length === 0) reasons.push("no risk signals detected");

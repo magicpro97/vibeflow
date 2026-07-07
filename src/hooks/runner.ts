@@ -1,4 +1,5 @@
 import type { HookDecision, HookInput, HookResult, RiskLevel } from "../core.js";
+import type { SemanticJudge } from "./risk-semantic.js";
 import { scoreRisk } from "./risk.js";
 import type { ResolvedHookPolicy } from "./templates.js";
 
@@ -53,15 +54,19 @@ function disabledResult(): HookResult {
  * raises an existing block/approval to a weaker state; it only surfaces a `warn`
  * when the base decision was `allow`. Defaults to a no-op so every existing caller
  * is byte-for-byte unchanged; only the live gate wires the real freshness check.
+ *
+ * `judge` is an OPTIONAL semantic (LLM) tier threaded into scoreRisk. It can only RAISE
+ * risk and is off unless a caller injects one (default undefined → byte-for-byte unchanged).
  */
 export function evaluateHook(
   input: HookInput,
   getEnv: EnvGetter = () => process.env,
   policy?: ResolvedHookPolicy,
   specStale: (input: HookInput) => string[] = () => [],
+  judge?: SemanticJudge,
 ): HookResult {
   if (hooksDisabled(getEnv())) return disabledResult();
-  const { risk, reasons } = policy ? scoreRisk(input, policy) : scoreRisk(input);
+  const { risk, reasons } = scoreRisk(input, policy, judge);
   const decision = decisionFor(risk);
   const stale = specStale(input);
   if (stale.length === 0) return { decision, risk, reasons };
