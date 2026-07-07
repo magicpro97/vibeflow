@@ -690,6 +690,16 @@ describe("computeConfidence (Task 5: self-report is a CAP)", () => {
       }),
     ).toBe(0);
   });
+  test("NaN / Infinity goal_score is ignored, never poisons the result (Copilot #585)", () => {
+    // A non-finite score must not turn confidence into NaN (NaN < threshold === false
+    // would silently let a unit pass the gate). parseGoalScore clamps, but
+    // computeConfidence is public API — defend the fold directly.
+    const base = computeConfidence({ confidence: 1, gates: G() });
+    expect(computeConfidence({ confidence: 1, gates: G(), goal_score: Number.NaN })).toBe(base);
+    expect(
+      computeConfidence({ confidence: 1, gates: G(), goal_score: Number.POSITIVE_INFINITY }),
+    ).toBe(base);
+  });
   test("weakest-link — lint fail tanks more than arithmetic mean would", () => {
     // geo-mean penalizes a near-zero signal superlinearly (arithmetic mean → 0.75).
     const c = computeConfidence({ confidence: 1, gates: G({ lint: "fail" }) });
