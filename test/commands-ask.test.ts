@@ -227,6 +227,19 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
     );
     expect(r.code).toBe(3);
   });
+
+  test("empty stdout falls back to stderr so failures are visible", () => {
+    const r = captureSpawn(
+      {
+        cmd: "node",
+        args: ["-e", 'process.stderr.write("BOOM"); process.exit(1)'],
+        promptMode: "stdin",
+      },
+      "x",
+    );
+    expect(r.code).toBe(1);
+    expect(r.text).toBe("BOOM"); // stderr surfaced, not blank
+  });
 });
 
 describe("pickEngine", () => {

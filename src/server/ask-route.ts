@@ -23,6 +23,9 @@ import type { EngineReadiness } from "../preflight/types.js";
 /** Match the /api/init string cap (#526) — bounds an untrusted UI field. */
 const QUESTION_CAP = 10_000;
 
+/** Cap the snippet span so a browser request can't force a huge file read / argv. */
+const MAX_SNIPPET_LINES = 2_000;
+
 export interface ResolvedAsk {
   absPath: string;
   start: number;
@@ -58,6 +61,10 @@ export function resolveAskTarget(activeRepo: string, body: unknown): ResolvedAsk
     (b.end as number) < (b.start as number)
   )
     return { error: "invalid line range — positive ints, end >= start", status: 400 };
+  // Bound the snippet span: a browser-reachable route must not be coaxed into
+  // reading/splitting a huge range or building an oversized argv prompt (copilot).
+  if ((b.end as number) - (b.start as number) + 1 > MAX_SNIPPET_LINES)
+    return { error: `line range too large (max ${MAX_SNIPPET_LINES} lines)`, status: 400 };
   if (
     b.engine !== undefined &&
     (typeof b.engine !== "string" || !(ENGINES as string[]).includes(b.engine))

@@ -1,9 +1,8 @@
 <template>
   <div
     class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-    tabindex="-1"
     @click.self="$emit('close')"
-    @keydown.esc="$emit('close')"
+    @keydown.esc.window="$emit('close')"
   >
     <div
       class="bg-neutral-950 border border-neutral-800 rounded w-full max-w-lg p-5 max-h-[calc(100vh-4rem)] overflow-y-auto"

@@ -214,7 +214,9 @@ export function captureSpawn(
     stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
     encoding: "utf8",
   });
-  const text = r.stdout ?? "";
+  // Fall back to stderr when stdout is empty so a failing engine surfaces its error
+  // to the Web-UI instead of a blank "(no output)".
+  const text = (r.stdout ?? "") || (r.stderr ?? "");
   onChunk?.(text);
   return { code: r.status ?? 1, text };
 }

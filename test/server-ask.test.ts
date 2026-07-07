@@ -67,6 +67,13 @@ describe("resolveAskTarget — validation", () => {
     expect(errOf(resolveAskTarget(REPO, { ...okBody, start: 5, end: 2 }))).toMatch(/range/);
   });
 
+  test("oversized line range → 400 (snippet-span cap, DoS guard)", () => {
+    const r = resolveAskTarget(REPO, { ...okBody, start: 1, end: 5000 });
+    expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/too large/) });
+    // exactly at the cap (2000 lines) is allowed
+    expect(resolveAskTarget(REPO, { ...okBody, start: 1, end: 2000 })).not.toHaveProperty("error");
+  });
+
   test("bad engine → 400", () => {
     const r = resolveAskTarget(REPO, { ...okBody, engine: "gpt" });
     expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/invalid engine/) });
