@@ -31,11 +31,26 @@ function readVerifiedSha(base: string): string {
   return r.status === 0 ? r.stdout.trim() : "HEAD";
 }
 
+/** #545: parse a reviewer-declared calibrated score (`SCORE: 0.NN`, P(goal met))
+ *  from the judge output. The contract is a TRAILING `SCORE:` line, so LAST wins
+ *  (earlier prose mentioning "score:" must not shadow the verdict). The tail is
+ *  anchored so trailing junk (e.g. `5e-1`) REJECTS rather than truncating to `5`
+ *  and inflating to 1.0. Clamps to [0,1]; returns undefined when absent or
+ *  malformed so the signal FAILS OPEN (never hardens a green path). */
+export function parseGoalScore(raw: string): number | undefined {
+  const matches = [...raw.matchAll(/^\s*score:\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*$/gim)];
+  const m = matches.at(-1);
+  if (!m || m[1] === undefined) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(1, Math.max(0, n));
+}
+
 /** ADR-003 phase 2: real LLM eval via VIBEFLOW_AI bridge. Fail-open when bridge not set. */
 export async function defaultGoalEvalFn(
   goal: string,
   _spawn = _spawnSync,
-): Promise<{ covered: boolean; uncovered: string[] }> {
+): Promise<{ covered: boolean; uncovered: string[]; score?: number }> {
   const diff = (() => {
     try {
       const r = _spawn("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
@@ -58,7 +73,7 @@ export async function defaultGoalEvalFn(
     });
     const raw = (r.stdout ?? "").trim();
     const covered = /^COVERED/i.test(raw);
-    return { covered, uncovered: covered ? [] : [raw.slice(0, 500)] };
+    return { covered, uncovered: covered ? [] : [raw.slice(0, 500)], score: parseGoalScore(raw) };
   } catch {
     return { covered: true, uncovered: [] };
   }
@@ -122,7 +137,7 @@ export interface VerifyReport {
   toolchain: { label: string; pass: boolean }[];
   policy: { passed: string[]; warnings: string[]; failures: string[] };
   /** ADR-003: behavioral goal-eval result. Only present when goal + goalEvalFn provided AND toolchain passes. */
-  goalEval?: { pass: boolean; uncovered: string[] };
+  goalEval?: { pass: boolean; uncovered: string[]; score?: number };
 }
 
 /** Async helper: runs toolchain + policy gates and returns a structured report.
@@ -136,7 +151,9 @@ export async function collectVerifyReportAsync(
     spawner?: (cmd: string, args: string[], opts: object) => Promise<{ status: number | null }>;
     coverage?: boolean;
     goal?: string; // ADR-003
-    goalEvalFn?: (goal: string) => Promise<{ covered: boolean; uncovered: string[] }>; // ADR-003
+    goalEvalFn?: (
+      goal: string,
+    ) => Promise<{ covered: boolean; uncovered: string[]; score?: number }>; // ADR-003
     allowUnverifiedEvidence?: boolean; // ADR-004 escape hatch
   } = {},
 ): Promise<VerifyReport> {
@@ -210,7 +227,7 @@ export async function collectVerifyReportAsync(
       ok: ok && goalEvalOk,
       toolchain,
       policy,
-      goalEval: { pass: result.covered, uncovered: result.uncovered },
+      goalEval: { pass: result.covered, uncovered: result.uncovered, score: result.score },
     };
   }
   return { ok, toolchain, policy };

@@ -667,6 +667,39 @@ describe("computeConfidence (Task 5: self-report is a CAP)", () => {
   test("missing self-report defaults to 0 (cap)", () => {
     expect(computeConfidence({ gates: G() } as Parameters<typeof computeConfidence>[0])).toBe(0);
   });
+
+  // ── #545: calibrated judge score as a graded signal ──
+  test("goal_score absent → identical to today (backward-compat regression lock)", () => {
+    const base = computeConfidence({ confidence: 1, gates: G() });
+    expect(computeConfidence({ confidence: 1, gates: G(), goal_score: undefined })).toBe(base);
+  });
+  test("higher goal_score ⇒ higher confidence (graded, not binary)", () => {
+    const hi = computeConfidence({ confidence: 1, gates: G(), goal_score: 0.9 });
+    const lo = computeConfidence({ confidence: 1, gates: G(), goal_score: 0.3 });
+    expect(hi).toBeGreaterThan(lo);
+  });
+  test("a weak goal_score pulls an all-green unit below 1.0", () => {
+    expect(computeConfidence({ confidence: 1, gates: G(), goal_score: 0.3 })).toBeLessThan(1);
+  });
+  test("goal_eval fail zeros regardless of a high goal_score", () => {
+    expect(
+      computeConfidence({
+        confidence: 1,
+        gates: G({ security: "pass", goal_eval: "fail" }),
+        goal_score: 0.99,
+      }),
+    ).toBe(0);
+  });
+  test("NaN / Infinity goal_score is ignored, never poisons the result (Copilot #585)", () => {
+    // A non-finite score must not turn confidence into NaN (NaN < threshold === false
+    // would silently let a unit pass the gate). parseGoalScore clamps, but
+    // computeConfidence is public API — defend the fold directly.
+    const base = computeConfidence({ confidence: 1, gates: G() });
+    expect(computeConfidence({ confidence: 1, gates: G(), goal_score: Number.NaN })).toBe(base);
+    expect(
+      computeConfidence({ confidence: 1, gates: G(), goal_score: Number.POSITIVE_INFINITY }),
+    ).toBe(base);
+  });
   test("weakest-link — lint fail tanks more than arithmetic mean would", () => {
     // geo-mean penalizes a near-zero signal superlinearly (arithmetic mean → 0.75).
     const c = computeConfidence({ confidence: 1, gates: G({ lint: "fail" }) });

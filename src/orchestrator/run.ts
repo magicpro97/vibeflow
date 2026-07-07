@@ -96,7 +96,9 @@ export type UnitDispatcher = (unit: WorkUnit) => Promise<UnitOutcome>;
 export type Reviewer = (
   unit: WorkUnit,
   outcome: UnitOutcome,
-) => { pass: boolean; reason: string } | Promise<{ pass: boolean; reason: string }>;
+) =>
+  | { pass: boolean; reason: string; score?: number }
+  | Promise<{ pass: boolean; reason: string; score?: number }>;
 
 /** Maximum confidence an engine's self-report can contribute.
  *  Must be below the lowest close threshold so a measured gate is always required. */
@@ -287,6 +289,9 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       const reviewed = applyOutcome(u, outcome, opts.now);
       const review = await opts.reviewer(reviewed, outcome);
       reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
+      // #545: persist the calibrated judge score onto the unit so computeConfidence
+      // reads it as a graded signal (the producer→unit wire; absent ⇒ untouched).
+      if (review.score !== undefined) reviewed.goal_score = review.score;
       opts.onProgress?.({
         phase: "done",
         unit: u.name,

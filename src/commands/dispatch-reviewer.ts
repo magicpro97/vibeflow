@@ -108,7 +108,11 @@ export function makeReviewer(
       // Surface the same-tool warning to the audit trail — the Reviewer boundary
       // only carries { pass, reason }, so emit it here or it's silently dropped.
       if (llmResult.warning) out("vf", llmResult.warning, { level: "warn" });
-      return { pass: llmResult.pass, reason: llmResult.reason };
+      return {
+        pass: llmResult.pass,
+        reason: llmResult.reason,
+        ...(llmResult.score !== undefined ? { score: llmResult.score } : {}),
+      };
     }
     return localResult;
   };
