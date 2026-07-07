@@ -87,6 +87,24 @@ vf run <claude|codex|copilot>   # write .vibeflow/dispatch/<engine>.md (dry)
 vf run <engine> --yes           # launch the engine CLI
 ```
 
+## Ask (inline code Q&A)
+
+```bash
+vf ask src/cli.ts:210-267 "what does this switch do?"   # stream an answer about a snippet
+vf ask src/dispatch.ts:172 "why json output?"           # single line (start==end)
+vf ask src/x.ts:5-12 "explain" --engine claude          # force a specific ready engine
+vf ask --resume "ok, and is that thread-safe?"          # continue the last conversation (multi-turn)
+```
+
+Reads the given line range, frames a prompt (file path + language-fenced snippet +
+your question), picks the first ready engine (or `--engine`), and streams the
+answer straight to your terminal. `--resume` continues the engine's most-recent
+conversation with a follow-up (no target needed — claude/codex only; the engine
+holds the history, vf stores no session state). Reuses vf's engine-readiness
+selection — no new dispatch path, no dependency. Bad target/range, missing file,
+missing question, or no ready engine exits non-zero with an actionable message.
+Run `vf doctor --probe` if none are ready.
+
 ## Orchestrate
 
 ```bash

@@ -25,6 +25,7 @@ export function printHelp(): number {
     ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
     ${c.cyan("init")}              generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
+    ${c.cyan("ask <f>:<lines>")}   inline code Q&A: stream an engine's answer about a snippet (--engine)
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
@@ -110,6 +111,22 @@ ${c.bold("Options:")}
 ${c.bold("Examples:")}
   vf run claude
   vf run codex --yes`,
+
+  ask: () => `${c.bold("vf ask")} ${c.dim('<path>:<start>[-<end>] "<question>" [--engine <e>] [--resume]')}
+Inline code Q&A: read a line range, frame it (file + language-fenced snippet +
+your question), and stream a ready engine's answer straight to the terminal.
+Reuses vf's engine-readiness selection; no chat app, no copy-paste.
+
+${c.bold("Options:")}
+  --engine <name>   force claude | codex | copilot (must be ready); else the
+                    first ready engine in priority order is used
+  --resume          continue the engine's MOST RECENT conversation with a
+                    follow-up question (no target needed) — claude/codex only
+
+${c.bold("Examples:")}
+  vf ask src/cli.ts:210-267 "what does this switch do?"
+  vf ask src/dispatch.ts:172 "why the json output format?" --engine claude
+  vf ask --resume "ok, and is that thread-safe?"`,
 
   orchestrate:
     () => `${c.bold("vf orchestrate")} ${c.dim("[--engine <e>] [--yes] [--concurrency <n>] [--risk <class>] [--focus]")}

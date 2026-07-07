@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col h-screen overflow-hidden bg-neutral-950 text-neutral-100 text-sm antialiased">
-    <TopBar :logs-open="store.logsOpen" @toggle-logs="store.logsOpen = !store.logsOpen" @open-settings="showSettings = true" />
+    <TopBar :logs-open="store.logsOpen" @toggle-logs="store.logsOpen = !store.logsOpen" @open-settings="showSettings = true" @open-ask="showAsk = true" />
     <div class="flex flex-1 overflow-hidden">
       <!-- No Rail — Stepper in TopBar handles navigation -->
       <main class="flex-1 overflow-y-auto p-8 min-w-0">
@@ -19,11 +19,13 @@
     </div>
     <StatusBar />
     <SettingsPanel v-if="showSettings" @close="closeSettings" />
+    <AskCard v-if="showAsk" @close="showAsk = false" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
+import AskCard from "./components/AskCard.vue";
 import LogPane from "./components/LogPane.vue";
 import ProjectList from "./components/ProjectList.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
@@ -37,6 +39,7 @@ import { useVfStore } from "./store.js";
 
 const store = useVfStore();
 const showSettings = ref(false);
+const showAsk = ref(false);
 const STAGE_TITLES = ["Home", "Describe", "Plan", "Run", "Verify"] as const;
 
 // Update page title per stage — helps users with multiple tabs

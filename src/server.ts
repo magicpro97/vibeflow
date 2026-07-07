@@ -355,6 +355,7 @@ export function startServer(
             path === "/api/units" ||
             path === "/api/orchestrate" ||
             path === "/api/discover" ||
+            path === "/api/ask" ||
             path === "/api/preflight" ||
             path === "/api/settings" ||
             path === "/api/verify" ||

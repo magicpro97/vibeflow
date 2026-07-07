@@ -130,4 +130,19 @@ export const api = {
     approve: (id: string, decision: "allow" | "block") =>
       req<{ ok: boolean }>("POST", "/api/hook/approve", { id, decision }),
   },
+  // #562: ask an engine about a code snippet (Web-UI surface for `vf ask`).
+  ask: {
+    run: (payload: {
+      path: string;
+      start: number;
+      end: number;
+      question: string;
+      engine?: string;
+    }) =>
+      req<{ ok: boolean; engine: string; answer: string; code: number }>(
+        "POST",
+        "/api/ask",
+        payload,
+      ),
+  },
 };
