@@ -95,6 +95,8 @@ export interface VibeSettings {
   failureProtection: FailureProtection;
   memory: boolean;
   hooks?: HookConfig;
+  /** #556: env-scrub policy for spawned engine subprocesses (read-only in the UI). */
+  envPolicy?: { deny?: string[]; allow?: string[] };
   updatedAt?: string;
 }
 
