@@ -148,6 +148,11 @@ vf config memory status     # print the current memory setting (default: false/o
 vf config memory builtin    # enable built-in BM25/FTS5 recall (zero deps)
 vf config memory claude-mem # enable claude-mem recall (requires claude-mem installed)
 vf config memory off        # disable memory recall
+
+vf config env-policy status          # print the env-scrub policy for spawned engines (#556)
+vf config env-policy deny 'MY_APP_*' # drop a glob from the env handed to spawned agent CLIs
+vf config env-policy allow 'MY_*'    # allowlist a glob (non-empty allow = strict pass-only mode)
+vf config env-policy reset           # clear the policy, back to the conservative default
 ```
 
 Reads/toggles `memory` in `.vibeflow/SETTINGS.json`. Default is `false` (off).

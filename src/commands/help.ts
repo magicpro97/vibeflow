@@ -207,7 +207,7 @@ ${c.bold("Examples:")}
   vf units status
   vf units update auth --status done --confidence 1`,
 
-  config: () => `${c.bold("vf config")} ${c.dim("memory <builtin|claude-mem|off|status>")}
+  config: () => `${c.bold("vf config")} ${c.dim("<memory|env-policy> ...")}
 Read or toggle per-repo settings in .vibeflow/SETTINGS.json.
 
 ${c.bold("Subcommands:")}
@@ -216,12 +216,18 @@ ${c.bold("Subcommands:")}
   memory claude-mem    enable claude-mem integration
   memory on            alias for builtin (backward compat)
   memory off           disable memory
+  env-policy status    print the effective env-scrub policy for spawned engines
+  env-policy deny <g>  add a glob to drop from the spawned engine env (e.g. FOO_*)
+  env-policy allow <g> add a glob to an allowlist (switches to strict pass-only mode)
+  env-policy reset     clear the configured policy (back to conservative default)
 
-${c.dim("The memory setting controls which memory backend is active.")}
+${c.dim("memory picks the backend; env-policy (#556) scrubs host secrets from the env handed to spawned agent CLIs.")}
 
 ${c.bold("Examples:")}
   vf config memory status
-  vf config memory builtin`,
+  vf config memory builtin
+  vf config env-policy status
+  vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
     `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import | init <name> | draft <name> | crystallize <run-id>]")}

@@ -226,6 +226,8 @@ export async function orchestrate(
     makeAsyncSpawner({
       timeoutMs,
       shell: mode === "bridge",
+      // #556: honor the per-repo env-scrub policy on the orchestrator safety-net spawner.
+      envPolicy: readSettings(base).envPolicy,
       // M2: route any stderr noise the engine emits to the bus. Each per-unit
       // dispatcher has its own streamSpawner that adds { unit, engine } meta;
       // the orchestrator-level spawner is the SAFETY NET for engines that bypass

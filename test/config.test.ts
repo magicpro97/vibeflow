@@ -163,3 +163,122 @@ describe("config usage errors", () => {
     }
   });
 });
+
+describe("config env-policy (#556)", () => {
+  test("status (no sub) prints the effective policy, exit 0", async () => {
+    const dir = tmpRepo();
+    try {
+      const { code, out } = await capture(() => config("env-policy", [], dir));
+      expect(code).toBe(0);
+      expect(out).toContain("env-policy mode: default (denylist)");
+      expect(out).toContain("built-in deny:");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("deny <glob> persists to settings.envPolicy.deny", async () => {
+    const dir = tmpRepo();
+    try {
+      const { code } = await capture(() => config("env-policy", ["deny", "FOO_*"], dir));
+      expect(code).toBe(0);
+      expect(readSettings(dir).envPolicy?.deny).toContain("FOO_*");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("allow <glob> persists + status flips to strict", async () => {
+    const dir = tmpRepo();
+    try {
+      await capture(() => config("env-policy", ["allow", "MY_*"], dir));
+      expect(readSettings(dir).envPolicy?.allow).toContain("MY_*");
+      const { out } = await capture(() => config("env-policy", ["status"], dir));
+      expect(out).toContain("strict (allowlist)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("deny is additive + deduped across calls", async () => {
+    const dir = tmpRepo();
+    try {
+      await capture(() => config("env-policy", ["deny", "A_*"], dir));
+      await capture(() => config("env-policy", ["deny", "B_*"], dir));
+      await capture(() => config("env-policy", ["deny", "A_*"], dir)); // dup
+      const deny = readSettings(dir).envPolicy?.deny ?? [];
+      expect(deny).toContain("A_*");
+      expect(deny).toContain("B_*");
+      expect(deny.filter((g) => g === "A_*").length).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reset clears the configured policy back to default", async () => {
+    const dir = tmpRepo();
+    try {
+      await capture(() => config("env-policy", ["deny", "FOO_*"], dir));
+      const { code } = await capture(() => config("env-policy", ["reset"], dir));
+      expect(code).toBe(0);
+      expect(readSettings(dir).envPolicy).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("deny with no glob returns exit 2", async () => {
+    const dir = tmpRepo();
+    try {
+      const { code } = await capture(() => config("env-policy", ["deny"], dir));
+      expect(code).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("unknown env-policy subcommand returns exit 2", async () => {
+    const dir = tmpRepo();
+    try {
+      const { code } = await capture(() => config("env-policy", ["frobnicate"], dir));
+      expect(code).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("settings envPolicy coerce/writeSettings (#556)", () => {
+  test("coerce materializes a valid envPolicy, drops non-string entries", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { envPolicy: { deny: ["FOO_*", 123 as unknown as string], allow: [] } });
+      const ep = readSettings(dir).envPolicy;
+      expect(ep?.deny).toEqual(["FOO_*"]);
+      expect(ep?.allow).toBeUndefined(); // empty array → undefined
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("garbage envPolicy block coerces to undefined (default applies)", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { envPolicy: "nonsense" as unknown as { deny?: string[] } });
+      expect(readSettings(dir).envPolicy).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("writeSettings keeps prior envPolicy when next omits it", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { envPolicy: { deny: ["KEEP_*"] } });
+      writeSettings(dir, { memory: "builtin" }); // unrelated write
+      expect(readSettings(dir).envPolicy?.deny).toContain("KEEP_*");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

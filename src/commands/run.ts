@@ -186,6 +186,8 @@ async function launchEngine(
     inject.spawner ??
     makeAsyncSpawner({
       timeoutMs,
+      // #556: honor the per-repo env-scrub policy on the real dispatch path (not just coord).
+      envPolicy: readSettings(base).envPolicy,
       onStderrChunk: (text) => {
         out("engine-stderr", text, {
           level: "warn",

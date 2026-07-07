@@ -85,7 +85,10 @@ export function makeResearcher(
 ): AsyncResearcher {
   // Research rounds are read-only and should be fast — use a per-round timeout (180s)
   // so investigation never cascades into a multi-hour hang when a round's engine stalls.
-  const researchSpawner = dispatchSpawner ?? makeAsyncSpawner({ timeoutMs: 180_000 });
+  // #556: research spawns the real engine too — honor the env-scrub policy.
+  const researchSpawner =
+    dispatchSpawner ??
+    makeAsyncSpawner({ timeoutMs: 180_000, envPolicy: readSettings(base).envPolicy });
   return async (round, question) => {
     const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
       `research round ${round}`,
@@ -251,6 +254,8 @@ export function makeDispatcher(
     const streamSpawner: AsyncSpawner =
       spawner == null
         ? makeAsyncSpawner({
+            // #556: per-unit dispatch is the PRIMARY spawn path — honor the env-scrub policy here.
+            envPolicy: readSettings(base).envPolicy,
             onChunk: (text) => {
               try {
                 const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;

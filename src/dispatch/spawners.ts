@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { extname } from "node:path";
 import { resolveCommand } from "../core.js";
+import { filterEnv } from "./env-filter.js";
 import type { AsyncSpawner, AsyncSpawnerOpts, SyncResult } from "./types.js";
 import { bunSpawn } from "./types.js";
 
@@ -103,6 +104,11 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     cwd,
   } = opts;
   const _spawn = opts.spawn ?? bunSpawn;
+  // #556: scrub the host env ONCE at spawner-build so every launch from this spawner
+  // hands the child a filtered env (secret-shaped vars dropped). `onAudit` sees the
+  // dropped NAMES (never values) so the caller can log the scrub.
+  const { env: filteredEnv, dropped } = filterEnv(process.env, opts.envPolicy ?? {});
+  opts.onAudit?.(dropped);
   return async (cmd, args, input): Promise<AsyncResult> => {
     // On Windows, .cmd/.bat shims (e.g. copilot.cmd installed by npm)
     // cannot be executed directly via CreateProcess. Detect and
@@ -125,7 +131,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       stdout: "pipe",
       stderr: "pipe",
       detached: process.platform !== "win32",
-      env: { ...process.env },
+      env: filteredEnv,
       ...(cwd ? { cwd } : {}),
     });
     try {
