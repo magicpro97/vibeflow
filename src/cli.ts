@@ -24,6 +24,7 @@ import {
   verify,
   workflow,
 } from "./commands.js";
+import { ask } from "./commands/ask.js";
 import { canary } from "./commands/canary.js";
 import { config, decision } from "./commands/config-decision.js";
 import { coord } from "./commands/coord.js";
@@ -223,6 +224,8 @@ async function main(argv: string[]): Promise<number> {
       return await init({ ...flags, "auto-codegraph": !flags["no-codegraph"] });
     case "run":
       return await run(positionals[0], flags);
+    case "ask":
+      return await ask(positionals, flags);
     case "orchestrate":
       return await orchestrate(flags);
     case "demo":
