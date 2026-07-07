@@ -173,10 +173,24 @@ export function pickEngine(
   return ready;
 }
 
+/**
+ * Build the argv for an arg-mode invocation. copilot's `-p/--prompt` takes a
+ * VALUE, so the prompt must sit IMMEDIATELY AFTER `-p` (not appended at the end,
+ * or `-p` swallows the next flag e.g. `--allow-all` and the question is silently
+ * lost). Mirrors dispatch.ts materializePrompt so both paths agree. #562.
+ */
+export function materializeArgs(inv: AskInvocation, prompt: string): string[] {
+  if (inv.promptMode !== "arg") return inv.args;
+  const flag = inv.args.findIndex((a) => a === "-p" || a === "--prompt");
+  if (flag === -1) return [...inv.args, prompt];
+  const args = [...inv.args];
+  args.splice(flag + 1, 0, prompt);
+  return args;
+}
+
 /** Default spawn: stream the engine's answer straight to the terminal. */
 export function inheritSpawn(inv: AskInvocation, prompt: string): number {
-  const args = inv.promptMode === "arg" ? [...inv.args, prompt] : inv.args;
-  const r = spawnSync(inv.cmd, args, {
+  const r = spawnSync(inv.cmd, materializeArgs(inv, prompt), {
     input: inv.promptMode === "stdin" ? prompt : undefined,
     stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "inherit", "inherit"],
   });
@@ -195,8 +209,7 @@ export function captureSpawn(
   prompt: string,
   onChunk?: (s: string) => void,
 ): { code: number; text: string } {
-  const args = inv.promptMode === "arg" ? [...inv.args, prompt] : inv.args;
-  const r = spawnSync(inv.cmd, args, {
+  const r = spawnSync(inv.cmd, materializeArgs(inv, prompt), {
     input: inv.promptMode === "stdin" ? prompt : undefined,
     stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
     encoding: "utf8",
@@ -216,7 +229,12 @@ export async function ask(
   flags: Record<string, string | boolean> = {},
   deps: AskDeps = {},
 ): Promise<number> {
-  const resume = flags.resume === true;
+  // --resume may arrive as boolean `true` (last token) OR as a string, because
+  // parseFlags binds the following non-dash token as the flag's VALUE:
+  // `vf ask --resume "why?"` → flags.resume === "why?". Treat any truthy value as
+  // resume, and fold a string value back in as the first word of the question.
+  const resume = flags.resume === true || typeof flags.resume === "string";
+  const resumeLead = typeof flags.resume === "string" ? flags.resume : "";
 
   // Resolve the engine first (both paths need it).
   const readiness = (deps.readiness ?? ((e: Engine[]) => preflightAll(e, { probe: true })))(
@@ -231,7 +249,7 @@ export async function ask(
   // --resume: continue the engine's most-recent conversation with just a follow-up
   // question — no target/snippet needed (the prior turn already has the code context).
   if (resume) {
-    const question = positionals.join(" ").trim();
+    const question = [resumeLead, ...positionals].join(" ").trim();
     if (!question) return fail('missing question — e.g. `vf ask --resume "and why is that safe?"`');
     const inv = resumeInvocation(eng);
     if (typeof inv === "string") return fail(inv);

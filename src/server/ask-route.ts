@@ -5,7 +5,7 @@
 // validation, the path-traversal guard, slice, engine pick — is unit-testable
 // WITHOUT a live server or a real engine spawn. The route branch is thin glue.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
   type AskInvocation,
@@ -23,23 +23,12 @@ import type { EngineReadiness } from "../preflight/types.js";
 /** Match the /api/init string cap (#526) — bounds an untrusted UI field. */
 const QUESTION_CAP = 10_000;
 
-/** Wire shape of a POST /api/ask body (documentation; the runner takes `unknown`). */
-export interface AskRequest {
-  path: string;
-  start: number;
-  end: number;
-  question: string;
-  engine?: string;
-  resume?: boolean;
-}
-
 export interface ResolvedAsk {
   absPath: string;
   start: number;
   end: number;
   question: string;
   engine?: string;
-  resume: boolean;
 }
 
 export interface AskError {
@@ -84,7 +73,6 @@ export function resolveAskTarget(activeRepo: string, body: unknown): ResolvedAsk
     end: b.end as number,
     question: b.question,
     engine: b.engine as string | undefined,
-    resume: b.resume === true,
   };
 }
 
@@ -93,6 +81,13 @@ export interface AskRunDeps {
   readiness?: (engines: Engine[]) => EngineReadiness[];
   spawn?: (inv: AskInvocation, prompt: string) => { code: number; text: string };
   readText?: (path: string) => string;
+  /**
+   * Resolve symlinks for the traversal re-check. Default realpathSync. The string
+   * guard in resolveAskTarget blocks `..`/absolute PATHS but not a symlink that
+   * lives inside the repo and points OUT — resolve() doesn't follow links, only
+   * realpath does. Tests inject a fake to stay off-disk.
+   */
+  realpath?: (p: string) => string;
 }
 
 export interface AskResult {
@@ -100,6 +95,28 @@ export interface AskResult {
   engine: Engine;
   answer: string;
   code: number;
+}
+
+/**
+ * Post-resolve symlink guard: the file's REAL path (symlinks followed) must still
+ * sit under the repo's real path. Closes the "symlink inside repo → /etc/passwd"
+ * escape that the pure string guard cannot see. Returns true when safe.
+ */
+export function realpathWithinRepo(
+  activeRepo: string,
+  absPath: string,
+  realpath: (p: string) => string,
+): boolean {
+  let realRepo: string;
+  let realTarget: string;
+  try {
+    realRepo = realpath(activeRepo);
+    realTarget = realpath(absPath);
+  } catch {
+    return false; // target does not exist / unreadable → treat as unsafe
+  }
+  const rel = relative(realRepo, realTarget);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 /**
@@ -114,6 +131,12 @@ export function runAskRequest(
 ): AskResult | AskError {
   const resolved = resolveAskTarget(activeRepo, body);
   if ("error" in resolved) return resolved;
+
+  // Symlink escape guard (see realpathWithinRepo): the string guard in
+  // resolveAskTarget can't see a symlink that points out of the repo.
+  const realpath = deps.realpath ?? ((p: string) => realpathSync(p));
+  if (!realpathWithinRepo(activeRepo, resolved.absPath, realpath))
+    return { error: "path escapes repo", status: 400 };
 
   const readText = deps.readText ?? ((p: string) => readFileSync(p, "utf8"));
   let text: string;
@@ -151,8 +174,10 @@ export function runAskRequest(
 export function askResponse(activeRepo: string, body: unknown, deps?: AskRunDeps): Response {
   const result = runAskRequest(activeRepo, body, deps);
   if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
+  // Honesty (codex review): a non-zero engine exit is NOT a success — report ok:false
+  // so the UI surfaces it as a failure instead of rendering empty output as an answer.
   return Response.json({
-    ok: true,
+    ok: result.code === 0,
     engine: result.engine,
     answer: result.answer,
     code: result.code,

@@ -4,6 +4,7 @@ import type { EngineReadiness } from "../src/preflight/types.js";
 import {
   type AskRunDeps,
   askResponse,
+  realpathWithinRepo,
   resolveAskTarget,
   runAskRequest,
 } from "../src/server/ask-route.js";
@@ -30,13 +31,12 @@ describe("resolveAskTarget — validation", () => {
       end: 4,
       question: "why?",
       engine: undefined,
-      resume: false,
     });
   });
 
-  test("optional engine accepted when valid; resume flag threaded", () => {
-    const r = resolveAskTarget(REPO, { ...okBody, engine: "codex", resume: true });
-    expect(r).toMatchObject({ engine: "codex", resume: true });
+  test("optional engine accepted when valid", () => {
+    const r = resolveAskTarget(REPO, { ...okBody, engine: "codex" });
+    expect(r).toMatchObject({ engine: "codex" });
   });
 
   test("non-object body → 400", () => {
@@ -94,6 +94,9 @@ describe("runAskRequest — orchestration (injected seams, never spawns a real e
     readiness: () => [ready("claude")],
     readText: () => "l1\nl2\nl3\nl4\nl5",
     spawn: () => ({ code: 0, text: "ANSWER" }),
+    // identity realpath = no symlink escape (paths already under the repo). Real
+    // symlink handling is covered in the dedicated realpathWithinRepo suite below.
+    realpath: (p: string) => p,
     ...over,
   });
 
@@ -149,13 +152,47 @@ describe("runAskRequest — orchestration (injected seams, never spawns a real e
     expect(r).toMatchObject({ status: 400 });
   });
 
-  test("default deps arrows are allocated (readText/readiness/spawn ?? fallbacks)", () => {
-    // Omit readText → default readFileSync arrow runs and throws on the fake abs
-    // path → 400. Proves the ?? fallback line executes without injecting it.
-    const r = runAskRequest(REPO, okBody, {
-      readiness: () => [ready("claude", "no-binary")],
-    });
+  test("default deps arrows are allocated (readText/readiness/spawn/realpath ?? fallbacks)", () => {
+    // Omit every dep → the default realpath (realpathSync) runs first on the fake
+    // abs path, which does not exist → the symlink guard returns 400. Proves the
+    // ?? fallback arrows execute without injection.
+    const r = runAskRequest(REPO, okBody, {});
     expect(r).toMatchObject({ status: 400 });
+  });
+});
+
+describe("realpathWithinRepo — symlink escape guard (#562 security)", () => {
+  test("in-repo real path → safe (true)", () => {
+    const rp = (p: string) => p; // identity: no symlink indirection
+    expect(realpathWithinRepo("/repo", "/repo/src/x.ts", rp)).toBe(true);
+  });
+
+  test("repo root itself → safe (rel === '')", () => {
+    expect(realpathWithinRepo("/repo", "/repo", (p) => p)).toBe(true);
+  });
+
+  test("symlink pointing OUT of repo → unsafe (false)", () => {
+    // A file that resolves (via symlink) to /etc/passwd escapes the repo.
+    const rp = (p: string) => (p === "/repo/leak.txt" ? "/etc/passwd" : p);
+    expect(realpathWithinRepo("/repo", "/repo/leak.txt", rp)).toBe(false);
+  });
+
+  test("realpath throwing (missing target) → unsafe (false)", () => {
+    const rp = (p: string) => {
+      if (p.endsWith("gone")) throw new Error("ENOENT");
+      return p;
+    };
+    expect(realpathWithinRepo("/repo", "/repo/gone", rp)).toBe(false);
+  });
+
+  test("runAskRequest rejects a symlink escape via the injected realpath", () => {
+    const r = runAskRequest(REPO, okBody, {
+      readiness: () => [ready("claude")],
+      readText: () => "x",
+      spawn: () => ({ code: 0, text: "A" }),
+      realpath: (p) => (p === "/repo/src/x.ts" ? "/etc/passwd" : p),
+    });
+    expect(r).toEqual({ error: "path escapes repo", status: 400 });
   });
 });
 
@@ -164,6 +201,7 @@ describe("askResponse — Response wrapper", () => {
     readiness: () => [ready("claude")],
     readText: () => "a\nb\nc\nd\ne",
     spawn: () => ({ code: 0, text: "OK" }),
+    realpath: (p: string) => p, // identity: in-repo, no symlink escape
   };
 
   test("error → JSON with its status", async () => {
@@ -176,5 +214,14 @@ describe("askResponse — Response wrapper", () => {
     const res = askResponse(REPO, okBody, good);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, engine: "claude", answer: "OK", code: 0 });
+  });
+
+  test("non-zero engine exit → ok:false (honesty, not a fake success)", async () => {
+    const res = askResponse(REPO, okBody, {
+      ...good,
+      spawn: () => ({ code: 1, text: "" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, engine: "claude", answer: "", code: 1 });
   });
 });

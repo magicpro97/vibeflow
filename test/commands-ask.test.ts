@@ -10,11 +10,13 @@ import {
   framePrompt,
   inheritSpawn,
   langFence,
+  materializeArgs,
   parseTarget,
   pickEngine,
   resumeInvocation,
   sliceRange,
 } from "../src/commands/ask.js";
+import { parseFlags } from "../src/core.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
 
 function ready(engine: string, level: EngineReadiness["level"] = "ready"): EngineReadiness {
@@ -117,6 +119,28 @@ describe("askInvocation", () => {
   });
 });
 
+describe("materializeArgs (#562 — copilot -p takes a VALUE, order matters)", () => {
+  test("copilot: prompt spliced IMMEDIATELY after -p, --allow-all stays trailing", () => {
+    // Regression: appending at the end makes -p swallow --allow-all and the
+    // question is silently lost. The prompt must sit right after -p.
+    expect(materializeArgs(askInvocation("copilot"), "MY QUESTION")).toEqual([
+      "-p",
+      "MY QUESTION",
+      "--allow-all",
+    ]);
+  });
+  test("stdin engines: args unchanged (prompt goes on stdin, not argv)", () => {
+    expect(materializeArgs(askInvocation("claude"), "Q")).toEqual(["-p"]);
+    expect(materializeArgs(askInvocation("codex"), "Q")).toEqual(["exec", "-"]);
+  });
+  test("arg mode with no -p flag: appends at end", () => {
+    expect(materializeArgs({ cmd: "x", args: ["--foo"], promptMode: "arg" }, "Q")).toEqual([
+      "--foo",
+      "Q",
+    ]);
+  });
+});
+
 describe("resumeInvocation (#562 multi-turn — engine-native continue)", () => {
   test("claude continues most-recent via -c -p", () => {
     expect(resumeInvocation("claude")).toEqual({
@@ -143,8 +167,10 @@ describe("inheritSpawn (real process, cross-platform via node)", () => {
     const code = inheritSpawn({ cmd: "node", args: ["-e", ""], promptMode: "stdin" }, "hello");
     expect(code).toBe(0);
   });
-  test("arg mode: appends prompt as argv, returns exit status", () => {
-    // node -e 'process.exit(process.argv.length>... )' — assert the prompt arrived as an arg.
+  test("arg mode: prompt appended to argv (no -p flag to splice after)", () => {
+    // materializeArgs order-after-`-p` is proven in its own describe; here just
+    // confirm arg-mode delivers the prompt as an argv token. Avoid a literal `-p`
+    // in the node args — node would consume it as its OWN print flag.
     const code = inheritSpawn(
       {
         cmd: "node",
@@ -179,13 +205,19 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
     expect(chunk).toBe(r.text);
   });
 
-  test("arg mode: appends prompt as argv, captures it back", () => {
+  test("arg mode: prompt delivered as an argv token, captured back", () => {
+    // Ordering-after-`-p` is proven in the materializeArgs describe. Here confirm
+    // arg-mode captures the prompt token. No literal `-p` (node would eat it).
     const r = captureSpawn(
-      { cmd: "node", args: ["-e", "process.stdout.write(process.argv[1])"], promptMode: "arg" },
+      {
+        cmd: "node",
+        args: ["-e", "process.stdout.write(process.argv[1])"],
+        promptMode: "arg",
+      },
       "PING",
     );
     expect(r.code).toBe(0);
-    expect(r.text).toContain("PING");
+    expect(r.text).toBe("PING");
   });
 
   test("nonzero engine exit propagates in code", () => {
@@ -400,5 +432,44 @@ describe("ask() integration (injected seams)", () => {
     );
     expect(code).not.toBe(0);
     expect(called).toBe(false);
+  });
+
+  // REGRESSION (codex review): the documented `vf ask --resume "question"` goes
+  // through the REAL parseFlags, which binds the next non-dash token as the flag's
+  // VALUE → flags.resume === "question" (a string, not `true`). A naive
+  // `flags.resume === true` check misses it and the headline feature breaks. Drive
+  // the actual parser here, not a hand-built {resume:true}.
+  test("--resume through the REAL flag parser: question bound as the flag value still resumes", async () => {
+    const { positionals, flags } = parseFlags(["--resume", "ok, and is that thread-safe?"]);
+    expect(flags.resume).toBe("ok, and is that thread-safe?"); // parseFlags swallowed it
+    let seen: { inv: AskInvocation; prompt: string } | undefined;
+    const code = await quiet(() =>
+      ask(positionals, flags, {
+        readiness: () => [ready("claude")],
+        spawn: (inv, prompt) => {
+          seen = { inv, prompt };
+          return 0;
+        },
+      }),
+    );
+    expect(code).toBe(0);
+    expect(seen?.inv.args).toEqual(["-c", "-p"]); // resumed, not a fresh ask
+    expect(seen?.prompt).toBe("ok, and is that thread-safe?");
+  });
+
+  test("--resume value + trailing positionals concatenate into the question", async () => {
+    const { positionals, flags } = parseFlags(["--resume", "why", "is", "that"]);
+    let seen: { prompt: string } | undefined;
+    const code = await quiet(() =>
+      ask(positionals, flags, {
+        readiness: () => [ready("claude")],
+        spawn: (_inv, prompt) => {
+          seen = { prompt };
+          return 0;
+        },
+      }),
+    );
+    expect(code).toBe(0);
+    expect(seen?.prompt).toBe("why is that");
   });
 });
