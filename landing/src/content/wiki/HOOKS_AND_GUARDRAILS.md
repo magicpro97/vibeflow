@@ -244,6 +244,19 @@ Risk classification compares paths with `path.sep` (never `/` or `\` literals) s
 glob/scope rules behave the same on Windows and Unix (`src/agents/role-templates.ts`
 also enforces this for all per-role agent templates).
 
+### Semantic risk tier
+
+The regex classifier is the deterministic **floor** — fast, offline, and the source of
+truth for a `block`. An OPTIONAL semantic (LLM) tier can be layered on top through the
+`VIBEFLOW_AI` bridge (the same bridge used for goal-eval): it scores a command the regex
+rated `none`/`low` but that is side-effecting (a sub-shell, an inline `-c` script, or a
+network / `base64` / `eval` token) and can only **raise** the final risk —
+`finalRisk = max(regex, llm)`. It never lowers a deterministic verdict, so a `critical`
+stays `critical`. The tier is **fail-open and off by default**: with no bridge configured
+(or on any spawn/parse failure) it contributes nothing and scoring is byte-for-byte the
+regex result. The raised level surfaces through the existing `reasons[]` (as
+`semantic tier raised risk to <tier>`) — there is no new user surface.
+
 ## False positive reduction techniques
 
 ### 1. Scope-aware checks
