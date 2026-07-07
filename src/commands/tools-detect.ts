@@ -32,10 +32,14 @@ function readVerifiedSha(base: string): string {
 }
 
 /** #545: parse a reviewer-declared calibrated score (`SCORE: 0.NN`, P(goal met))
- *  from the judge output. Clamps to [0,1]; returns undefined when absent or
+ *  from the judge output. The contract is a TRAILING `SCORE:` line, so LAST wins
+ *  (earlier prose mentioning "score:" must not shadow the verdict). The tail is
+ *  anchored so trailing junk (e.g. `5e-1`) REJECTS rather than truncating to `5`
+ *  and inflating to 1.0. Clamps to [0,1]; returns undefined when absent or
  *  malformed so the signal FAILS OPEN (never hardens a green path). */
 export function parseGoalScore(raw: string): number | undefined {
-  const m = raw.match(/\bscore:\s*(-?\d+(?:\.\d+)?)/i);
+  const matches = [...raw.matchAll(/^\s*score:\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*$/gim)];
+  const m = matches.at(-1);
   if (!m || m[1] === undefined) return undefined;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return undefined;

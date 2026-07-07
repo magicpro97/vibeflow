@@ -133,6 +133,10 @@ export function computeConfidence(u: {
   ];
   // #545: the calibrated judge score is a graded signal (weight ~ review). Only
   // folded in when present so units without a judge run are unchanged (fail-open).
+  // NOTE: grading trusts the judge in BOTH directions — a high score raises the
+  // objective term (up to the self-report cap applied below), a low one lowers it.
+  // The Math.min cap still bounds the final value, so a hallucinated high score
+  // can never exceed self-report, but CAN lift confidence toward that ceiling.
   if (typeof u.goal_score === "number") pairs.push([u.goal_score, 2]);
   const objective = wGeoMean(pairs);
   // Tier 3: self-report caps (Kadavath 2022) — lowers only, never inflates.
