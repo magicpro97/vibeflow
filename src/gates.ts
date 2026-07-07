@@ -107,6 +107,8 @@ function wGeoMean(pairs: Array<[number, number]>): number {
 export function computeConfidence(u: {
   confidence: number;
   gates?: Partial<WorkUnit["gates"]>;
+  /** #545: calibrated judge score 0..1. Graded signal; absent ⇒ omitted (fail-open). */
+  goal_score?: number;
 }): number {
   const g = u.gates ?? {};
   // Tier 1: an executed-and-FAILED critical gate ⇒ 0.
@@ -123,12 +125,16 @@ export function computeConfidence(u: {
   // judgment from relative signal strength, NOT an optimized study result.)
   // A gate not yet present (undefined) scores 0 — floored to EPS in wGeoMean.
   const val = (s: GateState | undefined): number => (s ? GATE_VAL[s] : 0);
-  const objective = wGeoMean([
+  const pairs: Array<[number, number]> = [
     [val(g.build), 1.5],
     [val(g.test), 3],
     [val(g.lint), 1],
     [val(g.review), 2],
-  ]);
+  ];
+  // #545: the calibrated judge score is a graded signal (weight ~ review). Only
+  // folded in when present so units without a judge run are unchanged (fail-open).
+  if (typeof u.goal_score === "number") pairs.push([u.goal_score, 2]);
+  const objective = wGeoMean(pairs);
   // Tier 3: self-report caps (Kadavath 2022) — lowers only, never inflates.
   return Math.round(Math.min(u.confidence ?? 0, objective) * 100) / 100;
 }

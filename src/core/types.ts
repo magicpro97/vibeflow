@@ -62,6 +62,9 @@ export interface WorkUnit {
     /** ADR-003: behavioral goal-eval result. */
     goal_eval?: GateState;
   };
+  /** #545: calibrated judge score 0..1 (P(goal met)) from the reviewer-LLM.
+   *  Graded signal in computeConfidence; absent ⇒ omitted (fail-open). */
+  goal_score?: number;
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
   /** #522: structured acceptance. Reviewer runs each `verification`; a failing MUST is a

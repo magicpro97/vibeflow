@@ -230,6 +230,19 @@ Goal blocked        → record the gap in HANDOFF.md, surface to the user
 
 The goal-eval result is recorded as evidence so the decision is auditable.
 
+### Calibrated judge score (#545)
+
+When the reviewer-LLM judges a unit, it ends its verdict with a calibrated
+`SCORE: 0.NN` line — its own probability (0..1) that the goal is fully met. vf
+records this as `goal_score` on the unit and folds it into the computed
+confidence as a *graded* signal (weight ≈ the independent review gate): a weak
+but "COVERED" verdict no longer scores the same as a confident one. The score is
+advisory-graded, never the sole authority — the binary `goal_eval` gate remains
+the hard floor (a failed judge still zeros confidence), and self-report can only
+lower confidence, never inflate it. Absent/unparseable score ⇒ omitted
+(fail-open: units without a judge run are unchanged). The score surfaces per unit
+in the web UI work-unit table (⚖ badge).
+
 ## Resource and progress tracking
 
 The orchestration ledger lives in `.vibeflow/WORKFLOW_STATE.json` and aggregates every

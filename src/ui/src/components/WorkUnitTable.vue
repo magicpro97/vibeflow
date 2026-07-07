@@ -122,6 +122,17 @@
                     ? 'bg-emerald-950/40 border border-emerald-900/40 text-emerald-400'
                     : 'bg-amber-950/40 border border-amber-900/40 text-amber-400'"
                 >{{ u.canary ? '🛡 canary' : '⚠ needs canary' }}</span>
+                <!-- #545: calibrated judge score (0..1) when the reviewer-LLM scored this unit -->
+                <span
+                  v-if="typeof u.goal_score === 'number'"
+                  :title="`judge score: ${u.goal_score.toFixed(2)} (calibrated P(goal met))`"
+                  class="ml-1 px-1 py-0.5 rounded text-[9px] font-mono leading-none border"
+                  :class="u.goal_score >= 0.85
+                    ? 'bg-emerald-950/40 border-emerald-900/40 text-emerald-400'
+                    : u.goal_score >= 0.5
+                      ? 'bg-amber-950/40 border-amber-900/40 text-amber-400'
+                      : 'bg-red-950/40 border-red-900/40 text-red-400'"
+                >⚖ {{ u.goal_score.toFixed(2) }}</span>
               </div>
             </td>
 
