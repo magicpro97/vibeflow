@@ -6,6 +6,7 @@ import {
   type AskInvocation,
   ask,
   askInvocation,
+  captureSpawn,
   framePrompt,
   inheritSpawn,
   langFence,
@@ -160,6 +161,39 @@ describe("inheritSpawn (real process, cross-platform via node)", () => {
       "x",
     );
     expect(code).toBe(2);
+  });
+});
+
+describe("captureSpawn (real process, cross-platform via node) — #562 Stage B", () => {
+  test("stdin mode: captures stdout, code 0, onChunk fires with the text", () => {
+    let chunk: string | undefined;
+    const r = captureSpawn(
+      { cmd: "node", args: ["-e", 'process.stdout.write("HELLO")'], promptMode: "stdin" },
+      "x",
+      (s) => {
+        chunk = s;
+      },
+    );
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("HELLO");
+    expect(chunk).toBe(r.text);
+  });
+
+  test("arg mode: appends prompt as argv, captures it back", () => {
+    const r = captureSpawn(
+      { cmd: "node", args: ["-e", "process.stdout.write(process.argv[1])"], promptMode: "arg" },
+      "PING",
+    );
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("PING");
+  });
+
+  test("nonzero engine exit propagates in code", () => {
+    const r = captureSpawn(
+      { cmd: "node", args: ["-e", "process.exit(3)"], promptMode: "stdin" },
+      "x",
+    );
+    expect(r.code).toBe(3);
   });
 });
 

@@ -183,6 +183,29 @@ export function inheritSpawn(inv: AskInvocation, prompt: string): number {
   return r.status ?? 1;
 }
 
+/**
+ * Captured runner: like inheritSpawn but COLLECTS stdout instead of streaming to
+ * the TTY. The Web-UI /api/ask route needs this — a browser has no TTY. onChunk
+ * fires ONCE with the full text; spawnSync is not incrementally streaming, so true
+ * token streaming (SSE) is a follow-up. #556 env-filtering is also a follow-up:
+ * spawnSync inherits process.env, acceptable for a local third-party engine CLI.
+ */
+export function captureSpawn(
+  inv: AskInvocation,
+  prompt: string,
+  onChunk?: (s: string) => void,
+): { code: number; text: string } {
+  const args = inv.promptMode === "arg" ? [...inv.args, prompt] : inv.args;
+  const r = spawnSync(inv.cmd, args, {
+    input: inv.promptMode === "stdin" ? prompt : undefined,
+    stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  });
+  const text = r.stdout ?? "";
+  onChunk?.(text);
+  return { code: r.status ?? 1, text };
+}
+
 function fail(msg: string): number {
   out("vf", c.red(`ask: ${msg}`), { level: "error" });
   return 2;

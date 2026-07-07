@@ -2431,6 +2431,7 @@ describe("commands.help branches", () => {
     expect(printCommandHelp("init")).toBe(0);
     expect(printCommandHelp("doctor")).toBe(0);
     expect(printCommandHelp("run")).toBe(0);
+    expect(printCommandHelp("ask")).toBe(0); // #562 ask help arm (help.ts 115-125)
     expect(printCommandHelp("orchestrate")).toBe(0);
     expect(printCommandHelp("workflow")).toBe(0);
     expect(printCommandHelp("units")).toBe(0);

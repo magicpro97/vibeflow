@@ -14,6 +14,7 @@ import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../c
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { writeGuidance } from "../dispatch/guidance.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
+import { askResponse } from "./ask-route.js";
 import {
   ATTACH_CAP,
   applySettings,
@@ -210,6 +211,12 @@ export async function handleMutationRoute(
     }
     await orchestrate({ engine, dry, yes }, ctx.getActiveRepo());
     return Response.json({ ok: true, state: readState(ctx.getActiveRepo()) });
+  }
+
+  if (path === "/api/ask") {
+    // #562 Stage B: thin glue. All validation/path-guard/slice/engine-pick lives
+    // in runAskRequest (ask-route.ts, unit-tested); real deps used here.
+    return askResponse(ctx.getActiveRepo(), payload);
   }
 
   if (path === "/api/discover") {

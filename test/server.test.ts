@@ -439,6 +439,49 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/ask returns 400 on path escaping the repo (#562 Stage B, no engine spawned)", async () => {
+    // Route glue in routes.ts calls askResponse with real deps. A path-traversal
+    // body is rejected by the pure guard BEFORE any engine spawn — hermetic 400.
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({
+          path: "../../etc/passwd",
+          start: 1,
+          end: 2,
+          question: "leak?",
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/escapes repo/);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/ask WITHOUT a CSRF token returns 403 (#562 Stage B write-guard)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const res = await fetch(`${url}/api/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "src/x.ts", start: 1, end: 2, question: "q" }),
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("DELETE /api/upload removes a file (line 478-485)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
