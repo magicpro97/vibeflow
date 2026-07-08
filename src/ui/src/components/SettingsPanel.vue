@@ -112,6 +112,15 @@
           </span>
         </label>
 
+        <!-- #559: Desktop notifications -->
+        <label class="flex items-start gap-2 cursor-pointer group">
+          <input v-model="form.notifications" type="checkbox" class="mt-0.5 accent-neutral-400" />
+          <span>
+            <span class="text-neutral-200 group-hover:text-white transition-colors">Desktop notifications</span>
+            <span class="block text-[11px] text-neutral-500 mt-0.5">Get an OS notification when vf pr merge-when-green CI settles (green/red/timeout). Suppress per-run with --no-notify or VF_NO_NOTIFY=1.</span>
+          </span>
+        </label>
+
         <!-- Hooks (read-only) -->
         <fieldset v-if="form.hooks" class="space-y-2">
           <legend class="text-xs text-neutral-500 mb-1.5 flex items-center gap-1.5">

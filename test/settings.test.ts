@@ -305,6 +305,48 @@ describe("settings.memory", () => {
   });
 });
 
+describe("settings.notifications", () => {
+  test("defaults to true on an empty repo (#559)", () => {
+    const dir = tmpRepo();
+    try {
+      expect(readSettings(dir).notifications).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("round-trips an explicit false through writeSettings", () => {
+    const dir = tmpRepo();
+    try {
+      const written = writeSettings(dir, { notifications: false }, { now: fixedNow });
+      expect(written.notifications).toBe(false);
+      expect(readSettings(dir).notifications).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file missing notifications forward-merges to the default true", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ tools: { codegraph: true } }));
+      expect(readSettings(dir).notifications).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a garbage notifications value stays true", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ notifications: "nope" }));
+      expect(readSettings(dir).notifications).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("settings.priorityRank", () => {
   test("default order: codegraph > lsp > native", () => {
     const rank = priorityRank(DEFAULT_SETTINGS);

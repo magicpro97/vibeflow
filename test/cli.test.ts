@@ -1354,6 +1354,7 @@ describe("adapters settings integration", () => {
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
         updatedAt: "",
         memory: false,
+        notifications: true,
       } satisfies VibeSettings,
     };
     const body = Object.values(engineFiles("claude", { ...ctx }, false)).join("\n");
@@ -1376,6 +1377,7 @@ describe("adapters settings integration", () => {
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
         updatedAt: "",
         memory: false,
+        notifications: true,
       } satisfies VibeSettings,
     };
     const policy = canonicalFiles(ctx)[`${CTX_DIR}/WORKFLOW_POLICY.md`] as string;

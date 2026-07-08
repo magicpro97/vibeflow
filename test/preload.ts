@@ -15,6 +15,13 @@ if (process.stdin.isTTY) {
   Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
 }
 
+// #559: suppress real OS desktop notifications for the whole test run. The
+// merge-when-green suite exercises post-claim terminals that call the real
+// notify() default path; without this a macOS/Linux runner would pop a real
+// notification per test. Tests that assert notify behaviour inject their own
+// `notify` spy (bypasses this) or an explicit `env` (overrides this).
+process.env.VF_NO_NOTIFY = "1";
+
 // Suppress CLI output so status lines from commands don't leak to the user's terminal during
 // `vf verify`. Two layers:
 //   1. console.log/error — used by out() no-bus fallback
