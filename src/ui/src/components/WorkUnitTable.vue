@@ -233,6 +233,24 @@
                   </div>
                 </div>
 
+                <!-- #557: status timeline — append-only transition ledger, oldest first -->
+                <div v-if="timelines[u.name]?.length">
+                  <span class="text-[10px] text-neutral-600 font-medium">timeline</span>
+                  <ol class="mt-1.5 space-y-0.5">
+                    <li
+                      v-for="(t, i) in timelines[u.name]" :key="i"
+                      class="flex items-center gap-2 text-neutral-500"
+                    >
+                      <span
+                        class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                        :class="statusClass(t.status as WorkUnit['status'])"
+                      />
+                      <span class="font-mono text-[11px] text-neutral-400">{{ t.status }}</span>
+                      <span class="text-neutral-600 text-[10px]">{{ relativeTime(t.at) }}</span>
+                    </li>
+                  </ol>
+                </div>
+
                 <!-- Spec preview -->
                 <div v-if="u.spec">
                   <span class="text-[10px] text-neutral-600 font-medium">spec</span>
@@ -293,7 +311,7 @@
 import { ref, watch } from "vue";
 import { api } from "../api.js";
 import { type ClassifiedEvidence, classifyEvidence } from "../lib/evidence.js";
-import type { GateState, WorkUnit } from "../types.js";
+import type { GateState, TimelineEntry, WorkUnit } from "../types.js";
 import InfoTip from "./InfoTip.vue";
 
 const props = defineProps<{ units: WorkUnit[]; emptyText?: string }>();
@@ -371,9 +389,31 @@ function toggleExpand(name: string) {
     expanded.value.delete(name);
   } else {
     expanded.value.add(name);
+    fetchTimeline(name);
   }
   // trigger reactivity
   expanded.value = new Set(expanded.value);
+}
+
+// #557: per-unit status-transition ledger, fetched once when a row expands.
+const timelines = ref<Record<string, TimelineEntry[]>>({});
+async function fetchTimeline(name: string) {
+  if (timelines.value[name]) return; // cached
+  try {
+    const res = await api.unitTimeline(name);
+    if (res.ok) timelines.value = { ...timelines.value, [name]: res.timeline };
+  } catch {
+    /* a failed timeline fetch is non-fatal — the rest of the row still renders */
+  }
+}
+
+// #557: "2m ago"-style relative time. Inline (6 lines) — not reused elsewhere.
+function relativeTime(at: number): string {
+  const s = Math.round((Date.now() - at) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
 }
 
 function statusClass(s: WorkUnit["status"]) {

@@ -147,16 +147,31 @@ describe("readMarker", () => {
   });
 
   test("returns null and removes the marker when past TTL", async () => {
-    const { createMarker, readMarker } = await loadMarker();
+    const { createMarker, readMarker, updateMarker } = await loadMarker();
     const u = unit("read-b");
     createMarker(u);
+    updateMarker(u, { status: "running" }); // seed a timeline sibling
     const file = join(dir(), `${u}.json`);
+    const timeline = join(dir(), `${u}.timeline.jsonl`);
+    expect(existsSync(timeline)).toBe(true);
     const old = JSON.parse(readFileSync(file, "utf8"));
     old.startedAt = Date.now() - 5 * 60 * 60 * 1000; // 5 hours ago
     writeFileSync(file, JSON.stringify(old));
     const result = readMarker(u);
     expect(result).toBeNull();
     expect(existsSync(file)).toBe(false);
+    expect(existsSync(timeline)).toBe(false); // #557: sibling ledger removed too, not orphaned
+  });
+
+  test("updateMarker with an unchanged status does NOT append a duplicate timeline entry", async () => {
+    const { createMarker, updateMarker } = await loadMarker();
+    const { readTimeline } = await import("../../src/orchestrator/timeline");
+    const u = unit("read-b-dedup");
+    createMarker(u);
+    updateMarker(u, { status: "running" });
+    updateMarker(u, { status: "running", confidence: 0.4 }); // same status → skip
+    updateMarker(u, { status: "done" });
+    expect(readTimeline(u).map((e) => e.status)).toEqual(["running", "done"]);
   });
 
   test("returns null for a corrupt marker file", async () => {
