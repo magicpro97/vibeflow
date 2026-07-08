@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
+import { handleFileRoute } from "./server/file-route.js";
 import { listAttachments, replayFromLog, settingsView } from "./server/handlers.js";
 import {
   clearPending,
@@ -145,6 +146,12 @@ export function startServer(
       // --- GET /api/settings ---
       if (method === "GET" && path === "/api/settings") {
         return Response.json({ ok: true, ...settingsView(activeRepo) });
+      }
+
+      // --- GET /api/file — token+loopback guarded, sandboxed to activeRepo (#558) ---
+      if (method === "GET" && path === "/api/file") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleFileRoute(activeRepo, url.searchParams.get("path") ?? "");
       }
 
       // --- GET /api/projects* and /api/hook/pending ---

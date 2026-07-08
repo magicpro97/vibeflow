@@ -189,13 +189,48 @@
                   <span class="text-[10px] text-neutral-600 font-medium">evidence</span>
                   <ul class="mt-1.5 space-y-0.5">
                     <li
-                      v-for="e in u.evidence" :key="e"
+                      v-for="(c, i) in u.evidence.map(classifyEvidence)" :key="i"
                       class="flex items-start gap-2 text-neutral-500"
                     >
                       <span class="text-neutral-600 mt-px flex-shrink-0 text-[10px]">+</span>
-                      <span class="font-mono text-[11px]">{{ e }}</span>
+                      <!-- file → click-to-open link (button, not <a>, to avoid navigation) -->
+                      <button
+                        v-if="c.kind === 'file'"
+                        type="button"
+                        class="font-mono text-[11px] text-blue-400 hover:text-blue-300 hover:underline text-left"
+                        @click="openFile(u.name, c)"
+                      >📄 {{ c.path }}<span v-if="c.line">:{{ c.line }}</span></button>
+                      <!-- command → $ badge + mono raw in a distinct color -->
+                      <span v-else-if="c.kind === 'command'" class="font-mono text-[11px]">
+                        <span class="text-neutral-600">$</span>
+                        <span class="text-emerald-400 ml-1">{{ cmdText(c.raw) }}</span>
+                      </span>
+                      <!-- test → ✓/✗ badge colored by pass/fail + label -->
+                      <span
+                        v-else-if="c.kind === 'test'"
+                        class="font-mono text-[11px]"
+                        :class="/fail/i.test(c.label ?? '') ? 'text-red-400' : 'text-emerald-400'"
+                      >{{ /fail/i.test(c.label ?? '') ? '✗' : '✓' }} {{ c.label }}</span>
+                      <!-- text → plain mono fallback (no regression) -->
+                      <span v-else class="font-mono text-[11px]">{{ c.raw }}</span>
                     </li>
                   </ul>
+                  <!-- #558: opened file content (XSS-safe {{ }}, never v-html) -->
+                  <div v-if="openedFile && openedFile.unit === u.name" class="mt-2 border border-neutral-800 rounded bg-neutral-950/60">
+                    <div class="flex items-center justify-between px-2 py-1 border-b border-neutral-800">
+                      <span class="font-mono text-[10px] text-neutral-400">
+                        {{ openedFile.path }}<span v-if="openedFile.line">:{{ openedFile.line }}</span>
+                      </span>
+                      <button
+                        type="button"
+                        class="text-[10px] text-neutral-500 hover:text-neutral-300"
+                        @click="openedFile = null"
+                      >✕ close</button>
+                    </div>
+                    <p v-if="openedFile.loading" class="px-2 py-1.5 text-[10px] text-neutral-600 italic">loading…</p>
+                    <p v-else-if="openedFile.error" class="px-2 py-1.5 text-[10px] text-red-400 font-mono">{{ openedFile.error }}</p>
+                    <pre v-else class="px-2 py-1.5 text-[10px] text-neutral-400 font-mono overflow-x-auto max-h-80 whitespace-pre-wrap">{{ openedFile.content }}</pre>
+                  </div>
                 </div>
 
                 <!-- Spec preview -->
@@ -257,6 +292,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { api } from "../api.js";
+import { type ClassifiedEvidence, classifyEvidence } from "../lib/evidence.js";
 import type { GateState, WorkUnit } from "../types.js";
 import InfoTip from "./InfoTip.vue";
 
@@ -291,6 +327,51 @@ watch(
 
 function fmtCost(n: number): string {
   return n >= 1 ? n.toFixed(2) : n.toFixed(4);
+}
+
+// #558: strip an optional `acceptance <id>: ` prefix + leading `$ ` so the
+// command badge shows just the runnable text.
+function cmdText(raw: string): string {
+  return raw.replace(/^acceptance\s+\S+:\s*/i, "").replace(/^\$ /, "");
+}
+
+// #558: inline viewer for a clicked `file:line` evidence item. One open at a
+// time; content is rendered via {{ }} (XSS-safe), never v-html.
+const openedFile = ref<{
+  unit: string;
+  path: string;
+  line?: number;
+  content?: string;
+  loading: boolean;
+  error?: string;
+} | null>(null);
+
+async function openFile(unit: string, c: ClassifiedEvidence) {
+  if (!c.path) return;
+  openedFile.value = { unit, path: c.path, line: c.line, loading: true };
+  try {
+    const res = await api.readFile(c.path, c.line);
+    if (!openedFile.value) return; // closed while loading
+    if (res.ok)
+      openedFile.value = { unit, path: c.path, line: c.line, content: res.content, loading: false };
+    else
+      openedFile.value = {
+        unit,
+        path: c.path,
+        line: c.line,
+        loading: false,
+        error: res.reason ?? "could not read file",
+      };
+  } catch (e) {
+    if (openedFile.value)
+      openedFile.value = {
+        unit,
+        path: c.path,
+        line: c.line,
+        loading: false,
+        error: (e as Error).message,
+      };
+  }
 }
 
 function toggleExpand(name: string) {

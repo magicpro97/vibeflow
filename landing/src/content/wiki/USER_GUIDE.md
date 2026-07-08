@@ -98,6 +98,19 @@ Security: the server binds to `127.0.0.1`, every write carries a per-process CSR
 the Host/Origin must be loopback, uploads are sanitized and size-capped, and the page ships
 no third-party JavaScript under a strict CSP.
 
+### Typed evidence
+
+Each work unit's recorded evidence is classified and rendered by type:
+
+- **File** (`path` or `path:line`) — shown as a 📄 click-to-open link. Clicking fetches the
+  file through a token-guarded, loopback-only route that is **sandboxed to the repo root**:
+  `..` traversal, absolute paths, `~`, and symlinks escaping the repo are all rejected, files
+  over 256 KB and binaries are refused, and the content is always returned as JSON and
+  rendered as inert text (never executed).
+- **Command** (`$ …`, `vf …`, `bun …`, `npm …`, `git …`) — shown with a `$` badge.
+- **Test** (`12 pass`, `3 fail`, acceptance tails) — shown with a ✓/✗ badge.
+- **Text** — anything else falls back to plain monospace.
+
 ---
 
 ## 4. The CLI
