@@ -23,30 +23,42 @@ interface Hunk {
 }
 
 /**
- * Split a unified git diff into per-file/per-hunk segments. For each `+++ b/<path>`
- * header we start a new file; every subsequent added line (`+`, but NOT the `+++`
- * header) is collected under that path, its leading `+` stripped. Malformed input
- * yields no hunks (the caller treats that as `none`).
+ * Split a unified git diff into per-file/per-hunk segments. A file block is opened by its
+ * `--- a/<old>` / `+++ b/<new>` header pair; every subsequent added line (`+`, but NOT the
+ * `+++` header) is collected under that file, its leading `+` stripped. The touched PATH is
+ * kept even for a deletion (`+++ /dev/null`, real name in `--- a/<path>`) so a PROTECTED_PATH
+ * removal (e.g. deleting `.env`) is still scored by files[]. Malformed input yields no hunks.
  */
 function parseHunks(diff: string): Hunk[] {
   const hunks: Hunk[] = [];
   let current: Hunk | undefined;
+  let pendingOld: string | undefined; // path from the most recent `--- a/<path>` line
   for (const line of diff.split("\n")) {
-    // A real new-file header is `+++ b/<path>` (or `+++ /dev/null` for a deletion). Requiring
-    // the marker stops an ADDED content line that happens to start with `++ ` (rendered `+++ …`)
-    // from being misread as a header and silently dropped (WARN-3).
+    // `--- a/<path>` (or `--- /dev/null` for an addition) — remember the old path so a
+    // deletion whose `+++` is `/dev/null` still resolves to the real file name.
+    if (line.startsWith("--- ") && !line.startsWith("--- +")) {
+      pendingOld = line === "--- /dev/null" ? undefined : line.slice(4).replace(/^a\//, "").trim();
+      continue;
+    }
+    // A real new-file header is `+++ b/<path>` or `+++ /dev/null` (deletion). Requiring the
+    // marker stops an ADDED content line rendered `+++ …` from being misread as a header (WARN-3).
     const isHeader = line.startsWith("+++ b/") || line === "+++ /dev/null";
     if (isHeader) {
-      const path = line.slice(4).replace(/^b\//, "").trim();
+      const newPath =
+        line === "+++ /dev/null" ? undefined : line.slice(4).replace(/^b\//, "").trim();
+      const path = newPath ?? pendingOld ?? "";
       current = { path, added: [] };
       hunks.push(current);
+      pendingOld = undefined;
     } else if (line.startsWith("+") && current) {
       // Everything else beginning with `+` is added content (including a `+++ …` that is NOT a
       // real header, e.g. an added line whose own text starts with `++ `).
       current.added.push(line.slice(1));
     }
   }
-  return hunks.filter((h) => h.added.length > 0);
+  // Keep a hunk when it has added content OR a resolved path — a pure deletion has no added
+  // lines but its path must still reach scoreRisk's files[] (PROTECTED_PATH check).
+  return hunks.filter((h) => h.added.length > 0 || h.path !== "");
 }
 
 /**

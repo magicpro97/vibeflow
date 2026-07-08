@@ -241,6 +241,22 @@ describe("apply-gate fail-open hardening (#547 review — opencode WARN-1/2/3/4)
     };
     expect(classifyDiff(benign, throwingJudge).risk).toBe("critical");
   });
+
+  test("C2: a deletion-only hunk on a PROTECTED_PATH is still scored (no bypass via zero-added)", () => {
+    // Deleting `.env` produces a hunk with NO added lines and a `+++ /dev/null` header — the
+    // real name lives in `--- a/.env`. It must still reach scoreRisk's files[] (PROTECTED_PATH).
+    const del = [
+      "diff --git a/.env b/.env",
+      "deleted file mode 100644",
+      "--- a/.env",
+      "+++ /dev/null",
+      "@@ -1,1 +0,0 @@",
+      "-SECRET=xyz",
+    ].join("\n");
+    const { risk, reasons } = classifyDiff(del);
+    expect(risk).not.toBe("none");
+    expect(reasons.join(" ")).toContain(".env");
+  });
 });
 
 describe("getUnitDiffResult (#547 review — WARN-1 retrieval fail-closed)", () => {
@@ -353,7 +369,7 @@ describe("applyGateBlock (#547 — orchestrator glue, both branches)", () => {
     let seenRisk = "";
     const r = await applyGateBlock(
       {
-        applyGate: async (_e, diff) => {
+        applyGate: async (_e: string, diff: string) => {
           seenRisk = diff.includes("curl") ? "sawDiff" : "empty";
           return { allowed: false, risk: "critical" as const, reasons: ["real diff"] };
         },
