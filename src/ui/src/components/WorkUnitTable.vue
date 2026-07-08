@@ -348,29 +348,21 @@ const openedFile = ref<{
 
 async function openFile(unit: string, c: ClassifiedEvidence) {
   if (!c.path) return;
-  openedFile.value = { unit, path: c.path, line: c.line, loading: true };
+  const req = { unit, path: c.path, line: c.line };
+  openedFile.value = { ...req, loading: true };
+  // Race guard: a second click before this resolves must win. Only mutate if the
+  // still-open viewer is THIS request (same unit/path/line), else drop the stale response.
+  const current = () => {
+    const o = openedFile.value;
+    return !!o && o.unit === req.unit && o.path === req.path && o.line === req.line;
+  };
   try {
     const res = await api.readFile(c.path, c.line);
-    if (!openedFile.value) return; // closed while loading
-    if (res.ok)
-      openedFile.value = { unit, path: c.path, line: c.line, content: res.content, loading: false };
-    else
-      openedFile.value = {
-        unit,
-        path: c.path,
-        line: c.line,
-        loading: false,
-        error: res.reason ?? "could not read file",
-      };
+    if (!current()) return; // closed or superseded while loading
+    if (res.ok) openedFile.value = { ...req, content: res.content, loading: false };
+    else openedFile.value = { ...req, loading: false, error: res.reason ?? "could not read file" };
   } catch (e) {
-    if (openedFile.value)
-      openedFile.value = {
-        unit,
-        path: c.path,
-        line: c.line,
-        loading: false,
-        error: (e as Error).message,
-      };
+    if (current()) openedFile.value = { ...req, loading: false, error: (e as Error).message };
   }
 }
 

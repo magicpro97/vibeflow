@@ -23,6 +23,22 @@ describe("classifyEvidence (#558 typed evidence)", () => {
     expect(classifyEvidence("README")).toEqual({ kind: "text", raw: "README" });
   });
 
+  test("dotfile (.env / .gitignore, nothing before the dot) → kind file", () => {
+    expect(classifyEvidence(".env")).toEqual({ kind: "file", raw: ".env", path: ".env" });
+    expect(classifyEvidence(".gitignore")).toEqual({
+      kind: "file",
+      raw: ".gitignore",
+      path: ".gitignore",
+    });
+    // a dotfile in a subdir, with a line, still resolves
+    expect(classifyEvidence("config/.npmrc:3")).toEqual({
+      kind: "file",
+      raw: "config/.npmrc:3",
+      path: "config/.npmrc",
+      line: 3,
+    });
+  });
+
   test("$ vf verify → command, raw kept verbatim", () => {
     expect(classifyEvidence("$ vf verify")).toEqual({
       kind: "command",

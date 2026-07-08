@@ -23,8 +23,10 @@ const ACCEPTANCE = /^acceptance\s+\S+:\s*/i;
 const TAIL = /→\s*"([^"]*)"/;
 // A command once any acceptance prefix is stripped.
 const COMMAND = /^(?:\$ |vf |bun |npm |git )/;
-// A path WITH an extension, optional :line. No spaces / arrows (guarded below).
-const FILE = /^([\w./\-@]+\.[\w]+)(?::(\d+))?$/;
+// A path WITH an extension, optional :line. Leading `*` (not `+`) so a dotfile like
+// `.env` / `.gitignore` (nothing before the dot) still classifies as a file. A bare
+// `README` (no dot at all) still falls through to text. No spaces / arrows (guarded below).
+const FILE = /^([\w./\-@]*\.[\w]+)(?::(\d+))?$/;
 
 /** Classify one evidence string. First match wins; all regex are cheap. */
 export function classifyEvidence(item: string): ClassifiedEvidence {
