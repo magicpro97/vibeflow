@@ -426,3 +426,47 @@ describe("orchestrateUnits — evidence freshness stamp (#517)", () => {
     expect(u?.evidence).toEqual(["legacy.log", "fresh.log"]);
   });
 });
+
+describe("orchestrateUnits — apply-time gate (#547)", () => {
+  test("gate blocks (allowed:false) → unit blocked, gates.security=fail, review reason", async () => {
+    const { units, reviews } = await orchestrateUnits({
+      units: [unit("gate-block")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+      applyGateEngine: "codex",
+      applyGate: async () => ({
+        allowed: false,
+        risk: "critical" as const,
+        reasons: ["src/x.ts: destructive command"],
+      }),
+    });
+    const u = units.find((x) => x.name === "gate-block");
+    expect(u?.status).toBe("blocked");
+    expect(u?.gates.security).toBe("fail");
+    expect(u?.gates.review).toBe("pass");
+    const r = reviews.find((x) => x.unit === "gate-block");
+    expect(r?.pass).toBe(false);
+    expect(r?.reason).toContain("apply-gate blocked");
+    expect(r?.reason).toContain("src/x.ts");
+  });
+
+  test("gate allows (allowed:true) → unit done (cwd() fallback path)", async () => {
+    let seenEngine = "";
+    const { units } = await orchestrateUnits({
+      units: [unit("gate-allow")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+      applyGateEngine: "codex",
+      applyGate: async (engine) => {
+        seenEngine = engine;
+        return { allowed: true, risk: "none" as const, reasons: [] };
+      },
+    });
+    const u = units.find((x) => x.name === "gate-allow");
+    expect(u?.status).toBe("done");
+    expect(u?.gates.security).toBeUndefined();
+    expect(seenEngine).toBe("codex");
+  });
+});
