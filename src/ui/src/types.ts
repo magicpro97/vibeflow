@@ -34,6 +34,14 @@ export interface Attachment {
   skill: string;
 }
 
+/** #557: one recorded status transition — mirrors src/orchestrator/timeline.ts. */
+export interface TimelineEntry {
+  status: string;
+  at: number;
+  confidence?: number;
+  evidenceCount?: number;
+}
+
 export interface WorkflowState {
   task_id: string;
   goal: string;

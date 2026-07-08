@@ -111,6 +111,16 @@ Each work unit's recorded evidence is classified and rendered by type:
 - **Test** (`12 pass`, `3 fail`, acceptance tails) — shown with a ✓/✗ badge.
 - **Text** — anything else falls back to plain monospace.
 
+### Status timeline
+
+Each unit records an **append-only transition ledger** at
+`~/.vibeflow/markers/<unit>.timeline.jsonl` — one JSONL line per status change, derived from
+vf's own marker updates (status, timestamp, confidence, evidence count). Expand a work unit's
+row and the ledger is surfaced beneath its evidence as an ordered list — a status dot, the
+status, and a relative timestamp (`2m ago`), oldest first. The read route is token-guarded and
+loopback-only, and the unit name is sanitized (no `/`, `\`, `..`, or NUL); a fresh unit with no
+transitions yet simply shows nothing.
+
 ---
 
 ## 4. The CLI

@@ -1,5 +1,5 @@
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
-import type { VibeSettings, WorkflowState } from "./types.js";
+import type { TimelineEntry, VibeSettings, WorkflowState } from "./types.js";
 
 const CSRF = document.querySelector<HTMLMetaElement>('meta[name="vf-token"]')?.content ?? "";
 
@@ -137,6 +137,12 @@ export const api = {
     req<{ ok: boolean; content?: string; reason?: string; path?: string }>(
       "GET",
       `/api/file?path=${encodeURIComponent(path)}${line ? `&line=${line}` : ""}`,
+    ),
+  // #557: a unit's append-only status-transition ledger (token-guarded, name-sanitized).
+  unitTimeline: (name: string) =>
+    req<{ ok: boolean; timeline: TimelineEntry[] }>(
+      "GET",
+      `/api/units/${encodeURIComponent(name)}/timeline`,
     ),
   // #562: ask an engine about a code snippet (Web-UI surface for `vf ask`).
   ask: {

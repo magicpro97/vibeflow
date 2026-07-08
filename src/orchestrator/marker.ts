@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { appendTimeline, timelinePath } from "./timeline.js";
 
 export type MarkerStatus = "pending" | "running" | "done" | "failed" | "blocked";
 
@@ -197,6 +198,16 @@ export function updateMarker(
 
   // AC #176: every status transition syncs to ProjectV2 #6
   if (update.status) {
+    // #557: only append a timeline entry on an ACTUAL status change — a repeated same-status
+    // update (idempotent re-write) must not duplicate the ledger or grow it unbounded across re-runs.
+    if (update.status !== current.status) {
+      appendTimeline(unit, {
+        status: update.status,
+        at: marker.updatedAt,
+        confidence: marker.confidence,
+        evidenceCount: marker.evidence.length,
+      });
+    }
     syncProjectStatus(marker);
     if (update.status === "done") closeLinkedIssue(marker);
   }
@@ -211,6 +222,7 @@ export function readMarker(unit: string): DispatchMarker | null {
     const marker: DispatchMarker = JSON.parse(readFileSync(path, "utf8"));
     if (Date.now() - marker.startedAt > MARKER_TTL_MS) {
       removeIfExists(path);
+      removeIfExists(timelinePath(unit)); // #557: don't orphan the sibling ledger on TTL expiry
       return null;
     }
     return marker;
@@ -243,6 +255,7 @@ export function listMarkers(): DispatchMarker[] {
 export function cleanupMarker(unit: string): void {
   removeIfExists(markerPath(unit));
   removeIfExists(lockPath(unit));
+  removeIfExists(timelinePath(unit));
 }
 
 /** Acquire an exclusive lock for the given unit, or detect a stale one and steal it.

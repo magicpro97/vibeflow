@@ -113,6 +113,24 @@ export function startServer(
         return Response.json({ markers: m.listMarkers() });
       }
 
+      // --- GET /api/units/:name/timeline — token+loopback guarded (#557) ---
+      if (method === "GET" && path.startsWith("/api/units/") && path.endsWith("/timeline")) {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        let name: string;
+        try {
+          name = decodeURIComponent(path.slice("/api/units/".length, -"/timeline".length));
+        } catch {
+          // malformed percent-encoding (e.g. `%ZZ`, a lone `%`) → clean 400, never a 500 crash
+          return Response.json({ error: "bad name" }, { status: 400 });
+        }
+        // Reject slug-unsafe names: separators/NUL/`..` (traversal) + `:` (Windows ADS) + overlong
+        // (symmetry with the 200-char cap on /api/units). A unit name is a plain slug.
+        if (!name || name.length > 200 || /[\\/:\0]/.test(name) || name.includes(".."))
+          return Response.json({ error: "bad name" }, { status: 400 });
+        const { readTimeline } = await import("./orchestrator/timeline.js");
+        return Response.json({ ok: true, timeline: readTimeline(name) });
+      }
+
       // --- GET /api/phases ---
       // ponytail: PhaseTracker snapshot is per-orchestrateUnits() call; markers are the stable proxy
       if (method === "GET" && path === "/api/phases") {
