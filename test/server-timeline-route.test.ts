@@ -88,6 +88,21 @@ describe("GET /api/units/:name/timeline (#557 status timeline)", () => {
     }
   });
 
+  test("malformed percent-encoding in the name → 400 (not a 500 crash)", async () => {
+    const { server, url } = await startServer();
+    try {
+      const token = await csrfToken(url);
+      // `%ZZ` is invalid percent-encoding — decodeURIComponent throws URIError; the route must
+      // catch it and return a clean 400 rather than letting a 500 escape the handler.
+      const res = await fetch(`${url}/api/units/%ZZ/timeline`, {
+        headers: { "x-vibeflow-token": token },
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("a slash in the name → 400", async () => {
     const { server, url } = await startServer();
     try {

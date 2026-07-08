@@ -116,7 +116,13 @@ export function startServer(
       // --- GET /api/units/:name/timeline — token+loopback guarded (#557) ---
       if (method === "GET" && path.startsWith("/api/units/") && path.endsWith("/timeline")) {
         if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
-        const name = decodeURIComponent(path.slice("/api/units/".length, -"/timeline".length));
+        let name: string;
+        try {
+          name = decodeURIComponent(path.slice("/api/units/".length, -"/timeline".length));
+        } catch {
+          // malformed percent-encoding (e.g. `%ZZ`, a lone `%`) → clean 400, never a 500 crash
+          return Response.json({ error: "bad name" }, { status: 400 });
+        }
         // Reject slug-unsafe names: separators/NUL/`..` (traversal) + `:` (Windows ADS) + overlong
         // (symmetry with the 200-char cap on /api/units). A unit name is a plain slug.
         if (!name || name.length > 200 || /[\\/:\0]/.test(name) || name.includes(".."))
