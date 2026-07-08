@@ -15,7 +15,9 @@ async function req<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json" };
-  if (method !== "GET") headers["x-vibeflow-token"] = CSRF;
+  // Always send the CSRF token — required by GET /api/file (#558) and harmless
+  // on other GETs (they don't check it). Write routes have always needed it.
+  headers["x-vibeflow-token"] = CSRF;
   const res = await fetch(path, {
     method,
     headers,
@@ -130,6 +132,12 @@ export const api = {
     approve: (id: string, decision: "allow" | "block") =>
       req<{ ok: boolean }>("POST", "/api/hook/approve", { id, decision }),
   },
+  // #558: read a repo file for `file:line` evidence (token-guarded, sandboxed server-side).
+  readFile: (path: string, line?: number) =>
+    req<{ ok: boolean; content?: string; reason?: string; path?: string }>(
+      "GET",
+      `/api/file?path=${encodeURIComponent(path)}${line ? `&line=${line}` : ""}`,
+    ),
   // #562: ask an engine about a code snippet (Web-UI surface for `vf ask`).
   ask: {
     run: (payload: {
