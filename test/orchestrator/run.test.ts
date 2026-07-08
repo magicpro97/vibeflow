@@ -435,6 +435,9 @@ describe("orchestrateUnits — apply-time gate (#547)", () => {
       reviewer: passReviewer,
       concurrency: 1,
       applyGateEngine: "codex",
+      // Inject the diff getter so the test doesn't depend on `git diff HEAD~1 HEAD` (fails on a
+      // shallow CI clone). ok:true + a non-empty diff → the mock applyGate runs.
+      applyGateDiff: () => ({ diff: "+++ b/x\n+risky", ok: true }),
       applyGate: async () => ({
         allowed: false,
         risk: "critical" as const,
@@ -459,6 +462,7 @@ describe("orchestrateUnits — apply-time gate (#547)", () => {
       reviewer: passReviewer,
       concurrency: 1,
       applyGateEngine: "codex",
+      applyGateDiff: () => ({ diff: "+++ b/x\n+ok", ok: true }),
       applyGate: async (engine) => {
         seenEngine = engine;
         return { allowed: true, risk: "none" as const, reasons: [] };

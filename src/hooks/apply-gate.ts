@@ -8,6 +8,7 @@
 // existing web-UI approval modal — fail-closed (a classifier throw ⇒ critical ⇒
 // confirm, never a silent pass).
 import { randomUUID } from "node:crypto";
+import { cwd } from "node:process";
 import { getUnitDiffResult } from "../commands/dispatch-reviewer-llm.js";
 import type { Engine, HookInput, HookResult, RiskLevel } from "../core.js";
 import { registerPending } from "../server/pending-hooks.js";
@@ -185,23 +186,28 @@ interface GateableUnit {
  * block so the per-unit loop in run.ts stays one line (and run.ts under the 400-line cap).
  */
 export async function applyGateBlock(
-  gate: OrchestratorApplyGate | undefined,
-  engine: Engine | undefined,
-  reviewPassed: boolean,
+  opts: {
+    applyGate?: OrchestratorApplyGate;
+    applyGateEngine?: Engine;
+    cwd?: string;
+    applyGateDiff?: (cwd: string, scope: string[]) => { diff: string; ok: boolean };
+  },
   unit: GateableUnit,
-  cwd: string,
-  getDiff: typeof getUnitDiffResult = getUnitDiffResult,
+  reviewPassed: boolean,
 ): Promise<{ reason: string } | null> {
-  if (!reviewPassed || !gate || !engine) return null;
+  if (!reviewPassed || !opts.applyGate || !opts.applyGateEngine) return null;
   // Fail CLOSED on a diff-retrieval error: if git can't produce the diff we must NOT let the
   // unit through unclassified (WARN-1). A genuine empty diff (ok:true, "") has nothing to gate.
-  const { diff, ok } = getDiff(cwd, unit.scope ?? []);
+  const { diff, ok } = (opts.applyGateDiff ?? getUnitDiffResult)(
+    opts.cwd ?? cwd(),
+    unit.scope ?? [],
+  );
   if (!ok) {
     unit.status = "blocked";
     unit.gates = { ...unit.gates, security: "fail" };
     return { reason: "apply-gate blocked: could not read unit diff — fail-closed" };
   }
-  const g = await gate(engine, diff);
+  const g = await opts.applyGate(opts.applyGateEngine, diff);
   if (g.allowed) return null;
   unit.status = "blocked";
   unit.gates = { ...unit.gates, security: "fail" };

@@ -229,8 +229,10 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   applyGate?: OrchestratorApplyGate;
   /** #547: the dispatching engine, passed to `applyGate`. */
   applyGateEngine?: Engine;
-  /** #547: repo root used to resolve the unit diff via `getUnitDiff`. Defaults to cwd(). */
+  /** #547: repo root used to resolve the unit diff. Defaults to cwd(). */
   cwd?: string;
+  /** #547 test seam: inject the diff getter so integration tests don't hit real git (shallow CI clone). */
+  applyGateDiff?: (cwd: string, scope: string[]) => { diff: string; ok: boolean };
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   // Log initial markers for visibility before the first unit dispatches.
@@ -320,14 +322,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       });
       reviewed.status = review.pass ? "done" : "blocked";
       reviewed.gates = { ...reviewed.gates, review: review.pass ? "pass" : "fail" };
-      // #547 apply-time gate: a passed detection-only unit's diff is classified; `!allowed` re-blocks (mutates reviewed).
-      const blocked = await applyGateBlock(
-        opts.applyGate,
-        opts.applyGateEngine,
-        review.pass,
-        reviewed,
-        opts.cwd ?? cwd(),
-      );
+      // #547 apply-time gate: a passed detection-only unit's diff is classified; `!allowed` re-blocks.
+      const blocked = await applyGateBlock(opts, reviewed, review.pass);
       if (blocked) reviews[i] = { unit: u.name, pass: false, reason: blocked.reason };
       updateMarker(u.name, {
         status: reviewed.status,
