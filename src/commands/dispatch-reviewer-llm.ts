@@ -56,15 +56,33 @@ export async function runLLMReview(opts: LLMReviewOpts): Promise<LLMReviewResult
   };
 }
 
-/** Get git diff for a set of file paths relative to cwd */
-export function getUnitDiff(cwd: string, scope: string[], _spawn = spawnSync): string {
+/** Get git diff for a set of file paths relative to cwd.
+ *  Result form: `ok` distinguishes a genuine empty diff (ok:true, "") from a git failure
+ *  (ok:false) so a security caller can fail CLOSED instead of treating "couldn't read" as
+ *  "nothing risky". `diff` is UNtruncated — callers that only want a bounded preview truncate
+ *  themselves (see {@link getUnitDiff}). */
+export function getUnitDiffResult(
+  cwd: string,
+  scope: string[],
+  _spawn = spawnSync,
+): { diff: string; ok: boolean } {
   try {
     const args = ["diff", "HEAD~1", "HEAD", "--", ...(scope.length ? scope : ["."])];
     const r = _spawn("git", args, { encoding: "utf8", cwd });
-    return ((r.stdout as string) ?? "").slice(0, 4000);
+    // A non-zero exit (bad revision, not a repo, git missing) means we could NOT read the
+    // diff — surface it as ok:false rather than an empty (but "successful") diff.
+    if (r.status !== 0 || r.error) return { diff: "", ok: false };
+    return { diff: (r.stdout as string) ?? "", ok: true };
   } catch {
-    return "";
+    return { diff: "", ok: false };
   }
+}
+
+/** Get git diff for a set of file paths relative to cwd, truncated to a bounded preview.
+ *  Back-compat shape used by the LLM reviewer (a truncated prompt is fine there). Swallows
+ *  git failure to `""` — do NOT use for security decisions; use {@link getUnitDiffResult}. */
+export function getUnitDiff(cwd: string, scope: string[], _spawn = spawnSync): string {
+  return getUnitDiffResult(cwd, scope, _spawn).diff.slice(0, 4000);
 }
 
 /**

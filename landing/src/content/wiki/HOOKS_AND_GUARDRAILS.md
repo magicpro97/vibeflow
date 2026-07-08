@@ -78,6 +78,33 @@ The hook adapter (`src/hooks/adapters.ts`) exposes an enforcement-capability des
 orchestrator knows, per engine, whether pre-action blocking is real or downgraded. When it
 is downgraded, `downgradeBannerText` is surfaced before the run starts.
 
+### Apply-time gate for detection-only engines (issue #547)
+
+Claude and Copilot veto risky actions mid-loop through their native pre-action hooks, so a
+dangerous edit or command never reaches disk without a decision. Codex has no vetoing
+pre-tool hook, so its produced changes would otherwise land unreviewed. The apply-time gate
+(`src/hooks/apply-gate.ts`) closes that one real gap by moving enforcement to the point where
+VibeFlow itself controls the flow — after a unit's review passes, before it is marked done:
+
+```text
+enforceApplyGate(engine, diff):
+  1. Native engine (Claude / Copilot) → pass through. They already blocked mid-loop; a
+     second gate would be redundant. ONLY a post-hoc-only engine (Codex) is gated.
+  2. classifyDiff(diff) PER-HUNK: each hunk's added lines + touched path run through the
+     SAME scoreRisk classifier (DANGEROUS_COMMAND / PROTECTED_PATH + the optional semantic
+     tier, #544). The MAX risk across hunks wins, and each contributing hunk names its file
+     so the reviewer sees WHICH change tripped the gate.
+  3. At/above the threshold (default `high`, config `applyGate.threshold`), the diff is routed
+     to the existing web-UI approval modal (`registerPending` → HookApprovalModal.vue). The
+     unit blocks until a human decides allow|block.
+  4. FAIL-CLOSED: a classifier throw is treated as `critical` (confirm/block), and a modal
+     that cannot be reached resolves to `block`. Safety never silently degrades to allow.
+```
+
+This gives every engine the same EFFECTIVE enforcement point: native engines block in-loop,
+Codex blocks at apply time. The gate is injected (default OFF), so a run with no detection-only
+engine is byte-identical to before.
+
 ## Universal hook input
 
 ```json

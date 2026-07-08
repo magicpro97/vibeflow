@@ -1,5 +1,13 @@
-import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
+import {
+  type Engine,
+  type RiskLevel,
+  type WorkUnit,
+  type WorkflowState,
+  cwd,
+  strArray,
+} from "../core.js";
 import { computeConfidence } from "../gates.js";
+import { type OrchestratorApplyGate, applyGateBlock } from "../hooks/apply-gate.js";
 import { thresholdFor } from "./investigate.js";
 import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
 import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security-checkpoint.js";
@@ -212,6 +220,19 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   };
   /** #517: injectable clock stamped onto NEW evidence keys. Test seam; defaults to real time. */
   now?: () => string;
+  /**
+   * #547 apply-time guardrail gate. Default undefined ⇒ NO gate (backward-compat). When set,
+   * AFTER a unit's review passes, its produced diff is classified and a `!allowed` verdict
+   * blocks the unit (status=blocked, gates.security=fail). Bound to the dispatching engine at
+   * injection (CLI wires it only for a detection-only engine); `cwd` resolves the unit diff.
+   */
+  applyGate?: OrchestratorApplyGate;
+  /** #547: the dispatching engine, passed to `applyGate`. */
+  applyGateEngine?: Engine;
+  /** #547: repo root used to resolve the unit diff. Defaults to cwd(). */
+  cwd?: string;
+  /** #547 test seam: inject the diff getter so integration tests don't hit real git (shallow CI clone). */
+  applyGateDiff?: (cwd: string, scope: string[]) => { diff: string; ok: boolean };
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   // Log initial markers for visibility before the first unit dispatches.
@@ -299,23 +320,16 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
         total: opts.units.length,
         pass: review.pass,
       });
-      if (!review.pass) {
-        reviewed.status = "blocked";
-        reviewed.gates = { ...reviewed.gates, review: "fail" };
-        updateMarker(u.name, {
-          status: "blocked",
-          confidence: reviewed.confidence,
-          evidence: reviewed.evidence,
-        });
-      } else {
-        reviewed.status = "done";
-        reviewed.gates = { ...reviewed.gates, review: "pass" };
-        updateMarker(u.name, {
-          status: "done",
-          confidence: reviewed.confidence,
-          evidence: reviewed.evidence,
-        });
-      }
+      reviewed.status = review.pass ? "done" : "blocked";
+      reviewed.gates = { ...reviewed.gates, review: review.pass ? "pass" : "fail" };
+      // #547 apply-time gate: a passed detection-only unit's diff is classified; `!allowed` re-blocks.
+      const blocked = await applyGateBlock(opts, reviewed, review.pass);
+      if (blocked) reviews[i] = { unit: u.name, pass: false, reason: blocked.reason };
+      updateMarker(u.name, {
+        status: reviewed.status,
+        confidence: reviewed.confidence,
+        evidence: reviewed.evidence,
+      });
       return reviewed;
     },
     opts.concurrency ?? DEFAULT_CONCURRENCY,

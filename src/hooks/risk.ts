@@ -67,7 +67,11 @@ const CONFIG_PROTECTED = [
   /(^|\/)\.prettierrc[\w.-]*$/i,
 ];
 
-const RISK_ORDER: RiskLevel[] = ["none", "low", "medium", "high", "critical"];
+export const RISK_ORDER: RiskLevel[] = ["none", "low", "medium", "high", "critical"];
+
+/** Placeholder reason pushed when a scored input has NO risk signal. Exported so callers
+ *  (e.g. the apply-gate hunk classifier) can filter it out without hard-coding the string. */
+export const NO_SIGNALS = "no risk signals detected";
 
 /** True when a path argument resolves outside the workspace root. */
 function escapesWorkspace(filePath: string, workspace: string): boolean {
@@ -116,7 +120,7 @@ export function scoreRisk(
     }
   }
 
-  if (reasons.length === 0) reasons.push("no risk signals detected");
+  if (reasons.length === 0) reasons.push(NO_SIGNALS);
   return { risk, reasons };
 }
 
