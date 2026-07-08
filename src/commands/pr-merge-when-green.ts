@@ -7,6 +7,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { notify } from "../notify.js";
+import { readSettings } from "../settings.js";
 import {
   type FileHasher,
   type ImplFingerprint,
@@ -177,6 +179,10 @@ export interface MergeWhenGreenInject {
   sleep?: (ms: number) => Promise<void>;
   /** #520: injectable file hasher for the transport-only digest guard. */
   hashFile?: FileHasher;
+  /** #559: injectable desktop-notifier seam (best-effort; test spy asserts calls). */
+  notify?: (title: string, body: string) => void;
+  /** #559: injectable settings reader so the notify toggle is testable hermetically. */
+  readSettings?: typeof readSettings;
 }
 
 /**
@@ -229,6 +235,17 @@ export async function mergeWhenGreen(
     meta: { kind: "merge-when-green-claim", pr: target.pr, branch: target.branch },
   });
 
+  // #559: fire a best-effort desktop notification when the CI poll SETTLES, so a
+  // user who walked away learns the outcome. Only the POST-CLAIM terminals ping
+  // (a CI wait actually happened); pre-claim returns stay silent. Suppressed by
+  // --no-notify, settings.notifications:false, or VF_NO_NOTIFY=1 (inside notify).
+  const settings = (inject.readSettings ?? readSettings)(cwd());
+  const notifyEnabled = flags["no-notify"] !== true && settings.notifications !== false;
+  const ping = inject.notify ?? notify;
+  const say = (title: string, body: string) => {
+    if (notifyEnabled) ping(title, body);
+  };
+
   // 3. Poll CI
   for (let poll = 0; poll < MAX_POLLS; poll++) {
     const status = checkCiStatus(target.pr, run);
@@ -255,6 +272,7 @@ export async function mergeWhenGreen(
           level: "error",
         });
         releaseClaim(target.pr, inject);
+        say("VibeFlow", `✗ merge failed for #${target.pr}`);
         return EXIT_MERGE_FAIL;
       }
       // #520: the ship step must be transport-only — no scoped file may change.
@@ -273,6 +291,7 @@ export async function mergeWhenGreen(
         // A merged PR must not re-enter the free pool (unlike the pre-merge
         // fail/timeout paths below, which release to requeue). Tamper is a
         // post-merge integrity alarm, not a retry signal.
+        say("VibeFlow", `⚠ ship-tamper on #${target.pr}`);
         return EXIT_SHIP_TAMPER;
       }
       out("vf", c.green(`✓ merged #${target.pr} (${target.branch})`), {
@@ -280,6 +299,7 @@ export async function mergeWhenGreen(
       });
       // #532 no-release-on-merged: success also KEEPS the claim — the PR left the
       // queue by merging, so releasing would let a merged PR be re-claimed.
+      say("VibeFlow", `✓ merged #${target.pr} (${target.branch})`);
       return EXIT_OK;
     }
 
@@ -288,6 +308,7 @@ export async function mergeWhenGreen(
         meta: { kind: "merge-when-green-ci", pr: target.pr, status: "fail" },
       });
       moveToBack(target, inject);
+      say("VibeFlow", `✗ CI red — #${target.pr} requeued`);
       return EXIT_IO;
     }
 
@@ -305,5 +326,6 @@ export async function mergeWhenGreen(
     },
   );
   releaseClaim(target.pr, inject);
+  say("VibeFlow", `⚠ CI timed out — #${target.pr} released`);
   return EXIT_TIMEOUT;
 }

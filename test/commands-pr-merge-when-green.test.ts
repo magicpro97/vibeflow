@@ -22,6 +22,7 @@ import {
   addEntry,
   readQueue,
 } from "../src/commands/pr-queue.js";
+import { DEFAULT_SETTINGS } from "../src/settings.js";
 
 let origCwd: string;
 let dir: string;
@@ -461,5 +462,167 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       },
     );
     expect(code).toBe(EXIT_OK);
+  });
+
+  // ---- #559 desktop notification on CI settle ----
+  /** A notify spy capturing (title, body) so we can assert calls without firing. */
+  function notifySpy() {
+    const calls: Array<{ title: string; body: string }> = [];
+    return { calls, notify: (title: string, body: string) => calls.push({ title, body }) };
+  }
+  /** Green CI → scope → merge OK response triple (same shape as greenScopeMerge). */
+  function greenOk() {
+    return greenScopeMerge(["src/a.ts"]);
+  }
+
+  test("(u) #559 merged success → exactly one 'merged' notification", async () => {
+    addEntry({ pr: 30, branch: "feat/notify-ok" });
+    const spy = notifySpy();
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenOk()),
+        sleep: async () => {},
+        hashFile: () => "same",
+        notify: spy.notify,
+      },
+    );
+    expect(code).toBe(EXIT_OK);
+    expect(spy.calls).toEqual([{ title: "VibeFlow", body: "✓ merged #30 (feat/notify-ok)" }]);
+  });
+
+  test("(v) #559 CI red requeue → exactly one 'requeued' notification", async () => {
+    addEntry({ pr: 31, branch: "feat/notify-red" });
+    const spy = notifySpy();
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun([
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "FAILURE" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
+        ]),
+        sleep: async () => {},
+        notify: spy.notify,
+      },
+    );
+    expect(code).toBe(EXIT_IO);
+    expect(spy.calls).toEqual([{ title: "VibeFlow", body: "✗ CI red — #31 requeued" }]);
+  });
+
+  test("(w) #559 timeout → exactly one 'timed out' notification", async () => {
+    addEntry({ pr: 32, branch: "feat/notify-timeout" });
+    const spy = notifySpy();
+    const pending = {
+      stdout: JSON.stringify({ statusCheckRollup: [{ status: "IN_PROGRESS", conclusion: null }] }),
+      stderr: "",
+      status: 0,
+    };
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(Array(10).fill(pending)),
+        sleep: async () => {},
+        notify: spy.notify,
+      },
+    );
+    expect(code).toBe(EXIT_TIMEOUT);
+    expect(spy.calls).toEqual([{ title: "VibeFlow", body: "⚠ CI timed out — #32 released" }]);
+  });
+
+  test("(x) #559 merge fail → exactly one 'merge failed' notification", async () => {
+    addEntry({ pr: 33, branch: "feat/notify-mergefail" });
+    const spy = notifySpy();
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun([
+          {
+            stdout: JSON.stringify({
+              statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+            }),
+            stderr: "",
+            status: 0,
+          },
+          { stdout: '{"files":[]}', stderr: "", status: 0 },
+          { stdout: "", stderr: "Merge conflict", status: 1 },
+        ]),
+        sleep: async () => {},
+        notify: spy.notify,
+      },
+    );
+    expect(code).toBe(EXIT_MERGE_FAIL);
+    expect(spy.calls).toEqual([{ title: "VibeFlow", body: "✗ merge failed for #33" }]);
+  });
+
+  test("(y) #559 ship-tamper → exactly one 'ship-tamper' notification", async () => {
+    addEntry({ pr: 34, branch: "feat/notify-tamper" });
+    const spy = notifySpy();
+    let n = 0;
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenOk()),
+        sleep: async () => {},
+        hashFile: () => (++n === 1 ? "h1" : "h2"),
+        notify: spy.notify,
+      },
+    );
+    expect(code).toBe(EXIT_SHIP_TAMPER);
+    expect(spy.calls).toEqual([{ title: "VibeFlow", body: "⚠ ship-tamper on #34" }]);
+  });
+
+  test("(z) #559 queue-empty is a PRE-claim return → ZERO notifications", async () => {
+    const spy = notifySpy();
+    const code = await mergeWhenGreen({}, { runCommandSync: fakeRun([]), notify: spy.notify });
+    expect(code).toBe(EXIT_NOT_FOUND);
+    expect(spy.calls).toEqual([]);
+  });
+
+  test("(aa) #559 claim-conflict is a PRE-claim return → ZERO notifications", async () => {
+    addEntry({ pr: 35, branch: "feat/notify-conflict" });
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(dir, ".vibeflow", ".merge-queue.lock"), { recursive: true });
+    const spy = notifySpy();
+    const code = await mergeWhenGreen({}, { runCommandSync: fakeRun([]), notify: spy.notify });
+    expect(code).toBe(EXIT_LOCK_HELD);
+    expect(spy.calls).toEqual([]);
+  });
+
+  test("(ab) #559 --no-notify flag suppresses the ping on a settle", async () => {
+    addEntry({ pr: 36, branch: "feat/notify-flag-off" });
+    const spy = notifySpy();
+    const code = await mergeWhenGreen(
+      { "no-notify": true },
+      {
+        runCommandSync: fakeRun(greenOk()),
+        sleep: async () => {},
+        hashFile: () => "same",
+        notify: spy.notify,
+      },
+    );
+    expect(code).toBe(EXIT_OK);
+    expect(spy.calls).toEqual([]);
+  });
+
+  test("(ac) #559 settings.notifications=false suppresses the ping on a settle", async () => {
+    addEntry({ pr: 37, branch: "feat/notify-setting-off" });
+    const spy = notifySpy();
+    const code = await mergeWhenGreen(
+      {},
+      {
+        runCommandSync: fakeRun(greenOk()),
+        sleep: async () => {},
+        hashFile: () => "same",
+        notify: spy.notify,
+        readSettings: () => ({ ...DEFAULT_SETTINGS, notifications: false }),
+      },
+    );
+    expect(code).toBe(EXIT_OK);
+    expect(spy.calls).toEqual([]);
   });
 });

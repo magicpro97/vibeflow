@@ -51,6 +51,9 @@ export interface VibeSettings {
    * truth-tell on `vf config memory status`).
    */
   memory: MemoryMode;
+  /** #559: fire an OS desktop notification when `vf pr merge-when-green` CI settles.
+   *  Default true; per-run overridable via --no-notify / VF_NO_NOTIFY=1. */
+  notifications: boolean;
   /** #556: env-scrub policy for spawned engine subprocesses. Absent = conservative
    *  default (filterEnv drops known secret-shaped vars, keeps essentials + engine
    *  auth vars). `allow` non-empty switches to strict pass-only mode. */
@@ -78,6 +81,7 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   // PR #160: default to `false` (was `true`). The previous default was a
   // lie — settings said on but non-TTY init never asked.
   memory: false,
+  notifications: true,
   updatedAt: "",
 };
 
@@ -92,6 +96,7 @@ function defaults(): VibeSettings {
     toolPriority: [...DEFAULT_SETTINGS.toolPriority],
     failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
     memory: DEFAULT_SETTINGS.memory,
+    notifications: DEFAULT_SETTINGS.notifications,
     updatedAt: DEFAULT_SETTINGS.updatedAt,
   };
 }
@@ -169,6 +174,9 @@ function coerce(raw: unknown): VibeSettings {
   // regardless of what's on disk — the setting would never read true.
   out.memory = coerceMemory(obj.memory);
 
+  // #559: absent → default true (forward-merge); a non-boolean value stays true.
+  if (typeof obj.notifications === "boolean") out.notifications = obj.notifications;
+
   // Only materialize `hooks` when the stored file actually carries the key, so
   // repos that never configured hooks keep an absent block (fail-safe all-on at
   // scoring time) and SETTINGS.json stays free of churn. A present-but-garbage
@@ -222,6 +230,7 @@ export function writeSettings(
       ...(next.failureProtection ?? {}),
     }),
     memory: next.memory ?? current.memory,
+    notifications: next.notifications ?? current.notifications,
     updatedAt: now(),
   };
   // `hooks` is replace-on-write (the menu hands a complete policy), not a deep

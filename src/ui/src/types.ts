@@ -103,6 +103,7 @@ export interface VibeSettings {
   lspServers?: string[];
   failureProtection: FailureProtection;
   memory: boolean;
+  notifications?: boolean;
   hooks?: HookConfig;
   /** #556: env-scrub policy for spawned engine subprocesses (read-only in the UI). */
   envPolicy?: { deny?: string[]; allow?: string[] };

@@ -20,6 +20,7 @@ last_updated: 2026-06-24
 - [Optional Tools (Code Navigation)](#optional-tools-code-navigation)
 - [Discovery (Context7, Approval-Gated)](#discovery-context7-approval-gated)
 - [Hooks (Guardrails)](#hooks-guardrails)
+- [PR queue & merge](#pr-queue--merge)
 - [Verification](#verification)
 - [Help / Version](#help--version)
 
@@ -249,6 +250,31 @@ Set automatically by vf orchestrate based on flags:
 - default: ask user via web UI modal
 - auto-pilot: independent LLM false-positive evaluation
 - yolo: blind allow-all
+
+## PR queue & merge
+
+```bash
+vf pr merge-when-green                 # claim head of queue, poll CI, merge on green
+vf pr merge-when-green --head <branch> # target a specific queued branch
+vf pr merge-when-green --no-notify     # suppress the desktop notification for this run
+```
+
+Claims the head of the PR queue, polls CI every 30s (up to 5 min), then merges on
+green, requeues on red, or releases the claim on timeout. Because the poll can run
+unattended, VibeFlow fires a best-effort **OS desktop notification** when the poll
+settles — merged, CI red (requeued), CI timed out, merge failed, or ship-tamper —
+so you can walk away and get pinged with the outcome (macOS `osascript`, Linux
+`notify-send`; a silent no-op when neither is on `PATH`).
+
+Suppression precedence (any one silences the ping):
+
+- `--no-notify` — suppress for a single run.
+- `VF_NO_NOTIFY=1` — env override for a single run (or a whole shell/CI session).
+- **Settings → Desktop notifications** (`notifications` in `.vibeflow/SETTINGS.json`,
+  default `true`) — the persistent toggle, also editable in the web UI Settings panel.
+
+The notifier is best-effort and never changes the command's exit code: a missing or
+failing notifier is swallowed so it can't break the merge flow.
 
 ## Verification
 
