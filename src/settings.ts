@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
 import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
+import type { UserMcpServer } from "./tools/index.js";
+
+export type { UserMcpServer };
 
 /** Tool tiers, in the canonical preference family used by the priority ladder. */
 export type ToolTier = "codegraph" | "lsp" | "native";
@@ -58,6 +61,9 @@ export interface VibeSettings {
    *  default (filterEnv drops known secret-shaped vars, keeps essentials + engine
    *  auth vars). `allow` non-empty switches to strict pass-only mode. */
   envPolicy?: { deny?: string[]; allow?: string[] };
+  /** #548: user-declared MCP servers (any transport) fanned out to every engine's
+   *  config by writeToolConfigs. Absent = none (today's behavior). */
+  mcpServers?: Record<string, UserMcpServer>;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -153,6 +159,49 @@ function coerceEnvPolicy(raw: unknown): { deny?: string[]; allow?: string[] } | 
   return out;
 }
 
+/** #548: validate a stored record<string, string> → drop non-string values, undefined when empty. */
+function coerceStrMap(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** #548: validate a stored mcpServers map — keep well-formed stdio/http/sse entries, drop the
+ *  rest; undefined when absent/empty (so back-compat repos keep today's behavior). */
+function coerceMcpServers(raw: unknown): Record<string, UserMcpServer> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, UserMcpServer> = {};
+  for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+    // #548 (review): the name becomes a TOML section + JSON key; reject any name that
+    // isn't the safe lowercase-hyphen shape so a hand-edited SETTINGS.json can't inject.
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) continue;
+    if (!val || typeof val !== "object") continue;
+    const v = val as Record<string, unknown>;
+    const transport = v.transport ?? "stdio";
+    if (transport === "stdio") {
+      if (typeof v.command !== "string" || v.command.length === 0) continue;
+      const entry: UserMcpServer = { command: v.command };
+      if (v.transport === "stdio") entry.transport = "stdio";
+      if (Array.isArray(v.args)) {
+        entry.args = v.args.filter((a): a is string => typeof a === "string");
+      }
+      const env = coerceStrMap(v.env);
+      if (env) entry.env = env;
+      out[name] = entry;
+    } else if (transport === "http" || transport === "sse") {
+      if (typeof v.url !== "string" || v.url.length === 0) continue;
+      const entry: UserMcpServer = { transport, url: v.url };
+      const headers = coerceStrMap(v.headers);
+      if (headers) entry.headers = headers;
+      out[name] = entry;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Merge a partial/old/unknown stored object over the defaults into a complete VibeSettings. */
 function coerce(raw: unknown): VibeSettings {
   const out = defaults();
@@ -197,6 +246,13 @@ function coerce(raw: unknown): VibeSettings {
       (s): s is string => typeof s === "string" && s.length > 0,
     );
     if (servers.length) out.lspServers = servers;
+  }
+
+  // #548: materialize mcpServers ONLY when present (like envPolicy); malformed entries
+  // are dropped, an all-garbage/empty block coerces to undefined → absent.
+  if ("mcpServers" in obj) {
+    const m = coerceMcpServers(obj.mcpServers);
+    if (m) out.mcpServers = m;
   }
 
   if (typeof obj.updatedAt === "string") out.updatedAt = obj.updatedAt;
@@ -244,6 +300,10 @@ export function writeSettings(
   // which writes without the key so the default re-applies).
   const envPolicy = "envPolicy" in next ? next.envPolicy : current.envPolicy;
   if (envPolicy) merged.envPolicy = envPolicy;
+  // #548: mcpServers is replace-on-write like envPolicy. `vf config mcp` hands the complete
+  // map. An empty {} passed explicitly drops the key (last server removed → absent block).
+  const mcpServers = "mcpServers" in next ? next.mcpServers : current.mcpServers;
+  if (mcpServers && Object.keys(mcpServers).length > 0) merged.mcpServers = mcpServers;
   const servers = next.lspServers ?? current.lspServers;
   if (servers?.length) merged.lspServers = [...servers];
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));

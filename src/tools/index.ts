@@ -45,12 +45,28 @@ export interface StdioServer {
   tools?: string[];
 }
 
+/** #548: a remote (http/sse) MCP server, serialized into the JSON `mcpServers` map. */
+export interface RemoteServer {
+  type: "http" | "sse";
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** #548: either transport shape a JSON `mcpServers` map may hold. */
+export type McpServerDef = StdioServer | RemoteServer;
+
+/** #548: a user-declared MCP server, before per-engine serialization. Transport defaults
+ *  to stdio (command required); http/sse carry a url + optional headers. */
+export type UserMcpServer =
+  | { transport?: "stdio"; command: string; args?: string[]; env?: Record<string, string> }
+  | { transport: "http" | "sse"; url: string; headers?: Record<string, string> };
+
 /** Claude/Copilot MCP entry: a `mcpServers` map fragment ready to merge into JSON. */
 export interface JsonMcpEntry {
   engine: "claude" | "copilot";
   /** Merge target file (repo-relative for claude, absolute-ish for copilot). */
   configPath: string;
-  servers: Record<string, StdioServer>;
+  servers: Record<string, McpServerDef>;
   /** Tool names this server exposes, for priority/gating downstream. */
   tools: string[];
 }
@@ -63,6 +79,8 @@ export interface TomlMcpEntry {
   section: string;
   command: string;
   args: string[];
+  /** #548: set for a remote http server (codex emits `url = "..."` + the rmcp flag). */
+  url?: string;
   /** Tools to disable (codex supports disabled_tools for gating). */
   disabledTools?: string[];
   tools: string[];
@@ -141,6 +159,51 @@ export function buildStdioEntry(
     };
   }
   return { engine, configPath: CLAUDE_CONFIG, servers: { [name]: server }, tools };
+}
+
+/**
+ * #548: build a per-engine MCP entry from a user-declared server of any transport.
+ * Transport defaults to stdio. Codex does not support SSE → returns null (caller warns).
+ * User servers expose unknown tools, so the `tools` list is empty; copilot's stdio servers
+ * still get the "*" filter via the JSON server shape written by the writer.
+ */
+export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer): McpEntry | null {
+  const transport = def.transport ?? "stdio";
+  if (engine === "codex") {
+    if (transport === "sse") return null;
+    if (transport === "http") {
+      return {
+        engine,
+        configPath: CODEX_CONFIG,
+        section: `mcp_servers.${name}`,
+        command: "",
+        args: [],
+        url: (def as { url: string }).url,
+        tools: [],
+      };
+    }
+    const stdio = def as { command: string; args?: string[] };
+    return {
+      engine,
+      configPath: CODEX_CONFIG,
+      section: `mcp_servers.${name}`,
+      command: stdio.command,
+      args: stdio.args ?? [],
+      tools: [],
+    };
+  }
+  const configPath = engine === "copilot" ? COPILOT_CONFIG : CLAUDE_CONFIG;
+  let server: McpServerDef;
+  if (transport === "stdio") {
+    const s = def as { command: string; args?: string[]; env?: Record<string, string> };
+    server = { command: s.command, args: s.args ?? [], env: s.env ?? {} };
+  } else {
+    const r = def as { url: string; headers?: Record<string, string> };
+    server = r.headers
+      ? { type: transport, url: r.url, headers: r.headers }
+      : { type: transport, url: r.url };
+  }
+  return { engine, configPath, servers: { [name]: server }, tools: [] };
 }
 
 /** Registry of every optional tool, keyed by name. */

@@ -4,6 +4,7 @@
 // circular import with tools.ts). All imports through `./_shared.js`.
 
 import {
+  buildUserEntry,
   c,
   existsSync,
   join,
@@ -17,7 +18,7 @@ import {
 import type {
   Engine,
   JsonMcpEntry,
-  StdioServer,
+  McpServerDef,
   TomlMcpEntry,
   ToolName,
   VibeSettings,
@@ -44,17 +45,27 @@ const CODEX_MCP_FILE = join(".codex", "config.toml");
 
 /** Claude `.mcp.json` shape (only the slice we touch). */
 interface ClaudeMcpFile {
-  mcpServers: Record<string, StdioServer>;
+  mcpServers: Record<string, McpServerDef>;
 }
 
-/** Every MCP server name VibeFlow manages, across BOTH tools — the keys we may remove. */
-function managedClaudeServerNames(base: string, languages: string[]): string[] {
+/** Every MCP server name VibeFlow manages, across BOTH tools AND user servers — the keys we
+ * may remove so disabling/removing one cleans `.mcp.json` with no orphan. */
+function managedClaudeServerNames(
+  base: string,
+  languages: string[],
+  settings: VibeSettings,
+  extraStrip: readonly string[] = [],
+): string[] {
   const ctx = { workspace: base, languages };
   const all = resolveTools({ codegraph: true, lsp: true }, "claude", ctx);
   const names: string[] = [];
   for (const entry of all.entries) {
     for (const name of Object.keys((entry as JsonMcpEntry).servers)) names.push(name);
   }
+  for (const name of Object.keys(settings.mcpServers ?? {})) names.push(name);
+  // #548 (review): a just-removed user server is no longer in settings.mcpServers, so it
+  // must be passed in explicitly or it orphans in .mcp.json.
+  for (const name of extraStrip) names.push(name);
   return names;
 }
 
@@ -75,7 +86,12 @@ function readClaudeMcp(path: string): ClaudeMcpFile & { corrupt: boolean } {
  * stripped (so disabling removes them), then re-added for currently-enabled tools. Unrelated
  * servers are preserved. Returns true when the file changed.
  */
-function writeClaudeMcp(base: string, settings: VibeSettings, languages: string[]): boolean {
+function writeClaudeMcp(
+  base: string,
+  settings: VibeSettings,
+  languages: string[],
+  extraStrip: readonly string[] = [],
+): boolean {
   const path = join(base, CLAUDE_MCP_FILE);
   const file = readClaudeMcp(path);
   if (file.corrupt) {
@@ -85,11 +101,17 @@ function writeClaudeMcp(base: string, settings: VibeSettings, languages: string[
     );
     return false;
   }
-  for (const name of managedClaudeServerNames(base, languages)) delete file.mcpServers[name];
+  for (const name of managedClaudeServerNames(base, languages, settings, extraStrip)) {
+    delete file.mcpServers[name];
+  }
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "claude", ctx);
   for (const entry of merged.entries) {
     Object.assign(file.mcpServers, (entry as JsonMcpEntry).servers);
+  }
+  for (const [name, def] of Object.entries(settings.mcpServers ?? {})) {
+    const entry = buildUserEntry("claude", name, def);
+    if (entry) Object.assign(file.mcpServers, (entry as JsonMcpEntry).servers);
   }
   const hasServers = Object.keys(file.mcpServers).length > 0;
   if (!hasServers && !existsSync(path)) return false;
@@ -99,8 +121,13 @@ function writeClaudeMcp(base: string, settings: VibeSettings, languages: string[
 
 /** Serialize one codex `[mcp_servers.x]` section (minimal, only the shapes we emit). */
 function tomlSection(entry: TomlMcpEntry): string {
-  const lines = [`[${entry.section}]`, `command = ${JSON.stringify(entry.command)}`];
-  lines.push(`args = ${JSON.stringify(entry.args)}`);
+  const lines = [`[${entry.section}]`];
+  if (entry.url) {
+    lines.push(`url = ${JSON.stringify(entry.url)}`);
+  } else {
+    lines.push(`command = ${JSON.stringify(entry.command)}`);
+    lines.push(`args = ${JSON.stringify(entry.args)}`);
+  }
   if (entry.disabledTools && entry.disabledTools.length > 0) {
     lines.push(`disabled_tools = ${JSON.stringify(entry.disabledTools)}`);
   }
@@ -127,15 +154,30 @@ function writeCodexMcp(base: string, settings: VibeSettings, languages: string[]
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "codex", ctx);
   const entries = gateCodexEntries(merged.entries as TomlMcpEntry[], settings);
+  // #548: append user servers. stdio + http land; sse is unsupported by codex → skip + warn.
+  let hasHttp = false;
+  for (const [name, def] of Object.entries(settings.mcpServers ?? {})) {
+    const entry = buildUserEntry("codex", name, def) as TomlMcpEntry | null;
+    if (!entry) {
+      out(
+        "vf",
+        c.yellow(`! codex does not support SSE MCP servers — "${name}" skipped for codex.`),
+      );
+      continue;
+    }
+    if (entry.url) hasHttp = true;
+    entries.push(entry);
+  }
   const path = join(base, CODEX_MCP_FILE);
   if (entries.length === 0) {
     if (existsSync(path)) rmSync(path);
     return false;
   }
+  const rmcp = hasHttp ? "experimental_use_rmcp_client = true\n\n" : "";
   const header =
     "# Managed by VibeFlow (`vf tools`). Repo-local codex MCP config — merge into\n" +
     "# ~/.codex/config.toml or point codex at it. Edit `vf tools enable/disable` to regenerate.";
-  writeFileSafe(path, `${header}\n\n${entries.map(tomlSection).join("\n\n")}`);
+  writeFileSafe(path, `${rmcp}${header}\n\n${entries.map(tomlSection).join("\n\n")}`);
   return true;
 }
 
@@ -147,18 +189,43 @@ function writeCodexMcp(base: string, settings: VibeSettings, languages: string[]
 function printCopilotMcp(base: string, settings: VibeSettings, languages: string[]): number {
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "copilot", ctx);
-  if (merged.entries.length === 0) return 0;
+  const userNames = Object.keys(settings.mcpServers ?? {});
+  if (merged.entries.length === 0 && userNames.length === 0) return 0;
   out("vf");
   out("vf", c.bold("Copilot (run these — VibeFlow won't touch your secret ~/.copilot):"));
   let count = 0;
   for (const entry of merged.entries) {
     for (const [name, server] of Object.entries((entry as JsonMcpEntry).servers)) {
-      const args = server.args.map((a) => JSON.stringify(a)).join(" ");
-      out("vf", c.cyan(`  copilot mcp add ${name} -- ${server.command} ${args}`.trim()));
+      const s = server as { command: string; args: string[] };
+      const args = s.args.map((a) => JSON.stringify(a)).join(" ");
+      out("vf", c.cyan(`  copilot mcp add ${name} -- ${s.command} ${args}`.trim()));
       count++;
     }
   }
+  for (const [name, def] of Object.entries(settings.mcpServers ?? {})) {
+    out("vf", c.cyan(`  ${copilotAddCommand(name, def)}`));
+    count++;
+  }
   return count;
+}
+
+/** #548: render a `copilot mcp add` command for a user server. Header VALUES are masked so a
+ *  bearer token never lands in vf output; users copy the printed command and fill the secret. */
+function copilotAddCommand(
+  name: string,
+  def: NonNullable<VibeSettings["mcpServers"]>[string],
+): string {
+  const transport = def.transport ?? "stdio";
+  if (transport === "stdio") {
+    const s = def as { command: string; args?: string[] };
+    const args = (s.args ?? []).map((a) => JSON.stringify(a)).join(" ");
+    return `copilot mcp add ${name} --transport stdio -- ${s.command} ${args}`.trim();
+  }
+  const r = def as { url: string; headers?: Record<string, string> };
+  const headers = Object.keys(r.headers ?? {})
+    .map((k) => ` --header ${JSON.stringify(`${k}: <value>`)}`)
+    .join("");
+  return `copilot mcp add ${name} --transport ${transport} --url ${r.url}${headers}`;
 }
 
 /**
@@ -174,10 +241,11 @@ export function writeToolConfigs(
   base: string,
   settings: VibeSettings,
   engines?: readonly Engine[],
+  removedMcpNames: readonly string[] = [],
 ): void {
   const languages = repoLanguages(base);
   const needsMcpJson = !engines || engines.includes("claude") || engines.includes("copilot");
-  if (needsMcpJson) writeClaudeMcp(base, settings, languages);
+  if (needsMcpJson) writeClaudeMcp(base, settings, languages, removedMcpNames);
   if (!engines || engines.includes("codex")) writeCodexMcp(base, settings, languages);
   if (!engines || engines.includes("copilot")) printCopilotMcp(base, settings, languages);
 }
