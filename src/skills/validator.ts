@@ -21,6 +21,7 @@ const STANDARD_FRONTMATTER = new Set([
   "metadata",
   "compatibility",
   "type",
+  "mcp",
 ]);
 
 const NAME_MAX = 64;
@@ -115,6 +116,26 @@ export function validateSkillDir(
   // to knowledge at the injection site, so this is a warning, not a hard error).
   if (data.type !== undefined && data.type !== "repo" && data.type !== "knowledge") {
     warnings.push('frontmatter.type must be "repo" or "knowledge"');
+  }
+
+  // #552: mcp is optional; when present it must be an object. transport defaults to stdio,
+  // so it's optional — but stdio needs a command, and http/sse need a url.
+  if (data.mcp !== undefined) {
+    const m = data.mcp;
+    let malformed = false;
+    if (!m || typeof m !== "object") {
+      malformed = true;
+    } else {
+      const r = m as Record<string, unknown>;
+      const t = r.transport;
+      const transport = t === "http" || t === "sse" ? t : "stdio";
+      if (transport === "stdio" && (typeof r.command !== "string" || !r.command)) malformed = true;
+      if ((transport === "http" || transport === "sse") && (typeof r.url !== "string" || !r.url))
+        malformed = true;
+    }
+    if (malformed) {
+      warnings.push("frontmatter.mcp is malformed (need command for stdio, or url for http/sse)");
+    }
   }
 
   // Warn (not error) on frontmatter keys outside the spec's standard set,

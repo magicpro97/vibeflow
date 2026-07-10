@@ -157,6 +157,15 @@ export interface Skill {
   /** #543: repo = always-on project law (injected every dispatch); knowledge (default) = keyword-gated. */
   type?: "repo" | "knowledge";
   requires?: SkillRequires;
+  /** #552: an MCP server this skill provisions when present (executable skill bundle). */
+  mcp?: {
+    name?: string;
+    transport?: "stdio" | "http" | "sse";
+    command?: string;
+    args?: string[];
+    url?: string;
+    headers?: Record<string, string>;
+  };
   /** Absolute path to the skill folder. */
   dir: string;
   /** Absolute path to the skill's SKILL.md. */

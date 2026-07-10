@@ -68,6 +68,20 @@ When the task splits into independent slices with distinct file scopes.
 3. Re-run `vf verify` until green. Nothing is "done" until it passes WITH evidence.
 4. `vf verify` is read-only by default; pass `--journal` only to append the run to the work journal.
 
+## Recent features (v0.12.x)
+
+- **Skill tiers (`type: repo|knowledge`)** — a SKILL.md frontmatter `type: repo` makes the
+  skill always-on "project law" injected into every dispatch; `knowledge` (default) stays
+  keyword-gated. `type: repo` skills are your team invariants that must never be missed.
+- **User MCP servers (`vf config mcp`)** — declare arbitrary MCP servers (stdio/http/sse)
+  once and vf fans them out to every engine: `vf config mcp add <name> --stdio --command <cmd>`
+  / `--http <url>` / `--sse <url>`; `vf config mcp list|remove <name>`. Codex has no SSE
+  (skipped+warned). Header values are never logged; use `${VAR}` for tokens in `.mcp.json`.
+- **Sandboxed verify (`vf verify --sandbox`)** — run the verify gate inside a throwaway
+  container (opt-in; default is host speed). Image via the `sandboxImage` setting.
+- **Merge-when-green notify** — `vf pr merge-when-green` fires an OS desktop notification when
+  CI settles (toggle with the `notifications` setting / `--no-notify`).
+
 ## Verification (prove it worked)
 
 - After init: `vf doctor` (engine ready + hooks armed) and the generated files exist.

@@ -111,6 +111,37 @@ The optional `type` frontmatter field sets how a skill reaches the engine:
 
 `vf skills validate` warns if `type` is present but not `repo`/`knowledge`.
 
+### `mcp:` (executable skill bundles — #552)
+
+A skill may declare ONE MCP server it needs. When the skill is present in the repo,
+VibeFlow provisions that server into every engine's MCP config (reusing the same
+fan-out as `vf config mcp`, #548). Remove the skill and its server disappears on the
+next `vf init` / `vf tools` run.
+
+```yaml
+mcp:
+  name: playwright        # optional; defaults to the skill name
+  transport: stdio        # stdio (default) | http | sse
+  command: npx            # stdio only
+  args: [@playwright/mcp] # stdio only
+  url: https://…/mcp      # http/sse only
+  headers: { Authorization: "Bearer ${TOKEN}" }  # http/sse only
+```
+
+- **One server per skill.** (A multi-server block is not supported — declare separate skills.)
+- **Server name** = `mcp.name` if it's valid lowercase-hyphen, else the skill name. The name
+  is regex-validated (it becomes a TOML section / JSON key) so it can't inject.
+- **Precedence**: an explicit `vf config mcp` server WINS over a skill's server on a name clash.
+- **Codex + SSE**: codex has no SSE transport, so an `sse` skill server is skipped for codex
+  with a warning (stdio/http still land).
+- **Security**: installing a skill now also wires a tool that runs code. VibeFlow prints one
+  warning per skill-contributed server (naming the skill + command/url) so you SEE what got
+  wired. Only install skills you trust; header values are never logged (use `${VAR}`).
+- `vf skills validate` warns if the `mcp` block is malformed (stdio without `command`, or
+  http/sse without `url`).
+
+See also [Tool Adapters — user-declared MCP servers](./TOOL_ADAPTERS.md).
+
 ## Skill categories
 
 ### Source skills
