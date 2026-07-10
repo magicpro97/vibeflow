@@ -13,6 +13,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { ENGINES, type Engine, c, cwd } from "../core.js";
 import { filterEnv } from "../dispatch/env-filter.js";
+import { makeAsyncSpawner } from "../dispatch/spawners.js";
+import type { AsyncSpawner } from "../dispatch/types.js";
 import { out } from "../logbus.js";
 import { preflightAll } from "../preflight.js";
 import type { EngineReadiness } from "../preflight/types.js";
@@ -225,6 +227,26 @@ export function captureSpawn(
   const text = (r.stdout ?? "") || (r.stderr ?? "");
   onChunk?.(text);
   return { code: r.status ?? 1, text };
+}
+
+/**
+ * Async, non-blocking counterpart of captureSpawn for the Bun HTTP server (#584).
+ * Builds a spawner honoring the repo's configured envPolicy (not just the DEFAULT_DENY
+ * floor) so it matches the sync captureSpawn's #556/#582 scrub — makeAsyncSpawner applies
+ * filterEnv(process.env, envPolicy) at build. onChunk/SSE streaming is a follow-up (#580).
+ */
+export async function captureSpawnAsync(
+  inv: AskInvocation,
+  prompt: string,
+  spawner: AsyncSpawner = makeAsyncSpawner({ envPolicy: readSettings(cwd()).envPolicy ?? {} }),
+): Promise<{ code: number; text: string }> {
+  const r = await spawner(
+    inv.cmd,
+    materializeArgs(inv, prompt),
+    inv.promptMode === "stdin" ? prompt : "",
+  );
+  const text = r.stdout || r.stderr || "";
+  return { code: r.status, text };
 }
 
 function fail(msg: string): number {
