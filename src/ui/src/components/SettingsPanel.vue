@@ -151,37 +151,8 @@
         </fieldset>
         <div v-else-if="!loading" class="text-[11px] text-neutral-600 italic">No hooks configured · edit .vibeflow/hooks.yaml to add</div>
 
-        <!-- #556: env-scrub policy for spawned engines (read-only) -->
-        <fieldset class="space-y-2">
-          <legend class="text-xs text-neutral-500 mb-1.5 flex items-center gap-1.5">
-            Env scrub
-            <InfoTip tip="Host env handed to spawned agent CLIs is filtered so secrets (AWS_*, *_TOKEN, DB URLs) don't leak. Engine auth vars are always kept." />
-            <span class="text-[10px] text-neutral-600 font-normal normal-case tracking-normal">read-only · edit via vf config env-policy</span>
-          </legend>
-          <div class="text-xs text-neutral-400">
-            mode:
-            <span class="font-mono text-neutral-300">{{ (form.envPolicy?.allow?.length) ? 'strict (allowlist)' : 'default (denylist)' }}</span>
-          </div>
-          <div v-if="form.envPolicy?.deny?.length" class="flex flex-wrap gap-1.5">
-            <span class="text-[11px] text-neutral-500 uppercase tracking-wider w-full">Configured deny</span>
-            <span
-              v-for="g in form.envPolicy.deny"
-              :key="'d-' + g"
-              class="px-2 py-0.5 rounded border border-neutral-800 text-xs text-neutral-400 font-mono"
-            >{{ g }}</span>
-          </div>
-          <div v-if="form.envPolicy?.allow?.length" class="flex flex-wrap gap-1.5">
-            <span class="text-[11px] text-neutral-500 uppercase tracking-wider w-full">Configured allow</span>
-            <span
-              v-for="g in form.envPolicy.allow"
-              :key="'a-' + g"
-              class="px-2 py-0.5 rounded border border-neutral-800 text-xs text-neutral-400 font-mono"
-            >{{ g }}</span>
-          </div>
-          <div v-if="!form.envPolicy?.deny?.length && !form.envPolicy?.allow?.length" class="text-[11px] text-neutral-600 italic">
-            Conservative default — known secret-shaped vars dropped, essentials + engine auth kept.
-          </div>
-        </fieldset>
+        <!-- #556 #576: env-scrub policy for spawned engines -->
+        <EnvScrubEditor v-model="form.envPolicy" />
 
         <div v-if="err" class="flex items-start gap-2 p-2 rounded border border-neutral-800 text-red-400 text-xs">
           <span class="shrink-0">⚠</span><span>{{ err }}</span>
@@ -219,6 +190,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
 import type { VibeSettings } from "../types.js";
+import EnvScrubEditor from "./EnvScrubEditor.vue";
 import InfoTip from "./InfoTip.vue";
 
 const emit = defineEmits<{ close: [] }>();
@@ -267,6 +239,10 @@ onMounted(async () => {
     // Deep clone so edits don't mutate the API-cached object
     form.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
     original.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
+    // Coerce envPolicy → {} on BOTH so EnvScrubEditor's v-model binds an object
+    // AND the dirty-check baseline matches (else isDirty is true on open).
+    if (form.value && !form.value.envPolicy) form.value.envPolicy = {};
+    if (original.value && !original.value.envPolicy) original.value.envPolicy = {};
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
