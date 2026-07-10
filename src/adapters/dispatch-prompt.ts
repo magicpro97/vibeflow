@@ -48,6 +48,8 @@ export type UnitBrief =
       skills?: string[];
       /** True when this is a knowledge-heavy unit (e.g. UX/UI) and NO skill matched. */
       skillGap?: boolean;
+      /** #543: always-on repo ("project law") skills — injected every dispatch. */
+      repoSkills?: string[];
     };
 
 function briefName(u: UnitBrief): string {
@@ -85,14 +87,17 @@ export function dispatchPrompt(
     }
     lines.push("");
   }
-  const matched = objs.flatMap((u) => u.skills ?? []);
+  const repo = [...new Set(objs.flatMap((u) => u.repoSkills ?? []))];
+  const repoSet = new Set(repo);
+  const matched = [...new Set(objs.flatMap((u) => u.skills ?? []))].filter((s) => !repoSet.has(s));
   const gaps = objs.filter((u) => u.skillGap).map((u) => u.name);
-  if (matched.length || gaps.length) {
+  if (repo.length || matched.length || gaps.length) {
     lines.push("Skills:");
+    if (repo.length) {
+      lines.push(`- Project law (always apply, every unit): ${repo.join(", ")}.`);
+    }
     if (matched.length) {
-      lines.push(
-        `- Follow these verified skills before improvising: ${[...new Set(matched)].join(", ")}.`,
-      );
+      lines.push(`- Follow these verified skills before improvising: ${matched.join(", ")}.`);
     }
     if (gaps.length) {
       lines.push(

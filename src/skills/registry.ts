@@ -128,6 +128,7 @@ export function parseSkill(
     status,
     capabilities: asStringArray(data.capabilities),
     triggers: asStringArray(data.triggers),
+    type: data.type === "repo" ? "repo" : data.type === "knowledge" ? "knowledge" : undefined,
     requires: asRequires(data.requires),
     dir,
     path: skillMdPath,
@@ -182,6 +183,44 @@ export function matchSkillsForFile(skills: Skill[], filename: string): SkillMatc
     }
   }
   return matches.sort(byScoreThenStatus);
+}
+
+/** #543: repo ("project law") skills — always-on, injected every dispatch regardless of
+ *  keyword match. Deprecated excluded; higher-trust status first. */
+export function repoSkills(skills: Skill[]): Skill[] {
+  return skills
+    .filter((s) => s.type === "repo" && s.status !== "deprecated")
+    .sort((a, b) => STATUS_RANK[b.status] - STATUS_RANK[a.status]);
+}
+
+/** #543: resolve the skills injected for one dispatch unit: always-on repo skills unioned
+ *  with keyword matches (repo first, deduped). `matchedNames` is the keyword-only subset
+ *  (used for the knowledge-gap flag); `skillsRequired` is the verified subset of the union. */
+export function selectDispatchSkills(
+  allSkills: Skill[],
+  unitText: string,
+): {
+  skillNames: string[];
+  alwaysNames: string[];
+  matchedNames: string[];
+  skillsRequired: string[];
+} {
+  const skillMatches = matchSkillsForTask(allSkills, unitText);
+  const alwaysOn = repoSkills(allSkills);
+  const alwaysNames = alwaysOn.map((s) => s.name);
+  // #543: a repo skill that ALSO declares triggers can appear in skillMatches, but it is
+  // always-on project law — NOT a knowledge match. Exclude repo-typed matches from
+  // matchedNames so the knowledge-gap flag (matchedNames.length === 0) is not falsely
+  // suppressed by an always-on skill. (Copilot review #591.)
+  const matchedNames = skillMatches.filter((m) => m.skill.type !== "repo").map((m) => m.skill.name);
+  const skillNames = [...new Set([...alwaysNames, ...matchedNames])];
+  const skillsRequired = [
+    ...new Set([
+      ...alwaysOn.filter((s) => s.status === "verified").map((s) => s.name),
+      ...skillMatches.filter((m) => m.skill.status === "verified").map((m) => m.skill.name),
+    ]),
+  ];
+  return { skillNames, alwaysNames, matchedNames, skillsRequired };
 }
 
 /**

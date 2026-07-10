@@ -96,6 +96,19 @@ status: verified
 Instructions...
 ```
 
+### `type: repo | knowledge` (always-on project law)
+
+The optional `type` frontmatter field sets how a skill reaches the engine:
+
+- `type: repo` — **always-on project law**. Injected into EVERY dispatch as
+  non-negotiable law, regardless of keyword match (e.g. "always run migrations
+  in a transaction", "never touch prod config").
+- `type: knowledge` (default) — **keyword-gated**. Injected only when the unit
+  text matches the skill's triggers/capabilities (today's behavior).
+- absent — treated as `knowledge` (back-compat).
+
+`vf skills validate` warns if `type` is present but not `repo`/`knowledge`.
+
 ## Skill categories
 
 ### Source skills
