@@ -248,7 +248,7 @@ describe("config env-policy (#556)", () => {
   });
 
   test("test subcommand prints DROPPED and KEPT names, never values", async () => {
-    // biome-ignore lint/performance/noDelete: test cleanup must truly remove the var
+    const orig = process.env.MY_TEST_SECRET;
     process.env.MY_TEST_SECRET = "super-secret-value-should-not-appear";
     try {
       const dir = tmpRepo();
@@ -267,13 +267,14 @@ describe("config env-policy (#556)", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     } finally {
-      // biome-ignore lint/performance/noDelete: test cleanup
-      delete process.env.MY_TEST_SECRET;
+      // biome-ignore lint/performance/noDelete: restore to truly-absent when the var wasn't set
+      if (orig === undefined) delete process.env.MY_TEST_SECRET;
+      else process.env.MY_TEST_SECRET = orig;
     }
   });
 
   test("test subcommand with no-policy still drops DEFAULT_DENY secrets", async () => {
-    // biome-ignore lint/performance/noDelete: test cleanup
+    const origAws = process.env.AWS_SECRET_ACCESS_KEY;
     process.env.AWS_SECRET_ACCESS_KEY = "abc123";
     try {
       const dir = tmpRepo();
@@ -287,8 +288,9 @@ describe("config env-policy (#556)", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     } finally {
-      // biome-ignore lint/performance/noDelete: test cleanup
-      delete process.env.AWS_SECRET_ACCESS_KEY;
+      // biome-ignore lint/performance/noDelete: restore to truly-absent when the var wasn't set
+      if (origAws === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
+      else process.env.AWS_SECRET_ACCESS_KEY = origAws;
     }
   });
 });

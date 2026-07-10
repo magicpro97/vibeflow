@@ -1103,7 +1103,7 @@ describe("defaultSpawner path quoting (Windows space-in-path fix)", () => {
 
 describe("defaultSpawner env scrub (#577)", () => {
   test("defaultSpawner strips DEFAULT_DENY secrets (AWS_SECRET_ACCESS_KEY)", () => {
-    // biome-ignore lint/performance/noDelete: test cleanup must truly remove the var
+    const orig = process.env.AWS_SECRET_ACCESS_KEY;
     process.env.AWS_SECRET_ACCESS_KEY = "super-secret-token";
     try {
       const { defaultSpawner } = require("../src/preflight/probe.js");
@@ -1114,8 +1114,9 @@ describe("defaultSpawner env scrub (#577)", () => {
       );
       expect(r.stdout).toBe("SCRUBBED");
     } finally {
-      // biome-ignore lint/performance/noDelete: test cleanup
-      delete process.env.AWS_SECRET_ACCESS_KEY;
+      // biome-ignore lint/performance/noDelete: restore to truly-absent when the var wasn't set
+      if (orig === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
+      else process.env.AWS_SECRET_ACCESS_KEY = orig;
     }
   });
 
@@ -1130,8 +1131,8 @@ describe("defaultSpawner env scrub (#577)", () => {
   });
 
   test("defaultSpawner scrubs DEFAULT_DENY even when no envPolicy configured", () => {
-    // biome-ignore lint/performance/noDelete: test cleanup
-    process.env.STRIPE_API_KEY = "sk_test_12345";
+    const orig = process.env.STRIPE_API_KEY;
+    process.env.STRIPE_API_KEY = "«redacted:sk_test_…»";
     try {
       const { defaultSpawner } = require("../src/preflight/probe.js");
       const r = defaultSpawner(
@@ -1141,8 +1142,9 @@ describe("defaultSpawner env scrub (#577)", () => {
       );
       expect(r.stdout).toBe("SCRUBBED");
     } finally {
-      // biome-ignore lint/performance/noDelete: test cleanup
-      delete process.env.STRIPE_API_KEY;
+      // biome-ignore lint/performance/noDelete: restore to truly-absent when the var wasn't set
+      if (orig === undefined) delete process.env.STRIPE_API_KEY;
+      else process.env.STRIPE_API_KEY = orig;
     }
   });
 });
@@ -1193,9 +1195,8 @@ describe("checkAsync Bun.spawn env scrub (#577)", () => {
       expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
       expect(env.STRIPE_API_KEY).toBeUndefined();
       expect(env.DATABASE_URL).toBeUndefined();
-      // ALWAYS_KEEP vars should be present
+      // ALWAYS_KEEP vars should be present (PATH is cross-platform; HOME is unset on Windows)
       expect(env.PATH).toBeDefined();
-      expect(env.HOME).toBeDefined();
     } finally {
       (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
     }
