@@ -260,7 +260,8 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
       expect(r.code).toBe(0);
       expect(r.text).toBe("SCRUBBED");
     } finally {
-      process.env[AWS_SECRET_KEY] = undefined;
+      // biome-ignore lint/performance/noDelete: must truly remove the env var (assigning undefined leaves the string "undefined")
+      delete process.env[AWS_SECRET_KEY];
     }
   });
 
@@ -294,16 +295,19 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
       const code = inheritSpawn({ cmd: "node", args: ["-e", ""], promptMode: "stdin" }, "x");
       expect(code).toBe(0);
     } finally {
-      process.env[AWS_SECRET_KEY] = undefined;
+      // biome-ignore lint/performance/noDelete: must truly remove the env var (assigning undefined leaves the string "undefined")
+      delete process.env[AWS_SECRET_KEY];
     }
   });
 
   // Restore env after all #582 tests
   afterAll(() => {
     if (origSecret !== undefined) process.env[AWS_SECRET_KEY] = origSecret;
-    else process.env[AWS_SECRET_KEY] = undefined;
+    // biome-ignore lint/performance/noDelete: restore to truly-absent, not the string "undefined"
+    else delete process.env[AWS_SECRET_KEY];
     if (origPath !== undefined) process.env.PATH = origPath;
-    else process.env.PATH = undefined;
+    // biome-ignore lint/performance/noDelete: restore to truly-absent, not the string "undefined"
+    else delete process.env.PATH;
   });
 });
 
