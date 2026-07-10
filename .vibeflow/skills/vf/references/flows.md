@@ -81,6 +81,10 @@ When the task splits into independent slices with distinct file scopes.
   container (opt-in; default is host speed). Image via the `sandboxImage` setting.
 - **Merge-when-green notify** — `vf pr merge-when-green` fires an OS desktop notification when
   CI settles (toggle with the `notifications` setting / `--no-notify`).
+- **Web-UI `ask` streaming + resume** — the dashboard's "Ask about code" card streams the engine
+  answer token-by-token over SSE (`GET /api/ask/stream`, #580) and offers a "Continue" affordance
+  to resume the engine's most-recent conversation (#581); resume is hidden for copilot (no native
+  resume flag).
 
 ## Verification (prove it worked)
 

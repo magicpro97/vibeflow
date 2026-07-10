@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type AskForm, validateAskForm } from "../src/ui/src/ask-client.js";
+import { type AskForm, validateAskForm, validateResumeForm } from "../src/ui/src/ask-client.js";
 
 function form(over: Partial<AskForm> = {}): AskForm {
   return { path: "src/x.ts", start: "5", end: "12", question: "why?", engine: "", ...over };
@@ -46,6 +46,24 @@ describe("validateAskForm (#562 Web-UI)", () => {
   });
 });
 
+describe("validateResumeForm (#581)", () => {
+  test("valid question → { question }", () => {
+    expect(validateResumeForm("and then?")).toEqual({ question: "and then?" });
+  });
+
+  test("trims whitespace", () => {
+    expect(validateResumeForm("  go on  ")).toEqual({ question: "go on" });
+  });
+
+  test("empty string → error", () => {
+    expect(typeof validateResumeForm("")).toBe("string");
+  });
+
+  test("whitespace-only → error", () => {
+    expect(typeof validateResumeForm("   ")).toBe("string");
+  });
+});
+
 describe("api.ask.streamUrl (#580)", () => {
   // CSRF is read from meta tag in browser; in test env it's "".
   // The function builds a URLSearchParams string regardless.
@@ -78,5 +96,37 @@ describe("api.ask.streamUrl (#580)", () => {
     p.set("engine", "codex");
     const url = `/api/ask/stream?${p.toString()}`;
     expect(url).toContain("engine=codex");
+  });
+});
+
+// #581: streamUrl resume
+describe("api.ask.streamUrl — resume (#581)", () => {
+  test("resume=true omits path/start/end, includes question+token+engine+resume", () => {
+    const p = new URLSearchParams({ question: "go on", token: "csrf" });
+    p.set("engine", "claude");
+    p.set("resume", "true");
+    const url = `/api/ask/stream?${p.toString()}`;
+    expect(url).toContain("question=go+on");
+    expect(url).toContain("token=csrf");
+    expect(url).toContain("engine=claude");
+    expect(url).toContain("resume=true");
+    expect(url).not.toContain("path=");
+    expect(url).not.toContain("start=");
+    expect(url).not.toContain("end=");
+  });
+
+  test("fresh mode (resume not set) still includes path/start/end", () => {
+    const p = new URLSearchParams({
+      path: "src/a.ts",
+      start: "1",
+      end: "3",
+      question: "q",
+      token: "csrf",
+    });
+    const url = `/api/ask/stream?${p.toString()}`;
+    expect(url).toContain("path=src%2Fa.ts");
+    expect(url).toContain("start=1");
+    expect(url).toContain("end=3");
+    expect(url).not.toContain("resume=");
   });
 });

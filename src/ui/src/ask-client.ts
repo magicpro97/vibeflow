@@ -39,3 +39,12 @@ export function validateAskForm(form: AskForm): AskPayload | string {
   if (form.engine) payload.engine = form.engine;
   return payload;
 }
+
+/**
+ * #581: resume-mode validation — only question is required (no path/lines).
+ */
+export function validateResumeForm(question: string): string | { question: string } {
+  const q = question.trim();
+  if (!q) return "question is required";
+  return { question: q };
+}
