@@ -237,7 +237,7 @@ async function main(argv: string[]): Promise<number> {
     case "units":
       return units(positionals[0], positionals.slice(1), flags);
     case "config":
-      return config(positionals[0], positionals.slice(1));
+      return config(positionals[0], positionals.slice(1), cwd(), flags);
     case "skills":
       return skills(positionals[0], positionals.slice(1));
     case "tools":

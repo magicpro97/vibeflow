@@ -173,6 +173,39 @@ interface EngineEnforcementCapability {
 }
 ```
 
+## User-declared MCP servers (`[mcp]` block)
+
+Beyond the built-in `codegraph`/`lsp` tools, you can declare arbitrary MCP servers
+that VibeFlow fans out to every engine's native config. Servers live under
+`mcpServers` in `.vibeflow/SETTINGS.json` and are managed with `vf config mcp`:
+
+```
+# stdio (local process) — the common case (Playwright, Postgres, fetch, …)
+vf config mcp add playwright --stdio --command npx serve --port
+
+# remote streamable-HTTP
+vf config mcp add notion --http https://mcp.notion.com/mcp --header_Authorization "Bearer ${NOTION_TOKEN}"
+
+# remote SSE (deprecated transport; not supported by Codex)
+vf config mcp add asana --sse https://mcp.asana.com/sse
+
+vf config mcp list        # show configured servers (name, transport, target)
+vf config mcp remove notion
+```
+
+Each `add`/`remove` regenerates every engine config in lockstep:
+
+| Engine  | Target file                    | stdio | http | sse |
+|---------|--------------------------------|-------|------|-----|
+| Claude  | `.mcp.json`                    | ✓     | `type:"http"` | `type:"sse"` |
+| Codex   | `.codex/config.toml`           | ✓     | `url=` + `experimental_use_rmcp_client=true` | ✗ (skipped + warning) |
+| Copilot | printed `copilot mcp add` cmd  | ✓     | `--transport http` | `--transport sse` |
+
+**Security.** `headers` may hold bearer tokens. VibeFlow only passes through what you
+type — it never invents or stores secrets, and never logs header VALUES (the Copilot
+command prints `<value>` placeholders). Because Claude's `.mcp.json` is repo-committed,
+use env-var expansion (`${VAR}`) in headers rather than committing a raw token.
+
 ## Dispatch result schema
 
 ```json

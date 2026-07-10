@@ -4,6 +4,7 @@ import * as codegraph from "../src/tools/codegraph.js";
 import {
   type JsonMcpEntry,
   type McpEntry,
+  type StdioServer,
   TOOLS,
   TOOL_ORDER,
   type TomlMcpEntry,
@@ -58,8 +59,9 @@ describe("codegraph tool", () => {
   test("mcpConfigFor(copilot) uses mcpServers with a tools filter (VERIFIED schema)", () => {
     const entry = asJson(codegraph.mcpConfigFor("copilot"));
     expect(entry.configPath).toBe("~/.copilot/mcp-config.json");
-    expect(entry.servers.codegraph?.command).toBe("codegraph");
-    expect(entry.servers.codegraph?.tools).toEqual(["*"]);
+    const server = entry.servers.codegraph as StdioServer;
+    expect(server?.command).toBe("codegraph");
+    expect(server?.tools).toEqual(["*"]);
   });
 });
 
@@ -81,19 +83,21 @@ describe("lsp tool", () => {
     expect(entries).toHaveLength(2);
 
     const ts = entries.find((e) => "lsp-typescript" in e.servers);
-    const tsArgs = ts?.servers["lsp-typescript"]?.args ?? [];
+    const tsServer = ts?.servers["lsp-typescript"] as StdioServer | undefined;
+    const tsArgs = tsServer?.args ?? [];
     expect(tsArgs).toContain("--workspace");
     // Portable: workspace is emitted as "." (resolved by mcp-language-server
     // from its spawn cwd), NOT an absolute path baked into .mcp.json.
     expect(tsArgs).toContain(".");
     expect(tsArgs).not.toContain(WORKSPACE);
-    expect(tsArgs.some((a) => a.startsWith("/"))).toBe(false);
+    expect(tsArgs.every((a: string) => !a.startsWith("/"))).toBe(true);
     expect(tsArgs).toContain("--lsp");
     expect(tsArgs).toContain("typescript-language-server");
     expect(tsArgs).toContain("--stdio");
 
     const go = entries.find((e) => "lsp-go" in e.servers);
-    const goArgs = go?.servers["lsp-go"]?.args ?? [];
+    const goServer = go?.servers["lsp-go"] as StdioServer | undefined;
+    const goArgs = goServer?.args ?? [];
     expect(goArgs).toContain("--lsp");
     expect(goArgs).toContain("gopls");
   });
@@ -113,7 +117,8 @@ describe("lsp tool", () => {
     expect(entries).toHaveLength(1);
     const kotlin = entries[0];
     expect(kotlin && "lsp-kotlin" in kotlin.servers).toBe(true);
-    const args = kotlin?.servers["lsp-kotlin"]?.args ?? [];
+    const kotlinServer = kotlin?.servers["lsp-kotlin"] as StdioServer | undefined;
+    const args = kotlinServer?.args ?? [];
     expect(args).toContain("--lsp");
     expect(args).toContain("kotlin-language-server");
   });
@@ -136,7 +141,8 @@ describe("lsp tool", () => {
       .mcpServersFor("claude", { workspace: WORKSPACE, languages: ["Java"] })
       .map(asJson);
     expect(entries).toHaveLength(1);
-    const args = entries[0]?.servers["lsp-java"]?.args ?? [];
+    const javaServer = entries[0]?.servers["lsp-java"] as StdioServer | undefined;
+    const args = javaServer?.args ?? [];
     expect(args).toContain("--lsp");
     expect(args).toContain("jdtls");
   });
