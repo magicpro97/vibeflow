@@ -226,6 +226,12 @@
                         class="text-[10px] text-neutral-500 hover:text-neutral-300"
                         @click="openedFile = null"
                       >✕ close</button>
+                      <button
+                        v-if="openedFile?.path"
+                        type="button"
+                        class="text-[10px] text-neutral-400 hover:text-neutral-200"
+                        @click="askAboutOpenedFile()"
+                      >Ask about this</button>
                     </div>
                     <p v-if="openedFile.loading" class="px-2 py-1.5 text-[10px] text-neutral-600 italic">loading…</p>
                     <p v-else-if="openedFile.error" class="px-2 py-1.5 text-[10px] text-red-400 font-mono">{{ openedFile.error }}</p>
@@ -310,12 +316,15 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { api } from "../api.js";
+import { prefillFromOpenedFile } from "../lib/ask-prefill.js";
 import { type ClassifiedEvidence, classifyEvidence } from "../lib/evidence.js";
+import { useVfStore } from "../store.js";
 import type { GateState, TimelineEntry, WorkUnit } from "../types.js";
 import InfoTip from "./InfoTip.vue";
 
 const props = defineProps<{ units: WorkUnit[]; emptyText?: string }>();
 const GATE_KEYS = ["build", "lint", "test", "review"] as const;
+const store = useVfStore();
 
 const expanded = ref(new Set<string>());
 
@@ -382,6 +391,11 @@ async function openFile(unit: string, c: ClassifiedEvidence) {
   } catch (e) {
     if (current()) openedFile.value = { ...req, loading: false, error: (e as Error).message };
   }
+}
+
+function askAboutOpenedFile() {
+  const prefill = prefillFromOpenedFile(openedFile.value);
+  if (prefill) store.openAsk(prefill);
 }
 
 function toggleExpand(name: string) {

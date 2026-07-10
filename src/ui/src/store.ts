@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { api } from "./api.js";
+import type { AskPrefill } from "./lib/ask-prefill.js";
 import type { ProjectEntry, VibeSettings, WorkflowState } from "./types.js";
 
 /** Pure function — extracted for testability without Pinia context. */
@@ -25,6 +26,17 @@ export const useVfStore = defineStore("vf", () => {
   const version = document.querySelector<HTMLMetaElement>('meta[name="vf-version"]')?.content ?? "";
   const projects = ref<ProjectEntry[]>([]);
   const reuseGoal = ref<string | null>(null); // one-shot prefill for Stage1Describe
+  const askOpen = ref(false);
+  const askPrefill = ref<AskPrefill | null>(null);
+
+  function openAsk(prefill: AskPrefill | null = null) {
+    askPrefill.value = prefill;
+    askOpen.value = true;
+  }
+  function closeAsk() {
+    askOpen.value = false;
+    askPrefill.value = null;
+  }
 
   /** Loads workflow state from server. Returns the new state, or null if not found yet.
    *  Throws on unexpected errors (non-404) so callers can surface them. */
@@ -104,6 +116,10 @@ export const useVfStore = defineStore("vf", () => {
     version,
     projects,
     reuseGoal,
+    askOpen,
+    askPrefill,
+    openAsk,
+    closeAsk,
     loadState,
     loadSettings,
     loadProjects,

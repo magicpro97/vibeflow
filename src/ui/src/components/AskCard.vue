@@ -133,9 +133,12 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { api } from "../api.js";
 import { type AskForm, validateAskForm, validateResumeForm } from "../ask-client.js";
+import { useVfStore } from "../store.js";
+
+const store = useVfStore();
 
 defineEmits<{ close: [] }>();
 
@@ -146,6 +149,16 @@ const answer = ref("");
 const answerEngine = ref("");
 const followup = ref("");
 const continuing = ref(false);
+
+onMounted(() => {
+  const p = store.askPrefill;
+  if (p) {
+    form.path = p.path;
+    form.start = String(p.start);
+    form.end = String(p.end);
+    store.askPrefill = null;
+  }
+});
 
 function consume(es: EventSource) {
   es.addEventListener("token", (e: MessageEvent) => {

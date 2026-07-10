@@ -85,6 +85,8 @@ When the task splits into independent slices with distinct file scopes.
   answer token-by-token over SSE (`GET /api/ask/stream`, #580) and offers a "Continue" affordance
   to resume the engine's most-recent conversation (#581); resume is hidden for copilot (no native
   resume flag).
+- **Ask-about-this prefill from the file viewer (#583)** — the inline file viewer's header shows an
+  "Ask about this" button that opens AskCard pre-filled with the viewer's path + line.
 
 ## Verification (prove it worked)
 
