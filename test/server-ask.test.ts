@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AskInvocation } from "../src/commands/ask.js";
+import { captureSpawnAsync } from "../src/commands/ask.js";
+import type { AsyncSpawner } from "../src/dispatch/types.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
 import {
   type AskRunDeps,
@@ -98,24 +100,24 @@ describe("resolveAskTarget — validation", () => {
 
 describe("runAskRequest — orchestration (injected seams, never spawns a real engine)", () => {
   const deps = (over: Partial<AskRunDeps> = {}): AskRunDeps => ({
-    readiness: () => [ready("claude")],
+    readiness: () => Promise.resolve([ready("claude")]),
     readText: () => "l1\nl2\nl3\nl4\nl5",
-    spawn: () => ({ code: 0, text: "ANSWER" }),
+    spawn: () => Promise.resolve({ code: 0, text: "ANSWER" }),
     // identity realpath = no symlink escape (paths already under the repo). Real
     // symlink handling is covered in the dedicated realpathWithinRepo suite below.
     realpath: (p: string) => p,
     ...over,
   });
 
-  test("happy path: reads, slices, frames, spawns, returns answer", () => {
+  test("happy path: reads, slices, frames, spawns, returns answer", async () => {
     let seen: { inv: AskInvocation; prompt: string } | undefined;
-    const r = runAskRequest(
+    const r = await runAskRequest(
       REPO,
       okBody,
       deps({
         spawn: (inv, prompt) => {
           seen = { inv, prompt };
-          return { code: 0, text: "ANSWER" };
+          return Promise.resolve({ code: 0, text: "ANSWER" });
         },
       }),
     );
@@ -125,15 +127,15 @@ describe("runAskRequest — orchestration (injected seams, never spawns a real e
     expect(seen?.prompt).toContain("why?");
   });
 
-  test("validation error passes straight through", () => {
-    expect(runAskRequest(REPO, { path: "a.ts", start: 1, end: 1 }, deps())).toEqual({
+  test("validation error passes straight through", async () => {
+    expect(await runAskRequest(REPO, { path: "a.ts", start: 1, end: 1 }, deps())).toEqual({
       error: "question is required",
       status: 400,
     });
   });
 
-  test("unreadable file → 400", () => {
-    const r = runAskRequest(
+  test("unreadable file → 400", async () => {
+    const r = await runAskRequest(
       REPO,
       okBody,
       deps({
@@ -145,25 +147,25 @@ describe("runAskRequest — orchestration (injected seams, never spawns a real e
     expect(r).toEqual({ error: "cannot read file", status: 400 });
   });
 
-  test("range past EOF → 400", () => {
-    const r = runAskRequest(REPO, { ...okBody, start: 50, end: 60 }, deps());
+  test("range past EOF → 400", async () => {
+    const r = await runAskRequest(REPO, { ...okBody, start: 50, end: 60 }, deps());
     expect(r).toMatchObject({ status: 400 });
   });
 
-  test("no ready engine → 400", () => {
-    const r = runAskRequest(
+  test("no ready engine → 400", async () => {
+    const r = await runAskRequest(
       REPO,
       okBody,
-      deps({ readiness: () => [ready("claude", "no-binary")] }),
+      deps({ readiness: () => Promise.resolve([ready("claude", "no-binary")]) }),
     );
     expect(r).toMatchObject({ status: 400 });
   });
 
-  test("default deps arrows are allocated (readText/readiness/spawn/realpath ?? fallbacks)", () => {
+  test("default deps arrows are allocated (readText/readiness/spawn/realpath ?? fallbacks)", async () => {
     // Omit every dep → the default realpath (realpathSync) runs first on the fake
     // abs path, which does not exist → the symlink guard returns 400. Proves the
     // ?? fallback arrows execute without injection.
-    const r = runAskRequest(REPO, okBody, {});
+    const r = await runAskRequest(REPO, okBody, {});
     expect(r).toMatchObject({ status: 400 });
   });
 });
@@ -192,11 +194,11 @@ describe("realpathWithinRepo — symlink escape guard (#562 security)", () => {
     expect(realpathWithinRepo("/repo", "/repo/gone", rp)).toBe(false);
   });
 
-  test("runAskRequest rejects a symlink escape via the injected realpath", () => {
-    const r = runAskRequest(REPO, okBody, {
-      readiness: () => [ready("claude")],
+  test("runAskRequest rejects a symlink escape via the injected realpath", async () => {
+    const r = await runAskRequest(REPO, okBody, {
+      readiness: () => Promise.resolve([ready("claude")]),
       readText: () => "x",
-      spawn: () => ({ code: 0, text: "A" }),
+      spawn: () => Promise.resolve({ code: 0, text: "A" }),
       realpath: (p) => (p === "/repo/src/x.ts" ? "/etc/passwd" : p),
     });
     expect(r).toEqual({ error: "path escapes repo", status: 400 });
@@ -205,30 +207,88 @@ describe("realpathWithinRepo — symlink escape guard (#562 security)", () => {
 
 describe("askResponse — Response wrapper", () => {
   const good: AskRunDeps = {
-    readiness: () => [ready("claude")],
+    readiness: () => Promise.resolve([ready("claude")]),
     readText: () => "a\nb\nc\nd\ne",
-    spawn: () => ({ code: 0, text: "OK" }),
+    spawn: () => Promise.resolve({ code: 0, text: "OK" }),
     realpath: (p: string) => p, // identity: in-repo, no symlink escape
   };
 
   test("error → JSON with its status", async () => {
-    const res = askResponse(REPO, { path: "a.ts", start: 1, end: 1 }, good);
+    const res = await askResponse(REPO, { path: "a.ts", start: 1, end: 1 }, good);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe("question is required");
   });
 
   test("ok → 200 { ok, engine, answer, code }", async () => {
-    const res = askResponse(REPO, okBody, good);
+    const res = await askResponse(REPO, okBody, good);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, engine: "claude", answer: "OK", code: 0 });
   });
 
   test("non-zero engine exit → ok:false (honesty, not a fake success)", async () => {
-    const res = askResponse(REPO, okBody, {
+    const res = await askResponse(REPO, okBody, {
       ...good,
-      spawn: () => ({ code: 1, text: "" }),
+      spawn: () => Promise.resolve({ code: 1, text: "" }),
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: false, engine: "claude", answer: "", code: 1 });
+  });
+});
+
+describe("captureSpawnAsync — async capture seam (#584)", () => {
+  test("happy path: spawner {status:0, stdout:'hi'} → {code:0, text:'hi'}", async () => {
+    const r = await captureSpawnAsync(
+      { cmd: "echo", args: ["-n", "hi"], promptMode: "arg" },
+      "",
+      () => Promise.resolve({ status: 0, stdout: "hi" }),
+    );
+    expect(r).toEqual({ code: 0, text: "hi" });
+  });
+
+  test("stderr fallback when stdout empty", async () => {
+    const r = await captureSpawnAsync(
+      { cmd: "sh", args: ["-c", "exit 1"], promptMode: "arg" },
+      "",
+      () => Promise.resolve({ status: 1, stdout: "", stderr: "boom" }),
+    );
+    expect(r).toEqual({ code: 1, text: "boom" });
+  });
+
+  test('arg promptMode passes "" as input to the spawner', async () => {
+    let receivedInput: string | undefined;
+    await captureSpawnAsync(
+      { cmd: "claude", args: ["-p"], promptMode: "arg" },
+      "hello",
+      (_cmd, _args, input) => {
+        receivedInput = input;
+        return Promise.resolve({ status: 0, stdout: "ok" });
+      },
+    );
+    expect(receivedInput).toBe("");
+  });
+
+  test("stdin promptMode passes the prompt as input to the spawner", async () => {
+    let receivedInput: string | undefined;
+    await captureSpawnAsync(
+      { cmd: "claude", args: ["-p"], promptMode: "stdin" },
+      "hello",
+      (_cmd, _args, input) => {
+        receivedInput = input;
+        return Promise.resolve({ status: 0, stdout: "ok" });
+      },
+    );
+    expect(receivedInput).toBe("hello");
+  });
+
+  test("materializeArgs: arg-mode flags are expanded before spawn", async () => {
+    const spy: AsyncSpawner = (cmd, args) => Promise.resolve({ status: 0, stdout: args.join(" ") });
+    const r = await captureSpawnAsync(
+      { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" },
+      "test question",
+      spy,
+    );
+    expect(r.text).toContain("test question");
+    expect(r.text).toContain("-p");
+    expect(r.text).toContain("--allow-all");
   });
 });

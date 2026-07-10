@@ -216,7 +216,8 @@ export async function handleMutationRoute(
   if (path === "/api/ask") {
     // #562 Stage B: thin glue. All validation/path-guard/slice/engine-pick lives
     // in runAskRequest (ask-route.ts, unit-tested); real deps used here.
-    return askResponse(ctx.getActiveRepo(), payload);
+    // #584: now async — do not block the Bun event loop.
+    return await askResponse(ctx.getActiveRepo(), payload);
   }
 
   if (path === "/api/discover") {

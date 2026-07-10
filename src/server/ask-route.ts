@@ -10,14 +10,14 @@ import { isAbsolute, relative, resolve } from "node:path";
 import {
   type AskInvocation,
   askInvocation,
-  captureSpawn,
+  captureSpawnAsync,
   framePrompt,
   langFence,
   pickEngine,
   sliceRange,
 } from "../commands/ask.js";
 import { ENGINES, type Engine } from "../core.js";
-import { preflightAll } from "../preflight.js";
+import { preflightAllAsync } from "../preflight.js";
 import type { EngineReadiness } from "../preflight/types.js";
 
 /** Match the /api/init string cap (#526) — bounds an untrusted UI field. */
@@ -85,8 +85,8 @@ export function resolveAskTarget(activeRepo: string, body: unknown): ResolvedAsk
 
 /** Injected seams (mirrors AskDeps in ask.ts) so the orchestration is hermetic. */
 export interface AskRunDeps {
-  readiness?: (engines: Engine[]) => EngineReadiness[];
-  spawn?: (inv: AskInvocation, prompt: string) => { code: number; text: string };
+  readiness?: (engines: Engine[]) => Promise<EngineReadiness[]>;
+  spawn?: (inv: AskInvocation, prompt: string) => Promise<{ code: number; text: string }>;
   readText?: (path: string) => string;
   /**
    * Resolve symlinks for the traversal re-check. Default realpathSync. The string
@@ -131,11 +131,11 @@ export function realpathWithinRepo(
  * follow-up (Stage B keeps scope tight). Returns plain data — the caller wraps
  * it in a Response. Every step is injectable so tests never spawn a real engine.
  */
-export function runAskRequest(
+export async function runAskRequest(
   activeRepo: string,
   body: unknown,
   deps: AskRunDeps = {},
-): AskResult | AskError {
+): Promise<AskResult | AskError> {
   const resolved = resolveAskTarget(activeRepo, body);
   if ("error" in resolved) return resolved;
 
@@ -155,9 +155,9 @@ export function runAskRequest(
   const sliced = sliceRange(text, resolved.start, resolved.end);
   if (typeof sliced === "string") return { error: sliced, status: 400 };
 
-  const readiness = (deps.readiness ?? ((e: Engine[]) => preflightAll(e, { probe: true })))(
-    ENGINES,
-  );
+  const readiness = await (
+    deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
+  )(ENGINES);
   const engine = pickEngine(readiness, resolved.engine);
   if (typeof engine === "string" && !(ENGINES as string[]).includes(engine))
     return { error: engine, status: 400 };
@@ -172,14 +172,18 @@ export function runAskRequest(
     sliced.snippet,
     resolved.question,
   );
-  const spawn = deps.spawn ?? captureSpawn;
-  const { code, text: answer } = spawn(askInvocation(eng), prompt);
+  const spawn = deps.spawn ?? captureSpawnAsync;
+  const { code, text: answer } = await spawn(askInvocation(eng), prompt);
   return { ok: true, engine: eng, answer, code };
 }
 
 /** Route glue: run the ask and wrap the result in a JSON Response. */
-export function askResponse(activeRepo: string, body: unknown, deps?: AskRunDeps): Response {
-  const result = runAskRequest(activeRepo, body, deps);
+export async function askResponse(
+  activeRepo: string,
+  body: unknown,
+  deps?: AskRunDeps,
+): Promise<Response> {
+  const result = await runAskRequest(activeRepo, body, deps);
   if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
   // Honesty (codex review): a non-zero engine exit is NOT a success — report ok:false
   // so the UI surfaces it as a failure instead of rendering empty output as an answer.
