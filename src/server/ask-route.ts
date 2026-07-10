@@ -14,6 +14,7 @@ import {
   framePrompt,
   langFence,
   pickEngine,
+  resumeInvocation,
   sliceRange,
   streamSpawnAsync,
 } from "../commands/ask.js";
@@ -87,6 +88,7 @@ export function resolveAskTarget(activeRepo: string, body: unknown): ResolvedAsk
 /** Injected seams (async analogue of AskDeps in ask.ts — Promise-based) so the orchestration is hermetic. */
 export interface PreparedAsk {
   eng: Engine;
+  inv: AskInvocation;
   prompt: string;
 }
 
@@ -128,9 +130,32 @@ export function realpathWithinRepo(
 }
 
 /**
+ * Shared readiness + pickEngine tail: probe all engines, pick one (override or
+ * first-ready), and return either the Engine or an AskError string.
+ */
+async function resolveEngine(
+  deps: {
+    readiness?: (engines: Engine[]) => Promise<EngineReadiness[]>;
+  },
+  engineOverride: string | undefined,
+): Promise<Engine | AskError> {
+  const readiness = await (
+    deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
+  )(ENGINES);
+  const engine = pickEngine(readiness, engineOverride);
+  if (typeof engine === "string" && !(ENGINES as string[]).includes(engine))
+    return { error: engine, status: 400 };
+  return engine as Engine;
+}
+
+/**
  * Prepare an ask — resolve target, symlink guard, read, slice, readiness, pickEngine,
- * framePrompt. Returns { eng, prompt } on success, AskError on failure. Does NOT spawn.
+ * framePrompt. Returns PreparedAsk on success, AskError on failure. Does NOT spawn.
  * The caller handles spawning (sync POST or streaming SSE).
+ *
+ * When `resume === true` (body.resume): skip path/start/end — validate only question
+ * + optional engine; use resumeInvocation (engine-native continue). copilot returns
+ * an error string → 400.
  */
 export async function prepareAsk(
   activeRepo: string,
@@ -141,6 +166,40 @@ export async function prepareAsk(
     realpath?: (p: string) => string;
   } = {},
 ): Promise<PreparedAsk | AskError> {
+  const b = body as Record<string, unknown> | null;
+  const resume = b?.resume === true;
+
+  if (resume) {
+    // Validate only question + engine.
+    if (typeof b?.question !== "string" || !b?.question.trim())
+      return { error: "question is required", status: 400 };
+    if (b.question.length > QUESTION_CAP)
+      return { error: "question too long (max 10,000 chars)", status: 400 };
+    if (
+      b.engine !== undefined &&
+      (typeof b.engine !== "string" || !(ENGINES as string[]).includes(b.engine))
+    )
+      return { error: `invalid engine — valid: ${ENGINES.join(", ")}`, status: 400 };
+
+    // copilot has no native resume — fail fast BEFORE the readiness probe so a
+    // hung/slow copilot probe can't delay (or with an unlucky timeout, swallow)
+    // the deterministic "not supported" 400.
+    if (b.engine === "copilot") {
+      const inv = resumeInvocation("copilot");
+      // resumeInvocation("copilot") is always the unsupported error string.
+      return { error: inv as string, status: 400 };
+    }
+
+    const eng = await resolveEngine(deps, b?.engine as string | undefined);
+    if (typeof eng !== "string") return eng;
+
+    const inv = resumeInvocation(eng);
+    if (typeof inv === "string") return { error: inv, status: 400 };
+
+    return { eng, inv, prompt: b.question };
+  }
+
+  // Fresh ask: existing path.
   const resolved = resolveAskTarget(activeRepo, body);
   if ("error" in resolved) return resolved;
 
@@ -158,13 +217,8 @@ export async function prepareAsk(
   const sliced = sliceRange(text, resolved.start, resolved.end);
   if (typeof sliced === "string") return { error: sliced, status: 400 };
 
-  const readiness = await (
-    deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
-  )(ENGINES);
-  const engine = pickEngine(readiness, resolved.engine);
-  if (typeof engine === "string" && !(ENGINES as string[]).includes(engine))
-    return { error: engine, status: 400 };
-  const eng = engine as Engine;
+  const eng = await resolveEngine(deps, resolved.engine);
+  if (typeof eng !== "string") return eng;
 
   const lang = langFence(resolved.absPath);
   const prompt = framePrompt(
@@ -175,7 +229,8 @@ export async function prepareAsk(
     sliced.snippet,
     resolved.question,
   );
-  return { eng, prompt };
+  const inv = askInvocation(eng);
+  return { eng, inv, prompt };
 }
 
 /**
@@ -191,7 +246,7 @@ export async function runAskRequest(
   if ("error" in prep) return prep;
 
   const spawn = deps.spawn ?? captureSpawnAsync;
-  const { code, text: answer } = await spawn(askInvocation(prep.eng), prep.prompt);
+  const { code, text: answer } = await spawn(prep.inv, prep.prompt);
   return { ok: true, engine: prep.eng, answer, code };
 }
 
@@ -243,7 +298,7 @@ export async function askStreamResponse(
         const onChunk = (s: string) =>
           safeEnqueue(enc.encode(`event: token\ndata: ${JSON.stringify({ text: s })}\n\n`));
 
-        spawn(askInvocation(prep.eng), prep.prompt, onChunk)
+        spawn(prep.inv, prep.prompt, onChunk)
           .then((result) => {
             safeEnqueue(
               enc.encode(

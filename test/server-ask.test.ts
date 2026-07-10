@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AskInvocation } from "../src/commands/ask.js";
-import { captureSpawnAsync, streamSpawnAsync } from "../src/commands/ask.js";
+import { captureSpawnAsync, resumeInvocation, streamSpawnAsync } from "../src/commands/ask.js";
 import type { AsyncSpawner } from "../src/dispatch/types.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
 import { startServer } from "../src/server.js";
@@ -336,10 +336,11 @@ describe("prepareAsk — extracted orchestration (#580)", () => {
     realpath: (p: string) => p,
   };
 
-  test("happy path → { eng, prompt } shape", async () => {
+  test("happy path → { eng, inv, prompt } shape", async () => {
     const r = await prepareAsk(REPO, okBody, deps);
     if ("error" in r) throw new Error(`unexpected error: ${r.error}`);
     expect(r.eng).toBe("claude");
+    expect(r.inv.cmd).toBe("claude");
     expect(r.prompt).toContain("l2\nl3\nl4");
     expect(r.prompt).toContain("why?");
   });
@@ -618,5 +619,266 @@ describe("askStreamResponse — SSE stream body (#580)", () => {
     await reader.read();
     await reader.cancel(); // must not throw; clears the heartbeat via cancel()
     resolveSpawn?.(); // let the dangling spawn settle so no unhandled promise
+  });
+});
+
+// #581: prepareAsk resume branch
+describe("prepareAsk — resume (#581)", () => {
+  const deps = {
+    readiness: () => Promise.resolve([ready("claude"), ready("codex")]),
+    readText: () => "",
+    realpath: (p: string) => p,
+  };
+
+  test("claude resume → { eng, inv: resumeInvocation, prompt: question }", async () => {
+    const r = await prepareAsk(
+      REPO,
+      { resume: true, question: "and then?", engine: "claude" },
+      deps,
+    );
+    if ("error" in r) throw new Error(`unexpected error: ${r.error}`);
+    expect(r.eng).toBe("claude");
+    expect(r.inv.cmd).toBe("claude");
+    expect(r.inv.args).toContain("-c");
+    expect(r.prompt).toBe("and then?");
+  });
+
+  test("codex resume → invocation includes resume args", async () => {
+    const r = await prepareAsk(
+      REPO,
+      { resume: true, question: "what next?" },
+      { ...deps, readiness: () => Promise.resolve([ready("codex")]) },
+    );
+    if ("error" in r) throw new Error(`unexpected error: ${r.error}`);
+    expect(r.eng).toBe("codex");
+    expect(r.inv.cmd).toBe("codex");
+    expect(r.inv.args).toContain("resume");
+    expect(r.prompt).toBe("what next?");
+  });
+
+  test("copilot resume → 400 (resumeInvocation returns string)", async () => {
+    const r = await prepareAsk(
+      REPO,
+      { resume: true, question: "why?", engine: "copilot" },
+      { ...deps, readiness: () => Promise.resolve([ready("copilot")]) },
+    );
+    expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/not supported/) });
+  });
+
+  test("auto-picked copilot resume → 400 (post-resolve guard)", async () => {
+    // engine omitted + only copilot ready → resolveEngine returns copilot, then
+    // resumeInvocation(copilot) is the unsupported string → 400. Exercises the
+    // guard AFTER resolveEngine (the explicit-copilot fast-path is skipped here).
+    const r = await prepareAsk(
+      REPO,
+      { resume: true, question: "why?" },
+      { ...deps, readiness: () => Promise.resolve([ready("copilot")]) },
+    );
+    expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/not supported/) });
+  });
+
+  test("missing question → 400", async () => {
+    const r = await prepareAsk(REPO, { resume: true }, deps);
+    expect(r).toEqual({ error: "question is required", status: 400 });
+  });
+
+  test("empty question → 400", async () => {
+    const r = await prepareAsk(REPO, { resume: true, question: "  " }, deps);
+    expect(r).toEqual({ error: "question is required", status: 400 });
+  });
+
+  test("question over cap → 400", async () => {
+    const r = await prepareAsk(REPO, { resume: true, question: "x".repeat(10_001) }, deps);
+    expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/too long/) });
+  });
+
+  test("unready engine → 400", async () => {
+    const r = await prepareAsk(
+      REPO,
+      { resume: true, question: "q", engine: "claude" },
+      { ...deps, readiness: () => Promise.resolve([ready("claude", "no-binary")]) },
+    );
+    expect(r).toMatchObject({ status: 400 });
+  });
+
+  test("invalid engine → 400", async () => {
+    const r = await prepareAsk(REPO, { resume: true, question: "q", engine: "gpt" }, deps);
+    expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/invalid engine/) });
+  });
+
+  test("auto-pick engine when engine omitted", async () => {
+    const r = await prepareAsk(REPO, { resume: true, question: "auto-pick me" }, deps);
+    if ("error" in r) throw new Error(`unexpected error: ${r.error}`);
+    expect(r.eng).toBe("claude"); // first ready in deps order
+    expect(r.prompt).toBe("auto-pick me");
+  });
+});
+
+// #581: prepareAsk fresh still includes inv
+describe("prepareAsk — fresh still carries inv (#581)", () => {
+  const deps = {
+    readiness: () => Promise.resolve([ready("claude")]),
+    readText: () => "l1\nl2\nl3\nl4\nl5",
+    realpath: (p: string) => p,
+  };
+
+  test("fresh prepareAsk returns inv equal to askInvocation(eng)", async () => {
+    const r = await prepareAsk(REPO, okBody, deps);
+    if ("error" in r) throw new Error(`unexpected error: ${r.error}`);
+    expect(r.inv.cmd).toBe("claude");
+    expect(r.inv.args).toContain("-p");
+    expect(r.inv.args).not.toContain("-c");
+  });
+});
+
+// #581: runAskRequest with resume=true uses resume invocation
+describe("runAskRequest — resume (#581)", () => {
+  const deps = (over: Partial<AskRunDeps> = {}): AskRunDeps => ({
+    readiness: () => Promise.resolve([ready("claude")]),
+    readText: () => "",
+    spawn: () => Promise.resolve({ code: 0, text: "OK-RESUME" }),
+    realpath: (p: string) => p,
+    ...over,
+  });
+
+  test("resume=true passes resumeInvocation args to spawn", async () => {
+    let seenArgs: string[] | undefined;
+    const r = await runAskRequest(
+      REPO,
+      { resume: true, question: "continue?", engine: "claude" },
+      deps({
+        spawn: (inv) => {
+          seenArgs = inv.args;
+          return Promise.resolve({ code: 0, text: "OK" });
+        },
+      }),
+    );
+    expect(r).toEqual({ ok: true, engine: "claude", answer: "OK", code: 0 });
+    expect(seenArgs).toContain("-c");
+    expect(seenArgs).toContain("-p");
+  });
+});
+
+// #581: askStreamResponse resume — token + done frames
+describe("askStreamResponse — resume (#581)", () => {
+  const prepDeps = {
+    readiness: () => Promise.resolve([ready("claude")]),
+    readText: () => "",
+    realpath: (p: string) => p,
+  };
+
+  async function readSSE(res: Response): Promise<string> {
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("no body");
+    const dec = new TextDecoder();
+    let out = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out += dec.decode(value);
+    }
+    return out;
+  }
+
+  test("resume stream relays token + done frame", async () => {
+    const spawn = (
+      _inv: AskInvocation,
+      _prompt: string,
+      onChunk: (s: string) => void,
+    ): Promise<{ code: number; text: string }> => {
+      onChunk("resume-answer");
+      return Promise.resolve({ code: 0, text: "resume-answer" });
+    };
+    const res = await askStreamResponse(
+      REPO,
+      { resume: true, question: "go on?", engine: "claude" },
+      spawn,
+      prepDeps,
+    );
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const sse = await readSSE(res);
+    expect(sse).toContain(`event: token\ndata: ${JSON.stringify({ text: "resume-answer" })}`);
+    expect(sse).toContain(
+      `event: done\ndata: ${JSON.stringify({ engine: "claude", code: 0, ok: true })}`,
+    );
+  });
+
+  test("copilot resume → 400 before stream opens", async () => {
+    const res = await askStreamResponse(
+      REPO,
+      { resume: true, question: "q?", engine: "copilot" },
+      () => Promise.resolve({ code: 0, text: "" }),
+      { ...prepDeps, readiness: () => Promise.resolve([ready("copilot")]) },
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/not supported/);
+  });
+
+  test("missing question → 400 before stream opens", async () => {
+    const res = await askStreamResponse(
+      REPO,
+      { resume: true },
+      () => Promise.resolve({ code: 0, text: "" }),
+      prepDeps,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+// #581: server GET /api/ask/stream?resume=true — integrated
+describe("GET /api/ask/stream — resume (#581)", () => {
+  async function csrfToken(url: string): Promise<string> {
+    const res = await fetch(url);
+    const html = await res.text();
+    const m = html.match(/<meta\s+name="vf-token"\s+content="([^"]+)"\s*\/?>/i);
+    if (!m) throw new Error("CSRF token not found");
+    return m[1] as string;
+  }
+
+  test("resume=true + engine=copilot is parsed and threaded to prepareAsk (→ 400, no probe)", async () => {
+    // engine=copilot hits prepareAsk's explicit-copilot fast-path → 400 BEFORE
+    // any readiness probe, so this real-server test stays fast + deterministic
+    // regardless of which engines are installed. Proves the server parsed
+    // resume=true + engine and threaded them into the resume branch.
+    const dir = mkdtempSync(join(tmpdir(), "ask-sse-resume-"));
+    const cwd0 = process.cwd();
+    try {
+      process.chdir(dir);
+      const { server, url } = await startServer(0);
+      const token = await csrfToken(url);
+      try {
+        const res = await fetch(
+          `${url}/api/ask/stream?resume=true&question=hello-resume&engine=copilot&token=${encodeURIComponent(token)}`,
+        );
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toContain("copilot");
+      } finally {
+        server.stop();
+      }
+    } finally {
+      process.chdir(cwd0);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("resume=true 403 on bad token", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ask-sse-resume-403-"));
+    const cwd0 = process.cwd();
+    try {
+      process.chdir(dir);
+      const { server, url } = await startServer(0);
+      try {
+        const res = await fetch(`${url}/api/ask/stream?resume=true&question=q&token=bad`);
+        expect(res.status).toBe(403);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      process.chdir(cwd0);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

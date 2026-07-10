@@ -290,6 +290,7 @@ export function startServer(
           end: Number(url.searchParams.get("end")),
           question: url.searchParams.get("question") ?? "",
           engine: url.searchParams.get("engine") ?? undefined,
+          resume: url.searchParams.get("resume") === "true",
         };
         return await askStreamResponse(activeRepo, body);
       }

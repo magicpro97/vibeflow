@@ -159,20 +159,22 @@ export const api = {
         payload,
       ),
     streamUrl: (payload: {
-      path: string;
-      start: number;
-      end: number;
+      path?: string;
+      start?: number;
+      end?: number;
       question: string;
       engine?: string;
+      resume?: boolean;
     }) => {
-      const p = new URLSearchParams({
-        path: payload.path,
-        start: String(payload.start),
-        end: String(payload.end),
-        question: payload.question,
-        token: CSRF,
-      });
+      const p = new URLSearchParams({ question: payload.question, token: CSRF });
       if (payload.engine) p.set("engine", payload.engine);
+      if (payload.resume) {
+        p.set("resume", "true");
+      } else {
+        p.set("path", payload.path ?? "");
+        p.set("start", String(payload.start ?? ""));
+        p.set("end", String(payload.end ?? ""));
+      }
       return `/api/ask/stream?${p.toString()}`;
     },
   },

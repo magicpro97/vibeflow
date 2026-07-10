@@ -108,6 +108,25 @@
           <div class="text-[11px] text-neutral-500 mb-1">{{ answerEngine }} answered:</div>
           <pre class="bg-neutral-900 border border-neutral-800 rounded p-3 text-[11px] text-neutral-200 whitespace-pre-wrap overflow-x-auto">{{ answer }}</pre>
         </div>
+
+        <!-- #581: Continue (resume) affordance after first answer -->
+        <div v-if="answer && answerEngine !== 'copilot'" class="mt-2 space-y-2">
+          <textarea
+            v-model="followup"
+            rows="2"
+            placeholder="Follow-up question…"
+            class="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-100 focus:border-neutral-600 outline-none resize-y"
+            :disabled="continuing"
+          />
+          <button
+            type="button"
+            :disabled="continuing || !followup.trim()"
+            class="px-3 py-1.5 rounded bg-neutral-800 text-neutral-200 text-xs font-medium hover:bg-neutral-700 disabled:opacity-50 transition-colors"
+            @click="doContinue"
+          >
+            {{ continuing ? "Continuing…" : "Continue" }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -116,7 +135,7 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
 import { api } from "../api.js";
-import { type AskForm, validateAskForm } from "../ask-client.js";
+import { type AskForm, validateAskForm, validateResumeForm } from "../ask-client.js";
 
 defineEmits<{ close: [] }>();
 
@@ -125,6 +144,29 @@ const loading = ref(false);
 const err = ref("");
 const answer = ref("");
 const answerEngine = ref("");
+const followup = ref("");
+const continuing = ref(false);
+
+function consume(es: EventSource) {
+  es.addEventListener("token", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as { text: string };
+    answer.value += data.text;
+  });
+  es.addEventListener("done", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as { engine: string; code: number; ok: boolean };
+    answerEngine.value = data.engine;
+    if (!data.ok) err.value = `Engine exited with code ${data.code}`;
+    es.close();
+    loading.value = false;
+    continuing.value = false;
+  });
+  es.onerror = () => {
+    es.close();
+    if (!err.value) err.value = "Stream connection failed";
+    loading.value = false;
+    continuing.value = false;
+  };
+}
 
 async function submit() {
   err.value = "";
@@ -136,25 +178,30 @@ async function submit() {
   loading.value = true;
   answer.value = "";
   answerEngine.value = "";
+  followup.value = "";
 
   const es = new EventSource(api.ask.streamUrl(payload));
-  es.addEventListener("token", (e: MessageEvent) => {
-    const data = JSON.parse(e.data) as { text: string };
-    answer.value += data.text;
-  });
-  es.addEventListener("done", (e: MessageEvent) => {
-    const data = JSON.parse(e.data) as { engine: string; code: number; ok: boolean };
-    answerEngine.value = data.engine;
-    if (!data.ok) err.value = `Engine exited with code ${data.code}`;
-    es.close();
-    loading.value = false;
-  });
-  // EventSource surfaces connection failures (and our server's `error` event on
-  // spawn rejection closes the stream, tripping this too) via onerror.
-  es.onerror = () => {
-    es.close();
-    if (!err.value) err.value = "Stream connection failed";
-    loading.value = false;
-  };
+  consume(es);
+}
+
+async function doContinue() {
+  err.value = "";
+  const q = followup.value;
+  const validated = validateResumeForm(q);
+  if (typeof validated === "string") {
+    err.value = validated;
+    return;
+  }
+  continuing.value = true;
+  // Capture the engine BEFORE clearing — resume must target the same engine
+  // that answered, and clearing answerEngine drives the "Continue" v-if off.
+  const resumeEngine = answerEngine.value;
+  answer.value = "";
+  answerEngine.value = "";
+
+  const es = new EventSource(
+    api.ask.streamUrl({ resume: true, question: validated.question, engine: resumeEngine }),
+  );
+  consume(es);
 }
 </script>
