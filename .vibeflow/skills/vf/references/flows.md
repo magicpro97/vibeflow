@@ -87,6 +87,7 @@ When the task splits into independent slices with distinct file scopes.
   resume flag).
 - **Ask-about-this prefill from the file viewer (#583)** — the inline file viewer's header shows an
   "Ask about this" button that opens AskCard pre-filled with the viewer's path + line.
+- **env-scrub allow/deny editor in Settings (#576)** — the Web-UI Settings panel now lets you add/remove glob patterns in the allow and deny lists for env filtering.
 
 ## Verification (prove it worked)
 
