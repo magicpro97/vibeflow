@@ -11,10 +11,12 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { ENGINES, type Engine, c } from "../core.js";
+import { ENGINES, type Engine, c, cwd } from "../core.js";
+import { filterEnv } from "../dispatch/env-filter.js";
 import { out } from "../logbus.js";
 import { preflightAll } from "../preflight.js";
 import type { EngineReadiness } from "../preflight/types.js";
+import { readSettings } from "../settings.js";
 
 /** Prompt delivery per engine: on stdin, or as a trailing argv token. */
 type PromptMode = "stdin" | "arg";
@@ -190,9 +192,11 @@ export function materializeArgs(inv: AskInvocation, prompt: string): string[] {
 
 /** Default spawn: stream the engine's answer straight to the terminal. */
 export function inheritSpawn(inv: AskInvocation, prompt: string): number {
+  const { env } = filterEnv(process.env, readSettings(cwd()).envPolicy ?? {});
   const r = spawnSync(inv.cmd, materializeArgs(inv, prompt), {
     input: inv.promptMode === "stdin" ? prompt : undefined,
     stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "inherit", "inherit"],
+    env,
   });
   return r.status ?? 1;
 }
@@ -201,18 +205,20 @@ export function inheritSpawn(inv: AskInvocation, prompt: string): number {
  * Captured runner: like inheritSpawn but COLLECTS stdout instead of streaming to
  * the TTY. The Web-UI /api/ask route needs this — a browser has no TTY. onChunk
  * fires ONCE with the full text; spawnSync is not incrementally streaming, so true
- * token streaming (SSE) is a follow-up. #556 env-filtering is also a follow-up:
- * spawnSync inherits process.env, acceptable for a local third-party engine CLI.
+ * token streaming (SSE) is a follow-up. #556: env is scrubbed via filterEnv before
+ * spawnSync — no secrets leak to the engine CLI subprocess.
  */
 export function captureSpawn(
   inv: AskInvocation,
   prompt: string,
   onChunk?: (s: string) => void,
 ): { code: number; text: string } {
+  const { env } = filterEnv(process.env, readSettings(cwd()).envPolicy ?? {});
   const r = spawnSync(inv.cmd, materializeArgs(inv, prompt), {
     input: inv.promptMode === "stdin" ? prompt : undefined,
     stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
     encoding: "utf8",
+    env,
   });
   // Fall back to stderr when stdout is empty so a failing engine surfaces its error
   // to the Web-UI instead of a blank "(no output)".
