@@ -78,11 +78,28 @@ function printEnvPolicy(base: string): void {
   );
 }
 
-/** #556: `vf config env-policy <status|deny <glob>|allow <glob>|reset>`. */
+/** #556: `vf config env-policy <status|test|deny <glob>|allow <glob>|reset>`. */
 function configEnvPolicy(rest: string[], base: string): number {
   const sub = rest[0];
   if (sub === undefined || sub === "status") {
     printEnvPolicy(base);
+    return 0;
+  }
+  if (sub === "test") {
+    const policy = readSettings(base).envPolicy ?? {};
+    const { env, dropped } = filterEnv(process.env, policy);
+    const kept = Object.keys(env).sort();
+    out(
+      "vf",
+      c.bold(
+        `env-policy test — evaluating current process.env (${dropped.length + kept.length} vars):`,
+      ),
+    );
+    out(
+      "vf",
+      `  ${c.yellow(`DROPPED (${dropped.length})`)}: ${dropped.join(" ") || c.dim("(none)")}`,
+    );
+    out("vf", `  ${c.green(`KEPT (${kept.length})`)}: ${kept.join(" ")}`);
     return 0;
   }
   if (sub === "reset") {
@@ -108,7 +125,7 @@ function configEnvPolicy(rest: string[], base: string): number {
   out(
     "vf",
     c.red(
-      `Unknown subcommand "${sub}". Usage: vf config env-policy <status|deny <glob>|allow <glob>|reset>`,
+      `Unknown subcommand "${sub}". Usage: vf config env-policy <status|test|deny <glob>|allow <glob>|reset>`,
     ),
     { level: "error" },
   );
