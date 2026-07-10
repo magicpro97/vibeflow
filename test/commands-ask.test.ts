@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -239,6 +239,71 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
     );
     expect(r.code).toBe(1);
     expect(r.text).toBe("BOOM"); // stderr surfaced, not blank
+  });
+
+  // #582: env-filtering — DEFAULT_DENY scrubs secrets; ALWAYS_KEEP preserves PATH.
+  const AWS_SECRET_KEY = "AWS_SECRET_ACCESS_KEY";
+  const origSecret = process.env[AWS_SECRET_KEY];
+  const origPath = process.env.PATH;
+
+  test("DEFAULT_DENY scrubs secret-shaped vars from captureSpawn child env", () => {
+    process.env[AWS_SECRET_KEY] = "test-secret-should-not-leak";
+    try {
+      const r = captureSpawn(
+        {
+          cmd: "node",
+          args: ["-e", `process.stdout.write(process.env.${AWS_SECRET_KEY} || 'SCRUBBED')`],
+          promptMode: "stdin",
+        },
+        "x",
+      );
+      expect(r.code).toBe(0);
+      expect(r.text).toBe("SCRUBBED");
+    } finally {
+      process.env[AWS_SECRET_KEY] = undefined;
+    }
+  });
+
+  test("ALWAYS_KEEP preserves PATH in captureSpawn child env", () => {
+    const save = process.env.PATH;
+    // spawn via the absolute node path so a mutated PATH can't break process lookup;
+    // the child prints its inherited PATH to prove ALWAYS_KEEP passed it through.
+    process.env.PATH = `/test/path:${save}`;
+    try {
+      const r = captureSpawn(
+        {
+          cmd: process.execPath,
+          args: [
+            "-e",
+            "process.stdout.write((process.env.PATH || '').includes('/test/path') ? 'HASPATH' : 'NOPATH')",
+          ],
+          promptMode: "stdin",
+        },
+        "x",
+      );
+      expect(r.code).toBe(0);
+      expect(r.text).toBe("HASPATH");
+    } finally {
+      process.env.PATH = save;
+    }
+  });
+
+  test("inheritSpawn returns 0 with filtered env (secret dropped, child still exits clean)", () => {
+    process.env[AWS_SECRET_KEY] = "test-secret-should-not-leak-inherit";
+    try {
+      const code = inheritSpawn({ cmd: "node", args: ["-e", ""], promptMode: "stdin" }, "x");
+      expect(code).toBe(0);
+    } finally {
+      process.env[AWS_SECRET_KEY] = undefined;
+    }
+  });
+
+  // Restore env after all #582 tests
+  afterAll(() => {
+    if (origSecret !== undefined) process.env[AWS_SECRET_KEY] = origSecret;
+    else process.env[AWS_SECRET_KEY] = undefined;
+    if (origPath !== undefined) process.env.PATH = origPath;
+    else process.env.PATH = undefined;
   });
 });
 
