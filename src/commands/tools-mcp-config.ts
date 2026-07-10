@@ -6,6 +6,7 @@
 import {
   buildUserEntry,
   c,
+  discoverSkills,
   existsSync,
   join,
   out,
@@ -13,6 +14,7 @@ import {
   resolveTools,
   rmSync,
   scanRepo,
+  skillMcpServers,
   writeFileSafe,
 } from "./_shared.js";
 import type {
@@ -48,6 +50,26 @@ interface ClaudeMcpFile {
   mcpServers: Record<string, McpServerDef>;
 }
 
+/** #552: sidecar recording the server names VibeFlow wrote into .mcp.json last run, so the
+ *  next run strips them ALL (even a now-deleted skill's server, which has no live source and
+ *  would otherwise orphan) before re-adding current sources. Non-vf servers stay untouched. */
+const MCP_MANAGED_FILE = join(".vibeflow", ".mcp-managed.json");
+
+function readManagedNames(base: string): string[] {
+  const p = join(base, MCP_MANAGED_FILE);
+  if (!existsSync(p)) return [];
+  try {
+    const v = JSON.parse(readFileSync(p, "utf8"));
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeManagedNames(base: string, names: string[]): void {
+  writeFileSafe(join(base, MCP_MANAGED_FILE), JSON.stringify(names.sort(), null, 2));
+}
+
 /** Every MCP server name VibeFlow manages, across BOTH tools AND user servers — the keys we
  * may remove so disabling/removing one cleans `.mcp.json` with no orphan. */
 function managedClaudeServerNames(
@@ -62,6 +84,8 @@ function managedClaudeServerNames(
   for (const entry of all.entries) {
     for (const name of Object.keys((entry as JsonMcpEntry).servers)) names.push(name);
   }
+  // #552: include skill-contributed server names so a removed skill's server is stripped.
+  for (const name of Object.keys(skillMcpServers(discoverSkills(base)))) names.push(name);
   for (const name of Object.keys(settings.mcpServers ?? {})) names.push(name);
   // #548 (review): a just-removed user server is no longer in settings.mcpServers, so it
   // must be passed in explicitly or it orphans in .mcp.json.
@@ -104,15 +128,26 @@ function writeClaudeMcp(
   for (const name of managedClaudeServerNames(base, languages, settings, extraStrip)) {
     delete file.mcpServers[name];
   }
+  // #552: also strip names VibeFlow wrote last run but that have no live source now (e.g. a
+  // deleted skill's server) — they'd otherwise orphan. Non-vf servers are never in this list.
+  for (const name of readManagedNames(base)) delete file.mcpServers[name];
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "claude", ctx);
   for (const entry of merged.entries) {
     Object.assign(file.mcpServers, (entry as JsonMcpEntry).servers);
   }
-  for (const [name, def] of Object.entries(settings.mcpServers ?? {})) {
+  // #552: skill servers merged first; settings win on name clash (explicit > skill default).
+  const userServers = { ...skillMcpServers(discoverSkills(base)), ...(settings.mcpServers ?? {}) };
+  const writtenNames: string[] = [];
+  for (const [name, def] of Object.entries(userServers)) {
     const entry = buildUserEntry("claude", name, def);
-    if (entry) Object.assign(file.mcpServers, (entry as JsonMcpEntry).servers);
+    if (entry) {
+      Object.assign(file.mcpServers, (entry as JsonMcpEntry).servers);
+      writtenNames.push(name);
+    }
   }
+  // #552: record what we wrote so the next run can strip a since-removed source's server.
+  writeManagedNames(base, writtenNames);
   const hasServers = Object.keys(file.mcpServers).length > 0;
   if (!hasServers && !existsSync(path)) return false;
   writeFileSafe(path, JSON.stringify({ mcpServers: file.mcpServers }, null, 2));
@@ -154,9 +189,14 @@ function writeCodexMcp(base: string, settings: VibeSettings, languages: string[]
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "codex", ctx);
   const entries = gateCodexEntries(merged.entries as TomlMcpEntry[], settings);
-  // #548: append user servers. stdio + http land; sse is unsupported by codex → skip + warn.
+  // #548/#552: append user+skill servers. stdio + http land; sse is unsupported by codex → skip + warn.
+  // settings win over skills on name clash (same precedence as writeClaudeMcp).
+  const userServersCodex = {
+    ...skillMcpServers(discoverSkills(base)),
+    ...(settings.mcpServers ?? {}),
+  };
   let hasHttp = false;
-  for (const [name, def] of Object.entries(settings.mcpServers ?? {})) {
+  for (const [name, def] of Object.entries(userServersCodex)) {
     const entry = buildUserEntry("codex", name, def) as TomlMcpEntry | null;
     if (!entry) {
       out(
@@ -189,7 +229,12 @@ function writeCodexMcp(base: string, settings: VibeSettings, languages: string[]
 function printCopilotMcp(base: string, settings: VibeSettings, languages: string[]): number {
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "copilot", ctx);
-  const userNames = Object.keys(settings.mcpServers ?? {});
+  // #552: skill servers merged with settings; settings win on clash.
+  const userServersCopilot = {
+    ...skillMcpServers(discoverSkills(base)),
+    ...(settings.mcpServers ?? {}),
+  };
+  const userNames = Object.keys(userServersCopilot);
   if (merged.entries.length === 0 && userNames.length === 0) return 0;
   out("vf");
   out("vf", c.bold("Copilot (run these — VibeFlow won't touch your secret ~/.copilot):"));
@@ -202,7 +247,7 @@ function printCopilotMcp(base: string, settings: VibeSettings, languages: string
       count++;
     }
   }
-  for (const [name, def] of Object.entries(settings.mcpServers ?? {})) {
+  for (const [name, def] of Object.entries(userServersCopilot)) {
     out("vf", c.cyan(`  ${copilotAddCommand(name, def)}`));
     count++;
   }
@@ -244,6 +289,25 @@ export function writeToolConfigs(
   removedMcpNames: readonly string[] = [],
 ): void {
   const languages = repoLanguages(base);
+  // #552 security: warn once per skill that contributes an MCP server so the user sees
+  // what got wired — installing a skill now also runs code via an MCP server.
+  const skillServers = skillMcpServers(discoverSkills(base));
+  const skillByServer = new Map<string, string>();
+  for (const skill of discoverSkills(base)) {
+    if (skill.status !== "deprecated" && skill.mcp?.name) {
+      skillByServer.set(skill.mcp.name, skill.name);
+    }
+  }
+  for (const [serverName, def] of Object.entries(skillServers)) {
+    const ownerSkill = skillByServer.get(serverName) ?? "unknown";
+    const target = "command" in def ? def.command : (def as { url: string }).url;
+    out(
+      "vf",
+      c.yellow(
+        `! skill "${ownerSkill}" wired an MCP server "${serverName}" (${target}) — installing a skill can run code.`,
+      ),
+    );
+  }
   const needsMcpJson = !engines || engines.includes("claude") || engines.includes("copilot");
   if (needsMcpJson) writeClaudeMcp(base, settings, languages, removedMcpNames);
   if (!engines || engines.includes("codex")) writeCodexMcp(base, settings, languages);

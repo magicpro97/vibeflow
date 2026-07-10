@@ -8,6 +8,7 @@ import {
   type SkillStatus,
 } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
+import type { UserMcpServer } from "../tools/index.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 
 /**
@@ -60,6 +61,43 @@ function asStringArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
   const out = v.map((x) => String(x)).filter(Boolean);
   return out.length ? out : undefined;
+}
+
+/** #552: parse one mcp block from frontmatter into a Skill.mcp entry (inline shape, not UserMcpServer,
+ *  to avoid a type-only import problem; see Skill interface). Returns undefined if malformed. */
+export function asMcp(v: unknown, skillName: string): Skill["mcp"] | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  // Transport defaults to stdio; unknown values fall back to stdio.
+  const t = r.transport;
+  const transport: "stdio" | "http" | "sse" = t === "http" || t === "sse" ? t : "stdio";
+  // Name: use mcp.name if valid kebab-case, else fall back to skillName.
+  const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  const rawName = typeof r.name === "string" ? r.name : undefined;
+  const name = rawName && NAME_RE.test(rawName) ? rawName : undefined;
+  // Validate skillName as fallback identity.
+  const resolvedName = name ?? skillName;
+  if (!NAME_RE.test(resolvedName)) return undefined;
+  if (transport === "stdio") {
+    if (typeof r.command !== "string" || !r.command) return undefined;
+    const args = Array.isArray(r.args) ? r.args.map(String).filter(Boolean) : [];
+    return { name: resolvedName, transport, command: r.command, args };
+  }
+  // http / sse
+  if (typeof r.url !== "string" || !r.url) return undefined;
+  const rawHeaders = r.headers;
+  const headers: Record<string, string> = {};
+  if (rawHeaders && typeof rawHeaders === "object" && !Array.isArray(rawHeaders)) {
+    for (const [k, hv] of Object.entries(rawHeaders as Record<string, unknown>)) {
+      if (typeof hv === "string") headers[k] = hv;
+    }
+  }
+  return {
+    name: resolvedName,
+    transport,
+    url: r.url,
+    ...(Object.keys(headers).length ? { headers } : {}),
+  };
 }
 
 function asRequires(v: unknown): SkillRequires | undefined {
@@ -130,6 +168,7 @@ export function parseSkill(
     triggers: asStringArray(data.triggers),
     type: data.type === "repo" ? "repo" : data.type === "knowledge" ? "knowledge" : undefined,
     requires: asRequires(data.requires),
+    mcp: asMcp(data.mcp, name),
     dir,
     path: skillMdPath,
   };
@@ -162,6 +201,34 @@ export function discoverSkills(repo: string): Skill[] {
     }
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** #552: collect every non-deprecated skill's mcp block into a {name → UserMcpServer} map,
+ *  ready to merge into the engine MCP fan-out (same shape as settings.mcpServers).
+ *  Server name = mcp.name (already resolved in asMcp). Later skills win on name clash. */
+export function skillMcpServers(skills: Skill[]): Record<string, UserMcpServer> {
+  const out: Record<string, UserMcpServer> = {};
+  for (const skill of skills) {
+    if (skill.status === "deprecated" || !skill.mcp) continue;
+    const { name: serverName, transport, command, args, url, headers } = skill.mcp;
+    if (!serverName) continue;
+    if (transport === "stdio" && command) {
+      const entry: UserMcpServer = {
+        transport: "stdio",
+        command,
+        ...(args?.length ? { args } : {}),
+      };
+      out[serverName] = entry;
+    } else if ((transport === "http" || transport === "sse") && url) {
+      const entry: UserMcpServer = {
+        transport,
+        url,
+        ...(headers && Object.keys(headers).length ? { headers } : {}),
+      };
+      out[serverName] = entry;
+    }
+  }
+  return out;
 }
 
 /**
