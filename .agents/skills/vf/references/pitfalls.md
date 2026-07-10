@@ -34,4 +34,45 @@ manual workaround — most of these are the exact failure modes the CLI exists t
   concurrency and got serial execution, check for file-scope overlap between units and
   split the scopes cleanly.
 
+- **`vf init` / `vf orchestrate` pollute generated files — clean them out of the PR.** A
+  dogfood run rewrites `AGENTS.md`, `CLAUDE.md`, `.vibeflow/SETTINGS.json`, `.claude/settings.json`,
+  and `.githooks/*` (often injecting a machine-specific absolute `$HOME` path that trips the
+  `no-tracked-machine-path` test). The orchestrator's WIP checkpoint commit bundles these with
+  your real changes. Before opening the PR: `git reset --soft main`, then `git restore --staged
+  --worktree` the generated files back to `main`, and `git add` ONLY the source/test/docs you
+  meant to change. Never stage the vf-generated files (`AGENTS.md`, `CLAUDE.md`,
+  `.vibeflow/SETTINGS.json`, `.claude/settings.json`, `.githooks/*`).
+
+- **The engine can finish coding then FAIL the final verify — the diff is still usable.** If
+  `vf orchestrate --yes` reports the unit blocked because the verify/gate step errored (e.g. the
+  engine's model 404'd at the end, or lint tripped), inspect `git diff` first: the engine
+  usually wrote correct source + tests over its earlier turns. Run the gates yourself
+  (`bun run typecheck`, `bun run lint`, `bun run coverage:check`), auto-fix format, and continue —
+  do not throw away 30+ turns of work because the last step died.
+
+- **The engine skips docs.** Dispatched engines reliably implement code + tests but ignore the
+  "update docs / mirror the landing wiki 1:1" part of a spec. After a dispatch, check
+  `git status docs/ landing/` yourself and write the doc + its mirror by hand.
+
+- **A failing engine test is usually a dodgy prompt, not a dumb engine.** The cheap engine follows
+  the prompt literally — so encode test pitfalls IN the prompt or you get code that compiles but
+  fails: (1) a spawn test that mutates `PATH` breaks the binary lookup — tell it to spawn via
+  `process.execPath`, not `"node"`; (2) never restore env with `process.env[K] = undefined` — it
+  sets the literal string `"undefined"` (Copilot flags this). Use the save/restore pattern in
+  pitfall (4), not a bare unconditional `delete`; (3) `let x = undefined`
+  makes TS narrow the type to `undefined` and later casts fail TS2352 — tell it to declare
+  `let x: T | undefined;` with no initializer; (4) a test that sets `process.env.KEY` must SAVE the
+  original first and RESTORE it in finally (`delete` only when it was absent) — a bare
+  `delete process.env.KEY` wipes a real value from the dev/CI env for the rest of the run; (5) don't
+  assert `HOME` is set (unset on Windows — USERPROFILE is the standard); `PATH` is the cross-platform
+  ALWAYS_KEEP probe. When a dispatched test fails, first ask "did my prompt warn about this pitfall?"
+  before blaming the engine.
+
+- **Cheap-engine model tags must point at an AUTHENTICATED provider account.** When routing
+  `vf`'s engines through a local proxy (e.g. 9router) to a cheap model, a wrong model tag fails
+  in two stages that look different: an unreachable model → `404` (no access), and a reachable
+  model on an un-authed account → `401 Missing API key`. `vf doctor --probe` surfaces this as a
+  probe timeout/failure for that engine. See `references/cheap-engine-setup.md` for the recipe
+  to find the correct tag.
+
 Powered by VibeFlow.
