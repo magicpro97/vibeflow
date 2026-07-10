@@ -246,6 +246,51 @@ describe("config env-policy (#556)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("test subcommand prints DROPPED and KEPT names, never values", async () => {
+    // biome-ignore lint/performance/noDelete: test cleanup must truly remove the var
+    process.env.MY_TEST_SECRET = "super-secret-value-should-not-appear";
+    try {
+      const dir = tmpRepo();
+      try {
+        const { code, out } = await capture(() => config("env-policy", ["test"], dir));
+        expect(code).toBe(0);
+        // NAMES appear under correct headers
+        expect(out).toContain("MY_TEST_SECRET");
+        expect(out).toContain("PATH");
+        // VALUE must NOT appear
+        expect(out).not.toContain("super-secret-value-should-not-appear");
+        // Headers present
+        expect(out).toContain("DROPPED");
+        expect(out).toContain("KEPT");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } finally {
+      // biome-ignore lint/performance/noDelete: test cleanup
+      delete process.env.MY_TEST_SECRET;
+    }
+  });
+
+  test("test subcommand with no-policy still drops DEFAULT_DENY secrets", async () => {
+    // biome-ignore lint/performance/noDelete: test cleanup
+    process.env.AWS_SECRET_ACCESS_KEY = "abc123";
+    try {
+      const dir = tmpRepo();
+      try {
+        const { code, out } = await capture(() => config("env-policy", ["test"], dir));
+        expect(code).toBe(0);
+        expect(out).toContain("AWS_SECRET_ACCESS_KEY");
+        expect(out).toContain("DROPPED");
+        expect(out).not.toContain("abc123");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } finally {
+      // biome-ignore lint/performance/noDelete: test cleanup
+      delete process.env.AWS_SECRET_ACCESS_KEY;
+    }
+  });
 });
 
 describe("settings envPolicy coerce/writeSettings (#556)", () => {

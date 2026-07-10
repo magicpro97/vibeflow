@@ -1,4 +1,5 @@
 import { type Engine, hasCommand, resolveCommand, resolveEngineBinary } from "../core.js";
+import { filterEnv } from "../dispatch/env-filter.js";
 import {
   GH_AUTH_TIMEOUT_MS,
   type ProbeInvocation,
@@ -106,6 +107,7 @@ export async function checkEngineAsync(
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
+        env: filterEnv(process.env, {}).env,
       });
       child.stdin?.write(attempt.input);
       child.stdin?.end();

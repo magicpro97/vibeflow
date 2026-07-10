@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { type Engine, needsShellForCommand, resolveEngineBinary } from "../core.js";
+import { filterEnv } from "../dispatch/env-filter.js";
 import type { ProbeResult, ProbeSpawner, ReadinessLevel } from "./types.js";
 
 /** Bounded so a hung / never-logged-in engine cannot block the check forever. */
@@ -37,11 +38,15 @@ export function defaultSpawner(
   // Windows, and cmd.exe /s strips the outer quotes — splitting on the
   // space (e.g. C:\Users\Linh Ngo\...\claude.cmd). Pre-quote to fix #439.
   const quotedCmd = needsShell && cmd.includes(" ") ? `"${cmd}"` : cmd;
+  // ponytail: probe scrubs with the DEFAULT_DENY floor only; honoring a
+  // configured envPolicy here would need base threaded to every probe call
+  // site — deferred (probe prompt carries no task context).
   const r = spawnSync(quotedCmd, args, {
     input,
     encoding: "utf8",
     timeout,
     shell: needsShell,
+    env: filterEnv(process.env, {}).env,
   });
   const code =
     r.error && typeof (r.error as NodeJS.ErrnoException).code === "string"

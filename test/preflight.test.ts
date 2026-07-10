@@ -1100,3 +1100,104 @@ describe("defaultSpawner path quoting (Windows space-in-path fix)", () => {
     expect(probeSrc).toMatch(/\$\{cmd\}|"\+cmd\+/);
   });
 });
+
+describe("defaultSpawner env scrub (#577)", () => {
+  test("defaultSpawner strips DEFAULT_DENY secrets (AWS_SECRET_ACCESS_KEY)", () => {
+    // biome-ignore lint/performance/noDelete: test cleanup must truly remove the var
+    process.env.AWS_SECRET_ACCESS_KEY = "super-secret-token";
+    try {
+      const { defaultSpawner } = require("../src/preflight/probe.js");
+      const r = defaultSpawner(
+        process.execPath,
+        ["-e", "process.stdout.write(process.env.AWS_SECRET_ACCESS_KEY || 'SCRUBBED')"],
+        "",
+      );
+      expect(r.stdout).toBe("SCRUBBED");
+    } finally {
+      // biome-ignore lint/performance/noDelete: test cleanup
+      delete process.env.AWS_SECRET_ACCESS_KEY;
+    }
+  });
+
+  test("defaultSpawner keeps ALWAYS_KEEP vars (PATH)", () => {
+    const { defaultSpawner } = require("../src/preflight/probe.js");
+    const r = defaultSpawner(
+      process.execPath,
+      ["-e", "process.stdout.write(process.env.PATH ? 'PRESENT' : 'MISSING')"],
+      "",
+    );
+    expect(r.stdout).toBe("PRESENT");
+  });
+
+  test("defaultSpawner scrubs DEFAULT_DENY even when no envPolicy configured", () => {
+    // biome-ignore lint/performance/noDelete: test cleanup
+    process.env.STRIPE_API_KEY = "sk_test_12345";
+    try {
+      const { defaultSpawner } = require("../src/preflight/probe.js");
+      const r = defaultSpawner(
+        process.execPath,
+        ["-e", "process.stdout.write(process.env.STRIPE_API_KEY || 'SCRUBBED')"],
+        "",
+      );
+      expect(r.stdout).toBe("SCRUBBED");
+    } finally {
+      // biome-ignore lint/performance/noDelete: test cleanup
+      delete process.env.STRIPE_API_KEY;
+    }
+  });
+});
+
+describe("checkAsync Bun.spawn env scrub (#577)", () => {
+  test("async Bun.spawn path receives scrubbed env", async () => {
+    const original = Bun.spawn;
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => {
+          const enc = new TextEncoder();
+          let yielded = false;
+          return {
+            read: async () => {
+              if (!yielded) {
+                yielded = true;
+                return { done: false, value: enc.encode("0 fail ok") };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+      stderr: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = ((
+      _cmd: string[],
+      opts?: { env?: NodeJS.ProcessEnv },
+    ) => {
+      capturedEnv = opts?.env;
+      return fakeChild;
+    }) as unknown as typeof Bun.spawn;
+    try {
+      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
+      expect(r.level).toBe("ready");
+      expect(capturedEnv).toBeDefined();
+      const env = capturedEnv as NodeJS.ProcessEnv;
+      // DEFAULT_DENY secrets should NOT be present
+      expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
+      expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      expect(env.STRIPE_API_KEY).toBeUndefined();
+      expect(env.DATABASE_URL).toBeUndefined();
+      // ALWAYS_KEEP vars should be present
+      expect(env.PATH).toBeDefined();
+      expect(env.HOME).toBeDefined();
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+});
