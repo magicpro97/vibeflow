@@ -20,11 +20,11 @@ import {
   discoverSkills,
   investigateUnit,
   makeAsyncSpawner,
-  matchSkillsForTask,
   out,
   persistDispatch,
   recoveryHint,
   runDispatchAsync,
+  selectDispatchSkills,
   thresholdFor,
 } from "./_shared.js";
 import type {
@@ -184,17 +184,16 @@ export function makeDispatcher(
     // matches by name. When a knowledge-heavy unit (feature/architecture, or UX/UI by spec) has
     // NO match, flag the gap so the engine won't silently freelance (esp. UX/UI).
     const unitText = `${u.name} ${u.spec ?? ""}`;
-    const skillMatches = matchSkillsForTask(discoverSkills(base), unitText);
-    const skillNames = skillMatches.map((m) => m.skill.name);
+    const { skillNames, alwaysNames, matchedNames, skillsRequired } = selectDispatchSkills(
+      discoverSkills(base),
+      unitText,
+    );
     const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
     const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
-    const skillGap = knowledgeHeavy && skillNames.length === 0;
+    const skillGap = knowledgeHeavy && matchedNames.length === 0;
     // The full mixed-trust list actually injected into the prompt vs the VERIFIED-only subset
     // that a downstream skills-first gate is allowed to count as satisfying the requirement.
     const skillsInjected = skillNames;
-    const skillsRequired = skillMatches
-      .filter((m) => m.skill.status === "verified")
-      .map((m) => m.skill.name);
     // Why the unit is knowledge-heavy: risk class first, else the UX/UI regex, else undefined.
     const knowledgeHeavySource = computeKnowledgeHeavySource(riskClass, unitText);
     const memProvider = resolveMemoryProvider(readSettings(base).memory, join(base, CTX_DIR));
@@ -206,7 +205,16 @@ export function makeDispatcher(
       buildEnginePrompt(
         engine,
         ctx,
-        [{ name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }],
+        [
+          {
+            name: u.name,
+            spec: u.spec,
+            scope: u.scope,
+            skills: skillNames,
+            skillGap,
+            repoSkills: alwaysNames,
+          },
+        ],
         memBlock,
       ),
       // A dry run is a READ-ONLY preview (see :309): it must still READ + PREPEND the

@@ -20,6 +20,7 @@ const STANDARD_FRONTMATTER = new Set([
   "allowed-tools",
   "metadata",
   "compatibility",
+  "type",
 ]);
 
 const NAME_MAX = 64;
@@ -108,6 +109,12 @@ export function validateSkillDir(
   const compatibility = typeof data.compatibility === "string" ? data.compatibility.trim() : "";
   if (compatibility && compatibility.length > COMPATIBILITY_MAX) {
     errors.push(`frontmatter.compatibility must be <= ${COMPATIBILITY_MAX} chars`);
+  }
+
+  // #543: type is optional; when present it must be "repo" or "knowledge" (unknown degrades
+  // to knowledge at the injection site, so this is a warning, not a hard error).
+  if (data.type !== undefined && data.type !== "repo" && data.type !== "knowledge") {
+    warnings.push('frontmatter.type must be "repo" or "knowledge"');
   }
 
   // Warn (not error) on frontmatter keys outside the spec's standard set,

@@ -154,6 +154,8 @@ export interface Skill {
   status: SkillStatus;
   capabilities?: string[];
   triggers?: string[];
+  /** #543: repo = always-on project law (injected every dispatch); knowledge (default) = keyword-gated. */
+  type?: "repo" | "knowledge";
   requires?: SkillRequires;
   /** Absolute path to the skill folder. */
   dir: string;
