@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AskInvocation } from "../src/commands/ask.js";
-import { captureSpawnAsync } from "../src/commands/ask.js";
+import { captureSpawnAsync, streamSpawnAsync } from "../src/commands/ask.js";
 import type { AsyncSpawner } from "../src/dispatch/types.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
+import { startServer } from "../src/server.js";
 import {
   type AskRunDeps,
   askResponse,
+  askStreamResponse,
+  prepareAsk,
   realpathWithinRepo,
   resolveAskTarget,
   runAskRequest,
@@ -323,5 +326,297 @@ describe("captureSpawnAsync — async capture seam (#584)", () => {
       else process.env.MY_ASK_CUSTOM_VAR = origVar;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("prepareAsk — extracted orchestration (#580)", () => {
+  const deps = {
+    readiness: () => Promise.resolve([ready("claude")]),
+    readText: () => "l1\nl2\nl3\nl4\nl5",
+    realpath: (p: string) => p,
+  };
+
+  test("happy path → { eng, prompt } shape", async () => {
+    const r = await prepareAsk(REPO, okBody, deps);
+    if ("error" in r) throw new Error(`unexpected error: ${r.error}`);
+    expect(r.eng).toBe("claude");
+    expect(r.prompt).toContain("l2\nl3\nl4");
+    expect(r.prompt).toContain("why?");
+  });
+
+  test("validation error → AskError (no spawning)", async () => {
+    const r = await prepareAsk(REPO, { path: "a.ts", start: 1, end: 1 }, deps);
+    expect(r).toEqual({ error: "question is required", status: 400 });
+  });
+
+  test("symlink escape → AskError", async () => {
+    const r = await prepareAsk(REPO, okBody, {
+      ...deps,
+      realpath: (p) => (p === "/repo/src/x.ts" ? "/etc/passwd" : p),
+    });
+    expect(r).toEqual({ error: "path escapes repo", status: 400 });
+  });
+
+  test("no ready engine → AskError", async () => {
+    const r = await prepareAsk(REPO, okBody, {
+      ...deps,
+      readiness: () => Promise.resolve([ready("claude", "no-binary")]),
+    });
+    expect(r).toMatchObject({ status: 400 });
+  });
+
+  test("existing runAskRequest tests still pass (thin wrapper over prepareAsk)", async () => {
+    // Prove prepareAsk is the same logic runAskRequest was before the refactor
+    const spawn = () => Promise.resolve({ code: 0, text: "OK" });
+    const r = await runAskRequest(REPO, okBody, { ...deps, spawn });
+    expect(r).toEqual({ ok: true, engine: "claude", answer: "OK", code: 0 });
+  });
+});
+
+describe("streamSpawnAsync — SSE onChunk relay (#580)", () => {
+  test("wires onChunk into the default spawner (real process streams to callback)", async () => {
+    // No injected spawner → streamSpawnAsync builds the default via
+    // makeAsyncSpawner({ onChunk }); a real child writing to stdout must reach
+    // the callback. Proves the onChunk seam (ask.ts:264), not just accumulation.
+    const chunks: string[] = [];
+    const r = await streamSpawnAsync(
+      {
+        cmd: process.execPath,
+        args: ["-e", "process.stdout.write('hello-stream')"],
+        promptMode: "arg",
+      },
+      "",
+      (s) => chunks.push(s),
+    );
+    expect(chunks.join("")).toBe("hello-stream");
+    expect(r).toEqual({ code: 0, text: "hello-stream" });
+  });
+
+  test("maps status→code and returns accumulated text (injected spawner)", async () => {
+    const r = await streamSpawnAsync(
+      { cmd: "test", args: ["-p"], promptMode: "stdin" },
+      "prompt",
+      () => {},
+      (cmd: string) => {
+        expect(cmd).toBe("test");
+        return Promise.resolve({ status: 0, stdout: "chunk1chunk2" });
+      },
+    );
+    expect(r).toEqual({ code: 0, text: "chunk1chunk2" });
+  });
+
+  test("stderr fallback when stdout empty", async () => {
+    const r = await streamSpawnAsync(
+      { cmd: "fail", args: [], promptMode: "arg" },
+      "",
+      () => {},
+      () => Promise.resolve({ status: 1, stdout: "", stderr: "oops" }),
+    );
+    expect(r).toEqual({ code: 1, text: "oops" });
+  });
+
+  test("default spawner honors envPolicy (denies custom var)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ask-stream-envpol-"));
+    const cwd0 = process.cwd();
+    const origVar = process.env.MY_ASK_STREAM_VAR;
+    try {
+      writeSettings(dir, { envPolicy: { deny: ["MY_ASK_STREAM_VAR"] } });
+      process.chdir(dir);
+      process.env.MY_ASK_STREAM_VAR = "leak-me";
+      const r = await streamSpawnAsync(
+        {
+          cmd: process.execPath,
+          args: ["-e", "process.stdout.write(process.env.MY_ASK_STREAM_VAR || 'SCRUBBED')"],
+          promptMode: "arg",
+        },
+        "",
+        () => {},
+      );
+      expect(r.text).toBe("SCRUBBED");
+    } finally {
+      process.chdir(cwd0);
+      // biome-ignore lint/performance/noDelete: restore to truly-absent
+      if (origVar === undefined) delete process.env.MY_ASK_STREAM_VAR;
+      else process.env.MY_ASK_STREAM_VAR = origVar;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("GET /api/ask/stream — SSE endpoint (#580)", () => {
+  async function csrfToken(url: string): Promise<string> {
+    const res = await fetch(url);
+    const html = await res.text();
+    const m = html.match(/<meta\s+name="vf-token"\s+content="([^"]+)"\s*\/?>/i);
+    if (!m) throw new Error("CSRF token not found");
+    return m[1] as string;
+  }
+
+  test("403 on bad token", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ask-sse-403-"));
+    const cwd0 = process.cwd();
+    try {
+      process.chdir(dir);
+      const { server, url } = await startServer(0);
+      try {
+        const res = await fetch(
+          `${url}/api/ask/stream?path=x.ts&start=1&end=1&question=q&token=bad-token`,
+        );
+        expect(res.status).toBe(403);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      process.chdir(cwd0);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("400 on missing params (before stream opens)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ask-sse-400-"));
+    const cwd0 = process.cwd();
+    try {
+      process.chdir(dir);
+      const { server, url } = await startServer(0);
+      try {
+        const token = await csrfToken(url);
+        const res = await fetch(
+          `${url}/api/ask/stream?path=&start=1&end=1&question=&token=${encodeURIComponent(token)}`,
+        );
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toBeDefined();
+      } finally {
+        server.stop();
+      }
+    } finally {
+      process.chdir(cwd0);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("header guards: 403 on missing token query param", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ask-sse-notok-"));
+    const cwd0 = process.cwd();
+    try {
+      process.chdir(dir);
+      const { server, url } = await startServer(0);
+      try {
+        const res = await fetch(`${url}/api/ask/stream?path=x.ts&start=1&end=1&question=q`);
+        expect(res.status).toBe(403);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      process.chdir(cwd0);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("askStreamResponse — SSE stream body (#580)", () => {
+  const prepDeps = {
+    readiness: () => Promise.resolve([ready("claude")]),
+    readText: () => "l1\nl2\nl3\nl4\nl5",
+    realpath: (p: string) => p,
+  };
+
+  async function readSSE(res: Response): Promise<string> {
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("no body");
+    const dec = new TextDecoder();
+    let out = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out += dec.decode(value);
+    }
+    return out;
+  }
+
+  test("relays token frames then a done frame (ok=true)", async () => {
+    const spawn = (
+      _inv: AskInvocation,
+      _prompt: string,
+      onChunk: (s: string) => void,
+    ): Promise<{ code: number; text: string }> => {
+      onChunk("hel");
+      onChunk("lo");
+      return Promise.resolve({ code: 0, text: "hello" });
+    };
+    const res = await askStreamResponse(REPO, okBody, spawn, prepDeps);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const sse = await readSSE(res);
+    expect(sse).toContain(": vibeflow-ask-1");
+    expect(sse).toContain(`event: token\ndata: ${JSON.stringify({ text: "hel" })}`);
+    expect(sse).toContain(`event: token\ndata: ${JSON.stringify({ text: "lo" })}`);
+    expect(sse).toContain(
+      `event: done\ndata: ${JSON.stringify({ engine: "claude", code: 0, ok: true })}`,
+    );
+  });
+
+  test("newline-containing token is JSON-escaped (frame not broken)", async () => {
+    const spawn = (
+      _inv: AskInvocation,
+      _prompt: string,
+      onChunk: (s: string) => void,
+    ): Promise<{ code: number; text: string }> => {
+      onChunk("a\nb");
+      return Promise.resolve({ code: 0, text: "a\nb" });
+    };
+    const sse = await readSSE(await askStreamResponse(REPO, okBody, spawn, prepDeps));
+    expect(sse).toContain(`event: token\ndata: ${JSON.stringify({ text: "a\nb" })}`);
+  });
+
+  test("non-zero engine exit → done frame ok=false", async () => {
+    const spawn = (): Promise<{ code: number; text: string }> =>
+      Promise.resolve({ code: 2, text: "boom" });
+    const sse = await readSSE(await askStreamResponse(REPO, okBody, spawn, prepDeps));
+    expect(sse).toContain(
+      `event: done\ndata: ${JSON.stringify({ engine: "claude", code: 2, ok: false })}`,
+    );
+  });
+
+  test("spawn rejection → error frame", async () => {
+    const spawn = (): Promise<{ code: number; text: string }> =>
+      Promise.reject(new Error("spawn failed"));
+    const sse = await readSSE(await askStreamResponse(REPO, okBody, spawn, prepDeps));
+    expect(sse).toContain(`event: error\ndata: ${JSON.stringify({ error: "spawn failed" })}`);
+  });
+
+  test("non-Error rejection is stringified (never a {} frame)", async () => {
+    const spawn = (): Promise<{ code: number; text: string }> =>
+      // biome-ignore lint/suspicious/useAwait: intentional non-Error rejection value
+      Promise.reject("boom-string");
+    const sse = await readSSE(await askStreamResponse(REPO, okBody, spawn, prepDeps));
+    expect(sse).toContain(`event: error\ndata: ${JSON.stringify({ error: "boom-string" })}`);
+  });
+
+  test("prep error → 400 JSON before stream opens", async () => {
+    const res = await askStreamResponse(
+      REPO,
+      { path: "a.ts", start: 1, end: 1 },
+      () => Promise.resolve({ code: 0, text: "" }),
+      prepDeps,
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  test("client disconnect (reader.cancel) stops the heartbeat without throwing", async () => {
+    // spawn never resolves → the stream stays open on the heartbeat; cancelling
+    // the reader must invoke ReadableStream.cancel() (clearInterval) cleanly.
+    let resolveSpawn: (() => void) | undefined;
+    const spawn = (): Promise<{ code: number; text: string }> =>
+      new Promise((res) => {
+        resolveSpawn = () => res({ code: 0, text: "" });
+      });
+    const response = await askStreamResponse(REPO, okBody, spawn, prepDeps);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("no body");
+    // Read the prelude frame, then disconnect.
+    await reader.read();
+    await reader.cancel(); // must not throw; clears the heartbeat via cancel()
+    resolveSpawn?.(); // let the dangling spawn settle so no unhandled promise
   });
 });

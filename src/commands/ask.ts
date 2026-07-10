@@ -249,6 +249,28 @@ export async function captureSpawnAsync(
   return { code: r.status, text };
 }
 
+/**
+ * Streaming async spawn for SSE (#580). Mirrors captureSpawnAsync but the default
+ * spawner is built WITH onChunk so tokens stream incrementally through the callback.
+ * When an injected spawner is passed (tests), it is used as-is.
+ */
+export async function streamSpawnAsync(
+  inv: AskInvocation,
+  prompt: string,
+  onChunk: (s: string) => void,
+  spawner?: AsyncSpawner,
+): Promise<{ code: number; text: string }> {
+  const s =
+    spawner ?? makeAsyncSpawner({ envPolicy: readSettings(cwd()).envPolicy ?? {}, onChunk });
+  const r = await s(
+    inv.cmd,
+    materializeArgs(inv, prompt),
+    inv.promptMode === "stdin" ? prompt : "",
+  );
+  const text = r.stdout || r.stderr || "";
+  return { code: r.status, text };
+}
+
 function fail(msg: string): number {
   out("vf", c.red(`ask: ${msg}`), { level: "error" });
   return 2;

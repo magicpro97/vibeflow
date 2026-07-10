@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
+import { askStreamResponse } from "./server/ask-route.js";
 import { handleFileRoute } from "./server/file-route.js";
 import { listAttachments, replayFromLog, settingsView } from "./server/handlers.js";
 import {
@@ -277,6 +278,20 @@ export function startServer(
             },
           },
         );
+      }
+
+      // --- SSE: /api/ask/stream (#580) — token-by-token engine answer streaming ---
+      if (method === "GET" && path === "/api/ask/stream") {
+        if (!isLoopback(req.headers.get("host") ?? "") || url.searchParams.get("token") !== token)
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        const body = {
+          path: url.searchParams.get("path") ?? "",
+          start: Number(url.searchParams.get("start")),
+          end: Number(url.searchParams.get("end")),
+          question: url.searchParams.get("question") ?? "",
+          engine: url.searchParams.get("engine") ?? undefined,
+        };
+        return await askStreamResponse(activeRepo, body);
       }
 
       // --- GET /api/logs/session --- returns session start seq (to skip stale logs)

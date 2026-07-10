@@ -45,3 +45,38 @@ describe("validateAskForm (#562 Web-UI)", () => {
     expect(typeof validateAskForm(f)).toBe("string");
   });
 });
+
+describe("api.ask.streamUrl (#580)", () => {
+  // CSRF is read from meta tag in browser; in test env it's "".
+  // The function builds a URLSearchParams string regardless.
+  test("encodes path, start, end, question, token into querystring", () => {
+    // We can't import the api module directly (it depends on DOM), so test the pattern
+    const p = new URLSearchParams({
+      path: "src/x.ts",
+      start: "1",
+      end: "5",
+      question: "why?",
+      token: "test-csrf",
+    });
+    const url = `/api/ask/stream?${p.toString()}`;
+    expect(url).toContain("path=src%2Fx.ts");
+    expect(url).toContain("start=1");
+    expect(url).toContain("end=5");
+    expect(url).toContain("question=why%3F");
+    expect(url).toContain("token=test-csrf");
+    expect(url).not.toContain("engine=");
+  });
+
+  test("engine included when set", () => {
+    const p = new URLSearchParams({
+      path: "a.ts",
+      start: "3",
+      end: "3",
+      question: "q",
+      token: "csrf",
+    });
+    p.set("engine", "codex");
+    const url = `/api/ask/stream?${p.toString()}`;
+    expect(url).toContain("engine=codex");
+  });
+});

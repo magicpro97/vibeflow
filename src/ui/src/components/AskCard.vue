@@ -135,14 +135,26 @@ async function submit() {
   }
   loading.value = true;
   answer.value = "";
-  try {
-    const res = await api.ask.run(payload);
-    answer.value = res.answer || "(no output)";
-    answerEngine.value = res.engine;
-  } catch (e) {
-    err.value = e instanceof Error ? e.message : "Ask failed";
-  } finally {
+  answerEngine.value = "";
+
+  const es = new EventSource(api.ask.streamUrl(payload));
+  es.addEventListener("token", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as { text: string };
+    answer.value += data.text;
+  });
+  es.addEventListener("done", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as { engine: string; code: number; ok: boolean };
+    answerEngine.value = data.engine;
+    if (!data.ok) err.value = `Engine exited with code ${data.code}`;
+    es.close();
     loading.value = false;
-  }
+  });
+  // EventSource surfaces connection failures (and our server's `error` event on
+  // spawn rejection closes the stream, tripping this too) via onerror.
+  es.onerror = () => {
+    es.close();
+    if (!err.value) err.value = "Stream connection failed";
+    loading.value = false;
+  };
 }
 </script>
