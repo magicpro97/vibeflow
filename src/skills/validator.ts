@@ -118,7 +118,8 @@ export function validateSkillDir(
     warnings.push('frontmatter.type must be "repo" or "knowledge"');
   }
 
-  // #552: mcp is optional; when present it must be an object with the required transport field.
+  // #552: mcp is optional; when present it must be an object. transport defaults to stdio,
+  // so it's optional — but stdio needs a command, and http/sse need a url.
   if (data.mcp !== undefined) {
     const m = data.mcp;
     let malformed = false;

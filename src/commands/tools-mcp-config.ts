@@ -291,9 +291,10 @@ export function writeToolConfigs(
   const languages = repoLanguages(base);
   // #552 security: warn once per skill that contributes an MCP server so the user sees
   // what got wired — installing a skill now also runs code via an MCP server.
-  const skillServers = skillMcpServers(discoverSkills(base));
+  const skills = discoverSkills(base);
+  const skillServers = skillMcpServers(skills);
   const skillByServer = new Map<string, string>();
-  for (const skill of discoverSkills(base)) {
+  for (const skill of skills) {
     if (skill.status !== "deprecated" && skill.mcp?.name) {
       skillByServer.set(skill.mcp.name, skill.name);
     }
