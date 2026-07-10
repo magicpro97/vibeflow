@@ -1,11 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dispatchPrompt } from "../src/adapters/dispatch-prompt.js";
 import { makeDispatcher } from "../src/commands.js";
 import { CTX_DIR, type Skill, writeState } from "../src/core.js";
-import { parseSkill, repoSkills } from "../src/skills/registry.js";
+import { parseSkill, repoSkills, selectDispatchSkills } from "../src/skills/registry.js";
 import { validateSkillDir } from "../src/skills/validator.js";
 
 function writeSkill(root: string, name: string, frontmatter: string[]): string {
@@ -31,6 +31,7 @@ function skill(over: Partial<Skill>): Skill {
 
 describe("#543 parseSkill type field", () => {
   const root = mkdtempSync(join(tmpdir(), "vf-543-parse-"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
   test("type: repo → repo", () => {
     const dir = writeSkill(root, "law", ["name: law", "description: project law", "type: repo"]);
     expect(parseSkill(join(dir, "SKILL.md"), dir)?.type).toBe("repo");
@@ -82,6 +83,29 @@ describe("#543 repoSkills()", () => {
   });
 });
 
+describe("#543 selectDispatchSkills", () => {
+  test("a repo skill with matching triggers does NOT count as a knowledge match", () => {
+    // The repo skill declares a trigger that hits unitText, so matchSkillsForTask
+    // returns it — but it must be excluded from matchedNames (always-on law, not a
+    // knowledge match), else it would falsely suppress the knowledge-gap flag.
+    const skills = [skill({ name: "law", type: "repo", status: "verified", triggers: ["widget"] })];
+    const r = selectDispatchSkills(skills, "build the widget");
+    expect(r.alwaysNames).toEqual(["law"]); // injected as project law
+    expect(r.skillNames).toEqual(["law"]); // in the union
+    expect(r.matchedNames).toEqual([]); // NOT a knowledge match → gap flag stays truthful
+    expect(r.skillsRequired).toEqual(["law"]); // verified subset of the union
+  });
+
+  test("a knowledge skill with matching triggers is a knowledge match", () => {
+    const skills = [
+      skill({ name: "kb", type: "knowledge", status: "verified", triggers: ["widget"] }),
+    ];
+    const r = selectDispatchSkills(skills, "build the widget");
+    expect(r.matchedNames).toEqual(["kb"]);
+    expect(r.alwaysNames).toEqual([]);
+  });
+});
+
 describe("#543 dispatchPrompt repo vs matched", () => {
   const ctx = { goal: "g", settings: {} } as never;
   test("renders Project law line when repoSkills present", () => {
@@ -100,6 +124,7 @@ describe("#543 dispatchPrompt repo vs matched", () => {
 
 describe("#543 validator type checks", () => {
   const root = mkdtempSync(join(tmpdir(), "vf-543-valid-"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
   test("type is a standard field (no non-standard warning)", () => {
     const dir = writeSkill(root, "ok", ["name: ok", "description: fine", "type: repo"]);
     const r = validateSkillDir(dir);

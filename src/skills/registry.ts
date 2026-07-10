@@ -208,7 +208,11 @@ export function selectDispatchSkills(
   const skillMatches = matchSkillsForTask(allSkills, unitText);
   const alwaysOn = repoSkills(allSkills);
   const alwaysNames = alwaysOn.map((s) => s.name);
-  const matchedNames = skillMatches.map((m) => m.skill.name);
+  // #543: a repo skill that ALSO declares triggers can appear in skillMatches, but it is
+  // always-on project law — NOT a knowledge match. Exclude repo-typed matches from
+  // matchedNames so the knowledge-gap flag (matchedNames.length === 0) is not falsely
+  // suppressed by an always-on skill. (Copilot review #591.)
+  const matchedNames = skillMatches.filter((m) => m.skill.type !== "repo").map((m) => m.skill.name);
   const skillNames = [...new Set([...alwaysNames, ...matchedNames])];
   const skillsRequired = [
     ...new Set([
