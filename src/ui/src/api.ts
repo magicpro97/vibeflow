@@ -158,5 +158,22 @@ export const api = {
         "/api/ask",
         payload,
       ),
+    streamUrl: (payload: {
+      path: string;
+      start: number;
+      end: number;
+      question: string;
+      engine?: string;
+    }) => {
+      const p = new URLSearchParams({
+        path: payload.path,
+        start: String(payload.start),
+        end: String(payload.end),
+        question: payload.question,
+        token: CSRF,
+      });
+      if (payload.engine) p.set("engine", payload.engine);
+      return `/api/ask/stream?${p.toString()}`;
+    },
   },
 };
