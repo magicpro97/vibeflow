@@ -221,6 +221,11 @@ export async function askStreamResponse(
   if ("error" in prep) return Response.json({ error: prep.error }, { status: prep.status });
 
   const enc = new TextEncoder();
+  // Hoisted so cancel() (client disconnect) can stop the heartbeat timer. The
+  // engine spawn itself is NOT aborted on disconnect — it finishes in the
+  // background (ponytail: no group-kill; add an AbortSignal→killGroup wire if
+  // idle engines pile up). safeEnqueue already swallows post-close enqueues.
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   return new Response(
     new ReadableStream({
       start(controller) {
@@ -232,7 +237,7 @@ export async function askStreamResponse(
           }
         };
         safeEnqueue(enc.encode(": vibeflow-ask-1\n\n"));
-        const heartbeat = setInterval(() => safeEnqueue(enc.encode(": keepalive\n\n")), 25_000);
+        heartbeat = setInterval(() => safeEnqueue(enc.encode(": keepalive\n\n")), 25_000);
         // JSON.stringify the data so a token containing a newline can't break the SSE
         // `\n\n` frame terminator.
         const onChunk = (s: string) =>
@@ -254,13 +259,18 @@ export async function askStreamResponse(
             );
           })
           .finally(() => {
-            clearInterval(heartbeat);
+            if (heartbeat) clearInterval(heartbeat);
             try {
               controller.close();
             } catch {
               /* already closed */
             }
           });
+      },
+      cancel() {
+        // Client disconnected: stop the heartbeat so the timer can't leak. The
+        // in-flight engine spawn is left to finish in the background.
+        if (heartbeat) clearInterval(heartbeat);
       },
     }),
     {

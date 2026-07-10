@@ -374,34 +374,35 @@ describe("prepareAsk — extracted orchestration (#580)", () => {
 });
 
 describe("streamSpawnAsync — SSE onChunk relay (#580)", () => {
-  test("onChunk fires for each stdout chunk, text accumulated, code mapped", async () => {
+  test("wires onChunk into the default spawner (real process streams to callback)", async () => {
+    // No injected spawner → streamSpawnAsync builds the default via
+    // makeAsyncSpawner({ onChunk }); a real child writing to stdout must reach
+    // the callback. Proves the onChunk seam (ask.ts:264), not just accumulation.
     const chunks: string[] = [];
+    const r = await streamSpawnAsync(
+      {
+        cmd: process.execPath,
+        args: ["-e", "process.stdout.write('hello-stream')"],
+        promptMode: "arg",
+      },
+      "",
+      (s) => chunks.push(s),
+    );
+    expect(chunks.join("")).toBe("hello-stream");
+    expect(r).toEqual({ code: 0, text: "hello-stream" });
+  });
+
+  test("maps status→code and returns accumulated text (injected spawner)", async () => {
     const r = await streamSpawnAsync(
       { cmd: "test", args: ["-p"], promptMode: "stdin" },
       "prompt",
-      (s) => chunks.push(s),
-      (cmd, args, input) => {
+      () => {},
+      (cmd: string) => {
         expect(cmd).toBe("test");
         return Promise.resolve({ status: 0, stdout: "chunk1chunk2" });
       },
     );
     expect(r).toEqual({ code: 0, text: "chunk1chunk2" });
-  });
-
-  test("onChunk called twice via injected spawner that explicitly fires onChunk", async () => {
-    const chunks: string[] = [];
-    await streamSpawnAsync(
-      { cmd: "echo", args: [], promptMode: "arg" },
-      "",
-      (s) => chunks.push(s),
-      async () => {
-        // Simulate two separate onChunk calls
-        chunks.push("A");
-        chunks.push("B");
-        return { status: 0, stdout: "AB" };
-      },
-    );
-    expect(chunks).toEqual(["A", "B"]);
   });
 
   test("stderr fallback when stdout empty", async () => {
@@ -592,5 +593,22 @@ describe("askStreamResponse — SSE stream body (#580)", () => {
     );
     expect(res.status).toBe(400);
     expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  test("client disconnect (reader.cancel) stops the heartbeat without throwing", async () => {
+    // spawn never resolves → the stream stays open on the heartbeat; cancelling
+    // the reader must invoke ReadableStream.cancel() (clearInterval) cleanly.
+    let resolveSpawn: (() => void) | undefined;
+    const spawn = (): Promise<{ code: number; text: string }> =>
+      new Promise((res) => {
+        resolveSpawn = () => res({ code: 0, text: "" });
+      });
+    const response = await askStreamResponse(REPO, okBody, spawn, prepDeps);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("no body");
+    // Read the prelude frame, then disconnect.
+    await reader.read();
+    await reader.cancel(); // must not throw; clears the heartbeat via cancel()
+    resolveSpawn?.(); // let the dangling spawn settle so no unhandled promise
   });
 });

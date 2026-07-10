@@ -149,11 +149,8 @@ async function submit() {
     es.close();
     loading.value = false;
   });
-  es.addEventListener("error", () => {
-    es.close();
-    err.value = "Stream connection failed";
-    loading.value = false;
-  });
+  // EventSource surfaces connection failures (and our server's `error` event on
+  // spawn rejection closes the stream, tripping this too) via onerror.
   es.onerror = () => {
     es.close();
     if (!err.value) err.value = "Stream connection failed";
