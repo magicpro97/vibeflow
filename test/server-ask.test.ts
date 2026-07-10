@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AskInvocation } from "../src/commands/ask.js";
 import { captureSpawnAsync } from "../src/commands/ask.js";
 import type { AsyncSpawner } from "../src/dispatch/types.js";
@@ -10,6 +13,7 @@ import {
   resolveAskTarget,
   runAskRequest,
 } from "../src/server/ask-route.js";
+import { writeSettings } from "../src/settings.js";
 
 const REPO = "/repo";
 
@@ -290,5 +294,34 @@ describe("captureSpawnAsync — async capture seam (#584)", () => {
     expect(r.text).toContain("test question");
     expect(r.text).toContain("-p");
     expect(r.text).toContain("--allow-all");
+  });
+
+  // #584 + Copilot review: the DEFAULT spawner (no inject) must honor the repo's configured
+  // envPolicy, not just the DEFAULT_DENY floor — otherwise a user-denied var leaks to the engine.
+  test("default spawner honors the configured envPolicy (denies a custom var)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ask-envpol-"));
+    const cwd0 = process.cwd();
+    const origVar = process.env.MY_ASK_CUSTOM_VAR;
+    try {
+      writeSettings(dir, { envPolicy: { deny: ["MY_ASK_CUSTOM_VAR"] } });
+      process.chdir(dir);
+      process.env.MY_ASK_CUSTOM_VAR = "leak-me";
+      // no injected spawner → captureSpawnAsync builds one from readSettings(cwd()).envPolicy
+      const r = await captureSpawnAsync(
+        {
+          cmd: process.execPath,
+          args: ["-e", "process.stdout.write(process.env.MY_ASK_CUSTOM_VAR || 'SCRUBBED')"],
+          promptMode: "arg",
+        },
+        "",
+      );
+      expect(r.text).toBe("SCRUBBED");
+    } finally {
+      process.chdir(cwd0);
+      // biome-ignore lint/performance/noDelete: restore to truly-absent when the var wasn't set
+      if (origVar === undefined) delete process.env.MY_ASK_CUSTOM_VAR;
+      else process.env.MY_ASK_CUSTOM_VAR = origVar;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

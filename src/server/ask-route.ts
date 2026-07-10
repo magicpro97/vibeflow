@@ -83,7 +83,7 @@ export function resolveAskTarget(activeRepo: string, body: unknown): ResolvedAsk
   };
 }
 
-/** Injected seams (mirrors AskDeps in ask.ts) so the orchestration is hermetic. */
+/** Injected seams (async analogue of AskDeps in ask.ts — Promise-based) so the orchestration is hermetic. */
 export interface AskRunDeps {
   readiness?: (engines: Engine[]) => Promise<EngineReadiness[]>;
   spawn?: (inv: AskInvocation, prompt: string) => Promise<{ code: number; text: string }>;
