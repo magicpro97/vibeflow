@@ -16,7 +16,6 @@ import {
   registerPending,
 } from "./server/pending-hooks.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
-import { readSettings } from "./settings.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
 import { validateSkillRoots } from "./skills/validator.js";

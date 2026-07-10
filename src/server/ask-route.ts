@@ -252,10 +252,11 @@ export async function askStreamResponse(
             );
           })
           .catch((err: unknown) => {
+            // Coerce non-Error rejections (string/unknown) so JSON.stringify
+            // never drops the field and the UI always gets an actionable message.
+            const message = err instanceof Error ? err.message : String(err);
             safeEnqueue(
-              enc.encode(
-                `event: error\ndata: ${JSON.stringify({ error: (err as Error).message })}\n\n`,
-              ),
+              enc.encode(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`),
             );
           })
           .finally(() => {
