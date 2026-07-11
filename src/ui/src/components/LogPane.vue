@@ -35,6 +35,13 @@
           >
             <!-- Timestamp -->
             <span class="text-neutral-700 select-none tabular-nums shrink-0">{{ fmtTime(item.event.ts) }}</span>
+            <!-- #524: per-unit color dot — distinguishes parallel units at a glance -->
+            <span
+              v-if="item.event.unit"
+              class="shrink-0 w-1.5 h-1.5 rounded-full self-center"
+              :class="unitDotClass(item.event.unit)"
+              :title="item.event.unit"
+            />
             <!-- Channel badge — friendly names -->
             <span
               class="shrink-0 text-[10px]"
@@ -63,6 +70,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useSSE } from "../composables/useSSE.js";
+import { unitColor } from "../lib/unit-color.js";
 import { useVfStore } from "../store.js";
 import type { LogEvent, LogLevel } from "../types.js";
 
@@ -119,6 +127,11 @@ onUnmounted(() => {
 
 function fmtTime(ts: number) {
   return new Date(ts).toTimeString().slice(0, 8);
+}
+
+// #524: bg-* token from unitColor (drop the text-* half) for the per-unit dot.
+function unitDotClass(unit: string) {
+  return unitColor(unit).split(" ")[1] as string;
 }
 
 function levelClass(level: LogLevel) {

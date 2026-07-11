@@ -58,7 +58,8 @@
                     <!-- Owner agent tag -->
                     <span
                       v-if="u.owner_agent"
-                      class="px-1.5 py-px rounded text-[10px] text-neutral-600 bg-neutral-800/60 font-sans flex-shrink-0"
+                      class="px-1.5 py-px rounded text-[10px] font-sans flex-shrink-0"
+                      :class="unitColor(u.name)"
                     >
                       {{ u.owner_agent }}
                     </span>
@@ -76,6 +77,7 @@
                     class="w-full h-0.5 bg-neutral-800 rounded-full overflow-hidden mt-1.5"
                     :title="u.confidence ? `Confidence: ${(u.confidence*100).toFixed(0)}%` : 'No confidence score yet'"
                   >
+                    <!-- #524: transition-all animates BOTH width and bg-color on status change -->
                     <div
                       class="h-full transition-all duration-700"
                       :class="u.status === 'running' ? 'bg-white/40' : 'bg-neutral-600'"
@@ -318,6 +320,7 @@ import { ref, watch } from "vue";
 import { api } from "../api.js";
 import { prefillFromOpenedFile } from "../lib/ask-prefill.js";
 import { type ClassifiedEvidence, classifyEvidence } from "../lib/evidence.js";
+import { unitColor } from "../lib/unit-color.js";
 import { useVfStore } from "../store.js";
 import type { GateState, TimelineEntry, WorkUnit } from "../types.js";
 import InfoTip from "./InfoTip.vue";
