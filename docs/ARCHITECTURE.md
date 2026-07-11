@@ -83,6 +83,23 @@ Responsibilities:
 - Verify output.
 - Propose skill updates.
 
+### 3a. Stuck Detection
+
+The orchestrator includes a **StuckDetector** that monitors dispatched work units for
+engine loops. It runs post-dispatch after the engine outcome and before the reviewer.
+
+**Detected patterns:**
+
+| Pattern              | Threshold             | Behavior                          |
+| -------------------- | --------------------- | --------------------------------- |
+| Repeat edit          | 3+ identical edits    | Abort unit, surface diff evidence |
+| Same failure         | 3+ consecutive fails  | Abort unit, surface error log     |
+| No progress          | 5+ no-progress steps  | Abort unit, surface step trace    |
+
+Thresholds are configurable via `VibeSettings` (`maxRepeatEdits`, `maxConsecutiveFails`,
+`maxStepsNoProgress`). When a pattern is detected, the unit is aborted and the evidence
+(whether a diff, log, or step trace) is surfaced in the outcome for downstream analysis.
+
 ## Tool Adapters
 
 Adapters translate canonical workflow context into each engine's expected format. Each

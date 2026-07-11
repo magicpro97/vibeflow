@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+
+* **orchestrator:** add StuckDetector to detect looping engines ([#546](https://github.com/magicpro97/vibeflow/issues/546))
+  - Detects repeat-edit, same-fail, no-progress patterns
+  - Aborts unit when stuck, surfaces evidence in outcome
+  - Configurable thresholds via VibeSettings
+* **agents:** add .vibeflow/agents/*.md role definitions with text-match engine override ([#550](https://github.com/magicpro97/vibeflow/issues/550))
+* **cli:** cost/tokens/elapsed in final render + self-redraw progress line ([#523](https://github.com/magicpro97/vibeflow/issues/523))
+* **ui:** --host flag for vf ui to expose web UI over LAN/Tailscale ([#561](https://github.com/magicpro97/vibeflow/issues/561))
+
 ## [0.12.1](https://github.com/magicpro97/vibeflow/compare/v0.12.0...v0.12.1) (2026-07-06)
 
 

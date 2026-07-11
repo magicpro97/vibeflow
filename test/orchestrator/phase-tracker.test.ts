@@ -105,4 +105,25 @@ describe("makePhaseTracker", () => {
     expect(a?.phase).toBe("done");
     expect(a?.pass).toBe(true);
   });
+
+  test("render() with cost/token/elapsed appends stats", () => {
+    const t = makePhaseTracker(2);
+    t.onProgress(ev({ phase: "start", unit: "a" }));
+    t.onProgress(ev({ phase: "done", unit: "a", pass: true }));
+
+    const r = t.render({ cost_usd: 0.04, tokens: 18300 }, "12s");
+    expect(r).toContain("$0.04");
+    expect(r).toContain("18k tok");
+    expect(r).toContain("12s");
+  });
+
+  test("render() with no args unchanged (back-compat)", () => {
+    const t = makePhaseTracker(2);
+    t.onProgress(ev({ phase: "start", unit: "a" }));
+    t.onProgress(ev({ phase: "done", unit: "a", pass: true }));
+
+    const r = t.render();
+    expect(r).not.toContain("$");
+    expect(r).toContain("[1/2]");
+  });
 });

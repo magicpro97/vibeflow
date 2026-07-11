@@ -67,6 +67,9 @@ import type { PreflightFn } from "./_shared.js";
 // orchestrate-resolve.ts #186 PR7).
 import { maybeFocus, tipState } from "./orchestrate-focus.js";
 
+// #550: agent roles from .vibeflow/agents/*.md
+import { loadAgentRoles } from "../agents/role-loader.js";
+
 // Resolver helpers in orchestrate-resolve.ts (#186 PR7); facade imports for internal use and re-exports the 5 public test seams.
 import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
 import {
@@ -138,6 +141,8 @@ export async function orchestrate(
   }
   const engine = resolveEngine(flags);
   const mode = resolveMode(flags);
+  // #550: load user-authored role definitions so per-unit role matching can override engine
+  const agentRoles = loadAgentRoles(join(base, ".vibeflow", "agents"));
   // PR3: raise the terminal so a screen recording captures the live phase timeline.
   maybeFocus({ focus: flags.focus === true, isTTY: process.stdout.isTTY });
 
@@ -287,20 +292,41 @@ export async function orchestrate(
   // out("vf"), which always tees to the terminal even when the engine buffers
   // its own output). The done counter is monotonic; with concurrency > 1 it is
   // the honest progress signal (ev.index is list position, not start order).
+  const startTime = Date.now();
+  let accCost = 0; // ponytail: cost/tokens only in final render; live requires streaming resource events
+  let accTokens = 0;
   const tracker = makePhaseTracker(units.length);
   const onProgress = (ev: import("../orchestrator/run.js").ProgressEvent) => {
     tracker.onProgress(ev);
     if (ev.phase === "start") {
       spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
     } else {
-      out("vf", tracker.render());
+      const elapsed = Math.floor((Date.now() - startTime) / 1000) + "s";
+      const totals = accCost > 0 ? { cost_usd: accCost, tokens: accTokens } : undefined;
+      const line = tracker.render(totals, elapsed);
+      if (process.stdout.isTTY) {
+        process.stdout.write("\r\x1b[2K" + line);
+      } else {
+        out("vf", line);
+      }
     }
   };
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,
     onProgress,
-    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate, gateFn),
+    dispatcher: makeDispatcher(
+      engine,
+      ctx,
+      base,
+      mode,
+      riskClass,
+      spawner,
+      prot,
+      isolate,
+      gateFn,
+      agentRoles,
+    ),
     reviewer: makeReviewer(mode, thresholdFor(riskClass), {
       cwd: base,
       // ADR-001: LLM review after local gate — only when goal available
@@ -315,6 +341,22 @@ export async function orchestrate(
     security: flags["security-check"] ? { base } : undefined,
   });
 
+  // Thread accumulated cost/tokens from completed units into the final render.
+  for (const u of ran) {
+    accCost += u.resources?.cost_usd ?? 0;
+    accTokens += u.resources?.tokens ?? 0;
+  }
+  if (accCost > 0) {
+    const finalElapsed = Math.floor((Date.now() - startTime) / 1000) + "s";
+    const finalLine = tracker.render({ cost_usd: accCost, tokens: accTokens }, finalElapsed);
+    if (process.stdout.isTTY) {
+      process.stdout.write("\r\x1b[2K" + finalLine + "\n");
+    } else {
+      out("vf", finalLine);
+    }
+  } else if (process.stdout.isTTY) {
+    process.stdout.write("\n");
+  }
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);
   // Merge dispatched results back with the skipped (already-complete) units so the ledger and
   // goal eval see the full set — not just the ones we re-ran this pass.

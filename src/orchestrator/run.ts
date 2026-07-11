@@ -307,6 +307,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
           outcome.gates = { ...(outcome.gates ?? {}), security: "pass" };
         }
       }
+      // TODO(#546): wire StuckDetector when dispatch streams step transcripts
       const reviewed = applyOutcome(u, outcome, opts.now);
       const review = await opts.reviewer(reviewed, outcome);
       reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };

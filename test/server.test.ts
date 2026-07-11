@@ -1642,7 +1642,7 @@ test("POST /api/verify without CSRF via live server returns 403 (B1 guard)", asy
 // B2 serve seam tests
 test("GET / returns fallback shell with CSRF token when dist/ui not built (B2)", async () => {
   const missing = new URL("file:///nonexistent/dist/ui/index.html");
-  const { server, url } = (await startServer(0, { uiHtmlPath: missing })) as {
+  const { server, url } = (await startServer(0, undefined, { uiHtmlPath: missing })) as {
     server: { stop: () => void };
     url: string;
   };

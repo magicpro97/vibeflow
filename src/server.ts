@@ -39,12 +39,14 @@ const CSP =
 
 export function startServer(
   port = 0,
+  host?: string,
   _opts: { uiHtmlPath?: URL } = {},
 ): Promise<{
   server: { stop: () => void };
   url: string;
 }> {
   const token = randomUUID();
+  const guardedHost = host ?? "127.0.0.1";
 
   const uiHtmlPath = _opts.uiHtmlPath ?? new URL("../dist/ui/index.html", import.meta.url);
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -69,7 +71,14 @@ export function startServer(
   const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
 
   const guarded = (req: Request): boolean => {
-    if (!isLoopback(req.headers.get("host") ?? "")) return false;
+    const reqHost = (req.headers.get("host") ?? "").replace(/:\d+$/, "");
+    if (guardedHost !== "0.0.0.0") {
+      if (guardedHost === "127.0.0.1" || LOOPBACK.has(guardedHost)) {
+        if (!isLoopback(reqHost)) return false;
+      } else {
+        if (!isLoopback(reqHost) && reqHost !== guardedHost) return false;
+      }
+    }
     const o = req.headers.get("origin") || req.headers.get("referer");
     if (o) {
       try {
@@ -83,7 +92,7 @@ export function startServer(
 
   const server = Bun.serve({
     port: port === 0 ? 0 : port,
-    hostname: "127.0.0.1",
+    hostname: guardedHost,
     idleTimeout: 0,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
@@ -483,8 +492,9 @@ export function startServer(
     },
   });
 
+  const displayHost = guardedHost === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1";
   console.log(
-    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://127.0.0.1:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
+    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://${displayHost}:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
   );
   return Promise.resolve({
     server: { stop: () => server.stop() },

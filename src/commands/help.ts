@@ -54,17 +54,19 @@ export function printHelp(): number {
 /** Per-subcommand help blocks. Keys mirror the routing switch in cli.ts. Each entry is a short
  * usage/description/flags block; derived from the actual command implementations above. */
 const COMMAND_HELP: Record<string, () => string> = {
-  ui: () => `${c.bold("vf ui")} ${c.dim("[--port <n>] [--no-open]")}
+  ui: () => `${c.bold("vf ui")} ${c.dim("[--port <n>] [--host <addr>] [--no-open]")}
 Open the local web UI (intake wizard + workflow console). This is also the default
 command when you run \`vf\` with no arguments.
 
 ${c.bold("Options:")}
   --port <n>    bind to a specific port (default: an ephemeral free port)
+  --host <addr> bind to a specific address (default: 127.0.0.1)
   --no-open     start the server without launching a browser
 
 ${c.bold("Examples:")}
   vf
-  vf ui --port 4173 --no-open`,
+  vf ui --port 4173 --no-open
+  vf ui --host 0.0.0.0 --port 7799`,
 
   doctor: () => `${c.bold("vf doctor")} ${c.dim("[--probe]")}
 Check required (node, git) and optional (bun, engine CLIs, docker) tools, plus
