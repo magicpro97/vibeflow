@@ -94,6 +94,9 @@ export function maybeFocus(
   focusTerminal(inject);
 }
 
+// #550: agent roles from .vibeflow/agents/*.md
+import { loadAgentRoles } from "../agents/role-loader.js";
+
 // Resolver helpers extracted into orchestrate/resolve.ts (#186 PR7).
 import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
 // The facade imports them for internal use AND re-exports the 5 public
@@ -157,10 +160,11 @@ export async function orchestrate(
     return 1;
   }
   const engine = resolveEngine(flags);
+  // #550: load user-authored role definitions so per-unit role matching can override engine
+  const agentRoles = loadAgentRoles(join(base, ".vibeflow", "agents"));
   const mode = resolveMode(flags);
   // PR3: raise the terminal so a screen recording captures the live phase timeline.
   maybeFocus({ focus: flags.focus === true, isTTY: process.stdout.isTTY });
-
   const riskClass = resolveRisk(flags);
   // Carry tool settings into the dispatch context so the prompt can tell the engine which
   // code-navigation tools (codegraph > lsp > native) are configured — otherwise dispatches run
@@ -328,7 +332,18 @@ export async function orchestrate(
     units,
     concurrency,
     onProgress,
-    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate, gateFn),
+    dispatcher: makeDispatcher(
+      engine,
+      ctx,
+      base,
+      mode,
+      riskClass,
+      spawner,
+      prot,
+      isolate,
+      gateFn,
+      agentRoles,
+    ),
     reviewer: makeReviewer(mode, thresholdFor(riskClass), { cwd: base }),
     // Post-coding security checkpoint. Opt-in via `--security-check`. When
     // on, the user is prompted (y/n/skip) after each unit finishes coding,

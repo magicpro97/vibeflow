@@ -5,6 +5,8 @@
 // src/commands/protection.ts (issue #131).
 
 import { join } from "node:path";
+import type { AgentRole } from "../agents/role-loader.js";
+import { resolveRole } from "../agents/role-loader.js";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import {
@@ -146,6 +148,7 @@ export function makeDispatcher(
   prot?: ProtectionRuntime,
   isolate?: { base: string; wt?: WorktreeOps },
   gate?: ScopedGateFn,
+  agentRoles?: AgentRole[],
 ): UnitDispatcher {
   return async (u) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
@@ -161,6 +164,12 @@ export function makeDispatcher(
     // matches by name. When a knowledge-heavy unit (feature/architecture, or UX/UI by spec) has
     // NO match, flag the gap so the engine won't silently freelance (esp. UX/UI).
     const unitText = `${u.name} ${u.spec ?? ""}`;
+    // #550: resolve per-unit role from .vibeflow/agents/ — engine override only
+    const role = agentRoles?.length ? resolveRole(unitText, agentRoles) : null;
+    const unitEngine: Engine =
+      role?.engine && ["claude", "codex", "copilot"].includes(role.engine)
+        ? (role.engine as Engine)
+        : engine;
     const skillMatches = matchSkillsForTask(discoverSkills(base), unitText);
     const skillNames = skillMatches.map((m) => m.skill.name);
     const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
@@ -174,7 +183,7 @@ export function makeDispatcher(
       .map((m) => m.skill.name);
     // Why the unit is knowledge-heavy: risk class first, else the UX/UI regex, else undefined.
     const knowledgeHeavySource = computeKnowledgeHeavySource(riskClass, unitText);
-    const prompt = buildEnginePrompt(engine, ctx, [
+    const prompt = buildEnginePrompt(unitEngine, ctx, [
       { name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap },
     ]);
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
@@ -229,7 +238,7 @@ export function makeDispatcher(
               // both see engine progress without a second read of the spawner.
               out("engine-stdout", text, {
                 unit: u.name,
-                meta: { engine, unit: u.name },
+                meta: { engine: unitEngine, unit: u.name },
               });
             },
             onStderrChunk: (text) => {
@@ -239,7 +248,7 @@ export function makeDispatcher(
               out("engine-stderr", text, {
                 level: "warn",
                 unit: u.name,
-                meta: { engine, unit: u.name },
+                meta: { engine: unitEngine, unit: u.name },
               });
             },
             ...(wtPath ? { cwd: wtPath } : {}),
@@ -255,7 +264,10 @@ export function makeDispatcher(
                 appendFileSafe(streamPath, line);
               }
               if (r.stdout) {
-                out("engine-stdout", r.stdout, { unit: u.name, meta: { engine, unit: u.name } });
+                out("engine-stdout", r.stdout, {
+                  unit: u.name,
+                  meta: { engine: unitEngine, unit: u.name },
+                });
               }
               // Stderr: AsyncSpawner's return type only has { status, stdout, timedOut? };
               // the base spawner may not surface stderr. The composed callback stays
@@ -268,7 +280,12 @@ export function makeDispatcher(
             return r;
           };
     try {
-      const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
+      const result = await runDispatchAsync({
+        engine: unitEngine,
+        prompt,
+        mode,
+        spawner: streamSpawner,
+      });
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
       // side-effect. It must never write result JSON nor append to the persisted evidence
       // ledger, so the dispatch outcome is reported in-memory only.
@@ -290,7 +307,7 @@ export function makeDispatcher(
             `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
           ),
         );
-        const research = makeResearcher(engine, ctx, mode, spawner);
+        const research = makeResearcher(unitEngine, ctx, mode, spawner);
         const outcome = await investigateUnit(
           { name: u.name, confidence, owner_agent: u.owner_agent },
           { riskClass, research },
