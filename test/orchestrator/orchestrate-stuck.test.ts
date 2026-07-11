@@ -31,8 +31,10 @@ describe("orchestrateUnits — stuck detection (issue #546)", () => {
       concurrency: 1,
     });
     expect(units).toHaveLength(1);
-    expect(units[0].status).toBe("done");
-    expect(reviews[0].pass).toBe(true);
+    const u0 = units[0]!;
+    expect(u0.status).toBe("done");
+    const r0 = reviews[0]!;
+    expect(r0.pass).toBe(true);
   });
 
   test("zero-evidence outcome passes through normally (no false stuck)", async () => {
@@ -46,7 +48,8 @@ describe("orchestrateUnits — stuck detection (issue #546)", () => {
       reviewer: passReviewer,
       concurrency: 1,
     });
-    expect(units[0].status).toBe("done");
+    const u0 = units[0]!;
+    expect(u0.status).toBe("done");
   });
 
   test("dispatcher throw does not crash stuck detection path", async () => {
@@ -59,7 +62,8 @@ describe("orchestrateUnits — stuck detection (issue #546)", () => {
       concurrency: 1,
     });
     expect(units).toHaveLength(1);
-    expect(units[0].status).toBe("done");
-    expect(units[0].confidence).toBe(0);
+    const u0 = units[0]!;
+    expect(u0.status).toBe("done");
+    expect(u0.confidence).toBe(0);
   });
 });
