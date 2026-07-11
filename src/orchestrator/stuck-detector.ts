@@ -88,8 +88,9 @@ export class StuckDetector {
     const fails = this.history.filter((s) => s.action === "test" && s.status === "fail");
     if (fails.length < this.thresholds.maxConsecutiveFails) return null;
     const recent = fails.slice(-this.thresholds.maxConsecutiveFails);
-    const testName = recent[0]!.test;
-    const errorMsg = recent[0]!.error;
+    const testName = recent[0]?.test ?? null;
+    const errorMsg = recent[0]?.error ?? null;
+    if (!testName || !errorMsg) return null;
     const allSame = recent.every((s) => s.test === testName && s.error === errorMsg);
     if (allSame) {
       return { reason: "same-fail", evidence: [testName ?? "unknown"] };

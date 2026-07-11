@@ -301,7 +301,7 @@ export async function orchestrate(
     if (ev.phase === "start") {
       spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
     } else {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000) + "s";
+      const elapsed = `${Math.floor((Date.now() - startTime) / 1000)}s`;
       const totals = accCost > 0 ? { cost_usd: accCost, tokens: accTokens } : undefined;
       const line = tracker.render(totals, elapsed);
       if (process.stdout.isTTY) {
