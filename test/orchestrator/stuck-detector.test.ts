@@ -50,7 +50,7 @@ describe("StuckDetector", () => {
 
   test("detectNoProgress: zero diff growth across N steps", () => {
     const detector = new StuckDetector({ maxStepsNoProgress: 5 });
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       expect(detector.feed({ action: "edit", diffSize: 0 })).toBeNull();
     }
     const result = detector.feed({ action: "edit", diffSize: 0 });
@@ -60,7 +60,7 @@ describe("StuckDetector", () => {
 
   test("detectNoProgress: steps with diff growth don't trigger", () => {
     const detector = new StuckDetector({ maxStepsNoProgress: 5 });
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       detector.feed({ action: "edit", diffSize: 0 });
     }
     detector.feed({ action: "edit", file: "src/foo.ts", diffSize: 5 });

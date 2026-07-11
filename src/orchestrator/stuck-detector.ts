@@ -46,7 +46,12 @@ export class StuckDetector {
   }
 
   private detect(): StuckReason | null {
-    return this.detectRepeatEdit() ?? this.detectSameFail() ?? this.detectNoProgress() ?? null;
+    return (
+      this.detectRepeatEdit() ??
+      this.detectSameFail() ??
+      this.detectNoProgress() ??
+      null
+    );
   }
 
   private detectRepeatEdit(): StuckReason | null {
@@ -55,9 +60,11 @@ export class StuckDetector {
 
     const fileHashes = new Map<string, string[]>();
     for (const step of edits) {
-      const hashes = fileHashes.get(step.file!) || [];
-      hashes.push(step.hash!);
-      fileHashes.set(step.file!, hashes);
+      const f = step.file ?? "";
+      const h = step.hash ?? "";
+      const hashes = fileHashes.get(f) || [];
+      hashes.push(h);
+      fileHashes.set(f, hashes);
     }
 
     for (const [file, hashes] of fileHashes) {
@@ -76,7 +83,9 @@ export class StuckDetector {
 
       const firstHash = unique[0];
       let count = 0;
-      for (const h of hashes) if (h === firstHash) count++;
+      for (const h of hashes) {
+        if (h === firstHash) count++;
+      }
       if (count >= this.thresholds.maxRepeatEdits + 1) {
         return { reason: "repeat-edit", evidence: [file] };
       }
@@ -99,12 +108,15 @@ export class StuckDetector {
   }
 
   private detectNoProgress(): StuckReason | null {
-    const threshold = this.thresholds.maxStepsNoProgress;
-    if (this.history.length < threshold) return null;
+    const threshold = this.thresholds.maxStepsNoProgress + 1;
     const recent = this.history.slice(-threshold);
+    if (recent.length < threshold) return null;
     const allStale = recent.every((s) => (s.diffSize ?? 1) === 0);
     if (allStale) {
-      return { reason: "no-progress", evidence: [`${threshold} steps with no diff`] };
+      return {
+        reason: "no-progress",
+        evidence: [`${threshold} steps with no diff`],
+      };
     }
     return null;
   }

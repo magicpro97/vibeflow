@@ -24,11 +24,11 @@ describe("parseAgentRole", () => {
   test("parses full frontmatter", () => {
     const role = parseAgentRole(md);
     expect(role).not.toBeNull();
-    expect(role!.name).toBe("reviewer");
-    expect(role!.engine).toBe("claude");
-    expect(role!.model).toBe("claude-sonnet-4");
-    expect(role!.tools).toEqual(["read", "grep", "git"]);
-    expect(role!.examples).toContain("Review this PR");
+    expect(role?.name).toBe("reviewer");
+    expect(role?.engine).toBe("claude");
+    expect(role?.model).toBe("claude-sonnet-4");
+    expect(role?.tools).toEqual(["read", "grep", "git"]);
+    expect(role?.examples).toContain("Review this PR");
   });
 
   test("returns null for missing name", () => {
@@ -37,17 +37,17 @@ describe("parseAgentRole", () => {
 
   test("uses body as description when no explicit description", () => {
     const role = parseAgentRole("---\nname: simple\n---\nDo simple things.");
-    expect(role!.description).toBe("Do simple things.");
+    expect(role?.description).toBe("Do simple things.");
   });
 
   test("coerces single string tools to array", () => {
     const role = parseAgentRole("---\nname: x\ntools: read\n---\n");
-    expect(role!.tools).toEqual(["read"]);
+    expect(role?.tools).toEqual(["read"]);
   });
 
   test("handles empty body gracefully", () => {
     const role = parseAgentRole("---\nname: x\ndescription: d\n---\n");
-    expect(role!.description).toBe("d");
+    expect(role?.description).toBe("d");
   });
 
   test("handles no frontmatter", () => {
@@ -91,8 +91,8 @@ describe("loadAgentRoles", () => {
     try {
       const loaded = loadAgentRoles(tmp);
       expect(loaded.length).toBe(2);
-      expect(loaded[0]!.name).toBe("reviewer");
-      expect(loaded[1]!.name).toBe("simple");
+      expect(loaded[0]?.name).toBe("reviewer");
+      expect(loaded[1]?.name).toBe("simple");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
