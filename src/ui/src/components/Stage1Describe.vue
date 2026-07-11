@@ -128,7 +128,7 @@
             <input type="radio" :value="eng.key" v-model="selectedEngine" class="accent-neutral-400" />
             <span class="text-neutral-200">{{ eng.key }}</span>
             <span v-if="recommendedEngine===eng.key" class="text-[10px] text-yellow-400 ml-1">★ Recommended</span>
-            <span v-if="readyEngines.size>0 && !readyEngines.has(eng.key)" class="text-[10px] text-neutral-700 ml-1">not authenticated</span>
+            <span v-if="readyEngines.size>0 && !readyEngines.has(eng.key)" class="text-[10px] text-neutral-700 ml-1">{{ engineReason(engineLevels.get(eng.key)) }}</span>
           </div>
           <span class="text-[10px] text-neutral-600 block ml-5">{{ ENGINE_HINTS[eng.key] }}</span>
         </label>
@@ -337,6 +337,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { api } from "../api.js";
+import { engineReason } from "../lib/engine-reason.js";
 import { useVfStore } from "../store.js";
 import type { Attachment } from "../types.js";
 import InfoTip from "./InfoTip.vue";
@@ -435,6 +436,7 @@ async function clearTask() {
     // Reset engine selection to defaults
     selectedEngine.value = "claude";
     readyEngines.value = new Set();
+    engineLevels.value = new Map();
     recommendedEngine.value = "claude";
     store.setStage(1); // land on fresh describe form
   } catch (e) {
@@ -463,6 +465,7 @@ function isValidUrl(s: string): boolean {
 const engines = reactive([{ key: "claude" }, { key: "codex" }, { key: "copilot" }]);
 const selectedEngine = ref("claude");
 const readyEngines = ref<Set<string>>(new Set());
+const engineLevels = ref<Map<string, string>>(new Map());
 const recommendedEngine = ref("claude");
 
 // ── Attachments ────────────────────────────────────────────────────────────
@@ -611,6 +614,9 @@ async function runDetect() {
         .filter((r: { level: string }) => r.level === "ready")
         .map((r: { engine: string }) => r.engine);
       readyEngines.value = new Set(readyKeys);
+      engineLevels.value = new Map(
+        readinessArr.map((r: { engine: string; level: string }) => [r.engine, r.level]),
+      );
       const first = ENGINE_PRIORITY.find((e) => readyEngines.value.has(e));
       if (first) {
         recommendedEngine.value = first;
