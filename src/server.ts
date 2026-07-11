@@ -51,10 +51,12 @@ export function startServer(port = 0, host?: string): Promise<{
 
   const guarded = (req: Request): boolean => {
     const reqHost = (req.headers.get("host") ?? "").replace(/:\d+$/, "");
-    if (guardedHost === "127.0.0.1" || LOOPBACK.has(guardedHost)) {
-      if (!isLoopback(reqHost)) return false;
-    } else {
-      if (reqHost !== guardedHost && !LOOPBACK.has(reqHost)) return false;
+    if (guardedHost !== "0.0.0.0") {
+      if (guardedHost === "127.0.0.1" || LOOPBACK.has(guardedHost)) {
+        if (!isLoopback(reqHost)) return false;
+      } else {
+        if (!isLoopback(reqHost) && reqHost !== guardedHost) return false;
+      }
     }
     const o = req.headers.get("origin") || req.headers.get("referer");
     if (o) {
@@ -340,8 +342,9 @@ export function startServer(port = 0, host?: string): Promise<{
     },
   });
 
+  const displayHost = guardedHost === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1";
   console.log(
-    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://127.0.0.1:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
+    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://${displayHost}:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
   );
   return Promise.resolve({
     server: { stop: () => server.stop() },

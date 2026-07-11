@@ -137,7 +137,7 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
         prev.stop();
         // Clear the screen and bring up a fresh server immediately.
         process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
-        startServer(Number.isFinite(port) ? port : 0)
+        startServer(Number.isFinite(port) ? port : 0, host)
           .then((next) => {
             ({ server, url } = next);
             writeUiPort(url);
