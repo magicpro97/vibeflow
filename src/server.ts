@@ -24,11 +24,12 @@ const ASSET_TYPES: Record<string, string> = {
 const CSP =
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'";
 
-export function startServer(port = 0): Promise<{
+export function startServer(port = 0, host?: string): Promise<{
   server: { stop: () => void };
   url: string;
 }> {
   const token = randomUUID();
+  const guardedHost = host ?? "127.0.0.1";
 
   const shellV2Enabled = process.env.VIBEFLOW_UI_V2 === "1";
   const shellHtmlSrc = shellV2Enabled ? "./ui/shell-v2.html" : "./ui/shell.html";
@@ -49,7 +50,12 @@ export function startServer(port = 0): Promise<{
   const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
 
   const guarded = (req: Request): boolean => {
-    if (!isLoopback(req.headers.get("host") ?? "")) return false;
+    const reqHost = (req.headers.get("host") ?? "").replace(/:\d+$/, "");
+    if (guardedHost === "127.0.0.1" || LOOPBACK.has(guardedHost)) {
+      if (!isLoopback(reqHost)) return false;
+    } else {
+      if (reqHost !== guardedHost && !LOOPBACK.has(reqHost)) return false;
+    }
     const o = req.headers.get("origin") || req.headers.get("referer");
     if (o) {
       try {
@@ -63,7 +69,7 @@ export function startServer(port = 0): Promise<{
 
   const server = Bun.serve({
     port: port === 0 ? 0 : port,
-    hostname: "127.0.0.1",
+    hostname: guardedHost,
     idleTimeout: 0,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
