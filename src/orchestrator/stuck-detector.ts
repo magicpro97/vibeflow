@@ -46,16 +46,11 @@ export class StuckDetector {
   }
 
   private detect(): StuckReason | null {
-    return (
-      this.detectRepeatEdit() ??
-      this.detectSameFail() ??
-      this.detectNoProgress() ??
-      null
-    );
+    return this.detectRepeatEdit() ?? this.detectSameFail() ?? this.detectNoProgress() ?? null;
   }
 
   private detectRepeatEdit(): StuckReason | null {
-    const edits = this.history.filter(s => s.action === "edit" && s.file && s.hash);
+    const edits = this.history.filter((s) => s.action === "edit" && s.file && s.hash);
     if (edits.length < this.thresholds.maxRepeatEdits * 2 + 1) return null;
 
     const fileHashes = new Map<string, string[]>();
@@ -72,7 +67,10 @@ export class StuckDetector {
 
       let oscillating = true;
       for (let i = 0; i < hashes.length - 1; i++) {
-        if (hashes[i] === hashes[i + 1]) { oscillating = false; break; }
+        if (hashes[i] === hashes[i + 1]) {
+          oscillating = false;
+          break;
+        }
       }
       if (!oscillating) continue;
 
@@ -87,12 +85,12 @@ export class StuckDetector {
   }
 
   private detectSameFail(): StuckReason | null {
-    const fails = this.history.filter(s => s.action === "test" && s.status === "fail");
+    const fails = this.history.filter((s) => s.action === "test" && s.status === "fail");
     if (fails.length < this.thresholds.maxConsecutiveFails) return null;
     const recent = fails.slice(-this.thresholds.maxConsecutiveFails);
-    const testName = recent[0].test;
-    const errorMsg = recent[0].error;
-    const allSame = recent.every(s => s.test === testName && s.error === errorMsg);
+    const testName = recent[0]!.test;
+    const errorMsg = recent[0]!.error;
+    const allSame = recent.every((s) => s.test === testName && s.error === errorMsg);
     if (allSame) {
       return { reason: "same-fail", evidence: [testName ?? "unknown"] };
     }
@@ -103,7 +101,7 @@ export class StuckDetector {
     const threshold = this.thresholds.maxStepsNoProgress + 1;
     const recent = this.history.slice(-threshold);
     if (recent.length < threshold) return null;
-    const allStale = recent.every(s => (s.diffSize ?? 1) === 0);
+    const allStale = recent.every((s) => (s.diffSize ?? 1) === 0);
     if (allStale) {
       return { reason: "no-progress", evidence: [`${threshold} steps with no diff`] };
     }
