@@ -288,12 +288,22 @@ export async function orchestrate(
   // its own output). The done counter is monotonic; with concurrency > 1 it is
   // the honest progress signal (ev.index is list position, not start order).
   const tracker = makePhaseTracker(units.length);
+  const startTime = Date.now();
+  let accCost = 0; // ponytail: cost/tokens only in final render; live requires streaming resource events
+  let accTokens = 0;
   const onProgress = (ev: import("../orchestrator/run.js").ProgressEvent) => {
     tracker.onProgress(ev);
     if (ev.phase === "start") {
       spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
     } else {
-      out("vf", tracker.render());
+      const elapsed = Math.floor((Date.now() - startTime) / 1000) + "s";
+      const totals = accCost > 0 ? { cost_usd: accCost, tokens: accTokens } : undefined;
+      const line = tracker.render(totals, elapsed);
+      if (process.stdout.isTTY) {
+        process.stdout.write("\r\x1b[2K" + line);
+      } else {
+        out("vf", line);
+      }
     }
   };
   const { units: ran, reviews } = await orchestrateUnits({
@@ -315,6 +325,22 @@ export async function orchestrate(
     security: flags["security-check"] ? { base } : undefined,
   });
 
+  // Thread accumulated cost/tokens from completed units into the final render.
+  for (const u of ran) {
+    accCost += u.resources?.cost_usd ?? 0;
+    accTokens += u.resources?.tokens ?? 0;
+  }
+  if (accCost > 0) {
+    const finalElapsed = Math.floor((Date.now() - startTime) / 1000) + "s";
+    const finalLine = tracker.render({ cost_usd: accCost, tokens: accTokens }, finalElapsed);
+    if (process.stdout.isTTY) {
+      process.stdout.write("\r\x1b[2K" + finalLine + "\n");
+    } else {
+      out("vf", finalLine);
+    }
+  } else if (process.stdout.isTTY) {
+    process.stdout.write("\n");
+  }
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);
   // Merge dispatched results back with the skipped (already-complete) units so the ledger and
   // goal eval see the full set — not just the ones we re-ran this pass.

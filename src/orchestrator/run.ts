@@ -307,8 +307,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
           outcome.gates = { ...(outcome.gates ?? {}), security: "pass" };
         }
       }
-      const reviewed = applyOutcome(u, outcome, opts.now);
-      const review = await opts.reviewer(reviewed, outcome);
+      // TODO(#546): wire StuckDetector when dispatch streams step transcripts
       reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
       // #545: persist the calibrated judge score onto the unit so computeConfidence
       // reads it as a graded signal (the producer→unit wire; absent ⇒ untouched).

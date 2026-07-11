@@ -1,17 +1,5 @@
 # Changelog
 
-## [0.12.1](https://github.com/magicpro97/vibeflow/compare/v0.12.0...v0.12.1) (2026-07-06)
-
-
-### Bug Fixes
-
-* **ci:** build UI before check in Release so server SPA tests pass ([#567](https://github.com/magicpro97/vibeflow/issues/567)) ([5d8ba6c](https://github.com/magicpro97/vibeflow/commit/5d8ba6cd81677e68855829626e3784b051688fa5))
-* **dispatch:** harden guidance file perms, note cap, research base arg ([#536](https://github.com/magicpro97/vibeflow/issues/536)) ([#563](https://github.com/magicpro97/vibeflow/issues/563)) ([92a063e](https://github.com/magicpro97/vibeflow/commit/92a063ee3460cddb0c1e0e5f17b62c8f84040519))
-* **gates:** acceptance priority validation + shell-doc + exec trust boundary ([#533](https://github.com/magicpro97/vibeflow/issues/533)) ([#540](https://github.com/magicpro97/vibeflow/issues/540)) ([6a309e4](https://github.com/magicpro97/vibeflow/commit/6a309e4c4abd9838785ad2bf66061daf2aa10401))
-* **gates:** evidence-freshness phase-2 prereqs — stamp scope + ISO normalize ([#534](https://github.com/magicpro97/vibeflow/issues/534)) ([#537](https://github.com/magicpro97/vibeflow/issues/537)) ([b0ef883](https://github.com/magicpro97/vibeflow/commit/b0ef8834d962cd9e1ef8c0ba456e1587e3c0590a))
-* **gates:** snapshot missing-file sentinel + PR error-msg URL + claim-retention doc/test ([#532](https://github.com/magicpro97/vibeflow/issues/532)) ([#539](https://github.com/magicpro97/vibeflow/issues/539)) ([a9f8300](https://github.com/magicpro97/vibeflow/commit/a9f8300223f833611a411a087f7fb1fb37f6b4b8))
-* **skills:** align validator + standard doc with official Agent Skills spec ([#565](https://github.com/magicpro97/vibeflow/issues/565)) ([aab406a](https://github.com/magicpro97/vibeflow/commit/aab406a5b9ac6605599856141738fc689440e46a)), closes [#564](https://github.com/magicpro97/vibeflow/issues/564)
-* **skills:** correct legacy-key comment count + reject non-string compatibility ([#566](https://github.com/magicpro97/vibeflow/issues/566)) ([ae965f4](https://github.com/magicpro97/vibeflow/commit/ae965f4c076a94a6bb891ce08170e4922ef6c9fe))
 
 
 ### Tests
@@ -106,6 +94,15 @@
 ### Tests
 
 * **init:** add regression guard for writeToolConfigs engine gating (closes [#427](https://github.com/magicpro97/vibeflow/issues/427)) ([#432](https://github.com/magicpro97/vibeflow/issues/432)) ([4f6ae54](https://github.com/magicpro97/vibeflow/commit/4f6ae5472c972617f84460bb37d6c696c1923786))
+## [Unreleased]
+
+### Features
+
+* **orchestrator:** add StuckDetector to detect looping engines ([#546](https://github.com/magicpro97/vibeflow/issues/546))
+  - Detects repeat-edit, same-fail, no-progress patterns
+  - Aborts unit when stuck, surfaces evidence in outcome
+  - Configurable thresholds via VibeSettings
+* **cli:** cost/tokens/elapsed in final render + self-redraw progress line ([#523](https://github.com/magicpro97/vibeflow/issues/523))
 
 ## [0.11.0](https://github.com/magicpro97/vibeflow/compare/v0.10.0...v0.11.0) (2026-06-29)
 

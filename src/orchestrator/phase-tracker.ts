@@ -42,11 +42,10 @@ export function makePhaseTracker(total: number, now: () => number = () => Date.n
       };
     },
 
-    render(): string {
+    render(totals?: { cost_usd: number; tokens: number }, elapsed?: string): string {
       const snap = this.snapshot();
       const parts: string[] = [];
 
-      // [done/total] counter
       parts.push(`[${snap.done}/${snap.total}]`);
 
       for (const u of snap.units) {
@@ -54,20 +53,27 @@ export function makePhaseTracker(total: number, now: () => number = () => Date.n
         if (u.phase === "done") {
           glyph = u.pass ? "✓" : "•";
         } else {
-          // running — show elapsed if startedAt is set
           const elapsed = u.startedAt != null ? Math.floor((now() - u.startedAt) / 1000) : 0;
           glyph = `▶${elapsed > 0 ? ` (${elapsed}s)` : ""}`;
         }
         parts.push(`${glyph} ${u.unit}`);
       }
 
-      // Show pending count for units not yet seen
       const pending = snap.total - snap.units.length;
       if (pending > 0) {
         parts.push(`·${pending}`);
       }
 
-      return parts.join("  ");
+      let line = parts.join("  ");
+
+      if (totals) {
+        const cost = `$${totals.cost_usd.toFixed(2)}`;
+        const tok = `${Math.round(totals.tokens / 1000)}k tok`;
+        line += ` · ${cost} · ${tok}`;
+        if (elapsed) line += ` · ${elapsed}`;
+      }
+
+      return line;
     },
   };
 }
