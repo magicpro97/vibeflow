@@ -5,6 +5,8 @@
 // (issue #131). The per-unit reviewer lives in dispatch-reviewer.ts (#503).
 
 import { join } from "node:path";
+import type { AgentRole } from "../agents/role-loader.js";
+import { resolveRole } from "../agents/role-loader.js";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { applyGuidance } from "../dispatch/guidance.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
@@ -169,6 +171,7 @@ export function makeDispatcher(
   prot?: ProtectionRuntime,
   isolate?: { base: string; wt?: WorktreeOps },
   gate?: ScopedGateFn,
+  agentRoles?: AgentRole[],
 ): UnitDispatcher {
   return async (u) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
@@ -188,9 +191,12 @@ export function makeDispatcher(
       discoverSkills(base),
       unitText,
     );
-    const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
-    const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
-    const skillGap = knowledgeHeavy && matchedNames.length === 0;
+    // #550: resolve per-unit role from .vibeflow/agents/ — engine override only
+    const role = agentRoles?.length ? resolveRole(unitText, agentRoles) : null;
+    const unitEngine: Engine = role?.engine && ["claude", "codex", "copilot"].includes(role.engine) ? (role.engine as Engine) : engine;
+      role?.engine && ["claude", "codex", "copilot"].includes(role.engine)
+        ? (role.engine as Engine)
+        : engine;
     // The full mixed-trust list actually injected into the prompt vs the VERIFIED-only subset
     // that a downstream skills-first gate is allowed to count as satisfying the requirement.
     const skillsInjected = skillNames;
@@ -203,7 +209,7 @@ export function makeDispatcher(
     const prompt = applyGuidance(
       u.name,
       buildEnginePrompt(
-        engine,
+        unitEngine,
         ctx,
         [
           {
@@ -277,7 +283,7 @@ export function makeDispatcher(
               out("engine-stdout", text, {
                 level: "info",
                 unit: u.name,
-                meta: { engine, unit: u.name },
+                meta: { engine: unitEngine, unit: u.name },
               });
             },
             onStderrChunk: (text) => {
@@ -287,7 +293,7 @@ export function makeDispatcher(
               out("engine-stderr", text, {
                 level: "warn",
                 unit: u.name,
-                meta: { engine, unit: u.name },
+                meta: { engine: unitEngine, unit: u.name },
               });
             },
             ...(wtPath ? { cwd: wtPath } : {}),
@@ -307,6 +313,8 @@ export function makeDispatcher(
                   level: "info",
                   unit: u.name,
                   meta: { engine, unit: u.name },
+                  unit: u.name,
+                  meta: { engine: unitEngine, unit: u.name },
                 });
               }
               // Stderr: AsyncSpawner's return type only has { status, stdout, timedOut? };
@@ -329,6 +337,10 @@ export function makeDispatcher(
         // gets a short pointer arg (argv-limit fix); claude/codex ignore these (stdin).
         unit: u.name,
         base,
+        engine: unitEngine,
+        prompt,
+        mode,
+        spawner: streamSpawner,
       });
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
       // side-effect. It must never write result JSON nor append to the persisted evidence
@@ -351,7 +363,7 @@ export function makeDispatcher(
             `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
           ),
         );
-        const research = makeResearcher(engine, ctx, mode, spawner, base);
+        const research = makeResearcher(unitEngine, ctx, mode, spawner, base);
         const outcome = await investigateUnit(
           { name: u.name, confidence, owner_agent: u.owner_agent },
           { riskClass, research },

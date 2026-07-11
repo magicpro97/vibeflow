@@ -102,6 +102,7 @@
   - Detects repeat-edit, same-fail, no-progress patterns
   - Aborts unit when stuck, surfaces evidence in outcome
   - Configurable thresholds via VibeSettings
+* **agents:** add .vibeflow/agents/*.md role definitions with text-match engine override ([#550](https://github.com/magicpro97/vibeflow/issues/550))
 * **cli:** cost/tokens/elapsed in final render + self-redraw progress line ([#523](https://github.com/magicpro97/vibeflow/issues/523))
 
 ## [0.11.0](https://github.com/magicpro97/vibeflow/compare/v0.10.0...v0.11.0) (2026-06-29)
