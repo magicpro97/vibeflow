@@ -305,7 +305,7 @@ export async function orchestrate(
       const totals = accCost > 0 ? { cost_usd: accCost, tokens: accTokens } : undefined;
       const line = tracker.render(totals, elapsed);
       if (process.stdout.isTTY) {
-        process.stdout.write("\r\x1b[2K" + line);
+        process.stdout.write(`\r\x1b[2K${line}`);
       } else {
         out("vf", line);
       }
@@ -347,10 +347,10 @@ export async function orchestrate(
     accTokens += u.resources?.tokens ?? 0;
   }
   if (accCost > 0) {
-    const finalElapsed = Math.floor((Date.now() - startTime) / 1000) + "s";
+    const finalElapsed = `${Math.floor((Date.now() - startTime) / 1000)}s`;
     const finalLine = tracker.render({ cost_usd: accCost, tokens: accTokens }, finalElapsed);
     if (process.stdout.isTTY) {
-      process.stdout.write("\r\x1b[2K" + finalLine + "\n");
+      process.stdout.write(`\r\x1b[2K${finalLine}\n`);
     } else {
       out("vf", finalLine);
     }

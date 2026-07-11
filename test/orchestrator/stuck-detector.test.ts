@@ -17,8 +17,8 @@ describe("StuckDetector", () => {
     detector.feed({ action: "edit", file: "src/foo.ts", hash: "a1b2" }); // trigger
     const result = detector.isStuck();
     expect(result).not.toBeNull();
-    expect(result!.reason).toBe("repeat-edit");
-    expect(result!.evidence).toContain("src/foo.ts");
+    expect(result?.reason).toBe("repeat-edit");
+    expect(result?.evidence).toContain("src/foo.ts");
   });
 
   test("detectRepeatEdit: different files don't trigger", () => {
@@ -36,8 +36,8 @@ describe("StuckDetector", () => {
     detector.feed({ action: "test", test: "test_a", status: "fail", error: "expected X got Y" });
     const result = detector.isStuck();
     expect(result).not.toBeNull();
-    expect(result!.reason).toBe("same-fail");
-    expect(result!.evidence).toContain("test_a");
+    expect(result?.reason).toBe("same-fail");
+    expect(result?.evidence).toContain("test_a");
   });
 
   test("detectSameFail: different error messages don't trigger", () => {
@@ -55,7 +55,7 @@ describe("StuckDetector", () => {
     }
     const result = detector.feed({ action: "edit", diffSize: 0 });
     expect(result).not.toBeNull();
-    expect(result!.reason).toBe("no-progress");
+    expect(result?.reason).toBe("no-progress");
   });
 
   test("detectNoProgress: steps with diff growth don't trigger", () => {
