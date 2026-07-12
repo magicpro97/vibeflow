@@ -21,8 +21,10 @@ export interface ParsedAgentRole {
   errors: string[];
 }
 
-/** Validate a frontmatter data block as a RoleSpec. Returns null on invalid. */
-function toRoleSpec(data: Record<string, unknown>): RoleSpec | null {
+/** Validate a frontmatter data block as a RoleSpec. Returns null on invalid.
+ *  Exported as a test seam: `parseAgentRole` always passes a string `body`, so
+ *  the non-string-body branch is only reachable via a direct call. */
+export function toRoleSpec(data: Record<string, unknown>): RoleSpec | null {
   const name = data.name;
   const description = data.description;
   const body = data.body;
@@ -63,7 +65,12 @@ function toRoleSpec(data: Record<string, unknown>): RoleSpec | null {
     body: typeof body === "string" ? body : "",
     tools: roleTools,
     model: model as RoleSpec["model"],
-    sandbox: typeof data.sandbox === "string" ? (data.sandbox as RoleSpec["sandbox"]) : undefined,
+    sandbox:
+      data.sandbox === "read-only" ||
+      data.sandbox === "workspace-write" ||
+      data.sandbox === "danger-full-access"
+        ? (data.sandbox as RoleSpec["sandbox"])
+        : undefined,
   };
 }
 

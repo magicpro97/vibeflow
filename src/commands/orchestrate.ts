@@ -69,7 +69,7 @@ import { maybeFocus, tipState } from "./orchestrate-focus.js";
 
 import { loadAgentRoles } from "../agents/role-loader.js";
 // Resolver helpers in orchestrate-resolve.ts (#186 PR7); facade imports for internal use and re-exports the 5 public test seams.
-import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
+import { makePhaseTracker, makeProgressReporter } from "../orchestrator/phase-tracker.js";
 import {
   announceLaunch,
   engineReady,
@@ -113,7 +113,7 @@ export async function orchestrate(
   // SOLE destination for engine stderr bytes (stdio is now piped in dispatch.ts), so an
   // uninstalled bus at this point would silently drop them. installLogbus is idempotent —
   // a second call replaces the active bus with a fresh one (the previous one is closed).
-  installLogbus();
+  const logbus = installLogbus();
 
   // M5: show the "watch live" tip once, if the UI server is running.
   if (!tipState.shown) {
@@ -288,23 +288,12 @@ export async function orchestrate(
   // out("vf"), which always tees to the terminal even when the engine buffers
   // its own output). The done counter is monotonic; with concurrency > 1 it is
   // the honest progress signal (ev.index is list position, not start order).
-  // #523: elapsed in the phase footer + TTY self-redraw.
+  // #523: elapsed/cost/tokens in the phase footer + TTY self-redraw.
   const t0 = Date.now();
   const tracker = makePhaseTracker(units.length);
-  const isTTY = process.stdout.isTTY;
-  const onProgress = (ev: import("../orchestrator/run.js").ProgressEvent) => {
-    tracker.onProgress(ev);
-    if (ev.phase === "start") {
-      spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
-    } else {
-      const line = tracker.render({ elapsed: Math.floor((Date.now() - t0) / 1000) });
-      if (isTTY) {
-        process.stdout.write(`\x1b[2K\r${line}\n`);
-      } else {
-        out("vf", line);
-      }
-    }
-  };
+  const onProgress = makeProgressReporter(tracker, t0, (ev) =>
+    spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`),
+  );
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,
@@ -317,6 +306,8 @@ export async function orchestrate(
       implementer: engine,
       ...(state.goal ? { goal: state.goal } : {}),
     }),
+    // #546: wire live engine-stdout per-unit for looping detection
+    logbus,
     // Post-coding security checkpoint. Opt-in via `--security-check`. When
     // on, the user is prompted (y/n/skip) after each unit finishes coding,
     // BEFORE the independent reviewer is consulted. A `fail` verdict blocks

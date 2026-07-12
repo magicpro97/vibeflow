@@ -35,7 +35,7 @@ export class StuckDetector {
   constructor(opts?: StuckDetectorOpts) {
     this.stallSeconds = opts?.stallSeconds ?? 120;
     this.loopThreshold = opts?.loopThreshold ?? 3;
-    this.evidenceStallRounds = opts?.evidenceStallRounds ?? 2;
+    this.evidenceStallRounds = Math.max(1, opts?.evidenceStallRounds ?? 1);
     this.lastProgressTime = Date.now();
     this.outputHistory = [];
     this.evidenceHistory = [];
@@ -63,6 +63,11 @@ export class StuckDetector {
     }
   }
 
+  /** Test seam: expose the clamped value. */
+  getEvidenceStallRoundsForTest(): number {
+    return this.evidenceStallRounds;
+  }
+
   /** Evaluate all 3 detection patterns. Returns a StuckState with reasons. */
   check(now?: number): StuckState {
     const ts = now ?? Date.now();
@@ -70,10 +75,7 @@ export class StuckDetector {
 
     const windowStart = Math.max(0, this.outputHistory.length - this.loopThreshold);
     const recentOutputs = this.outputHistory.slice(windowStart);
-    const looping =
-      recentOutputs.length >= this.loopThreshold &&
-      recentOutputs.length > 0 &&
-      new Set(recentOutputs).size === 1;
+    const looping = recentOutputs.length >= this.loopThreshold && new Set(recentOutputs).size === 1;
 
     let evidenceStuck = false;
     if (this.evidenceHistory.length >= this.evidenceStallRounds + 1) {

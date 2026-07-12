@@ -1,6 +1,3 @@
-// test/orchestrator/stuck-detector.test.ts
-// #546 — StuckDetector: stalled / looping / evidence-stuck patterns.
-
 import { describe, expect, test } from "bun:test";
 import { StuckDetector } from "../../src/orchestrator/stuck-detector.js";
 
@@ -31,17 +28,39 @@ describe("StuckDetector", () => {
     expect(d.check().looping).toBe(false);
   });
 
-  test("evidence-stuck: count unchanged across evidenceStallRounds+1 checks", () => {
-    const d = new StuckDetector({ evidenceStallRounds: 2 });
-    d.recordEvidenceCount(4);
+  test("evidence-stuck at default (rounds=1): 2 identical counts trips", () => {
+    const d = new StuckDetector({ evidenceStallRounds: 1 });
     d.recordEvidenceCount(4);
     expect(d.check().evidenceStuck).toBe(false);
     d.recordEvidenceCount(4);
     expect(d.check().evidenceStuck).toBe(true);
   });
 
+  test("evidence-stuck at default (rounds=1): differing counts (0 then 2) is not stuck", () => {
+    const d = new StuckDetector({ evidenceStallRounds: 1 });
+    d.recordEvidenceCount(0);
+    d.recordEvidenceCount(2);
+    expect(d.check().evidenceStuck).toBe(false);
+  });
+
+  test("evidence-stuck: default rounds clamped to 1", () => {
+    const d = new StuckDetector();
+    expect(d.getEvidenceStallRoundsForTest()).toBe(1);
+    d.recordEvidenceCount(5);
+    d.recordEvidenceCount(5);
+    expect(d.check().evidenceStuck).toBe(true);
+  });
+
+  test("clamp: evidenceStallRounds:0 behaves as rounds=1", () => {
+    const d = new StuckDetector({ evidenceStallRounds: 0 });
+    expect(d.getEvidenceStallRoundsForTest()).toBe(1);
+    d.recordEvidenceCount(3);
+    d.recordEvidenceCount(3);
+    expect(d.check().evidenceStuck).toBe(true);
+  });
+
   test("evidence-stuck: a growing count clears it", () => {
-    const d = new StuckDetector({ evidenceStallRounds: 2 });
+    const d = new StuckDetector({ evidenceStallRounds: 1 });
     d.recordEvidenceCount(1);
     d.recordEvidenceCount(2);
     d.recordEvidenceCount(3);

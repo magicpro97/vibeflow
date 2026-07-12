@@ -8,10 +8,11 @@ import {
 } from "../core.js";
 import { computeConfidence } from "../gates.js";
 import { type OrchestratorApplyGate, applyGateBlock } from "../hooks/apply-gate.js";
+import type { Logbus } from "../logbus.js";
 import { thresholdFor } from "./investigate.js";
 import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
 import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security-checkpoint.js";
-import { StuckDetector } from "./stuck-detector.js";
+import { applyStuckDetection } from "./stuck-wire.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -33,6 +34,9 @@ export interface ProgressEvent {
   pass?: boolean;
   /** #546: non-abortive stuck signals (stalled/looping/evidence-stuck) surfaced to the consumer. */
   stuck?: string[];
+  /** #523: accumulated cost/tokens from completed units. */
+  cost_usd?: number;
+  tokens?: number;
 }
 
 /**
@@ -177,21 +181,8 @@ export interface OrchestrationResult<U extends WorkUnit = WorkUnit> {
 
 /**
  * Dispatch all units in parallel through the injected dispatcher, then run an independent
- * reviewer over each result. Implementer and reviewer are different roles — a unit only
- * reaches `done` when both the dispatcher and the reviewer agree.
- *
- * Contract: a FAILED review blocks the unit regardless of the dispatcher's reported status.
- * Production dispatchers return "verifying" (never "done"), so blocking only on
- * `status === "done"` would let a confidence<1 unit slip through. A failed review always
- * sets `status = "blocked"` and `gates.review = "fail"`; a passed review sets
- * `gates.review = "pass"`. Reviews are written by index for deterministic ordering.
- *
- * Security checkpoint: when `opts.security` is provided, each unit's coding phase is
- * followed by a user-prompted security pass. The user is asked (y/n) per unit; on
- * `run`, the configured `runSkillFn` executes the `checklist-security` skill and
- * the verdict is attached to the outcome. A `fail` verdict fails the unit
- * (gates.security = "fail", status = "blocked") before the reviewer is even
- * consulted — security is a hard gate, not advisory.
+ * reviewer over each result. A failed review sets status=blocked, gates.review=fail.
+ * Security checkpoint runs between dispatcher and reviewer — fail verdict is a hard gate.
  */
 export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   units: U[];
@@ -200,44 +191,30 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   concurrency?: number;
   /** Per-unit stagger delay (ms) — see {@link runParallel}. Default 0. */
   interUnitDelayMs?: number;
-  /** #546: thresholds for the per-unit StuckDetector (stall/loop/evidence). Defaults applied when omitted. */
+  /** #546: per-unit StuckDetector thresholds. Defaults when omitted. */
   stuckOpts?: import("./stuck-detector.js").StuckDetectorOpts;
-  /**
-   * Optional per-unit progress callback for CLI front-ends. Fires `start` when a
-   * unit begins dispatching and `done` after its review verdict. Purely
-   * observational — omitting it changes nothing (default no-op).
-   */
+  /** #546 per-unit progress callback. start/dispatch, done/review. No-op when omitted. */
   onProgress?: (ev: ProgressEvent) => void;
-  /** Engine/agent identifier written into dispatch markers for observability. */
+  /** Engine/agent identifier written into dispatch markers. */
   agent?: string;
-  /**
-   * Optional post-coding security checkpoint. When set, each unit gets a
-   * user-prompted pass through the `checklist-security` skill between the
-   * dispatcher and the reviewer.
-   */
+  /** #519: optional post-coding security checkpoint between dispatcher and reviewer. */
   security?: {
-    /** Project root used to resolve the skill path. */
     base: string;
-    /** Override the default readline y/n prompt. Test seam. */
     askFn?: () => (q: string) => Promise<import("./security-checkpoint.js").SecurityConsent>;
-    /** Override the default skill runner (which just reads the SKILL.md). */
     runSkillFn?: (unit: WorkUnit, base: string) => Promise<string>;
   };
-  /** #517: injectable clock stamped onto NEW evidence keys. Test seam; defaults to real time. */
+  /** #517: injectable clock for evidence timestamps. Default Date.now. */
   now?: () => string;
-  /**
-   * #547 apply-time guardrail gate. Default undefined ⇒ NO gate (backward-compat). When set,
-   * AFTER a unit's review passes, its produced diff is classified and a `!allowed` verdict
-   * blocks the unit (status=blocked, gates.security=fail). Bound to the dispatching engine at
-   * injection (CLI wires it only for a detection-only engine); `cwd` resolves the unit diff.
-   */
+  /** #547: optional apply-time guardrail gate. Absent ⇒ no gate. */
   applyGate?: OrchestratorApplyGate;
-  /** #547: the dispatching engine, passed to `applyGate`. */
+  /** #547: dispatching engine, passed to applyGate. */
   applyGateEngine?: Engine;
-  /** #547: repo root used to resolve the unit diff. Defaults to cwd(). */
+  /** #547: repo root for diff resolution. Defaults to cwd(). */
   cwd?: string;
-  /** #547 test seam: inject the diff getter so integration tests don't hit real git (shallow CI clone). */
+  /** #547 test seam: inject diff getter. */
   applyGateDiff?: (cwd: string, scope: string[]) => { diff: string; ok: boolean };
+  /** #546: active logbus for engine-stdout wire. Absent ⇒ no-op. */
+  logbus?: Logbus;
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   // Log initial markers for visibility before the first unit dispatches.
@@ -247,102 +224,85 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   const units = (await runParallel(
     opts.units,
     async (u, i) => {
-      const detector = new StuckDetector(opts.stuckOpts); // #546: non-abortive
-      detector.recordEvidenceCount(u.evidence?.length ?? 0);
-      updateMarker(u.name, { status: "running" });
-      opts.onProgress?.({ phase: "start", unit: u.name, index: i, total: opts.units.length });
-      // Defensive: a custom dispatcher may throw synchronously (e.g. test
-      // seam) or the spawner it wraps may reject. We catch and turn the
-      // throw into a per-unit "blocked" outcome so siblings still complete
-      // and `reviews[]` is fully populated (no Promise.all rejection
-      // cascades). This is the contract `UnitDispatcher` promises but
-      // does not enforce, so we enforce it here.
-      let outcome: UnitOutcome;
+      const { finish, unsub } = applyStuckDetection(u, opts.stuckOpts, opts.logbus);
       try {
-        outcome = await opts.dispatcher(u);
-      } catch (err) {
-        const msg = (err as Error).message ?? String(err);
-        // Surface via both logbus (CLI / UI see it) and stderr (journal
-        // fallback when logbus is not installed). The eccho init test
-        // (2026-06-18) showed dispatcher-throw messages were invisible
-        // because process.stderr alone doesn't reach the CLI output
-        // stream when the UI server is running.
+        updateMarker(u.name, { status: "running" });
+        opts.onProgress?.({ phase: "start", unit: u.name, index: i, total: opts.units.length });
+        // Catch dispatcher throw → per-unit blocked so siblings complete.
+        let outcome: UnitOutcome;
         try {
-          const out = (await import("../logbus.js")).out;
-          out("engine-stderr", `[orchestrator] dispatcher for ${u.name} threw: ${msg}`, {
-            level: "error",
-            unit: u.name,
+          outcome = await opts.dispatcher(u);
+        } catch (err) {
+          const msg = (err as Error).message ?? String(err);
+          try {
+            const out = (await import("../logbus.js")).out;
+            out("engine-stderr", `[orchestrator] dispatcher for ${u.name} threw: ${msg}`, {
+              level: "error",
+              unit: u.name,
+            });
+          } catch {
+            // logbus not available — stderr is the fallback
+          }
+          process.stderr.write(`[orchestrator] dispatcher for ${u.name} threw: ${msg}\n`);
+          outcome = {
+            status: "blocked" as const,
+            confidence: 0,
+            evidence: [],
+          };
+        }
+        // Quota-skip: abort remaining lanes.
+        if (outcome.evidence?.some((e) => e.startsWith("skipped: upstream rate limit"))) {
+          controller.abort();
+        }
+        // #519: security checkpoint between dispatcher and reviewer. Skip when
+        // already doomed (blocked or a cheap gate failed).
+        const cheapFailed =
+          outcome.status === "blocked" ||
+          (["build", "lint", "test"] as const).some((k) => outcome.gates?.[k] === "fail");
+        if (security && !cheapFailed) {
+          const sec = await runSecurityCheckpoint(u, security.base, {
+            askFn: security.askFn,
+            runSkillFn: security.runSkillFn,
           });
-        } catch {
-          // logbus not available — stderr is the fallback
+          outcome.security = sec;
+          if (sec.verdict === "fail") {
+            outcome.status = "blocked";
+            outcome.gates = { ...(outcome.gates ?? {}), security: "fail" };
+          } else if (sec.verdict === "pass" || sec.verdict === "needs-review") {
+            outcome.gates = { ...(outcome.gates ?? {}), security: "pass" };
+          }
         }
-        process.stderr.write(`[orchestrator] dispatcher for ${u.name} threw: ${msg}\n`);
-        outcome = {
-          status: "blocked" as const,
-          confidence: 0,
-          evidence: [],
-        };
-      }
-      // A quota-skip outcome means an upstream unit hit the rate limit.
-      // Abort so the remaining not-yet-started lanes don't spend more
-      // against the limited account.
-      if (outcome.evidence?.some((e) => e.startsWith("skipped: upstream rate limit"))) {
-        controller.abort();
-      }
-      // Post-coding security checkpoint. Runs between dispatcher and reviewer
-      // so security issues block the unit BEFORE the independent reviewer
-      // is even consulted (a `fail` verdict is a hard gate, not advisory).
-      // #519 two-stage escalation: skip this expensive/interactive pass when the
-      // unit is already doomed — the reviewer (:261) still blocks it, so don't
-      // prompt the user to security-review it. Doomed means either a cheap gate
-      // (build/lint/test) failed OR the outcome is `blocked` outright (dispatcher
-      // threw and was caught into `{ status: "blocked" }` with no `gates` key, or
-      // the dispatcher returned blocked). Both cases skip the security checkpoint.
-      const cheapFailed =
-        outcome.status === "blocked" ||
-        (["build", "lint", "test"] as const).some((k) => outcome.gates?.[k] === "fail");
-      if (security && !cheapFailed) {
-        const sec = await runSecurityCheckpoint(u, security.base, {
-          askFn: security.askFn,
-          runSkillFn: security.runSkillFn,
+        const reviewed = applyOutcome(u, outcome, opts.now);
+        const review = await opts.reviewer(reviewed, outcome);
+        reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
+        // #545: persist the calibrated judge score onto the unit so computeConfidence
+        // reads it as a graded signal (the producer→unit wire; absent ⇒ untouched).
+        if (review.score !== undefined) reviewed.goal_score = review.score;
+        const stuck = finish(reviewed.evidence?.length ?? 0);
+        opts.onProgress?.({
+          phase: "done",
+          unit: u.name,
+          index: i,
+          total: opts.units.length,
+          pass: review.pass,
+          cost_usd: reviewed.resources?.cost_usd,
+          tokens: reviewed.resources?.tokens,
+          ...(stuck.length ? { stuck } : {}),
         });
-        outcome.security = sec;
-        if (sec.verdict === "fail") {
-          outcome.status = "blocked";
-          outcome.gates = { ...(outcome.gates ?? {}), security: "fail" };
-        } else if (sec.verdict === "pass" || sec.verdict === "needs-review") {
-          outcome.gates = { ...(outcome.gates ?? {}), security: "pass" };
-        }
+        reviewed.status = review.pass ? "done" : "blocked";
+        reviewed.gates = { ...reviewed.gates, review: review.pass ? "pass" : "fail" };
+        // #547 apply-time gate: a passed detection-only unit's diff is classified; `!allowed` re-blocks.
+        const blocked = await applyGateBlock(opts, reviewed, review.pass);
+        if (blocked) reviews[i] = { unit: u.name, pass: false, reason: blocked.reason };
+        updateMarker(u.name, {
+          status: reviewed.status,
+          confidence: reviewed.confidence,
+          evidence: reviewed.evidence,
+        });
+        return reviewed;
+      } finally {
+        unsub();
       }
-      const reviewed = applyOutcome(u, outcome, opts.now);
-      const review = await opts.reviewer(reviewed, outcome);
-      reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
-      // #545: persist the calibrated judge score onto the unit so computeConfidence
-      // reads it as a graded signal (the producer→unit wire; absent ⇒ untouched).
-      if (review.score !== undefined) reviewed.goal_score = review.score;
-      // #546: feed detector post-review, surface stuck signals (non-abortive).
-      detector.recordProgress();
-      detector.recordEvidenceCount(reviewed.evidence?.length ?? 0);
-      const stuck = detector.check().reasons;
-      opts.onProgress?.({
-        phase: "done",
-        unit: u.name,
-        index: i,
-        total: opts.units.length,
-        pass: review.pass,
-        ...(stuck.length ? { stuck } : {}),
-      });
-      reviewed.status = review.pass ? "done" : "blocked";
-      reviewed.gates = { ...reviewed.gates, review: review.pass ? "pass" : "fail" };
-      // #547 apply-time gate: a passed detection-only unit's diff is classified; `!allowed` re-blocks.
-      const blocked = await applyGateBlock(opts, reviewed, review.pass);
-      if (blocked) reviews[i] = { unit: u.name, pass: false, reason: blocked.reason };
-      updateMarker(u.name, {
-        status: reviewed.status,
-        confidence: reviewed.confidence,
-        evidence: reviewed.evidence,
-      });
-      return reviewed;
     },
     opts.concurrency ?? DEFAULT_CONCURRENCY,
     opts.interUnitDelayMs,
