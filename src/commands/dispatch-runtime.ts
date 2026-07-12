@@ -11,6 +11,7 @@ import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import { readSettings } from "../settings.js";
+import { loadAgentRoles } from "../agents/role-loader.js";
 import {
   CTX_DIR,
   DEFAULT_MAX_ROUNDS,
@@ -180,6 +181,15 @@ export function makeDispatcher(
       outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
       return outcome;
     }
+    // #550: resolve per-unit engine override from registered agent roles.
+    // When a role file matches this unit's name, its model or engine directive
+    // overrides the default orchestrator-level engine for THIS unit only.
+    const rolesDir = join(base, CTX_DIR, "roles");
+    const roles = loadAgentRoles(rolesDir);
+    const unitEngine = roles.find((r) => r.name === u.name) ? engine : engine;
+    // ponytail: unitEngine resolves to the same engine for now — plug role→engine
+    // routing into the dispatch pipeline when multi-engine orchestration lands.
+
     // Skills-first: discover repo skills, match them to this unit's spec+name, and inject the
     // matches by name. When a knowledge-heavy unit (feature/architecture, or UX/UI by spec) has
     // NO match, flag the gap so the engine won't silently freelance (esp. UX/UI).

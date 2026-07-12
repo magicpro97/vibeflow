@@ -239,6 +239,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   for (const u of opts.units) createMarker(u.name, opts.agent);
   const security = opts.security;
   const controller = new AbortController();
+  // TODO(#546): wire StuckDetector into the per-unit dispatch loop so stalled/looping/evidence-stuck
+  // units are surfaced to the onProgress consumer without aborting sibling lanes.
   const units = (await runParallel(
     opts.units,
     async (u, i) => {

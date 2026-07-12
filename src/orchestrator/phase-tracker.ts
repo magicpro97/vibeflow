@@ -1,4 +1,5 @@
 import type { ProgressEvent } from "./run.js";
+import { c } from "../core.js";
 
 export interface PhaseSnapshot {
   total: number;
@@ -42,7 +43,7 @@ export function makePhaseTracker(total: number, now: () => number = () => Date.n
       };
     },
 
-    render(): string {
+    render(opts?: { cost_usd?: number; tokens?: number; elapsed?: number }): string {
       const snap = this.snapshot();
       const parts: string[] = [];
 
@@ -66,6 +67,13 @@ export function makePhaseTracker(total: number, now: () => number = () => Date.n
       if (pending > 0) {
         parts.push(`·${pending}`);
       }
+
+      // Optional cost / tokens / elapsed footer (#523)
+      const footer: string[] = [];
+      if (opts?.cost_usd !== undefined) footer.push(`$${opts.cost_usd.toFixed(2)}`);
+      if (opts?.tokens !== undefined) footer.push(`${opts.tokens} tok`);
+      if (opts?.elapsed !== undefined) footer.push(`${opts.elapsed}s`);
+      if (footer.length > 0) parts.push(c.dim(`(${footer.join(" · ")})`));
 
       return parts.join("  ");
     },

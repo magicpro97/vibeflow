@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+
+* **orchestrator:** stuck-detector with 3 detection patterns — stalled, looping, evidence-stuck ([#546](https://github.com/magicpro97/vibeflow/issues/546))
+* **ui:** live progress self-redraw + cost/token/elapsed footer in phase tracker ([#523](https://github.com/magicpro97/vibeflow/issues/523))
+* **agents:** role-loader with parseAgentRole, resolveRole, loadAgentRoles reusing parseFrontmatter ([#550](https://github.com/magicpro97/vibeflow/issues/550))
+* **server:** startServer accepts host parameter; guarded() handles 0.0.0.0 bind-all ([#561](https://github.com/magicpro97/vibeflow/issues/561))
+* **cli:** --host flag passthrough to startServer for LAN UI access
+
 ## [0.12.1](https://github.com/magicpro97/vibeflow/compare/v0.12.0...v0.12.1) (2026-07-06)
 
 

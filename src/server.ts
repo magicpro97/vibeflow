@@ -39,12 +39,15 @@ const CSP =
 
 export function startServer(
   port = 0,
-  _opts: { uiHtmlPath?: URL } = {},
+  _opts: { uiHtmlPath?: URL; host?: string } = {},
 ): Promise<{
   server: { stop: () => void };
   url: string;
 }> {
   const token = randomUUID();
+
+  const host = _opts.host ?? "127.0.0.1";
+  const bindAll = host === "0.0.0.0";
 
   const uiHtmlPath = _opts.uiHtmlPath ?? new URL("../dist/ui/index.html", import.meta.url);
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -69,7 +72,12 @@ export function startServer(
   const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
 
   const guarded = (req: Request): boolean => {
-    if (!isLoopback(req.headers.get("host") ?? "")) return false;
+    const reqHost = req.headers.get("host") ?? "";
+    // When bound to 0.0.0.0, accept loopback OR the bind-all address
+    const hostOk = bindAll
+      ? isLoopback(reqHost) || reqHost.startsWith("0.0.0.0")
+      : isLoopback(reqHost);
+    if (!hostOk) return false;
     const o = req.headers.get("origin") || req.headers.get("referer");
     if (o) {
       try {
@@ -83,7 +91,7 @@ export function startServer(
 
   const server = Bun.serve({
     port: port === 0 ? 0 : port,
-    hostname: "127.0.0.1",
+    hostname: host,
     idleTimeout: 0,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
@@ -483,11 +491,12 @@ export function startServer(
     },
   });
 
+  const displayHost = bindAll ? "0.0.0.0" : "127.0.0.1";
   console.log(
-    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://127.0.0.1:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
+    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://${displayHost}:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
   );
   return Promise.resolve({
     server: { stop: () => server.stop() },
-    url: `http://127.0.0.1:${server.port}`,
+    url: `http://${displayHost}:${server.port}`,
   });
 }
