@@ -50,6 +50,8 @@ export type UnitBrief =
       skillGap?: boolean;
       /** #543: always-on repo ("project law") skills — injected every dispatch. */
       repoSkills?: string[];
+      /** #612: summaries handed off from completed upstream units. */
+      upstreamHandoffs?: Array<{ unit: string; summary: string }>;
     };
 
 function briefName(u: UnitBrief): string {
@@ -67,7 +69,11 @@ export function dispatchPrompt(
   const names = units.map(briefName);
   const objs = units.filter((u): u is UnitBriefObj => typeof u !== "string");
   const specs = objs.filter(
-    (u) => Boolean(u.spec?.trim()) || Boolean(u.scope?.length) || Boolean(u.skills?.length),
+    (u) =>
+      Boolean(u.spec?.trim()) ||
+      Boolean(u.scope?.length) ||
+      Boolean(u.skills?.length) ||
+      Boolean(u.upstreamHandoffs?.length),
   );
   const goal = (ctx.goal ?? "").trim();
   const lines = [
@@ -84,6 +90,20 @@ export function dispatchPrompt(
       if (u.scope?.length) lines.push(`  scope: ${u.scope.join(", ")}`);
       if (u.spec?.trim()) lines.push(`  spec: ${u.spec.trim()}`);
       if (u.skills?.length) lines.push(`  skills: ${u.skills.join(", ")}`);
+    }
+    lines.push("");
+  }
+
+  // #612: bounded upstream handoff context — a dedicated section so dependents
+  // see what their upstream units produced (first 10 summaries per unit).
+  const withHandoffs = objs.filter((u) => u.upstreamHandoffs?.length);
+  if (withHandoffs.length) {
+    lines.push("## Upstream context");
+    for (const u of withHandoffs) {
+      lines.push(`- ${u.name}:`);
+      for (const h of (u.upstreamHandoffs ?? []).slice(0, 10)) {
+        lines.push(`  - ${h.unit}: ${h.summary}`);
+      }
     }
     lines.push("");
   }

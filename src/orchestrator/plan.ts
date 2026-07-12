@@ -31,6 +31,7 @@ export function planWorkUnits(proposals: UnitProposal[]): PlanResult {
     confidence: p.confidence ?? 0,
     owner_agent: p.owner_agent,
     scope: p.scope,
+    depends_on: p.depends_on,
     gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
     resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
   }));

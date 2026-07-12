@@ -114,6 +114,20 @@ that unit's full transition ledger; `vf status --json` emits machine-readable ou
 
 See `src/commands/status.ts`, `src/orchestrator/marker.ts`, `src/orchestrator/timeline.ts`.
 
+## Wave Handoff
+
+Units declare `depends_on` (carried from the planner's proposal onto the `WorkUnit`).
+`scheduleWaves` topologically orders them into dependency waves: each wave holds only
+units whose deps are already satisfied, and units within a wave run concurrently.
+`dispatchInWaves` runs the waves in order — after every wave, each finished unit's
+derived one-line summary (`deriveHandoff`: name + status + evidence count, sanitized and
+capped at 500 bytes) is recorded and injected as an `## Upstream context` block into its
+dependents' dispatch prompt in the next wave. This is best-effort context, not a contract.
+With no `depends_on`, `scheduleWaves` returns a single wave ⇒ one dispatch call ⇒ identical
+to the pre-#612 behavior.
+
+See `src/orchestrator/waves.ts`, `src/orchestrator/handoff.ts`, `src/orchestrator/plan.ts`.
+
 ## Tool Adapters
 
 Adapters translate canonical workflow context into each engine's expected format. Each

@@ -9,6 +9,7 @@
 //   merges results back into the workflow ledger, and reports the goal verdict.
 
 import { resolve } from "node:path";
+import { dispatchInWaves } from "../orchestrator/waves.js";
 // Protection cluster lives in src/commands/protection.ts and is
 // re-exported through the sibling barrel (_shared.js). Both this
 // file and protection.ts import from _shared.js (sibling-via-barrel),
@@ -50,7 +51,6 @@ import {
   makeAsyncSpawner,
   maybePublishPrs,
   normalizeUnit,
-  orchestrateUnits,
   out,
   publishSpawn,
   readFileSync,
@@ -294,7 +294,7 @@ export async function orchestrate(
   const onProgress = makeProgressReporter(tracker, t0, (ev) =>
     spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`),
   );
-  const { units: ran, reviews } = await orchestrateUnits({
+  const { ran, reviews } = await dispatchInWaves({
     units,
     concurrency,
     onProgress,
@@ -312,7 +312,7 @@ export async function orchestrate(
     // on, the user is prompted (y/n/skip) after each unit finishes coding,
     // BEFORE the independent reviewer is consulted. A `fail` verdict blocks
     // the unit on `gates.security = "fail"`. Default-skip in non-TTY (CI).
-    security: flags["security-check"] ? { base } : undefined,
+    ...(flags["security-check"] ? { security: { base } } : {}),
   });
 
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);

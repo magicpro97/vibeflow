@@ -67,6 +67,11 @@ export interface WorkUnit {
   goal_score?: number;
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
+  /** #612: names of units this unit depends on (carried from the planner's UnitProposal). */
+  depends_on?: string[];
+  /** #612: summaries handed off from completed upstream units. Read-only — filled by the
+   *  wave dispatcher before this unit is dispatched. */
+  upstreamHandoffs?: Array<{ unit: string; summary: string }>;
   /** #522: structured acceptance. Reviewer runs each `verification`; a failing MUST is a
    *  review FAILURE. Optional — prose spec/acceptance still valid. */
   acceptance_criteria?: AcceptanceCriterion[];
