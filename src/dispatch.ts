@@ -8,7 +8,7 @@ import {
   sanitizeUnitName,
   writeFileSafe,
 } from "./core.js";
-import { parseEngineSummary } from "./dispatch/prompt.js";
+import { parseEngineSummary, parseSessionId } from "./dispatch/prompt.js";
 import {
   defaultAsyncSpawner,
   defaultSpawner,
@@ -43,7 +43,7 @@ export {
   defaultSyncSpawner,
   makeAsyncSpawner,
 } from "./dispatch/spawners.js";
-export { buildEnginePrompt, parseEngineSummary } from "./dispatch/prompt.js";
+export { buildEnginePrompt, parseEngineSummary, parseSessionId } from "./dispatch/prompt.js";
 
 export function isUnavailable(r: EngineCommandResult): r is EngineUnavailable {
   return "unavailable" in r;
@@ -244,6 +244,7 @@ function buildResult(
     ok,
     raw: r.stdout,
     summary: parseEngineSummary(r.stdout),
+    sessionId: parseSessionId(r.stdout),
     reason: ok ? undefined : r.timedOut ? "timeout" : failReason,
     warning,
   };

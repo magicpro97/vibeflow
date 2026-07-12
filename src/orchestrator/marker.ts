@@ -28,6 +28,8 @@ export interface DispatchMarker {
   projectItemId?: string;
   /** GitHub issue URL or number — used to auto-close when PR merge is detected. */
   issueUrl?: string;
+  /** #618: engine conversation/session id, persisted for crash-resume (`--resume`). */
+  engineSessionId?: string;
 }
 
 /**
@@ -174,7 +176,13 @@ export function updateMarker(
   update: Partial<
     Pick<
       DispatchMarker,
-      "status" | "confidence" | "evidence" | "exitCode" | "projectItemId" | "issueUrl"
+      | "status"
+      | "confidence"
+      | "evidence"
+      | "exitCode"
+      | "projectItemId"
+      | "issueUrl"
+      | "engineSessionId"
     >
   >,
 ): DispatchMarker | null {
@@ -194,6 +202,7 @@ export function updateMarker(
   if (update.exitCode !== undefined) marker.exitCode = update.exitCode;
   if (update.projectItemId !== undefined) marker.projectItemId = update.projectItemId;
   if (update.issueUrl !== undefined) marker.issueUrl = update.issueUrl;
+  if (update.engineSessionId !== undefined) marker.engineSessionId = update.engineSessionId;
   writeFileSync(path, JSON.stringify(marker, null, 2));
 
   // AC #176: every status transition syncs to ProjectV2 #6

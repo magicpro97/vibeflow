@@ -124,3 +124,23 @@ export function parseEngineSummary(stdout: string): EngineSummary | undefined {
   }
   return undefined;
 }
+
+/** #618: pull the claude `--output-format json` envelope's session_id (transport-level,
+ *  distinct from the model summary). Returns undefined for any non-envelope stdout.
+ *
+ *  Scope (PR1): claude-only by design. The `type === "result"` envelope guard means codex's
+ *  event-stream JSON and copilot output fall through to `undefined` → safe redo-full fallback.
+ *  codex session parse + 2-mode resume/retry land in PR2 (#618 AC2); copilot has no by-id
+ *  resume (`--continue` most-recent-only) so it never produces an id to capture. */
+export function parseSessionId(stdout: string): string | undefined {
+  if (!stdout) return undefined;
+  for (const block of extractJsonObjects(stdout).reverse()) {
+    try {
+      const obj = JSON.parse(block.trim()) as Record<string, unknown>;
+      if (obj.type === "result" && typeof obj.session_id === "string") return obj.session_id;
+    } catch {
+      // not JSON — skip
+    }
+  }
+  return undefined;
+}

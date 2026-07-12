@@ -680,6 +680,27 @@ describe("closeLinkedIssue", () => {
   });
 });
 
+describe("updateMarker engineSessionId (#618)", () => {
+  test("updateMarker persists engineSessionId (#618)", async () => {
+    const { createMarker, updateMarker, readMarker, cleanupMarker } = await loadMarker();
+    const u = unit("sid-1");
+    createMarker(u);
+    const m = updateMarker(u, { status: "running", engineSessionId: "sess-xyz" });
+    expect(m?.engineSessionId).toBe("sess-xyz");
+    expect(readMarker(u)?.engineSessionId).toBe("sess-xyz");
+    cleanupMarker(u);
+  });
+
+  test("updateMarker without engineSessionId leaves legacy marker untouched (#618)", async () => {
+    const { createMarker, updateMarker, cleanupMarker } = await loadMarker();
+    const u = unit("sid-2");
+    createMarker(u);
+    const m = updateMarker(u, { status: "done" });
+    expect(m?.engineSessionId).toBeUndefined();
+    cleanupMarker(u);
+  });
+});
+
 describe("updateMarker projectId wiring", () => {
   test("updateMarker wires projectItemId through to marker", async () => {
     const { createMarker, updateMarker, readMarker } = await loadMarker();

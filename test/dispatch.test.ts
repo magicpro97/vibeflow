@@ -1505,6 +1505,35 @@ describe("makeAsyncSpawner — env scrub (#556)", () => {
 });
 
 // ── dispatch split sentinel (#186 PR8) ──
+describe("parseSessionId (#618)", () => {
+  test("runDispatch captures session_id from claude JSON envelope", () => {
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      session_id: "sess-abc-123",
+      num_turns: 2,
+      result: "",
+    });
+    const spawner = (_c: string, _a: string[], _i: string) => ({
+      status: 0,
+      stdout: envelope,
+      stderr: "",
+    });
+    const r = runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
+    expect(r.sessionId).toBe("sess-abc-123");
+  });
+
+  test("runDispatch leaves sessionId undefined when no envelope", () => {
+    const spawner = (_c: string, _a: string[], _i: string) => ({
+      status: 0,
+      stdout: "plain text no json",
+      stderr: "",
+    });
+    const r = runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
+    expect(r.sessionId).toBeUndefined();
+  });
+});
+
 describe("dispatch split (#186 PR8 sentinel)", () => {
   const facade = readFileSync("src/dispatch.ts", "utf8");
   test("prompt builders extracted", () => {

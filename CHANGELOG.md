@@ -11,6 +11,7 @@
 * **cli:** --host flag passthrough to startServer for LAN UI access
 * **cli:** `vf status` — crash-recovery view of per-unit markers/timeline without reading the diff ([#613](https://github.com/magicpro97/vibeflow/issues/613))
 * **orchestrator:** wave-aware structured handoff — each completed upstream unit's derived summary is injected into its dependents' dispatch prompt ([#612](https://github.com/magicpro97/vibeflow/issues/612))
+* **orchestrator:** capture engine session_id into dispatch markers for crash-resume ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR1)
 
 ## [0.12.1](https://github.com/magicpro97/vibeflow/compare/v0.12.0...v0.12.1) (2026-07-06)
 
