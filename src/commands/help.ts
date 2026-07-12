@@ -31,6 +31,7 @@ export function printHelp(): number {
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
     ${c.cyan("canary [sub]")}      list | link <unit> <file> | check — human-authored canary tests (ADR-005)
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
+    ${c.cyan("status")}             crash-recovery view of per-unit markers after a crash (--timeline <unit> | --json)
     ${c.cyan("config [sub]")}      memory <builtin|claude-mem|off|status> — read/toggle per-repo settings
     ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | import
     ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
@@ -208,6 +209,16 @@ ${c.bold("Subcommands:")}
 ${c.bold("Examples:")}
   vf units status
   vf units update auth --status done --confidence 1`,
+
+  status: () =>
+    `${c.bold("vf status")} ${c.dim("[--timeline <unit>] [--json]")}
+Crash-recovery view of per-unit progress. Reads the persisted markers under
+~/.vibeflow/markers (no re-run) to show which units were running at a crash and
+which claimed done but never published evidence.
+
+${c.bold("Options:")}
+  --timeline <unit>   dump a unit's append-only status-transition ledger
+  --json              emit the raw marker array (machine-readable)`,
 
   config: () => `${c.bold("vf config")} ${c.dim("<memory|env-policy> ...")}
 Read or toggle per-repo settings in .vibeflow/SETTINGS.json.

@@ -19,6 +19,7 @@ import {
   printVersion,
   run,
   skills,
+  status,
   tools,
   units,
   verify,
@@ -241,6 +242,8 @@ async function main(argv: string[]): Promise<number> {
       return canary(positionals[0], positionals.slice(1), flags);
     case "units":
       return units(positionals[0], positionals.slice(1), flags);
+    case "status":
+      return status(positionals[0], positionals.slice(1), flags);
     case "config":
       return config(positionals[0], positionals.slice(1), cwd(), flags);
     case "skills":

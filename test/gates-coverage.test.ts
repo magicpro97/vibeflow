@@ -625,7 +625,6 @@ describe("policyGates: goal_eval gate (ADR-003)", () => {
 });
 
 describe("computeConfidence (Task 5: self-report is a CAP)", () => {
-  // biome-ignore lint/suspicious/noExplicitAny: terse gate fixture for unit tests
   const G = (o = {}) =>
     ({ build: "pass", lint: "pass", test: "pass", review: "pass", ...o }) as any;
 

@@ -53,4 +53,11 @@ describe("help text", () => {
     expect(hasCommandHelp("update-check")).toBe(true);
     expect(printCommandHelp("update-check")).toBe(0);
   });
+
+  test("status has a per-command help block (covers the COMMAND_HELP.status arm, #613)", () => {
+    expect(hasCommandHelp("status")).toBe(true);
+    expect(printCommandHelp("status")).toBe(0);
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
+    expect(src).toContain("--timeline <unit>");
+  });
 });
