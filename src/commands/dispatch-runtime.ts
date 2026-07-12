@@ -95,11 +95,10 @@ export function makeResearcher(
       `research round ${round}`,
     ]);
     // Pass a unit slug so copilot's prompt goes to a file, not argv (#526 item 7);
-    // research prompts carry full project context and can re-hit the ~32K argv
-    // limit otherwise. Pass `base` too (#536): when the server orchestrates a
-    // registered repo ≠ process.cwd(), the copilot dispatch pointer/file must land
-    // under the active repo, not cwd(). Falls back to cwd() inside writeDispatchPrompt
-    // when base is undefined (the CLI path, where the repo IS cwd).
+    // research prompts carry full project context and can re-hit the ~32K argv limit.
+    // Pass `base` too (#536): when the server orchestrates a registered repo ≠ cwd(),
+    // the copilot dispatch file must land under the active repo. Falls back to cwd()
+    // inside writeDispatchPrompt when base is undefined (the CLI path, repo IS cwd).
     const result = await runDispatchAsync({
       engine,
       prompt,
@@ -214,6 +213,7 @@ export function makeDispatcher(
             skills: skillNames,
             skillGap,
             repoSkills: alwaysNames,
+            upstreamHandoffs: u.upstreamHandoffs,
           },
         ],
         memBlock,
