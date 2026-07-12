@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   analyzeDiff,
@@ -6095,5 +6095,123 @@ describe("buildReviewerPrompt (ADR-001)", () => {
     const out = buildReviewerPrompt({ goal: "g", diff: "d" });
     expect(out).toContain("STEP 3");
     expect(out).toContain("edge case");
+  });
+});
+describe("commands.makeDispatcher resume policy (#618 PR2b-1)", () => {
+  const CLAUDE_OK =
+    '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```';
+  const UNIT = {
+    name: "u1",
+    status: "pending" as const,
+    confidence: 0,
+    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" } as const,
+    resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+  };
+  const seedState = (dir: string) =>
+    writeState(dir, {
+      task_id: "T1",
+      goal: "test",
+      success_criteria: [],
+      work_units: [{ ...UNIT }],
+      totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+  const seedMarker = (over: Record<string, unknown>) => {
+    const markerDir = join(homedir(), ".vibeflow", "markers");
+    mkdirSync(markerDir, { recursive: true });
+    const path = join(markerDir, "u1.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        unit: "u1",
+        status: "running",
+        startedAt: Date.now(),
+        updatedAt: Date.now(),
+        confidence: 0,
+        evidence: [],
+        ...over,
+      }),
+    );
+    return path;
+  };
+
+  test("resume=false (default) → engine dispatched WITHOUT -r (fresh)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-resume-off-"));
+    const marker = seedMarker({ engineSessionId: "sess-1" });
+    let capturedArgs: string[] = [];
+    try {
+      seedState(dir);
+      const spawner: AsyncSpawner = async (_c, a) => {
+        capturedArgs = a;
+        return { status: 0, stdout: CLAUDE_OK };
+      };
+      // resume defaults to false — marker.engineSessionId must be ignored.
+      const d = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", spawner);
+      await d({ ...UNIT });
+      expect(capturedArgs).not.toContain("-r");
+      expect(capturedArgs).toEqual(["-p", "--output-format", "json"]);
+    } finally {
+      rmSync(marker, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("resume=true with a crashed marker's engineSessionId → engine dispatched WITH -r <id>", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-resume-on-"));
+    const marker = seedMarker({ status: "running", engineSessionId: "sess-1" });
+    let capturedArgs: string[] = [];
+    try {
+      seedState(dir);
+      const spawner: AsyncSpawner = async (_c, a) => {
+        capturedArgs = a;
+        return { status: 0, stdout: CLAUDE_OK };
+      };
+      const d = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      await d({ ...UNIT });
+      expect(capturedArgs).toEqual(["-p", "-r", "sess-1", "--output-format", "json"]);
+    } finally {
+      rmSync(marker, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("resume=true but marker status done → engine dispatched fresh (no -r)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-resume-done-"));
+    const marker = seedMarker({ status: "done", engineSessionId: "sess-1" });
+    let capturedArgs: string[] = [];
+    try {
+      seedState(dir);
+      const spawner: AsyncSpawner = async (_c, a) => {
+        capturedArgs = a;
+        return { status: 0, stdout: CLAUDE_OK };
+      };
+      const d = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      await d({ ...UNIT });
+      expect(capturedArgs).not.toContain("-r");
+    } finally {
+      rmSync(marker, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
