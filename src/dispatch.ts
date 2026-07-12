@@ -93,6 +93,9 @@ interface DispatchOpts {
    * channel so both paths are visible.
    */
   onStderrChunk?: (text: string) => void;
+  /** #618 PR2a: resume the engine's prior session (claude only) instead of a fresh
+   *  dispatch. Absent = fresh (default). codex/copilot ignore it until PR2b. */
+  resumeSessionId?: string;
 }
 
 /**
@@ -161,9 +164,10 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
 
 /**
  * Headless invocation per engine (verified against current CLI docs):
- *   claude  -> claude -p --output-format json   (print mode, JSON envelope on stdout)
- *   codex   -> codex exec -                      (non-interactive, `-` reads prompt from stdin)
- *   copilot -> copilot -p <prompt> --allow-all-tools
+ *   claude          -> claude -p --output-format json            (fresh)
+ *   claude (resume) -> claude -p -r <id> --output-format json   (#618 PR2a)
+ *   codex           -> codex exec -                              (stdin prompt)
+ *   copilot         -> copilot -p <prompt> --allow-all-tools
  * Claude and Codex receive the prompt on stdin; Copilot's current CLI requires it as the
  * `-p/--prompt` option value, so we pass it as a single argv element without a shell.
  * `gh -p` is NOT a valid fallback (gh has no global -p flag) so copilot resolves to an explicit
@@ -176,10 +180,17 @@ export function engineCommand(
    *  Claude, --allow-all for Copilot already present). Used in AI init /
    *  workflow dispatch to avoid permission-denial stalls (eccho 2026-06-18). */
   dangerouslySkipPermissions = false,
+  /** #618 PR2a: when set AND engine supports resume (claude only in PR2a), the
+   *  invocation resumes that session instead of starting fresh. codex/copilot
+   *  ignore this until PR2b. */
+  resumeSessionId?: string,
 ): EngineCommandResult {
   switch (engine) {
     case "claude": {
-      const args = ["-p", "--output-format", "json"];
+      // #618 PR2a: `-r <id>` resumes a session (claude requires it alongside -p/--print).
+      const args = resumeSessionId
+        ? ["-p", "-r", resumeSessionId, "--output-format", "json"]
+        : ["-p", "--output-format", "json"];
       if (dangerouslySkipPermissions) {
         args.push("--dangerously-skip-permissions");
       }
@@ -197,11 +208,18 @@ function resolveCli(
   engine: Engine,
   hasSpawner: boolean,
   has: (cmd: string) => boolean = hasCommand,
+  /** #618 PR2a: resume session id forwarded to engineCommand (claude only). */
+  resumeSessionId?: string,
 ):
   | { ok: true; cmd: string; args: string[]; promptMode?: "stdin" | "arg"; warning?: string }
   | { ok: false; reason: string } {
   // With an injected spawner we never touch the real PATH, so treat the engine as present.
-  const invocation = engineCommand(engine, hasSpawner ? { has: () => true } : { has });
+  const invocation = engineCommand(
+    engine,
+    hasSpawner ? { has: () => true } : { has },
+    false,
+    resumeSessionId,
+  );
   if (isUnavailable(invocation)) return { ok: false, reason: invocation.unavailable };
   if (!hasSpawner && !has(invocation.cmd)) {
     return { ok: false, reason: `${invocation.cmd} CLI not found` };
@@ -284,7 +302,7 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
       });
     return buildResult(opts, bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }
-  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
+  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has, opts.resumeSessionId);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
   const invocation = materializePrompt(cli, preparePrompt(cli, opts));
   return buildResult(
@@ -314,7 +332,7 @@ export async function runDispatchAsync(
     const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: true });
     return buildResult(opts, await bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }
-  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
+  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has, opts.resumeSessionId);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
   const invocation = materializePrompt(cli, preparePrompt(cli, opts));
   return buildResult(

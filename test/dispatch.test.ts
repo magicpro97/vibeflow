@@ -80,6 +80,93 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
   });
 });
 
+describe("engineCommand resume (#618 PR2a)", () => {
+  test("claude with resumeSessionId → -r <id> in args", () => {
+    const r = engineCommand("claude", { has: () => true }, false, "sess-abc-123");
+    expect(r).toEqual({
+      cmd: "claude",
+      args: ["-p", "-r", "sess-abc-123", "--output-format", "json"],
+    });
+  });
+
+  test("claude resume + dangerouslySkip → both flags present", () => {
+    const r = engineCommand("claude", { has: () => true }, true, "sess-xyz");
+    expect(r).toEqual({
+      cmd: "claude",
+      args: ["-p", "-r", "sess-xyz", "--output-format", "json", "--dangerously-skip-permissions"],
+    });
+  });
+
+  test("claude WITHOUT resumeSessionId → fresh (backward-compat)", () => {
+    const r = engineCommand("claude", { has: () => true }, false);
+    expect(r).toEqual({ cmd: "claude", args: ["-p", "--output-format", "json"] });
+  });
+
+  test("codex ignores resumeSessionId in PR2a (fresh)", () => {
+    const r = engineCommand("codex", { has: () => true }, false, "sess-abc-123");
+    expect(r).toEqual({ cmd: "codex", args: ["exec", "-"] });
+  });
+
+  test("copilot ignores resumeSessionId in PR2a (fresh)", () => {
+    const r = engineCommand("copilot", { has: () => true }, false, "sess-abc-123");
+    expect(r).toMatchObject({ cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" });
+  });
+});
+
+describe("runDispatch resumeSessionId threading (#618 PR2a)", () => {
+  test("runDispatch threads resumeSessionId to claude invocation (#618 PR2a)", () => {
+    let capturedArgs: string[] = [];
+    const spawner = (_c: string, a: string[], _i: string) => {
+      capturedArgs = a;
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    runDispatch({
+      engine: "claude",
+      prompt: "x",
+      mode: "cli",
+      resumeSessionId: "sess-resume-1",
+      spawner,
+    });
+    expect(capturedArgs).toEqual(["-p", "-r", "sess-resume-1", "--output-format", "json"]);
+  });
+
+  test("runDispatch without resumeSessionId → fresh claude args (#618 PR2a)", () => {
+    let capturedArgs: string[] = [];
+    const spawner = (_c: string, a: string[], _i: string) => {
+      capturedArgs = a;
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
+    expect(capturedArgs).toEqual(["-p", "--output-format", "json"]);
+  });
+
+  test("runDispatchAsync threads resumeSessionId to claude invocation (#618 PR2a)", async () => {
+    let capturedArgs: string[] = [];
+    const spawner = async (_c: string, a: string[], _i: string) => {
+      capturedArgs = a;
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    await runDispatchAsync({
+      engine: "claude",
+      prompt: "x",
+      mode: "cli",
+      resumeSessionId: "sess-async-1",
+      spawner,
+    });
+    expect(capturedArgs).toEqual(["-p", "-r", "sess-async-1", "--output-format", "json"]);
+  });
+
+  test("runDispatchAsync without resumeSessionId → fresh claude args (#618 PR2a)", async () => {
+    let capturedArgs: string[] = [];
+    const spawner = async (_c: string, a: string[], _i: string) => {
+      capturedArgs = a;
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    await runDispatchAsync({ engine: "claude", prompt: "x", mode: "cli", spawner });
+    expect(capturedArgs).toEqual(["-p", "--output-format", "json"]);
+  });
+});
+
 describe("runDispatch — copilot-absent path (defect #1)", () => {
   test("cli mode for absent copilot yields an unavailable reason, runs no command", () => {
     // Inject has:()=>false so this is deterministic and NEVER spawns a real engine (copilot may
