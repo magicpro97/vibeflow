@@ -114,7 +114,7 @@ that unit's full transition ledger; `vf status --json` emits machine-readable ou
 
 See `src/commands/status.ts`, `src/orchestrator/marker.ts`, `src/orchestrator/timeline.ts`.
 
-Dispatch captures the engine's `session_id` (claude JSON envelope) into `DispatchMarker.engineSessionId`, persisted for crash-resume. PR2 (#618 AC2) will use it to `--resume` a crashed unit instead of redoing it.
+Dispatch captures the engine's `session_id` (claude JSON envelope) into `DispatchMarker.engineSessionId`, persisted for crash-resume. PR2a (#618 PR2a) wires `resumeSessionId` through the dispatch layer so a claude unit can resume its prior session (`claude -p -r <id>`) instead of a fresh run. Orchestrate-level resume (reading a crashed marker) + codex/copilot support land in PR2b.
 
 ## Wave Handoff
 
