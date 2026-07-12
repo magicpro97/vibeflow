@@ -114,6 +114,8 @@ that unit's full transition ledger; `vf status --json` emits machine-readable ou
 
 See `src/commands/status.ts`, `src/orchestrator/marker.ts`, `src/orchestrator/timeline.ts`.
 
+Dispatch captures the engine's `session_id` (claude JSON envelope) into `DispatchMarker.engineSessionId`, persisted for crash-resume. PR2 (#618 AC2) will use it to `--resume` a crashed unit instead of redoing it.
+
 ## Wave Handoff
 
 Units declare `depends_on` (carried from the planner's proposal onto the `WorkUnit`).

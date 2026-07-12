@@ -10,6 +10,7 @@ import { applyGuidance } from "../dispatch/guidance.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
+import { updateMarker } from "../orchestrator/marker.js";
 import { readSettings } from "../settings.js";
 import {
   CTX_DIR,
@@ -62,12 +63,10 @@ import {
   defaultWorktreeOps,
   makeWorktreeOps,
 } from "./dispatch-diff.js";
-// Re-export the moved seam so the public surface (commands.ts, _shared.js, tests)
-// keeps importing these names from dispatch-runtime.js unchanged (#80).
+// Re-export seam so public surface unchanged (#80).
 export { analyzeDiff, defaultDiffReader, defaultWorktreeOps, makeWorktreeOps };
 export type { DiffReader, WorktreeOps };
-// makeReviewer moved to dispatch-reviewer.ts (#503); re-export keeps its public
-// surface (commands.ts, _shared.js, tests) importing it from here unchanged.
+// makeReviewer re-export (#503).
 export { makeReviewer } from "./dispatch-reviewer.js";
 
 /**
@@ -336,6 +335,7 @@ export function makeDispatcher(
       // ledger, so the dispatch outcome is reported in-memory only.
       if (mode !== "dry") {
         evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
+        if (result.sessionId) updateMarker(u.name, { engineSessionId: result.sessionId });
         if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
       }
       let confidence = result.summary?.confidence ?? 0;
