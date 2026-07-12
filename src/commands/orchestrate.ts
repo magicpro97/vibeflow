@@ -288,9 +288,7 @@ export async function orchestrate(
   // out("vf"), which always tees to the terminal even when the engine buffers
   // its own output). The done counter is monotonic; with concurrency > 1 it is
   // the honest progress signal (ev.index is list position, not start order).
-  // #523: accumulate running cost + token totals for the phase footer.
-  const accCost = 0;
-  const accTokens = 0;
+  // #523: elapsed in the phase footer + TTY self-redraw.
   const t0 = Date.now();
   const tracker = makePhaseTracker(units.length);
   const isTTY = process.stdout.isTTY;
@@ -299,13 +297,7 @@ export async function orchestrate(
     if (ev.phase === "start") {
       spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
     } else {
-      const elapsed = Math.floor((Date.now() - t0) / 1000);
-      const line = tracker.render({
-        cost_usd: accCost > 0 ? accCost : undefined,
-        tokens: accTokens > 0 ? accTokens : undefined,
-        elapsed,
-      });
-      // #523: TTY self-redraw — overwrite the last progress line instead of scrolling
+      const line = tracker.render({ elapsed: Math.floor((Date.now() - t0) / 1000) });
       if (isTTY) {
         process.stdout.write(`\x1b[2K\r${line}\n`);
       } else {

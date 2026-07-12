@@ -11,6 +11,7 @@ import { type OrchestratorApplyGate, applyGateBlock } from "../hooks/apply-gate.
 import { thresholdFor } from "./investigate.js";
 import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
 import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security-checkpoint.js";
+import { StuckDetector } from "./stuck-detector.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -30,6 +31,8 @@ export interface ProgressEvent {
   total: number;
   /** Only on `phase:"done"`: whether the unit's review passed. */
   pass?: boolean;
+  /** #546: non-abortive stuck signals (stalled/looping/evidence-stuck) surfaced to the consumer. */
+  stuck?: string[];
 }
 
 /**
@@ -197,6 +200,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   concurrency?: number;
   /** Per-unit stagger delay (ms) — see {@link runParallel}. Default 0. */
   interUnitDelayMs?: number;
+  /** #546: thresholds for the per-unit StuckDetector (stall/loop/evidence). Defaults applied when omitted. */
+  stuckOpts?: import("./stuck-detector.js").StuckDetectorOpts;
   /**
    * Optional per-unit progress callback for CLI front-ends. Fires `start` when a
    * unit begins dispatching and `done` after its review verdict. Purely
@@ -239,11 +244,11 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   for (const u of opts.units) createMarker(u.name, opts.agent);
   const security = opts.security;
   const controller = new AbortController();
-  // TODO(#546): wire StuckDetector into the per-unit dispatch loop so stalled/looping/evidence-stuck
-  // units are surfaced to the onProgress consumer without aborting sibling lanes.
   const units = (await runParallel(
     opts.units,
     async (u, i) => {
+      const detector = new StuckDetector(opts.stuckOpts); // #546: non-abortive
+      detector.recordEvidenceCount(u.evidence?.length ?? 0);
       updateMarker(u.name, { status: "running" });
       opts.onProgress?.({ phase: "start", unit: u.name, index: i, total: opts.units.length });
       // Defensive: a custom dispatcher may throw synchronously (e.g. test
@@ -315,12 +320,17 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       // #545: persist the calibrated judge score onto the unit so computeConfidence
       // reads it as a graded signal (the producer→unit wire; absent ⇒ untouched).
       if (review.score !== undefined) reviewed.goal_score = review.score;
+      // #546: feed detector post-review, surface stuck signals (non-abortive).
+      detector.recordProgress();
+      detector.recordEvidenceCount(reviewed.evidence?.length ?? 0);
+      const stuck = detector.check().reasons;
       opts.onProgress?.({
         phase: "done",
         unit: u.name,
         index: i,
         total: opts.units.length,
         pass: review.pass,
+        ...(stuck.length ? { stuck } : {}),
       });
       reviewed.status = review.pass ? "done" : "blocked";
       reviewed.gates = { ...reviewed.gates, review: review.pass ? "pass" : "fail" };
