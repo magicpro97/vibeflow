@@ -51,6 +51,7 @@ import {
   skippedByQuota,
 } from "./_shared.js";
 import type { ProtectionRuntime } from "./_shared.js";
+import { parseResources } from "./dispatch-resources.js";
 
 // ── Diff reading + worktree isolation seam (extracted to dispatch-diff.ts, #80) ──
 import {
@@ -374,11 +375,15 @@ export function makeDispatcher(
           ? gate({ scope: u.scope, cwd: wtPath ?? base })
           : undefined;
       const gates = mapGateResult(measured);
+      // #523: surface engine cost/tokens so the progress footer shows real numbers
+      // (not a dead $0.00). Parse the Claude result envelope best-effort.
+      const resources = parseResources(result.raw);
       return {
         status,
         confidence,
         evidence,
         gates,
+        ...(resources ? { resources } : {}),
         knowledge_heavy: knowledgeHeavy,
         knowledge_heavy_source: knowledgeHeavySource,
         skills_injected: skillsInjected,

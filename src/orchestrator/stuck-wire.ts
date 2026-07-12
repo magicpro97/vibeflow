@@ -1,4 +1,4 @@
-import { getLogbus, matchesUnitFilter } from "../logbus.js";
+import { matchesUnitFilter } from "../logbus.js";
 import type { Logbus } from "../logbus.js";
 import { StuckDetector } from "./stuck-detector.js";
 import type { StuckDetectorOpts } from "./stuck-detector.js";
