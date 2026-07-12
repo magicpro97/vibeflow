@@ -197,7 +197,11 @@ export function engineCommand(
       return { cmd: "claude", args };
     }
     case "codex":
-      return { cmd: "codex", args: ["exec", "-"] };
+      // #618 PR2b-2: `--json` enables JSONL output (thread_id + summary);
+      // `resume <id>` continues a crashed session. Prompt stays on stdin (`-`).
+      return resumeSessionId
+        ? { cmd: "codex", args: ["exec", "resume", resumeSessionId, "--json", "-"] }
+        : { cmd: "codex", args: ["exec", "--json", "-"] };
     case "copilot":
       return copilotCommand(probe);
   }

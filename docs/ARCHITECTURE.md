@@ -114,7 +114,7 @@ that unit's full transition ledger; `vf status --json` emits machine-readable ou
 
 See `src/commands/status.ts`, `src/orchestrator/marker.ts`, `src/orchestrator/timeline.ts`.
 
-Dispatch captures the engine's `session_id` (claude JSON envelope) into `DispatchMarker.engineSessionId`, persisted for crash-resume. PR2a (#618 PR2a) wires `resumeSessionId` through the dispatch layer so a claude unit can resume its prior session (`claude -p -r <id>`) instead of a fresh run. PR2b-1 wires `vf orchestrate --resume`: a crashed unit (marker `running`/`blocked`/`failed`) with a persisted `engineSessionId` resumes that claude session via the PR2a dispatch path; without `--resume`, or for codex/copilot (no persisted id), the unit re-runs fresh.
+Dispatch captures the engine's `session_id` (claude JSON envelope) into `DispatchMarker.engineSessionId`, persisted for crash-resume. PR2a (#618 PR2a) wires `resumeSessionId` through the dispatch layer so a claude unit can resume its prior session (`claude -p -r <id>`) instead of a fresh run. PR2b-1 wires `vf orchestrate --resume`: a crashed unit (marker `running`/`blocked`/`failed`) with a persisted `engineSessionId` resumes that claude session via the PR2a dispatch path; without `--resume`, or for codex/copilot (no persisted id), the unit re-runs fresh. PR2b-2 extends capture+resume to codex (`codex exec --json -` → `thread_id`; `codex exec resume <id>`). Copilot has no by-id resume and always runs fresh. The exact per-engine invocation flags, output-shape assumptions, verified CLI versions, and a re-verify procedure for CLI bumps live in `docs/ENGINE-COMPAT.md`.
 
 ## Wave Handoff
 

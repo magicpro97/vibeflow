@@ -11,6 +11,7 @@ import {
   isUnavailable,
   makeAsyncSpawner,
   parseEngineSummary,
+  parseSessionId,
   runDispatch,
   runDispatchAsync,
   writeDispatchPrompt,
@@ -26,12 +27,12 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
     }
   });
 
-  test("codex → exec with the `-` stdin sentinel", () => {
+  test("codex → exec --json - (#618 PR2b-2)", () => {
     const r = engineCommand("codex");
     expect(isUnavailable(r)).toBe(false);
     if (!isUnavailable(r)) {
       expect(r.cmd).toBe("codex");
-      expect(r.args).toEqual(["exec", "-"]);
+      expect(r.args).toEqual(["exec", "--json", "-"]);
     }
   });
 
@@ -102,9 +103,9 @@ describe("engineCommand resume (#618 PR2a)", () => {
     expect(r).toEqual({ cmd: "claude", args: ["-p", "--output-format", "json"] });
   });
 
-  test("codex ignores resumeSessionId in PR2a (fresh)", () => {
-    const r = engineCommand("codex", { has: () => true }, false, "sess-abc-123");
-    expect(r).toEqual({ cmd: "codex", args: ["exec", "-"] });
+  test("codex resume → exec resume <id> --json - (#618 PR2b-2)", () => {
+    const r = engineCommand("codex", { has: () => true }, false, "thread-1");
+    expect(r).toEqual({ cmd: "codex", args: ["exec", "resume", "thread-1", "--json", "-"] });
   });
 
   test("copilot ignores resumeSessionId in PR2a (fresh)", () => {
@@ -896,6 +897,28 @@ describe("parseEngineSummary: claude envelope branches (line 320-345)", () => {
   });
 });
 
+describe("parseEngineSummary codex --json (#618 PR2b-2)", () => {
+  const codexStream = readFileSync("test/fixtures/codex-json-stream.txt", "utf8");
+  test("extracts summary from agent_message (NOT reasoning)", () => {
+    const s = parseEngineSummary(codexStream);
+    expect(s).toBeDefined();
+    expect(s?.confidence).toBe(1.0);
+    expect(s?.files_changed).toEqual([]);
+  });
+  test("claude fenced summary still parses (backward-compat)", () => {
+    const raw = '```json\n{"confidence":0.8,"files_changed":["a.ts"]}\n```';
+    expect(parseEngineSummary(raw)?.confidence).toBe(0.8);
+  });
+  test("codex stream with ONLY reasoning (no agent_message) → undefined", () => {
+    const raw =
+      '{"type":"thread.started","thread_id":"x"}\n' +
+      '{"type":"item.completed","item":{"type":"reasoning","text":"```json\\n{\\"confidence\\":0.5}\\n```"}}\n' +
+      '{"type":"turn.completed"}';
+    // reasoning must NOT be treated as the summary
+    expect(parseEngineSummary(raw)).toBeUndefined();
+  });
+});
+
 describe("defaultSpawner (test seam)", () => {
   test("defaultSpawner: success path returns status + stdout (line 67-68)", () => {
     // Mock Bun.spawnSync to return success → exercises the function body.
@@ -1592,6 +1615,20 @@ describe("makeAsyncSpawner — env scrub (#556)", () => {
 });
 
 // ── dispatch split sentinel (#186 PR8) ──
+describe("parseSessionId codex (#618 PR2b-2)", () => {
+  test("codex thread.started → thread_id", () => {
+    const raw = '{"type":"thread.started","thread_id":"019f-abc"}\n{"type":"turn.completed"}';
+    expect(parseSessionId(raw)).toBe("019f-abc");
+  });
+  test("claude envelope still works (backward-compat)", () => {
+    const raw = JSON.stringify({ type: "result", session_id: "sess-claude" });
+    expect(parseSessionId(raw)).toBe("sess-claude");
+  });
+  test("no session marker → undefined", () => {
+    expect(parseSessionId("plain text")).toBeUndefined();
+  });
+});
+
 describe("parseSessionId (#618)", () => {
   test("runDispatch captures session_id from claude JSON envelope", () => {
     const envelope = JSON.stringify({

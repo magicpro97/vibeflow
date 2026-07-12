@@ -14,6 +14,8 @@
 * **orchestrator:** capture engine session_id into dispatch markers for crash-resume ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR1)
 * **orchestrator:** resume claude sessions at the dispatch layer via resumeSessionId ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR2a)
 * **orchestrator:** `vf orchestrate --resume` resumes crashed claude units from their persisted session ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR2b-1)
+* **orchestrator:** codex crash-resume — capture thread_id from `codex exec --json` and resume via `exec resume <id>` ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR2b-2, closes #618)
+* **docs:** add `docs/ENGINE-COMPAT.md` — verified engine CLI versions, per-engine invocation/output-shape contract, and a re-verify procedure for CLI bumps
 
 ## [0.12.1](https://github.com/magicpro97/vibeflow/compare/v0.12.0...v0.12.1) (2026-07-06)
 

@@ -106,13 +106,37 @@ function tryParseSummary(block: string): EngineSummary | undefined {
 }
 
 /**
- * Extract the engine summary from stdout, robust to three shapes (last valid wins):
- *  (a) a fenced ```json block, (b) the claude `--output-format json` envelope (`.result` /
- *  `.structured_output`), (c) a bare object. Uses balanced-brace scanning so nested objects
+ * Extract the engine summary from stdout, robust to four shapes (first valid wins):
+ *  (a) codex `exec --json` JSONL — find `item.completed` with `item.type === "agent_message"`,
+ *      recurse on `.text` (fenced ```json block). **Only** agent_message — the `reasoning`
+ *      event echoes the same json and must NOT be mistaken for the answer.
+ *  (b) a fenced ```json block, (c) the claude `--output-format json` envelope (`.result` /
+ *  `.structured_output`), (d) a bare object. Uses balanced-brace scanning so nested objects
  *  parse correctly (the old `lastIndexOf("{")` slice broke on `{"a":{"b":1}}`).
  */
 export function parseEngineSummary(stdout: string): EngineSummary | undefined {
   if (!stdout) return undefined;
+  // codex `exec --json` JSONL: scan forward for the agent_message item's fenced summary.
+  // Target agent_message SPECIFICALLY — the `reasoning` event echoes the same json and must
+  // NOT be mistaken for the answer. Track whether we saw ANY item.completed — if we scanned
+  // a full codex stream but found no agent_message, bail early so the fence-regex and bare-
+  // JSON fallback paths don't accidentally pick up the reasoning echo.
+  let sawItemCompleted = false;
+  for (const block of extractJsonObjects(stdout)) {
+    try {
+      const obj = JSON.parse(block.trim()) as { type?: string; item?: Record<string, unknown> };
+      if (obj.type === "item.completed") {
+        sawItemCompleted = true;
+        if (obj.item?.type === "agent_message" && typeof obj.item.text === "string") {
+          const inner = parseEngineSummary(obj.item.text as string);
+          if (inner) return inner;
+        }
+      }
+    } catch {
+      // not a codex event — fall through
+    }
+  }
+  if (sawItemCompleted) return undefined;
   const fences = [...stdout.matchAll(/```json\s*([\s\S]*?)```/g)].map((m) => m[1] ?? "");
   for (const block of fences.reverse()) {
     const s = tryParseSummary(block);
@@ -125,15 +149,22 @@ export function parseEngineSummary(stdout: string): EngineSummary | undefined {
   return undefined;
 }
 
-/** #618: pull the claude `--output-format json` envelope's session_id (transport-level,
- *  distinct from the model summary). Returns undefined for any non-envelope stdout.
- *
- *  Scope (PR1): claude-only by design. The `type === "result"` envelope guard means codex's
- *  event-stream JSON and copilot output fall through to `undefined` → safe redo-full fallback.
- *  codex session parse + 2-mode resume/retry land in PR2 (#618 AC2); copilot has no by-id
- *  resume (`--continue` most-recent-only) so it never produces an id to capture. */
+/** #618: pull the engine session id from stdout. Supports two shapes:
+ *  - codex `exec --json`: JSONL events; `thread.started` carries `thread_id` (scan forward).
+ *  - claude `--output-format json`: envelope JSON carries `session_id` (scan reverse).
+ *  copilot has no by-id resume so it never produces an id to capture. */
 export function parseSessionId(stdout: string): string | undefined {
   if (!stdout) return undefined;
+  // codex: thread.started is the first event → scan forward
+  for (const block of extractJsonObjects(stdout)) {
+    try {
+      const obj = JSON.parse(block.trim()) as Record<string, unknown>;
+      if (obj.type === "thread.started" && typeof obj.thread_id === "string") return obj.thread_id;
+    } catch {
+      // not JSON — skip
+    }
+  }
+  // claude: result envelope is the last JSON → scan reverse
   for (const block of extractJsonObjects(stdout).reverse()) {
     try {
       const obj = JSON.parse(block.trim()) as Record<string, unknown>;

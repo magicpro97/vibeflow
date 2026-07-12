@@ -146,7 +146,7 @@ ${c.bold("Options:")}
   --isolate           dispatch each unit in its own git worktree (cli only; off by default)
   --no-unit-gate      skip the per-unit typecheck+biome gate (final bun run check still runs)
   --pr                after a unit's review passes, open a QUEUED PR for it (needs --isolate; never merges)
-  --resume            resume crashed units from their persisted engine session (claude only) instead of re-running fresh
+  --resume            resume crashed units from their persisted engine session (claude + codex) instead of re-running fresh
 
 ${c.bold("Examples:")}
   vf orchestrate
