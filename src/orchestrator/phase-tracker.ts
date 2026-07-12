@@ -1,5 +1,5 @@
-import type { ProgressEvent } from "./run.js";
 import { c } from "../core.js";
+import type { ProgressEvent } from "./run.js";
 
 export interface PhaseSnapshot {
   total: number;

@@ -5,13 +5,13 @@
 // (issue #131). The per-unit reviewer lives in dispatch-reviewer.ts (#503).
 
 import { join } from "node:path";
+import { loadAgentRoles } from "../agents/role-loader.js";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { applyGuidance } from "../dispatch/guidance.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import { readSettings } from "../settings.js";
-import { loadAgentRoles } from "../agents/role-loader.js";
 import {
   CTX_DIR,
   DEFAULT_MAX_ROUNDS,

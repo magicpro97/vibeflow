@@ -67,9 +67,9 @@ import type { PreflightFn } from "./_shared.js";
 // orchestrate-resolve.ts #186 PR7).
 import { maybeFocus, tipState } from "./orchestrate-focus.js";
 
+import { loadAgentRoles } from "../agents/role-loader.js";
 // Resolver helpers in orchestrate-resolve.ts (#186 PR7); facade imports for internal use and re-exports the 5 public test seams.
 import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
-import { loadAgentRoles } from "../agents/role-loader.js";
 import {
   announceLaunch,
   engineReady,
@@ -289,8 +289,8 @@ export async function orchestrate(
   // its own output). The done counter is monotonic; with concurrency > 1 it is
   // the honest progress signal (ev.index is list position, not start order).
   // #523: accumulate running cost + token totals for the phase footer.
-  let accCost = 0;
-  let accTokens = 0;
+  const accCost = 0;
+  const accTokens = 0;
   const t0 = Date.now();
   const tracker = makePhaseTracker(units.length);
   const isTTY = process.stdout.isTTY;

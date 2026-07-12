@@ -46,7 +46,15 @@ function toRoleSpec(data: Record<string, unknown>): RoleSpec | null {
   }
   if (roleTools.length === 0) return null;
 
-  const validModels = ["haiku", "sonnet", "opus", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.4-codex"];
+  const validModels = [
+    "haiku",
+    "sonnet",
+    "opus",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex-spark",
+    "gpt-5.4-codex",
+  ];
   if (typeof model !== "string" || !validModels.includes(model)) return null;
 
   return {

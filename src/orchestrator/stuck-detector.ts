@@ -85,7 +85,8 @@ export class StuckDetector {
     const reasons: string[] = [];
     if (stalled) reasons.push(`stalled: no progress for ${this.stallSeconds}s`);
     if (looping) reasons.push(`looping: same output repeated ${this.loopThreshold} times`);
-    if (evidenceStuck) reasons.push(`evidence-stuck: count unchanged across ${this.evidenceStallRounds + 1} checks`);
+    if (evidenceStuck)
+      reasons.push(`evidence-stuck: count unchanged across ${this.evidenceStallRounds + 1} checks`);
 
     return { stalled, looping, evidenceStuck, reasons };
   }
