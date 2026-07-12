@@ -28,6 +28,7 @@ import { ask } from "./commands/ask.js";
 import { canary } from "./commands/canary.js";
 import { config, decision } from "./commands/config-decision.js";
 import { coord } from "./commands/coord.js";
+import { lanExposureWarning } from "./commands/lan-warning.js";
 import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
 import { installLogbus, out } from "./logbus.js";
@@ -113,14 +114,8 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
   }
   const port = typeof flags.port === "string" ? Number(flags.port) : 0;
   const host = typeof flags.host === "string" ? flags.host : undefined;
-  if (host === "0.0.0.0") {
-    out(
-      "vf",
-      c.red(
-        "WARNING: server exposed to LAN — anyone on the network can access; token required in URL",
-      ),
-    );
-  }
+  const warn = lanExposureWarning(host);
+  if (warn) out("vf", c.red(warn));
   let { server, url } = await startServerResilient(Number.isFinite(port) ? port : 0, host);
   if (!flags["no-open"]) openBrowser(url);
 

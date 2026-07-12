@@ -182,11 +182,10 @@ describe("makePhaseTracker", () => {
       const origWrite = process.stdout.write.bind(process.stdout);
       let captured = "";
       Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
-      // biome-ignore lint/suspicious/noExplicitAny: test stub for stdout.write
       process.stdout.write = ((s: string) => {
         captured += s;
         return true;
-      }) as any;
+      }) as typeof process.stdout.write;
       try {
         const report = makeProgressReporter(t, Date.now(), () => {});
         report(ev({ phase: "done", unit: "a", pass: true }));
