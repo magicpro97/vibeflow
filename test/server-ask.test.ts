@@ -586,9 +586,7 @@ describe("askStreamResponse — SSE stream body (#580)", () => {
   });
 
   test("non-Error rejection is stringified (never a {} frame)", async () => {
-    const spawn = (): Promise<{ code: number; text: string }> =>
-      // biome-ignore lint/suspicious/useAwait: intentional non-Error rejection value
-      Promise.reject("boom-string");
+    const spawn = (): Promise<{ code: number; text: string }> => Promise.reject("boom-string");
     const sse = await readSSE(await askStreamResponse(REPO, okBody, spawn, prepDeps));
     expect(sse).toContain(`event: error\ndata: ${JSON.stringify({ error: "boom-string" })}`);
   });

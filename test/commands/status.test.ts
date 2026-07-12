@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatStatus, relAge, status } from "../../src/commands/status.js";
+import { type Logbus, installLogbus } from "../../src/logbus.js";
 import type { DispatchMarker } from "../../src/orchestrator/marker.js";
-import { installLogbus, type Logbus } from "../../src/logbus.js";
 
 /** Isolated marker dir: set HOME so markerDir()/readTimeline() point here. */
 let home: string;
@@ -97,7 +97,11 @@ describe("formatStatus", () => {
     const markers: DispatchMarker[] = [
       baseMarker({ unit: "auth", status: "running" }),
       baseMarker({ unit: "nav", status: "pending" }),
-      { ...baseMarker({ unit: "pay", status: "done" }), confidence: 0.83, issueUrl: "https://github.com/magicpro97/vibeflow/issues/613" },
+      {
+        ...baseMarker({ unit: "pay", status: "done" }),
+        confidence: 0.83,
+        issueUrl: "https://github.com/magicpro97/vibeflow/issues/613",
+      },
       baseMarker({ unit: "ui", status: "failed" }),
       baseMarker({ unit: "db", status: "blocked" }),
       { ...baseMarker({ unit: "ghost", status: "done" }), evidence: [] },
@@ -153,7 +157,10 @@ describe("status command", () => {
   test("sub === 'timeline' with positional unit reads the ledger", () => {
     const dir = markerDir();
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "nav.timeline.jsonl"), `${JSON.stringify({ status: "failed", at: 500 })}\n`);
+    writeFileSync(
+      join(dir, "nav.timeline.jsonl"),
+      `${JSON.stringify({ status: "failed", at: 500 })}\n`,
+    );
     const code = status("timeline", ["nav"], {});
     expect(code).toBe(0);
     expect(seen.join("\n")).toContain("failed");

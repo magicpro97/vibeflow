@@ -213,20 +213,12 @@ ${c.bold("Examples:")}
   status: () =>
     `${c.bold("vf status")} ${c.dim("[--timeline <unit>] [--json]")}
 Crash-recovery view of per-unit progress. Reads the persisted markers under
-~/.vibeflow/markers (written by the orchestrator for every dispatched unit) and
-shows each unit's status, confidence, evidence count and last update — without
-re-running anything. After a crash this is the fastest way to see which units
-were running (the crash point) and which claimed done but never published
-evidence.
+~/.vibeflow/markers (no re-run) to show which units were running at a crash and
+which claimed done but never published evidence.
 
 ${c.bold("Options:")}
   --timeline <unit>   dump a unit's append-only status-transition ledger
-  --json              emit the raw marker array (machine-readable)
-
-${c.bold("Examples:")}
-  vf status
-  vf status --timeline auth
-  vf status --json`,
+  --json              emit the raw marker array (machine-readable)`,
 
   config: () => `${c.bold("vf config")} ${c.dim("<memory|env-policy> ...")}
 Read or toggle per-repo settings in .vibeflow/SETTINGS.json.
