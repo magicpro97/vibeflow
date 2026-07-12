@@ -11,6 +11,7 @@ import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import { updateMarker } from "../orchestrator/marker.js";
+import { resolveResumeId } from "../orchestrator/resume-policy.js";
 import { readSettings } from "../settings.js";
 import {
   CTX_DIR,
@@ -74,8 +75,7 @@ export { makeReviewer } from "./dispatch-reviewer.js";
  * prompt (never writes) and reports the engine's self-assessed confidence. Used by
  * {@link investigateUnit} to raise confidence on a unit below the bar before we block it.
  */
-// Test seam: exported so unit tests can exercise the summary-uncertainty
-// and raw-envelope fallback branches without dispatching a real engine.
+// Test seam: export for unit-test exercises of summary-uncertainty and envelope-fallback branches.
 export function makeResearcher(
   engine: Engine,
   ctx: ProjectContext,
@@ -168,6 +168,8 @@ export function makeDispatcher(
   prot?: ProtectionRuntime,
   isolate?: { base: string; wt?: WorktreeOps },
   gate?: ScopedGateFn,
+  /** #618 PR2b-1: when true, a crashed unit's persisted engine session is resumed. */
+  resume = false,
 ): UnitDispatcher {
   return async (u) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
@@ -227,11 +229,7 @@ export function makeDispatcher(
     if (prot?.checkpoint) {
       evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
     }
-    // Stream output to a unit-level log file so the web UI SSE relay can show
-    // live engine stdout. Truncate then append; format each chunk as SSE line.
-    // DEPRECATED: this file is being superseded by the logbus + M3 SSE endpoint
-    // (see out("engine-stdout"|"engine-stderr", ...) below). Kept for one more
-    // minor version so the existing web UI continues to render.
+    // DEPRECATED: per-unit stream.log for web UI SSE — superseded by logbus+M3. Remove after next minor.
     const streamPath = join(unitDir, "stream.log");
     try {
       writeFileSafe(streamPath, "");
@@ -319,16 +317,16 @@ export function makeDispatcher(
             }
             return r;
           };
+    const resumeSessionId = resolveResumeId(u.name, resume);
     try {
       const result = await runDispatchAsync({
         engine,
         prompt,
         mode,
         spawner: streamSpawner,
-        // #526 item 7: copilot writes its prompt to .vibeflow/dispatch/<unit>.md and
-        // gets a short pointer arg (argv-limit fix); claude/codex ignore these (stdin).
         unit: u.name,
         base,
+        ...(resumeSessionId ? { resumeSessionId } : {}),
       });
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
       // side-effect. It must never write result JSON nor append to the persisted evidence

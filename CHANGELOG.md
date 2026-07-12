@@ -13,6 +13,7 @@
 * **orchestrator:** wave-aware structured handoff — each completed upstream unit's derived summary is injected into its dependents' dispatch prompt ([#612](https://github.com/magicpro97/vibeflow/issues/612))
 * **orchestrator:** capture engine session_id into dispatch markers for crash-resume ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR1)
 * **orchestrator:** resume claude sessions at the dispatch layer via resumeSessionId ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR2a)
+* **orchestrator:** `vf orchestrate --resume` resumes crashed claude units from their persisted session ([#618](https://github.com/magicpro97/vibeflow/issues/618), PR2b-1)
 
 ## [0.12.1](https://github.com/magicpro97/vibeflow/compare/v0.12.0...v0.12.1) (2026-07-06)
 

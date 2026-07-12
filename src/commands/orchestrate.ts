@@ -298,7 +298,18 @@ export async function orchestrate(
     units,
     concurrency,
     onProgress,
-    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate, gateFn),
+    dispatcher: makeDispatcher(
+      engine,
+      ctx,
+      base,
+      mode,
+      riskClass,
+      spawner,
+      prot,
+      isolate,
+      gateFn,
+      flags.resume === true,
+    ),
     reviewer: makeReviewer(mode, thresholdFor(riskClass), {
       cwd: base,
       // ADR-001: LLM review after local gate — only when goal available
