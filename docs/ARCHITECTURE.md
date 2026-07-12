@@ -12,6 +12,7 @@ last_updated: 2026-06-24
 - [Overview](#overview)
 - [Main Components](#main-components)
 - [Stuck Detection](#stuck-detection)
+- [Crash Recovery](#crash-recovery)
 - [Tool Adapters](#tool-adapters)
 - [Source Modules](#source-modules)
 - [Core Data Flow](#core-data-flow)
@@ -98,6 +99,20 @@ from the orchestrator's per-unit dispatch loop. `check()` returns a `StuckState`
 array — consumer decides whether to warn, throttle, or escalate.
 
 See `src/orchestrator/stuck-detector.ts`.
+
+## Crash Recovery
+
+The orchestrator persists a marker (`~/.vibeflow/markers/<unit>.json`) for every unit
+it dispatches, plus an append-only timeline ledger (`<unit>.timeline`) next to it. These
+files are the source of truth for "what was the engine doing when the process died" — they
+survive a crash or Ctrl-C intact.
+
+`vf status` reads them back (never re-running anything): a table of UNIT / STATUS / CONF /
+EVID / UPDATED / ISSUE across all units, highlighting the `running` unit (the crash point)
+and flagging a `done` marker that published no evidence. `vf status timeline <unit>` dumps
+that unit's full transition ledger; `vf status --json` emits machine-readable output.
+
+See `src/commands/status.ts`, `src/orchestrator/marker.ts`, `src/orchestrator/timeline.ts`.
 
 ## Tool Adapters
 

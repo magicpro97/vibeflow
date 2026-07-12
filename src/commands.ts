@@ -60,6 +60,7 @@ export { applyDispatch, mutateUnits, normalizeUnit } from "./commands/dispatch.j
 // keeps working. The body does not call `units` directly — it's a
 // pure CLI entry point.
 export { units } from "./commands/units.js";
+export { formatStatus, relAge, status } from "./commands/status.js";
 export { config, decision } from "./commands/config-decision.js";
 // === Re-export the orchestrate subcommand (issue #80, phase 6/14) ===
 // `orchestrate` + `resolveMode` / `resolveEngine` / `announceLaunch`

@@ -9,6 +9,7 @@
 * **agents:** role-loader with parseAgentRole, resolveRole, loadAgentRoles reusing parseFrontmatter ([#550](https://github.com/magicpro97/vibeflow/issues/550))
 * **server:** startServer accepts host parameter; guarded() handles 0.0.0.0 bind-all ([#561](https://github.com/magicpro97/vibeflow/issues/561))
 * **cli:** --host flag passthrough to startServer for LAN UI access
+* **cli:** `vf status` — crash-recovery view of per-unit markers/timeline without reading the diff ([#613](https://github.com/magicpro97/vibeflow/issues/613))
 
 ## [0.12.1](https://github.com/magicpro97/vibeflow/compare/v0.12.0...v0.12.1) (2026-07-06)
 
