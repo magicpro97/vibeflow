@@ -11,6 +11,7 @@ last_updated: 2026-06-24
 
 - [Overview](#overview)
 - [Main Components](#main-components)
+- [Stuck Detection](#stuck-detection)
 - [Tool Adapters](#tool-adapters)
 - [Source Modules](#source-modules)
 - [Core Data Flow](#core-data-flow)
@@ -82,6 +83,21 @@ Responsibilities:
 - Dispatch Claude Code, Codex, or Copilot CLI.
 - Verify output.
 - Propose skill updates.
+
+## Stuck Detection
+
+The orchestrator runs a `StuckDetector` per in-flight work unit to surface hung engines
+without aborting sibling lanes. Three configurable detection patterns:
+
+- **Stalled:** no progress event within `stallSeconds` (default 120s).
+- **Looping:** same engine output repeated `loopThreshold` times (default 3).
+- **Evidence-stuck:** evidence count unchanged across `evidenceStallRounds + 1` checks (default 2 rounds → 3 checks).
+
+The detector is driven by `recordProgress()`, `recordOutput()`, and `recordEvidenceCount()` calls
+from the orchestrator's per-unit dispatch loop. `check()` returns a `StuckState` with a `reasons`
+array — consumer decides whether to warn, throttle, or escalate.
+
+See `src/orchestrator/stuck-detector.ts`.
 
 ## Tool Adapters
 

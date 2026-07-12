@@ -747,13 +747,14 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("GET /api/markers returns listMarkers (line 268-272)", async () => {
+  test("GET /api/markers returns listMarkers (#561: guarded)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
     };
     try {
-      const res = await fetch(`${url}/api/markers`);
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/markers`, { headers: { "x-vibeflow-token": token } });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { markers: unknown[] };
       expect(Array.isArray(body.markers)).toBe(true);
@@ -762,13 +763,14 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("GET /api/phases returns the marker list (phase timeline source)", async () => {
+  test("GET /api/phases returns the marker list (#561: guarded)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
     };
     try {
-      const res = await fetch(`${url}/api/phases`);
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/phases`, { headers: { "x-vibeflow-token": token } });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { markers: unknown[] };
       expect(Array.isArray(body.markers)).toBe(true);
@@ -777,13 +779,14 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("GET /api/attachments returns attachments list (line 277-279)", async () => {
+  test("GET /api/attachments returns attachments list (#561: guarded)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
     };
     try {
-      const res = await fetch(`${url}/api/attachments`);
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/attachments`, { headers: { "x-vibeflow-token": token } });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { attachments: unknown[] };
       expect(Array.isArray(body.attachments)).toBe(true);
@@ -983,17 +986,17 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("GET /state returns 200 with JSON (null when no init)", async () => {
+  test("GET /state returns 200 with JSON (null when no init) (#561: guarded)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
     };
     try {
-      const res = await fetch(`${url}/state`);
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": token } });
       expect(res.status).toBe(200);
       const contentType = res.headers.get("content-type");
       expect(contentType).toContain("application/json");
-      // Body may be null (no init performed) or an object
       const body = (await res.json()) as unknown;
       expect(body === null || typeof body === "object").toBe(true);
     } finally {
@@ -1015,7 +1018,9 @@ describe("server HTTP API handlers", () => {
         body: JSON.stringify({ goal: "test goal", repoPath: url }),
       });
       // State should now exist
-      const before = await fetch(`${url}/state`).then((r) => r.json());
+      const before = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": token } }).then(
+        (r) => r.json(),
+      );
       expect(before).not.toBeNull();
       // Delete state
       const del = await fetch(`${url}/api/state`, {
@@ -1025,8 +1030,10 @@ describe("server HTTP API handlers", () => {
       expect(del.status).toBe(200);
       const body = (await del.json()) as { ok: boolean };
       expect(body.ok).toBe(true);
-      // State should now be gone
-      const after = await fetch(`${url}/state`).then((r) => r.json());
+      // State should be gone
+      const after = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": token } }).then(
+        (r) => r.json(),
+      );
       expect(after).toBeNull();
     } finally {
       server.stop();
@@ -2445,4 +2452,121 @@ test("GET /ui/assets/*.js returns 200 with immutable cache-control (lines 313-33
   } finally {
     server.stop();
   }
+});
+
+describe("bindAll security (#561)", () => {
+  async function bindAllServer(): Promise<{
+    server: { stop: () => void };
+    url: string;
+    token: string;
+  }> {
+    const s = (await startServer(0, { host: "0.0.0.0" })) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    const html = await (await fetch(s.url)).text();
+    const m = html.match(/<meta\s+name="vf-token"\s+content="([^"]+)"\s*\/?>/i);
+    const token = m?.[1] ?? "";
+    return { ...s, token };
+  }
+
+  test("valid token → 200 on /state", async () => {
+    const { server, url, token } = await bindAllServer();
+    try {
+      const res = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": token } });
+      expect(res.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("missing token → 403 on /state", async () => {
+    const { server, url } = await bindAllServer();
+    try {
+      const res = await fetch(`${url}/state`);
+      expect(res.status).toBe(403);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("wrong token → 403 on /state", async () => {
+    const { server, url } = await bindAllServer();
+    try {
+      const res = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": "wrong" } });
+      expect(res.status).toBe(403);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("spoofed Host header → 403 (no token)", async () => {
+    const { server, url } = await bindAllServer();
+    try {
+      const res = await fetch(`${url}/state`, { headers: { host: "127.0.0.1" } });
+      expect(res.status).toBe(403);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("valid token + spoofed host → 200 (auth beats host)", async () => {
+    const { server, url, token } = await bindAllServer();
+    try {
+      const res = await fetch(`${url}/state`, {
+        headers: { host: "evil.com", "x-vibeflow-token": token },
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("public HTML page is accessible without token", async () => {
+    const { server, url } = await bindAllServer();
+    try {
+      const res = await fetch(url);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("vf-token");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("loopback default (127.0.0.1) unchanged — no token on GET / returns HTML", async () => {
+    const s = (await startServer()) as { server: { stop: () => void }; url: string };
+    try {
+      const res = await fetch(s.url);
+      expect(res.status).toBe(200);
+    } finally {
+      s.server.stop();
+    }
+  });
+
+  test("LAN warning fires for bindAll (0.0.0.0) on console.error", async () => {
+    const stderr: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => stderr.push(a.join(" "));
+    try {
+      const { server } = await bindAllServer();
+      server.stop();
+    } finally {
+      console.error = orig;
+    }
+    expect(stderr.some((l) => l.includes("server exposed to LAN"))).toBe(true);
+  });
+
+  test("no LAN warning for default loopback (127.0.0.1)", async () => {
+    const stderr: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => stderr.push(a.join(" "));
+    try {
+      const s = await startServer(0);
+      s.server.stop();
+    } finally {
+      console.error = orig;
+    }
+    expect(stderr.some((l) => l.includes("server exposed to LAN"))).toBe(false);
+  });
 });

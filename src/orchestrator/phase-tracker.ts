@@ -1,3 +1,5 @@
+import { c } from "../core.js";
+import { out } from "../logbus.js";
 import type { ProgressEvent } from "./run.js";
 
 export interface PhaseSnapshot {
@@ -42,7 +44,7 @@ export function makePhaseTracker(total: number, now: () => number = () => Date.n
       };
     },
 
-    render(): string {
+    render(opts?: { cost_usd?: number; tokens?: number; elapsed?: number }): string {
       const snap = this.snapshot();
       const parts: string[] = [];
 
@@ -67,7 +69,48 @@ export function makePhaseTracker(total: number, now: () => number = () => Date.n
         parts.push(`·${pending}`);
       }
 
+      // Optional cost / tokens / elapsed footer (#523)
+      const footer: string[] = [];
+      if (opts?.cost_usd !== undefined) footer.push(`$${opts.cost_usd.toFixed(2)}`);
+      if (opts?.tokens !== undefined) footer.push(`${opts.tokens} tok`);
+      if (opts?.elapsed !== undefined) footer.push(`${opts.elapsed}s`);
+      if (footer.length > 0) parts.push(c.dim(`(${footer.join(" · ")})`));
+
       return parts.join("  ");
     },
+  };
+}
+
+/**
+ * Build the orchestrate onProgress handler: updates the tracker, and on non-start
+ * events renders the phase line with accumulated cost/tokens + elapsed, self-redrawing
+ * on a TTY (#523). On `start`, delegates to `onStart` (spinner text).
+ */
+export function makeProgressReporter(
+  tracker: ReturnType<typeof makePhaseTracker>,
+  t0: number,
+  onStart: (ev: ProgressEvent) => void,
+): (ev: ProgressEvent) => void {
+  let accCost = 0;
+  let accTokens = 0;
+  const isTTY = process.stdout.isTTY;
+  return (ev: ProgressEvent) => {
+    tracker.onProgress(ev);
+    if (ev.phase === "start") {
+      onStart(ev);
+      return;
+    }
+    if (ev.cost_usd !== undefined) accCost += ev.cost_usd;
+    if (ev.tokens !== undefined) accTokens += ev.tokens;
+    const line = tracker.render({
+      cost_usd: accCost,
+      tokens: accTokens,
+      elapsed: Math.floor((Date.now() - t0) / 1000),
+    });
+    if (isTTY) {
+      process.stdout.write(`\x1b[2K\r${line}\n`);
+    } else {
+      out("vf", line);
+    }
   };
 }

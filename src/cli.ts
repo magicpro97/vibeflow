@@ -64,9 +64,10 @@ function promptYesNo(question: string): Promise<boolean> {
 // by another process and ask whether to switch to a free port or stop.
 async function startServerResilient(
   port: number,
+  host?: string,
 ): Promise<Awaited<ReturnType<typeof startServer>>> {
   try {
-    return await startServer(port);
+    return await startServer(port, { host });
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "EADDRINUSE" && port !== 0) {
@@ -74,7 +75,7 @@ async function startServerResilient(
         level: "error",
       });
       const change = await promptYesNo("Switch to a different port? (y/N) ");
-      if (change) return await startServer(0);
+      if (change) return await startServer(0, { host });
       out("vf", c.dim("Stopped."), {
         level: "error",
       });
@@ -111,7 +112,16 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
     /* best-effort */
   }
   const port = typeof flags.port === "string" ? Number(flags.port) : 0;
-  let { server, url } = await startServerResilient(Number.isFinite(port) ? port : 0);
+  const host = typeof flags.host === "string" ? flags.host : undefined;
+  if (host === "0.0.0.0") {
+    out(
+      "vf",
+      c.red(
+        "WARNING: server exposed to LAN — anyone on the network can access; token required in URL",
+      ),
+    );
+  }
+  let { server, url } = await startServerResilient(Number.isFinite(port) ? port : 0, host);
   if (!flags["no-open"]) openBrowser(url);
 
   // --- .ui-port: cross-process port discovery for the "watch live" tip ---
@@ -163,7 +173,7 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
         prev.stop();
         // Clear the screen and bring up a fresh server immediately.
         process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
-        startServer(Number.isFinite(port) ? port : 0)
+        startServer(Number.isFinite(port) ? port : 0, { host })
           .then((next) => {
             ({ server, url } = next);
             writeUiPort(url);

@@ -39,12 +39,15 @@ const CSP =
 
 export function startServer(
   port = 0,
-  _opts: { uiHtmlPath?: URL } = {},
+  _opts: { uiHtmlPath?: URL; host?: string } = {},
 ): Promise<{
   server: { stop: () => void };
   url: string;
 }> {
   const token = randomUUID();
+
+  const host = _opts.host ?? "127.0.0.1";
+  const bindAll = host === "0.0.0.0";
 
   const uiHtmlPath = _opts.uiHtmlPath ?? new URL("../dist/ui/index.html", import.meta.url);
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -69,7 +72,12 @@ export function startServer(
   const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
 
   const guarded = (req: Request): boolean => {
-    if (!isLoopback(req.headers.get("host") ?? "")) return false;
+    // #561: when bindAll, AUTHENTICATE BY TOKEN, not Host header.
+    // Host is attacker-controlled. Drop the host-match theater.
+    if (bindAll) return req.headers.get("x-vibeflow-token") === token;
+    // Loopback mode: Host check + CSRF origin guard.
+    const reqHost = req.headers.get("host") ?? "";
+    if (!isLoopback(reqHost)) return false;
     const o = req.headers.get("origin") || req.headers.get("referer");
     if (o) {
       try {
@@ -83,7 +91,7 @@ export function startServer(
 
   const server = Bun.serve({
     port: port === 0 ? 0 : port,
-    hostname: "127.0.0.1",
+    hostname: host,
     idleTimeout: 0,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
@@ -103,18 +111,20 @@ export function startServer(
         });
       }
 
-      // --- GET /state ---
+      // --- GET /state (#561: guarded) ---
       if (method === "GET" && path === "/state") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json(readState(activeRepo));
       }
 
-      // --- GET /api/markers ---
+      // --- GET /api/markers (#561: guarded) ---
       if (method === "GET" && path === "/api/markers") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         const m = await import("./orchestrator/marker.js");
         return Response.json({ markers: m.listMarkers() });
       }
 
-      // --- GET /api/units/:name/timeline — token+loopback guarded (#557) ---
+      // --- GET /api/units/:name/timeline — token+loopback guarded (#557 / #561) ---
       if (method === "GET" && path.startsWith("/api/units/") && path.endsWith("/timeline")) {
         if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         let name: string;
@@ -132,20 +142,22 @@ export function startServer(
         return Response.json({ ok: true, timeline: readTimeline(name) });
       }
 
-      // --- GET /api/phases ---
-      // ponytail: PhaseTracker snapshot is per-orchestrateUnits() call; markers are the stable proxy
+      // --- GET /api/phases (#561: guarded) ---
       if (method === "GET" && path === "/api/phases") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         const pm = await import("./orchestrator/marker.js");
         return Response.json({ markers: pm.listMarkers() });
       }
 
-      // --- GET /api/attachments ---
+      // --- GET /api/attachments (#561: guarded) ---
       if (method === "GET" && path === "/api/attachments") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json({ ok: true, attachments: listAttachments(activeRepo) });
       }
 
-      // --- GET /api/skills ---
+      // --- GET /api/skills (#561: guarded) ---
       if (method === "GET" && path === "/api/skills") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         const state = readState(activeRepo);
         const needs = resolveSkillNeeds({
           repo: activeRepo,
@@ -162,8 +174,9 @@ export function startServer(
         });
       }
 
-      // --- GET /api/settings ---
+      // --- GET /api/settings (#561: guarded) ---
       if (method === "GET" && path === "/api/settings") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json({ ok: true, ...settingsView(activeRepo) });
       }
 
@@ -173,8 +186,9 @@ export function startServer(
         return handleFileRoute(activeRepo, url.searchParams.get("path") ?? "");
       }
 
-      // --- GET /api/projects* and /api/hook/pending ---
+      // --- GET /api/projects* and /api/hook/pending (#561: guarded) ---
       if (method === "GET" && (path.startsWith("/api/projects") || path === "/api/hook/pending")) {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         const r = handleProjectsRoute(path, url);
         if (r) return r;
       }
@@ -282,7 +296,7 @@ export function startServer(
 
       // --- SSE: /api/ask/stream (#580) — token-by-token engine answer streaming ---
       if (method === "GET" && path === "/api/ask/stream") {
-        if (!isLoopback(req.headers.get("host") ?? "") || url.searchParams.get("token") !== token)
+        if (!guarded(req) && url.searchParams.get("token") !== token)
           return Response.json({ error: "forbidden" }, { status: 403 });
         const body = {
           path: url.searchParams.get("path") ?? "",
@@ -370,12 +384,10 @@ export function startServer(
         );
       }
 
-      // --- POST /api/hook/pending — CLI loopback only (no CSRF; hook subprocess can't hold token) ---
-      if (
-        method === "POST" &&
-        path === "/api/hook/pending" &&
-        isLoopback(req.headers.get("host") ?? "")
-      ) {
+      // --- POST /api/hook/pending — loopback or token when bindAll (#561) ---
+      if (method === "POST" && path === "/api/hook/pending") {
+        if (bindAll ? !guarded(req) : !isLoopback(req.headers.get("host") ?? ""))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const body = (await req.json()) as { id?: string; input?: unknown; result?: unknown };
         if (typeof body.id !== "string" || !body.id)
           return Response.json({ error: "id required" }, { status: 400 });
@@ -483,11 +495,19 @@ export function startServer(
     },
   });
 
+  const displayHost = bindAll ? "0.0.0.0" : "127.0.0.1";
+  if (bindAll) {
+    console.error(
+      c.red(
+        "WARNING: server exposed to LAN — anyone on the network can access; token required in URL",
+      ),
+    );
+  }
   console.log(
-    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://127.0.0.1:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
+    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://${displayHost}:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
   );
   return Promise.resolve({
     server: { stop: () => server.stop() },
-    url: `http://127.0.0.1:${server.port}`,
+    url: `http://${displayHost}:${server.port}`,
   });
 }
