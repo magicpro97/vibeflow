@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LogEvent } from "../../src/logbus.js";
 import { readVerdictSamples, readVerifySamples } from "../../src/eval/telemetry.js";
+import type { LogEvent } from "../../src/logbus.js";
 
 function verdictEvent(over: Partial<LogEvent> & { meta: Record<string, unknown> }): LogEvent {
   return {

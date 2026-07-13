@@ -44,13 +44,17 @@ export function buildReport(
 
   const verdict: EvalReport["verdict"] = { total, passed, passRate, gateFailures };
 
-  const scores = verdicts.filter((s) => s.goalScore !== undefined).map((s) => s.goalScore as number);
+  const scores = verdicts
+    .filter((s) => s.goalScore !== undefined)
+    .map((s) => s.goalScore as number);
   if (scores.length > 0) verdict.avgGoalScore = scores.reduce((a, b) => a + b, 0) / scores.length;
 
   const costs = verdicts.filter((s) => s.costUsd !== undefined).map((s) => s.costUsd as number);
   if (costs.length > 0) verdict.totalCostUsd = costs.reduce((a, b) => a + b, 0);
 
-  const tokenSamples = verdicts.filter((s) => s.tokens !== undefined).map((s) => s.tokens as number);
+  const tokenSamples = verdicts
+    .filter((s) => s.tokens !== undefined)
+    .map((s) => s.tokens as number);
   if (tokenSamples.length > 0) verdict.totalTokens = tokenSamples.reduce((a, b) => a + b, 0);
 
   const vTotal = verifies.length;

@@ -6,10 +6,10 @@
 // (so you can wire it into pre-push/CI). No LLM, no network, no fixtures.
 
 import { c, cwd, writeFileSafe } from "../core.js";
+import { type EvalReport, buildReport } from "../eval/report.js";
+import { readVerdictSamples, readVerifySamples } from "../eval/telemetry.js";
 import { out } from "../logbus.js";
 import { readSettings } from "../settings.js";
-import { buildReport, type EvalReport } from "../eval/report.js";
-import { readVerdictSamples, readVerifySamples } from "../eval/telemetry.js";
 
 /** Format the report as a human-readable block. Pure. */
 function formatReport(r: EvalReport): string {
@@ -40,10 +40,7 @@ function formatReport(r: EvalReport): string {
 }
 
 /** vf eval entry. Reads telemetry → builds report → prints/writes → exit code. */
-export function evalCmd(
-  _positionals: string[],
-  flags: Record<string, string | boolean>,
-): number {
+export function evalCmd(_positionals: string[], flags: Record<string, string | boolean>): number {
   const base = cwd();
   const verdicts = readVerdictSamples(base);
   const verifies = readVerifySamples(base);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { VerdictSample, VerifySample } from "../../src/eval/telemetry.js";
 import { buildReport } from "../../src/eval/report.js";
+import type { VerdictSample, VerifySample } from "../../src/eval/telemetry.js";
 
 function v(pass: boolean, over: Partial<VerdictSample> = {}): VerdictSample {
   return { ts: 0, pass, gates: {}, ...over };
@@ -9,8 +9,18 @@ function v(pass: boolean, over: Partial<VerdictSample> = {}): VerdictSample {
 describe("buildReport (#549)", () => {
   test("computes pass-rate, gate failures, avg goal score, cost totals", () => {
     const verdicts: VerdictSample[] = [
-      v(true, { gates: { build: "pass", review: "pass" }, goalScore: 0.8, costUsd: 0.01, tokens: 100 }),
-      v(false, { gates: { build: "fail", review: "fail" }, goalScore: 0.4, costUsd: 0.02, tokens: 200 }),
+      v(true, {
+        gates: { build: "pass", review: "pass" },
+        goalScore: 0.8,
+        costUsd: 0.01,
+        tokens: 100,
+      }),
+      v(false, {
+        gates: { build: "fail", review: "fail" },
+        goalScore: 0.4,
+        costUsd: 0.02,
+        tokens: 200,
+      }),
       v(true, { gates: { build: "pass", review: "fail" } }), // no cost/score
     ];
     const verifies: VerifySample[] = [

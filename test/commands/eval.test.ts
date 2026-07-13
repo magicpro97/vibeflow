@@ -1,23 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LogEvent } from "../../src/logbus.js";
 import { evalCmd } from "../../src/commands/eval.js";
+import type { LogEvent } from "../../src/logbus.js";
 
 /** Build a temp repo whose telemetry the default readers will pick up. */
 function repo(events: LogEvent[], journal: string): string {
   const base = mkdtempSync(join(tmpdir(), "vf-eval-"));
   const logs = join(base, ".vibeflow", "logs");
   mkdirSync(logs, { recursive: true });
-  writeFileSync(join(logs, "current.log"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  writeFileSync(join(logs, "current.log"), `${events.map((e) => JSON.stringify(e)).join("\n")}\n`);
   const kn = join(base, ".vibeflow", "knowledge");
   mkdirSync(kn, { recursive: true });
   writeFileSync(join(kn, "log.md"), journal);
   return base;
 }
 
-function verdict(seq: number, unit: string, review: string, extra: Record<string, unknown> = {}): LogEvent {
+function verdict(
+  seq: number,
+  unit: string,
+  review: string,
+  extra: Record<string, unknown> = {},
+): LogEvent {
   return {
     seq,
     ts: seq,
@@ -62,11 +67,11 @@ describe("evalCmd (#549)", () => {
   });
 
   test("below threshold with enough samples → exit 1", () => {
-    const events = Array.from({ length: 3 }, (_, i) => verdict(i + 1, `u${i}`, i === 0 ? "pass" : "fail"));
-    const base = repo(events, "");
-    const code = withCwd(base, () =>
-      evalCmd([], { "min-pass-rate": "0.9", "min-samples": "3" }),
+    const events = Array.from({ length: 3 }, (_, i) =>
+      verdict(i + 1, `u${i}`, i === 0 ? "pass" : "fail"),
     );
+    const base = repo(events, "");
+    const code = withCwd(base, () => evalCmd([], { "min-pass-rate": "0.9", "min-samples": "3" }));
     expect(code).toBe(1);
     rmSync(base, { recursive: true, force: true });
   });

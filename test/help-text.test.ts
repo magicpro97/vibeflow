@@ -60,4 +60,11 @@ describe("help text", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
     expect(src).toContain("--timeline <unit>");
   });
+
+  test("eval has a per-command help block (covers the COMMAND_HELP.eval arm, #549)", () => {
+    expect(hasCommandHelp("eval")).toBe(true);
+    expect(printCommandHelp("eval")).toBe(0);
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
+    expect(src).toContain("--min-pass-rate <0..1>");
+  });
 });
