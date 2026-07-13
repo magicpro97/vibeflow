@@ -14,8 +14,9 @@
     "rollbackOnFail": false,
     "requireGit": true
   },
-  "memory": true,
-  "updatedAt": "2026-07-02T01:58:56.119Z",
+  "memory": "builtin",
+  "notifications": true,
+  "updatedAt": "2026-07-11T07:38:34.692Z",
   "hooks": {
     "templates": [
       "block-destructive",
