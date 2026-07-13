@@ -54,6 +54,11 @@ describe("orchestrateUnits — emits reviewer verdict + gate result to logbus (#
       expect(meta.review).toBe("pass");
       expect(meta.goal_score).toBe(0.87);
       expect((meta.gates as Record<string, unknown>).review).toBe("pass");
+      // #549: the verdict now carries the unit's cost/token resources so `vf eval`
+      // can report spend without re-reading WORKFLOW_STATE.
+      const resources = meta.resources as Record<string, unknown>;
+      expect(resources.cost_usd).toBe(0);
+      expect(resources.tokens).toBe(0);
     } finally {
       setLogbusForTests(null);
       rmSync(dir, { recursive: true, force: true });
