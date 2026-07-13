@@ -6,7 +6,7 @@
 
 // ponytail: seams.ts deleted (#391) — symbols inlined into their natural homes
 export { tipState, resetTipStateForTests } from "./commands/orchestrate.js";
-export { liveGuardrailArmed, guardrailOffNote } from "./commands/doctor.js";
+export { liveGuardrailArmed, guardrailOffNote, gitGuardrailArmed } from "./commands/doctor.js";
 
 // === Re-export the doctor subcommand + repo detection helpers ===
 // (issue #80, phase 3/14) `doctor`, `detectRepo`, `RepoDetection`,
