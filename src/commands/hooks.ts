@@ -29,7 +29,6 @@ import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HookInput } from "../core.js";
 import { readLocalSpec, specStaleSignals } from "../spec-freshness.js";
-import { type LastVerify, readLastVerify } from "./tools-detect.js";
 import {
   CTX_DIR,
   type Engine,
@@ -50,6 +49,7 @@ import {
   writeSettings,
 } from "./_shared.js";
 import type { SelftestReport } from "./_shared.js";
+import { type LastVerify, readLastVerify } from "./tools-detect.js";
 
 /**
  * #624 Task 3: build the Stop-gate verify check. Returns a block-reason string when
@@ -75,14 +75,13 @@ export function buildVerifyGate(base: string): (input: HookInput) => string | nu
       const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: base, encoding: "utf8" });
       const sha = head.status === 0 ? head.stdout.trim() : "HEAD";
       const marker: LastVerify | null = readLastVerify(base);
-      if (marker && marker.passed && marker.sha === sha) return null; // verified this commit
+      if (marker?.passed && marker.sha === sha) return null; // verified this commit
       return "Uncommitted code changes with no passing `vf verify` for the current commit. Run `vf verify` and include its output before ending.";
     } catch {
       return null; // fail open — never block on our own error
     }
   };
 }
-
 
 // Architectural note (preserved from src/commands.ts pre-extraction, issue #80
 // phase 7/14): `liveGuardrailArmed` lives in src/commands/seams.ts (the test-seam
