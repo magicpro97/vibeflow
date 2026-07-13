@@ -71,4 +71,12 @@ describe("VF_WORKFLOW learning instructions (issue #335)", () => {
     expect(VF_WORKFLOW_SLIM).toContain("vf skills draft");
     expect(VF_WORKFLOW_SLIM).toContain("vf decision add");
   });
+
+  test("slim workflow uses an imperative gate directive with a trigger (issue #624)", () => {
+    // Directive strength: imperative "YOU MUST" + a concrete trigger, not a soft slogan.
+    expect(VF_WORKFLOW_SLIM).toContain("YOU MUST run");
+    expect(VF_WORKFLOW_SLIM).toMatch(/After ANY code edit/i);
+    // Points the agent at the enforcement mechanism, not just advice.
+    expect(VF_WORKFLOW_SLIM).toContain("vf hooks emit --yes");
+  });
 });
