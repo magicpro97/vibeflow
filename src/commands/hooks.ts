@@ -49,6 +49,39 @@ import {
   writeSettings,
 } from "./_shared.js";
 import type { SelftestReport } from "./_shared.js";
+import { type LastVerify, readLastVerify } from "./tools-detect.js";
+
+/**
+ * #624 Task 3: build the Stop-gate verify check. Returns a block-reason string when
+ * the working tree has uncommitted code changes but no PASSING `vf verify` marker is
+ * recorded for the CURRENT git HEAD — forcing the agent to run `vf verify` before it
+ * ends its turn. Returns null (allow the stop) when the tree is clean, or a passing
+ * marker exists for HEAD. Fail-open: any git/marker error → null (never trap the agent
+ * on our own bookkeeping failure). `.vibeflow/`-only churn does not count as code change.
+ */
+export function buildVerifyGate(base: string): (input: HookInput) => string | null {
+  return () => {
+    try {
+      const dirty = spawnSync("git", ["status", "--porcelain"], {
+        cwd: base,
+        encoding: "utf8",
+      });
+      if (dirty.status !== 0) return null; // not a git repo / git error → fail open
+      const changed = dirty.stdout
+        .split("\n")
+        .map((l) => l.slice(3).trim())
+        .filter((p) => p && !p.startsWith(".vibeflow/"));
+      if (changed.length === 0) return null; // no code changes → nothing to verify
+      const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: base, encoding: "utf8" });
+      const sha = head.status === 0 ? head.stdout.trim() : "HEAD";
+      const marker: LastVerify | null = readLastVerify(base);
+      if (marker?.passed && marker.sha === sha) return null; // verified this commit
+      return "Uncommitted code changes with no passing `vf verify` for the current commit. Run `vf verify` and include its output before ending.";
+    } catch {
+      return null; // fail open — never block on our own error
+    }
+  };
+}
 
 // Architectural note (preserved from src/commands.ts pre-extraction, issue #80
 // phase 7/14): `liveGuardrailArmed` lives in src/commands/seams.ts (the test-seam
@@ -175,7 +208,7 @@ export async function hook(
   const result = evaluateHook(input, () => process.env, policy, specStale);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
-  const { json, exitCode } = presentDecision(result, input);
+  const { json, exitCode } = presentDecision(result, input, buildVerifyGate(cwd()));
   out("vf", json);
 
   // Web UI approval path (issue #462): when require_approval and UI is running
@@ -291,7 +324,22 @@ export function hookSelftest(
   return 0;
 }
 
-function installHooks(): number {
+export function installHooks(base?: string): number {
+  const dir = base ?? cwd();
+  // Write the portable .githooks/* files first, THEN point git at them. Only the
+  // git-level hooks (pre-commit/post-checkout/post-merge) — engine configs like
+  // .claude/settings.json stay behind `emit --yes` because they hot-reload a live
+  // PreToolUse hook into a running agent.
+  for (const [rel, content] of Object.entries(engineHookFiles())) {
+    if (!rel.startsWith(".githooks/")) continue;
+    const dest = join(dir, rel);
+    writeFileSafe(dest, content);
+    try {
+      chmodSync(dest, 0o755);
+    } catch {
+      /* best-effort: non-POSIX filesystems may not support the exec bit */
+    }
+  }
   // PR28 audit Task 7 (M3): the old code only printed a green success line when
   // git exited 0. On non-zero exit (not a git repo, read-only filesystem, missing
   // .githooks dir, etc.) it silently returned the bad status — the user saw
@@ -299,13 +347,14 @@ function installHooks(): number {
   // The stdio is still "inherit" for stdout so the git output stays visible in
   // CI / scripted invocations; we just need to know when it FAILED.
   const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], {
+    cwd: dir,
     stdio: ["ignore", "inherit", "pipe"],
   });
   const status = r.status ?? 0;
   if (status === 0) {
     out("vf", c.green("Installed: core.hooksPath → .githooks"));
     out("vf");
-    out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
+    out("vf", liveGuardrailArmed(dir) ? c.green("live guardrail: ON") : guardrailOffNote());
     return 0;
   }
   // Failure: surface stderr + likely cause. The hint text is intentionally generic —

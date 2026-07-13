@@ -45,6 +45,7 @@ import {
   ensureIndex,
   ensureLog,
   existsSync,
+  installHooks,
   join,
   mergeManagedBlock,
   preflightAll,
@@ -287,6 +288,18 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // Runs on every init (first or re-init) to catch upgrades and restore a
   // deleted vf skill. Short-circuits internally when already current.
   if (!opts.dry) ensureInitUpdated(base);
+  // #624 Task 2: arm the portable git guardrail on a FRESH repo only. Non-clobbering:
+  // skip when .githooks/pre-commit already exists (fresh install already done, OR the
+  // repo self-hosts its own hooks like vibeflow itself). Git pre-commit is safe to
+  // default ON — fires only on `git commit`, bypassable with --no-verify, and does NOT
+  // hot-reload into a live agent (unlike .claude/settings.json, which stays --yes-gated).
+  if (
+    !opts.dry &&
+    existsSync(join(base, ".git")) &&
+    !existsSync(join(base, ".githooks", "pre-commit"))
+  ) {
+    installHooks(base);
+  }
   return {
     files: written,
     state,

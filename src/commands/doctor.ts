@@ -87,6 +87,13 @@ export function liveGuardrailArmed(base: string): boolean {
   }
   return false;
 }
+/** #624 Task 4: the COMMIT-TIME git guardrail — .githooks/pre-commit routed via
+ *  core.hooksPath. Independent of the live per-tool-call gate: this fires on
+ *  `git commit`, is host-agnostic, and is armed by default on fresh `vf init`. */
+export function gitGuardrailArmed(base: string): boolean {
+  return existsSync(join(base, ".githooks", "pre-commit"));
+}
+
 export function guardrailOffNote(): string {
   return c.yellow(
     "live guardrail: OFF — risky tool calls are NOT intercepted. Run `vf hooks emit --yes` to arm the PreToolUse gate.",
@@ -150,6 +157,10 @@ export async function doctor(
   out("vf", table(["", "tool", "status"], toolRows));
   out("vf");
   out("vf", `  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
+  out(
+    "vf",
+    `  ${gitGuardrailArmed(cwd()) ? c.green("commit-time guardrail: ON (.githooks/pre-commit)") : c.yellow("commit-time guardrail: OFF — run 'vf hooks install' or re-init to arm .githooks/pre-commit")}`,
+  );
   out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
 
   // Issue #163 (F2): stale logbus lock detection

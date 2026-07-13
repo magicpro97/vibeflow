@@ -277,6 +277,14 @@ describe("adapters", () => {
     expect(beforeFooter.endsWith("\n")).toBe(true);
     expect(beforeFooter.endsWith("\n\n\n")).toBe(false);
   });
+
+  test("detection-only warning is inlined for codex (post-hoc) but NOT claude (native) — #624 Task 5", () => {
+    const ctx = defaultContext();
+    const codex = engineFiles("codex", ctx, false)["AGENTS.md"] ?? "";
+    const claude = engineFiles("claude", ctx, false)["CLAUDE.md"] ?? "";
+    expect(codex).toContain("Detection-only guardrails");
+    expect(claude).not.toContain("Detection-only guardrails");
+  });
   test("dispatchPrompt includes the project hard rules in Constraints", () => {
     const p = dispatchPrompt("codex", defaultContext(), [
       { name: "u", spec: "x", scope: ["src/a.ts"] },

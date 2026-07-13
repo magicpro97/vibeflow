@@ -214,6 +214,10 @@ export interface HookInput {
    *  Populated by the native payload parsers so content-aware secret scanning
    *  can see secrets hard-coded into an otherwise-allowed file. */
   content?: string;
+  /** #624: Claude sets stop_hook_active=true when a Stop hook already blocked once.
+   *  The Stop-gate reads this to DOWNGRADE from a hard block to advice, avoiding an
+   *  infinite loop (respects CLAUDE_CODE_STOP_HOOK_BLOCK_CAP). */
+  stopHookActive?: boolean;
 }
 
 export interface HookResult {

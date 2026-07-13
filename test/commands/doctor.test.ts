@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectRepo, doctor, resolveRepo } from "../../src/commands.js";
+import { gitGuardrailArmed, guardrailOffNote } from "../../src/commands.js";
 import type { EngineReadiness } from "../../src/preflight.js";
 
 function r(
@@ -179,5 +180,23 @@ describe("detectRepo", () => {
     expect(typeof d.isGit).toBe("boolean");
     expect(d.engines).toBeDefined();
     expect(d.clis).toBeDefined();
+  });
+});
+
+describe("gitGuardrailArmed + two-tier note (#624 Task 4)", () => {
+  test("true when .githooks/pre-commit exists, false otherwise", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gg-"));
+    try {
+      expect(gitGuardrailArmed(dir)).toBe(false);
+      mkdirSync(join(dir, ".githooks"), { recursive: true });
+      writeFileSync(join(dir, ".githooks", "pre-commit"), "#!/bin/sh\nexit 1\n");
+      expect(gitGuardrailArmed(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("live guardrail note still points to `vf hooks emit --yes`", () => {
+    expect(guardrailOffNote()).toContain("vf hooks emit --yes");
   });
 });

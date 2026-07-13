@@ -360,10 +360,11 @@ ${VF_BLOCK_END}`;
 
       // Old verbose commands should NOT be present (replaced by slim)
       expect(updated).not.toContain("vf tools");
-      expect(updated).not.toContain("vf hooks");
       expect(updated).not.toContain("vf discover");
       expect(updated).not.toContain("vf workflow");
       expect(updated).not.toContain("v0.7.0");
+      // Note: `vf hooks emit --yes` IS in the slim block now (#624 — guardrail
+      // reference), so it is no longer a fat-block discriminator.
 
       // Slim commands should be present
       expect(updated).toContain("vf doctor");
