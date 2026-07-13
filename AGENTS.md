@@ -3,6 +3,7 @@
 ## ⚡ VibeFlow v0.12.1 Active — local-first orchestrator for AI coding agents (https://github.com/magicpro97/vibeflow).
 Project: vibeflow · Goal: test goal
 - For code navigation (definitions, references, callers, impact): prefer the language-server (LSP) MCP tools first; only fall back to grep/find/read if the others are unavailable.
+> ⚠ Detection-only guardrails on this engine: risky actions are flagged AFTER they run, not blocked. Rely on `vf verify` and the git pre-commit gate — do not assume a live hook will stop a destructive command.
 ## VibeFlow commands (use these)
 - `vf doctor` — check engine readiness before dispatching.
 - `vf init` — regenerate context/engine files after editing .vibeflow/*.
