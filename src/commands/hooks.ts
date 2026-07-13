@@ -291,7 +291,22 @@ export function hookSelftest(
   return 0;
 }
 
-function installHooks(): number {
+export function installHooks(base?: string): number {
+  const dir = base ?? cwd();
+  // Write the portable .githooks/* files first, THEN point git at them. Only the
+  // git-level hooks (pre-commit/post-checkout/post-merge) — engine configs like
+  // .claude/settings.json stay behind `emit --yes` because they hot-reload a live
+  // PreToolUse hook into a running agent.
+  for (const [rel, content] of Object.entries(engineHookFiles())) {
+    if (!rel.startsWith(".githooks/")) continue;
+    const dest = join(dir, rel);
+    writeFileSafe(dest, content);
+    try {
+      chmodSync(dest, 0o755);
+    } catch {
+      /* best-effort: non-POSIX filesystems may not support the exec bit */
+    }
+  }
   // PR28 audit Task 7 (M3): the old code only printed a green success line when
   // git exited 0. On non-zero exit (not a git repo, read-only filesystem, missing
   // .githooks dir, etc.) it silently returned the bad status — the user saw
@@ -299,13 +314,14 @@ function installHooks(): number {
   // The stdio is still "inherit" for stdout so the git output stays visible in
   // CI / scripted invocations; we just need to know when it FAILED.
   const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], {
+    cwd: dir,
     stdio: ["ignore", "inherit", "pipe"],
   });
   const status = r.status ?? 0;
   if (status === 0) {
     out("vf", c.green("Installed: core.hooksPath → .githooks"));
     out("vf");
-    out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
+    out("vf", liveGuardrailArmed(dir) ? c.green("live guardrail: ON") : guardrailOffNote());
     return 0;
   }
   // Failure: surface stderr + likely cause. The hint text is intentionally generic —

@@ -208,7 +208,7 @@ export type { InitAiEnrichmentOpts } from "./init-ai.js";
 // `vf init`'s interactive hooks step arms the engine guardrail configs via the
 // same writer `vf hooks emit --yes` uses. The cycle rule routes the cross-sibling
 // import through this barrel.
-export { armHooks, emitHookFiles } from "./hooks.js";
+export { armHooks, emitHookFiles, installHooks } from "./hooks.js";
 
 // === Re-export the state cluster (issue #184, A0 brief surface) ===
 // `coord.ts` and `init.ts` use `isBriefFresh` to gate non-trivial
