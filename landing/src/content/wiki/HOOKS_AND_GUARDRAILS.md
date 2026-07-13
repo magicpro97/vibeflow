@@ -371,6 +371,12 @@ approvals and the modal re-appears automatically.
 
 Audit log: `.vibeflow/knowledge/hook-audit.log` (append-only JSONL).
 
+Logbus stream: every live-gate decision is also emitted onto the durable `hook`
+logbus channel (visible via `vf logs` / the SSE endpoint) as
+`{ kind: "hook", decision, risk }` with the unit as `unit`. This is additive —
+the `hook-audit.log` above is unchanged; the channel gives an ordered stream so a
+run's hook decisions interleave with dispatch and verdict events (#542).
+
 ### CLI-only fallback
 When `.vibeflow/.ui-port` is absent, `require_approval` auto-decides:
 medium → allow (warn), high/critical → block.

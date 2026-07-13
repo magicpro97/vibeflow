@@ -210,6 +210,18 @@ export async function hook(
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
   const { json, exitCode } = presentDecision(result, input, buildVerifyGate(cwd()));
   out("vf", json);
+  // #542: mirror the decision onto the durable "hook" logbus channel (until now a
+  // defined-but-unused channel). Keeps the existing hook-audit.log; adds the ordered
+  // stream so a run's hook decisions interleave with dispatch/verdict events.
+  try {
+    out("hook", `${input.event}: ${result.decision} (${result.risk})`, {
+      level: "info",
+      unit: input.taskId,
+      meta: { kind: "hook", decision: result.decision, risk: result.risk },
+    });
+  } catch {
+    /* never fail the gate on a logging error */
+  }
 
   // Web UI approval path (issue #462): when require_approval and UI is running
   if (result.decision === "require_approval") {

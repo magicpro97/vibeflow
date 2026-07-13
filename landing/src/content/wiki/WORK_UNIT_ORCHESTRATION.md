@@ -306,6 +306,13 @@ vf units resources         # token / cost / wall-time totals across units
 vf units evidence <name>   # recorded gate output for a unit
 ```
 
+When a unit's review settles, the orchestrator also emits a verdict event onto the
+`vf` logbus channel (visible via `vf logs` / the SSE endpoint) as
+`{ kind: "verdict", review: "pass"|"fail", gates, goal_score? }` with the unit as
+`unit`. Unlike `WORKFLOW_STATE.gates` (which keeps only the last state, overwritten
+each update), this is an append-only record of the decision at the moment it
+happened, so `vf logs` and any export see a complete, ordered stream (#542).
+
 ## Sub-agent guardrails
 
 Conventions injected into every dispatched agent's CONTEXT.md and enforced by hooks where

@@ -291,6 +291,24 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
         });
         reviewed.status = review.pass ? "done" : "blocked";
         reviewed.gates = { ...reviewed.gates, review: review.pass ? "pass" : "fail" };
+        // #542: record the verdict + gate outcome on the durable stream (append-only),
+        // so `vf logs` / SSE / export see the decision at the moment it happened —
+        // WORKFLOW_STATE.gates only keeps the LAST state (overwritten each update).
+        try {
+          const out = (await import("../logbus.js")).out;
+          out("vf", `verdict ${u.name}: ${review.pass ? "pass" : "fail"}`, {
+            level: "info",
+            unit: u.name,
+            meta: {
+              kind: "verdict",
+              review: review.pass ? "pass" : "fail",
+              gates: reviewed.gates,
+              ...(review.score !== undefined ? { goal_score: review.score } : {}),
+            },
+          });
+        } catch {
+          /* logbus unavailable — verdict still lives in WORKFLOW_STATE */
+        }
         // #547 apply-time gate: a passed detection-only unit's diff is classified; `!allowed` re-blocks.
         const blocked = await applyGateBlock(opts, reviewed, review.pass);
         if (blocked) reviews[i] = { unit: u.name, pass: false, reason: blocked.reason };
