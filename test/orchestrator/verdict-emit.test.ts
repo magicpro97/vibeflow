@@ -44,7 +44,9 @@ describe("orchestrateUnits — emits reviewer verdict + gate result to logbus (#
         reviewer: () => ({ pass: true, reason: "ok", score: 0.87 }),
       });
       await bus.close();
-      const verdicts = readEvents(bus).filter((e) => e.channel === "vf" && (e.meta as Record<string, unknown>)?.kind === "verdict");
+      const verdicts = readEvents(bus).filter(
+        (e) => e.channel === "vf" && (e.meta as Record<string, unknown>)?.kind === "verdict",
+      );
       expect(verdicts).toHaveLength(1);
       const v = verdicts[0] as Record<string, unknown>;
       expect(v.unit).toBe("alpha");
