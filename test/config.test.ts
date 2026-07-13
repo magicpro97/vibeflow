@@ -329,3 +329,42 @@ describe("settings envPolicy coerce/writeSettings (#556)", () => {
     }
   });
 });
+
+describe("settings eval coerce/writeSettings (#549)", () => {
+  test("round-trips minPassRate + minSamples, clamping to valid ranges", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { eval: { minPassRate: 1.4, minSamples: 5.6 } });
+      const ev = readSettings(dir).eval;
+      expect(ev?.minPassRate).toBe(1); // clamped to 1
+      expect(ev?.minSamples).toBe(6); // rounded
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("garbage eval block coerces to undefined (report-only, no gate)", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, {
+        eval: { minPassRate: "x" as unknown as number, minSamples: Number.NaN },
+      });
+      expect(readSettings(dir).eval).toBeUndefined();
+      writeSettings(dir, { eval: "nonsense" as unknown as { minPassRate?: number } });
+      expect(readSettings(dir).eval).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("writeSettings keeps prior eval when next omits it", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { eval: { minPassRate: 0.9 } });
+      writeSettings(dir, { memory: "builtin" }); // unrelated write
+      expect(readSettings(dir).eval?.minPassRate).toBe(0.9);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
