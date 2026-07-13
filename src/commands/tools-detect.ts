@@ -21,6 +21,7 @@ import {
   readState,
   spawn,
   spawnSync,
+  writeFileSafe,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
 
@@ -29,6 +30,46 @@ import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
 function readVerifiedSha(base: string): string {
   const r = _spawnSync("git", ["rev-parse", "HEAD"], { cwd: base, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : "HEAD";
+}
+
+/** #624 Task 3a: machine-readable marker the Stop-gate reads to know a full
+ *  `vf verify` passed for the current commit. Written under .vibeflow/ (gitignored,
+ *  so the read-only #154 invariant holds — git tree stays clean). */
+const LAST_VERIFY_REL = join(".vibeflow", "last-verify.json");
+
+export interface LastVerify {
+  sha: string;
+  passed: boolean;
+  at: string;
+}
+
+/** Read the last-verify marker, or null when absent/garbage. */
+export function readLastVerify(base: string): LastVerify | null {
+  const p = join(base, LAST_VERIFY_REL);
+  if (!existsSync(p)) return null;
+  try {
+    const o = JSON.parse(readFileSync(p, "utf8")) as Partial<LastVerify>;
+    if (typeof o.sha === "string" && typeof o.passed === "boolean" && typeof o.at === "string") {
+      return { sha: o.sha, passed: o.passed, at: o.at };
+    }
+  } catch {
+    /* corrupt marker → treat as absent */
+  }
+  return null;
+}
+
+/** Stamp the last-verify marker. Best-effort: never fail verify on IO. */
+function stampLastVerify(base: string, passed: boolean): void {
+  try {
+    const marker: LastVerify = {
+      sha: readVerifiedSha(base),
+      passed,
+      at: new Date().toISOString(),
+    };
+    writeFileSafe(join(base, LAST_VERIFY_REL), JSON.stringify(marker, null, 2));
+  } catch {
+    /* marker is advisory bookkeeping — never block verify on it */
+  }
 }
 
 /** #545: parse a reviewer-declared calibrated score (`SCORE: 0.NN`, P(goal met))
@@ -319,6 +360,7 @@ export function verify(
   if (failed > 0) {
     out("vf");
     out("vf", c.red(`${failed} gate(s) failed.`), { level: "error" });
+    stampLastVerify(base, false);
     if (writeJournal) {
       appendJournal(base, "verify", "fail", [
         `${failed} gate(s) failed`,
@@ -330,6 +372,7 @@ export function verify(
   }
   out("vf");
   out("vf", c.green("All configured gates passed."));
+  stampLastVerify(base, true);
   if (writeJournal) {
     appendJournal(base, "verify", "pass", [
       `${report.passed.length} gate(s) passed`,

@@ -29,6 +29,7 @@ import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HookInput } from "../core.js";
 import { readLocalSpec, specStaleSignals } from "../spec-freshness.js";
+import { type LastVerify, readLastVerify } from "./tools-detect.js";
 import {
   CTX_DIR,
   type Engine,
@@ -49,6 +50,39 @@ import {
   writeSettings,
 } from "./_shared.js";
 import type { SelftestReport } from "./_shared.js";
+
+/**
+ * #624 Task 3: build the Stop-gate verify check. Returns a block-reason string when
+ * the working tree has uncommitted code changes but no PASSING `vf verify` marker is
+ * recorded for the CURRENT git HEAD — forcing the agent to run `vf verify` before it
+ * ends its turn. Returns null (allow the stop) when the tree is clean, or a passing
+ * marker exists for HEAD. Fail-open: any git/marker error → null (never trap the agent
+ * on our own bookkeeping failure). `.vibeflow/`-only churn does not count as code change.
+ */
+export function buildVerifyGate(base: string): (input: HookInput) => string | null {
+  return () => {
+    try {
+      const dirty = spawnSync("git", ["status", "--porcelain"], {
+        cwd: base,
+        encoding: "utf8",
+      });
+      if (dirty.status !== 0) return null; // not a git repo / git error → fail open
+      const changed = dirty.stdout
+        .split("\n")
+        .map((l) => l.slice(3).trim())
+        .filter((p) => p && !p.startsWith(".vibeflow/"));
+      if (changed.length === 0) return null; // no code changes → nothing to verify
+      const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: base, encoding: "utf8" });
+      const sha = head.status === 0 ? head.stdout.trim() : "HEAD";
+      const marker: LastVerify | null = readLastVerify(base);
+      if (marker && marker.passed && marker.sha === sha) return null; // verified this commit
+      return "Uncommitted code changes with no passing `vf verify` for the current commit. Run `vf verify` and include its output before ending.";
+    } catch {
+      return null; // fail open — never block on our own error
+    }
+  };
+}
+
 
 // Architectural note (preserved from src/commands.ts pre-extraction, issue #80
 // phase 7/14): `liveGuardrailArmed` lives in src/commands/seams.ts (the test-seam
@@ -175,7 +209,7 @@ export async function hook(
   const result = evaluateHook(input, () => process.env, policy, specStale);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
-  const { json, exitCode } = presentDecision(result, input);
+  const { json, exitCode } = presentDecision(result, input, buildVerifyGate(cwd()));
   out("vf", json);
 
   // Web UI approval path (issue #462): when require_approval and UI is running

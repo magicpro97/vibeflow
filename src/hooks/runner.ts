@@ -164,6 +164,7 @@ function parseClaudeNative(obj: Record<string, unknown>): HookInput | null {
     command: asStr(toolInput.command),
     files,
     content,
+    stopHookActive: obj.stop_hook_active === true,
   };
 }
 
@@ -258,6 +259,7 @@ export function exitCodeFor(_decision: HookDecision): number {
 export function presentDecision(
   result: HookResult,
   input: HookInput,
+  verifyGate: (input: HookInput) => string | null = () => null,
 ): { json: string; exitCode: number } {
   // --- PreToolUse: permissionDecision envelope ---
   if (input.event === "pre-tool-use") {
@@ -284,18 +286,34 @@ export function presentDecision(
   // No risks: `{suppressOutput:true}` for silent approval (no JSON noise)
   if (input.event === "stop") {
     const hasRisks = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
+    // Risk-scan block always wins (destructive cmd / secret in the final state).
     if (result.decision === "block") {
       return {
         json: JSON.stringify({ decision: "block", reason: result.reasons.join("; ") }),
         exitCode: 0,
       };
     }
-    if (hasRisks) {
+    // #624 Task 3: verify-gate. If code changed but no passing `vf verify` is
+    // recorded for the current commit, force the agent to run it before ending.
+    // stopHookActive downgrades the hard block to advice so we never loop forever
+    // (respects CLAUDE_CODE_STOP_HOOK_BLOCK_CAP).
+    const verifyReason = verifyGate(input);
+    if (verifyReason && !input.stopHookActive) {
+      return {
+        json: JSON.stringify({ decision: "block", reason: verifyReason }),
+        exitCode: 0,
+      };
+    }
+    const advisories = [
+      ...(hasRisks ? result.reasons : []),
+      ...(verifyReason && input.stopHookActive ? [verifyReason] : []),
+    ];
+    if (advisories.length > 0) {
       return {
         json: JSON.stringify({
           hookSpecificOutput: {
             hookEventName: "Stop",
-            additionalContext: result.reasons.join("; "),
+            additionalContext: advisories.join("; "),
           },
         }),
         exitCode: 0,

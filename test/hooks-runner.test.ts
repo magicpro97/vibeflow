@@ -102,6 +102,47 @@ describe("runner: presentDecision stop branches", () => {
     expect(p.exitCode).toBe(0);
     expect(p.json).toBe("{}");
   });
+
+  // --- #624 Task 3: verify-gate on stop ---
+  test("verify-gate returns a reason + not stopHookActive → hard block", () => {
+    const r: HookResult = { decision: "allow", risk: "none", reasons: [] };
+    const p = presentDecision(r, { event: "stop" }, () => "run vf verify first");
+    expect(p.exitCode).toBe(0);
+    expect(p.json).toContain('"decision":"block"');
+    expect(p.json).toContain("run vf verify first");
+  });
+
+  test("verify-gate reason but stopHookActive → downgrade to advice, no block", () => {
+    const r: HookResult = { decision: "allow", risk: "none", reasons: [] };
+    const p = presentDecision(
+      r,
+      { event: "stop", stopHookActive: true },
+      () => "run vf verify first",
+    );
+    expect(p.exitCode).toBe(0);
+    expect(p.json).not.toContain('"decision":"block"');
+    expect(p.json).toContain('"hookEventName":"Stop"');
+    expect(p.json).toContain("run vf verify first");
+  });
+
+  test("verify-gate returns null → clean stop stays empty", () => {
+    const r: HookResult = { decision: "allow", risk: "none", reasons: [] };
+    const p = presentDecision(r, { event: "stop" }, () => null);
+    expect(p.json).toBe("{}");
+  });
+
+  test("risk-scan block always wins over verify-gate", () => {
+    const r: HookResult = { decision: "block", risk: "critical", reasons: ["secret in file"] };
+    const p = presentDecision(r, { event: "stop" }, () => "run vf verify first");
+    expect(p.json).toContain('"decision":"block"');
+    expect(p.json).toContain("secret in file");
+    expect(p.json).not.toContain("run vf verify first");
+  });
+
+  test("default verifyGate (omitted) is a no-op — existing callers byte-identical", () => {
+    const r: HookResult = { decision: "allow", risk: "none", reasons: [] };
+    expect(presentDecision(r, { event: "stop" }).json).toBe("{}");
+  });
 });
 
 // --- presentDecision: post-tool-use branches ---
