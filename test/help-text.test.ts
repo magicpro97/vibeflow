@@ -12,11 +12,11 @@ describe("help text", () => {
     expect(printHelp()).toBe(0);
   });
 
-  test("src/commands/help.ts skills help block mentions every skills subcommand", () => {
-    // Per-command help blocks live in src/commands/help.ts (extracted in
-    // issue #80 phase 8/14). The block still starts with `skills: () =>`
-    // and ends before `tools:`.
-    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
+  test("src/commands/help-commands.ts skills help block mentions every skills subcommand", () => {
+    // Per-command help blocks live in src/commands/help-commands.ts (COMMAND_HELP
+    // registry extracted from help.ts in #549). The block still starts with
+    // `skills: () =>` and ends before `tools:`.
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help-commands.ts"), "utf8");
     const skillsBlock = src.match(/skills: \(\) =>\n([\s\S]*?)\n\n {2}tools:/);
     expect(skillsBlock).not.toBeNull();
     const block = skillsBlock ? skillsBlock[1] : "";
@@ -59,5 +59,12 @@ describe("help text", () => {
     expect(printCommandHelp("status")).toBe(0);
     const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
     expect(src).toContain("--timeline <unit>");
+  });
+
+  test("eval has a per-command help block (covers the COMMAND_HELP.eval arm, #549)", () => {
+    expect(hasCommandHelp("eval")).toBe(true);
+    expect(printCommandHelp("eval")).toBe(0);
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help-commands.ts"), "utf8");
+    expect(src).toContain("--min-pass-rate <0..1>");
   });
 });

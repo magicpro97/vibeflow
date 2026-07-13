@@ -333,3 +333,8 @@ export {
   EXIT_IO,
 } from "./commands/pr-queue.js";
 export type { QueueEntry } from "./commands/pr-queue.js";
+
+// === Re-export the eval cluster (issue #549) ===
+// `vf eval` reads verdict/verify telemetry, aggregates a pass-rate report, and
+// exits 1 below the expected threshold — a passive CLI/CI regression gate.
+export { evalCmd } from "./commands/eval.js";

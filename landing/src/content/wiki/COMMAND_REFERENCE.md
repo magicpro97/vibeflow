@@ -22,6 +22,7 @@ last_updated: 2026-06-24
 - [Hooks (Guardrails)](#hooks-guardrails)
 - [PR queue & merge](#pr-queue--merge)
 - [Verification](#verification)
+- [Eval (Telemetry Success-Rate Gate)](#eval-telemetry-success-rate-gate)
 - [Help / Version](#help--version)
 
 The shipped `vf` surface. See `USER_GUIDE.md` for a verifiable walkthrough.
@@ -286,7 +287,34 @@ vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migr
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
 missing evidence on a `done` unit, and overlapping work-unit scopes all fail.
 
-## Help / version
+## Eval (Telemetry Success-Rate Gate)
+
+```bash
+vf eval                                # report only
+vf eval --min-pass-rate 0.9            # exit 1 if verdict pass-rate < 90% (enough samples)
+vf eval --min-samples 20               # raise the thin-sample floor (default 10)
+vf eval --json                         # emit the report as JSON to stdout
+vf eval --json --out eval-report.json  # also write the JSON report to a file
+```
+
+`vf eval` is a **passive** regression gate: it reads the telemetry vf already writes
+during normal use — verdict events on the logbus (`.vibeflow/logs/current.log`, from
+#542) and verify pass/fail entries in `.vibeflow/knowledge/log.md` — and aggregates a
+real success-rate, gate-failure breakdown, average goal score, and cost/token totals.
+No LLM, no network, no fixtures to maintain: it measures whether vf is doing well on
+the tasks you actually ran, not a fixed benchmark.
+
+With a threshold (`--min-pass-rate`, or `eval.minPassRate` in `.vibeflow/SETTINGS.json`)
+it becomes a one-job-two-outcomes gate you can wire into pre-push/CI:
+
+- **exit 0** — pass-rate at/above the threshold, no threshold set, or too few samples
+  (below `--min-samples` it warns instead of failing, so a handful of hard tasks never
+  trips a false regression).
+- **exit 1** — pass-rate below the threshold with enough samples.
+
+Empty telemetry prints a friendly note and exits 0.
+
+## Help / Version
 
 ```bash
 vf help

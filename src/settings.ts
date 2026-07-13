@@ -64,6 +64,10 @@ export interface VibeSettings {
   /** #548: user-declared MCP servers (any transport) fanned out to every engine's
    *  config by writeToolConfigs. Absent = none (today's behavior). */
   mcpServers?: Record<string, UserMcpServer>;
+  /** #549: `vf eval` regression-gate config. minPassRate is the expected verdict
+   *  pass-rate (0..1); minSamples is the floor below which eval warns instead of
+   *  failing. Absent = no gate (eval reports only). */
+  eval?: { minPassRate?: number; minSamples?: number };
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -202,6 +206,21 @@ function coerceMcpServers(raw: unknown): Record<string, UserMcpServer> | undefin
   return Object.keys(out).length ? out : undefined;
 }
 
+/** #549: validate a stored eval block → {minPassRate?, minSamples?} of finite numbers,
+ *  or undefined when absent/garbage (so `vf eval` reports only, no gate). */
+function coerceEval(raw: unknown): { minPassRate?: number; minSamples?: number } | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const obj = raw as { minPassRate?: unknown; minSamples?: unknown };
+  const out: { minPassRate?: number; minSamples?: number } = {};
+  if (typeof obj.minPassRate === "number" && Number.isFinite(obj.minPassRate)) {
+    out.minPassRate = Math.min(1, Math.max(0, obj.minPassRate));
+  }
+  if (typeof obj.minSamples === "number" && Number.isFinite(obj.minSamples)) {
+    out.minSamples = Math.max(0, Math.round(obj.minSamples));
+  }
+  return out.minPassRate === undefined && out.minSamples === undefined ? undefined : out;
+}
+
 /** Merge a partial/old/unknown stored object over the defaults into a complete VibeSettings. */
 function coerce(raw: unknown): VibeSettings {
   const out = defaults();
@@ -256,6 +275,11 @@ function coerce(raw: unknown): VibeSettings {
   }
 
   if (typeof obj.updatedAt === "string") out.updatedAt = obj.updatedAt;
+  // #549: materialize eval ONLY when present (like envPolicy); garbage → undefined.
+  if ("eval" in obj) {
+    const ev = coerceEval(obj.eval);
+    if (ev) out.eval = ev;
+  }
   return out;
 }
 
@@ -306,6 +330,9 @@ export function writeSettings(
   if (mcpServers && Object.keys(mcpServers).length > 0) merged.mcpServers = mcpServers;
   const servers = next.lspServers ?? current.lspServers;
   if (servers?.length) merged.lspServers = [...servers];
+  // #549: eval is replace-on-write like envPolicy — keep prior block when next omits it.
+  const evalCfg = "eval" in next ? coerceEval(next.eval) : current.eval;
+  if (evalCfg) merged.eval = evalCfg;
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
   return merged;
 }

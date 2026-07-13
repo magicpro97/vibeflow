@@ -304,6 +304,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
               review: review.pass ? "pass" : "fail",
               gates: reviewed.gates,
               ...(review.score !== undefined ? { goal_score: review.score } : {}),
+              ...(reviewed.resources ? { resources: reviewed.resources } : {}),
             },
           });
         } catch {
