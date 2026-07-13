@@ -128,4 +128,10 @@ describe("buildVerifyGate (#624 Task 3)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("spawn throws (invalid cwd with NUL) → null (fail open catch)", () => {
+    // A NUL byte in the path makes spawnSync throw synchronously, exercising the
+    // outer catch → fail-open branch.
+    expect(buildVerifyGate("/no\0such")(stop)).toBeNull();
+  });
 });
