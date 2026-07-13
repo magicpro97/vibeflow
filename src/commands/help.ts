@@ -43,6 +43,7 @@ export function printHelp(): number {
     ${c.cyan("state [sub]")}       brief [--consult] — read the coordinator brief
     ${c.cyan("coord")}             consult brief + enforce freshness gate before non-trivial actions
     ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
+    ${c.cyan("eval")}              success-rate + gate breakdown from real telemetry; exit 1 below --min-pass-rate (CI gate)
     ${c.cyan("update-check")}      check npm for a newer VibeFlow release
     ${c.cyan("help, --version")}   show help / version
 
@@ -329,6 +330,27 @@ workflow ledger. Returns nonzero if any gate fails.
 
 ${c.bold("Examples:")}
   vf verify`,
+
+  eval: () => `${c.bold("vf eval")} ${c.dim("[--min-pass-rate <0..1>] [--min-samples <n>] [--json] [--out <file>]")}
+Read the verdict/verify telemetry vf already writes during normal use, aggregate a
+real success-rate + gate breakdown + cost, and (with a threshold) exit 1 when the
+pass-rate is below it. This is a PASSIVE regression gate over dogfood telemetry — NOT
+a fixed benchmark. Wire it into pre-push/CI. Thin samples (< --min-samples) warn
+instead of failing, so a handful of hard tasks never trips a false regression.
+
+${c.bold("Options:")}
+  --min-pass-rate <0..1>   fail (exit 1) when the verdict pass-rate is below this
+                           (else read from settings.eval.minPassRate; absent = report only)
+  --min-samples <n>        floor below which eval warns instead of failing (default 10)
+  --json                   print the report as JSON to stdout
+  --out <file>             also write the JSON report to a file
+
+${c.bold("Exit codes:")} 0 = ok / no threshold / thin samples · 1 = below threshold with enough samples
+
+${c.bold("Examples:")}
+  vf eval
+  vf eval --min-pass-rate 0.9
+  vf eval --json --out eval-report.json`,
 
   pr: () => `${c.bold("vf pr")} ${c.dim("<create|queue|merge-when-green> [options]")}
 Open, queue, or auto-merge GitHub pull requests from the active branch.

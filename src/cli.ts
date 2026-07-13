@@ -29,6 +29,7 @@ import { ask } from "./commands/ask.js";
 import { canary } from "./commands/canary.js";
 import { config, decision } from "./commands/config-decision.js";
 import { coord } from "./commands/coord.js";
+import { evalCmd } from "./commands/eval.js";
 import { lanExposureWarning } from "./commands/lan-warning.js";
 import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
@@ -269,6 +270,8 @@ async function main(argv: string[]): Promise<number> {
       return state(positionals[0], positionals.slice(1), flags);
     case "coord":
       return await coord(positionals, flags);
+    case "eval":
+      return evalCmd(positionals, flags);
     default:
       out("vf", c.red(`Unknown command: ${cmd}`), {
         level: "error",
