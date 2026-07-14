@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.13.0](https://github.com/magicpro97/vibeflow/compare/v0.12.1...v0.13.0) (2026-07-13)
+
+
+### Features
+
+* **cli:** add vf status — crash-recovery view of per-unit markers ([#613](https://github.com/magicpro97/vibeflow/issues/613)) ([#615](https://github.com/magicpro97/vibeflow/issues/615)) ([456bde1](https://github.com/magicpro97/vibeflow/commit/456bde1ec0b4cb773167ce49cdd403337e6be1a0))
+* **cli:** desktop notification when merge-when-green CI settles ([#559](https://github.com/magicpro97/vibeflow/issues/559)) ([#590](https://github.com/magicpro97/vibeflow/issues/590)) ([5d780b8](https://github.com/magicpro97/vibeflow/commit/5d780b8b2a41baa754e1889d6c116d72734f3a3e))
+* **cli:** update-check notifier + fix TOCTOU test false-positive ([#568](https://github.com/magicpro97/vibeflow/issues/568)) ([9baf916](https://github.com/magicpro97/vibeflow/commit/9baf916b6c711e3fa5ca8c9e795c9dc80b098e93))
+* **config:** user-declared MCP servers fanned out to every engine ([#548](https://github.com/magicpro97/vibeflow/issues/548)) ([#592](https://github.com/magicpro97/vibeflow/issues/592)) ([230955f](https://github.com/magicpro97/vibeflow/commit/230955fa3b39808dcefec69a5ac77a9a33191cf7))
+* **core:** calibrated judge score as a graded confidence signal ([#545](https://github.com/magicpro97/vibeflow/issues/545)) ([#585](https://github.com/magicpro97/vibeflow/issues/585)) ([68953ef](https://github.com/magicpro97/vibeflow/commit/68953ef58caceb7f3c826f4774b8e56418beec5e))
+* **eval:** vf eval — orchestration success-rate from telemetry ([#549](https://github.com/magicpro97/vibeflow/issues/549)) ([#627](https://github.com/magicpro97/vibeflow/issues/627)) ([684dbfd](https://github.com/magicpro97/vibeflow/commit/684dbfd6c79572556946fdd6274d1f146b375106))
+* **harness:** connect always-loaded harness to real enforcement ([#624](https://github.com/magicpro97/vibeflow/issues/624)) ([#625](https://github.com/magicpro97/vibeflow/issues/625)) ([20f7cce](https://github.com/magicpro97/vibeflow/commit/20f7cce6b255288f1558003fa6ce4705532898ef))
+* **hooks:** apply-time guardrail gate for detection-only engines ([#547](https://github.com/magicpro97/vibeflow/issues/547)) ([#587](https://github.com/magicpro97/vibeflow/issues/587)) ([d00af60](https://github.com/magicpro97/vibeflow/commit/d00af60c6f80b45fcef7cca0ed38a53a4f363605))
+* **hooks:** semantic LLM risk tier + widen fetch-pipe-to-shell detection ([#544](https://github.com/magicpro97/vibeflow/issues/544)) ([#586](https://github.com/magicpro97/vibeflow/issues/586)) ([4d8de62](https://github.com/magicpro97/vibeflow/commit/4d8de62a807107c5685791b92f294ca7a2a74910))
+* **logbus:** emit hook + verdict decisions to the durable stream ([#542](https://github.com/magicpro97/vibeflow/issues/542)) ([#626](https://github.com/magicpro97/vibeflow/issues/626)) ([aa9e9ba](https://github.com/magicpro97/vibeflow/commit/aa9e9ba02d1b6fd559cb2787e196656145e77160))
+* **orchestrator:** add StuckDetector class with 3 detection patterns (12 tests) ([b5669ab](https://github.com/magicpro97/vibeflow/commit/b5669ab74175f7bc6a9a56c6eafc376936ea7ad2))
+* **orchestrator:** capture engine session_id into markers for crash-resume ([#618](https://github.com/magicpro97/vibeflow/issues/618) PR1) ([#619](https://github.com/magicpro97/vibeflow/issues/619)) ([a33bebf](https://github.com/magicpro97/vibeflow/commit/a33bebf5112037a34d9dd1ca1a1a1cee0b0ea919))
+* **orchestrator:** codex crash-resume via exec --json + resume &lt;id&gt; ([#618](https://github.com/magicpro97/vibeflow/issues/618) PR2b-2) ([#622](https://github.com/magicpro97/vibeflow/issues/622)) ([545a274](https://github.com/magicpro97/vibeflow/commit/545a274dfce5636480e10cc7c47cb478a0c4dcaf))
+* **orchestrator:** resume claude sessions at dispatch layer ([#618](https://github.com/magicpro97/vibeflow/issues/618) PR2a) ([#620](https://github.com/magicpro97/vibeflow/issues/620)) ([052fdbb](https://github.com/magicpro97/vibeflow/commit/052fdbbd889a07614bc635ba641077cbe701c070))
+* **orchestrator:** vf orchestrate --resume resumes crashed claude units ([#618](https://github.com/magicpro97/vibeflow/issues/618) PR2b-1) ([#621](https://github.com/magicpro97/vibeflow/issues/621)) ([fd12712](https://github.com/magicpro97/vibeflow/commit/fd12712b2ac2ab8d79161e70748397d67924a3b3))
+* **orchestrator:** wave-aware structured handoff between dependent units ([#612](https://github.com/magicpro97/vibeflow/issues/612)) ([#616](https://github.com/magicpro97/vibeflow/issues/616)) ([bba9ae3](https://github.com/magicpro97/vibeflow/commit/bba9ae30b7c630e5ae685cc8d388fda7518986ad))
+* resume a vf ask conversation from the Web-UI / API ([#581](https://github.com/magicpro97/vibeflow/issues/581)) ([#599](https://github.com/magicpro97/vibeflow/issues/599)) ([a27b168](https://github.com/magicpro97/vibeflow/commit/a27b168ef03afa9f6891286d3b95f3d8a86f0253))
+* **safety:** filter host env handed to spawned agent subprocesses ([#556](https://github.com/magicpro97/vibeflow/issues/556)) ([#575](https://github.com/magicpro97/vibeflow/issues/575)) ([85a846b](https://github.com/magicpro97/vibeflow/commit/85a846b17c50d6ef9036a5a0f5089384ebce02e8))
+* **skills:** add type:repo always-on project-law injection ([#543](https://github.com/magicpro97/vibeflow/issues/543)) ([#591](https://github.com/magicpro97/vibeflow/issues/591)) ([a2f4eed](https://github.com/magicpro97/vibeflow/commit/a2f4eed2f60d9663764c09b48200518e9b715841))
+* **skills:** let a skill declare the MCP server it needs ([#552](https://github.com/magicpro97/vibeflow/issues/552)) ([#593](https://github.com/magicpro97/vibeflow/issues/593)) ([718e003](https://github.com/magicpro97/vibeflow/commit/718e003b03b03da3310b09dec62cec2034f97aa7))
+* **sprint:** stuck detection + live progress + role agents + LAN UI ([#546](https://github.com/magicpro97/vibeflow/issues/546), [#523](https://github.com/magicpro97/vibeflow/issues/523), [#550](https://github.com/magicpro97/vibeflow/issues/550), [#561](https://github.com/magicpro97/vibeflow/issues/561)) ([b5669ab](https://github.com/magicpro97/vibeflow/commit/b5669ab74175f7bc6a9a56c6eafc376936ea7ad2))
+* **ui:** actionable per-engine readiness reason ([#458](https://github.com/magicpro97/vibeflow/issues/458)) ([#603](https://github.com/magicpro97/vibeflow/issues/603)) ([87be69f](https://github.com/magicpro97/vibeflow/commit/87be69f4a1b35809b942c83cc929b51739e9c386))
+* **ui:** full allow/deny editor for the env-scrub policy ([#576](https://github.com/magicpro97/vibeflow/issues/576)) ([#601](https://github.com/magicpro97/vibeflow/issues/601)) ([f70200e](https://github.com/magicpro97/vibeflow/commit/f70200ec04cd501acd57e7bb454cc06cf1cffbf5))
+* **ui:** per-unit color + smooth bar transitions ([#524](https://github.com/magicpro97/vibeflow/issues/524)) ([#602](https://github.com/magicpro97/vibeflow/issues/602)) ([8145f97](https://github.com/magicpro97/vibeflow/commit/8145f97b5dbdb6a87e585a24a7e30bfca1080d6b))
+* **ui:** prefill vf ask from the file viewer ([#583](https://github.com/magicpro97/vibeflow/issues/583)) ([#600](https://github.com/magicpro97/vibeflow/issues/600)) ([d7698c7](https://github.com/magicpro97/vibeflow/commit/d7698c755752920d8c33b2d9d565801c27979e25))
+* **ui:** render per-unit status timeline in the work-unit detail row ([#557](https://github.com/magicpro97/vibeflow/issues/557)) ([#589](https://github.com/magicpro97/vibeflow/issues/589)) ([f49af33](https://github.com/magicpro97/vibeflow/commit/f49af33c4844edcbe69564aba5ee7dff8dc1def2))
+* **ui:** render work-unit evidence as typed clickable links ([#558](https://github.com/magicpro97/vibeflow/issues/558)) ([#588](https://github.com/magicpro97/vibeflow/issues/588)) ([47549c8](https://github.com/magicpro97/vibeflow/commit/47549c857d2931b689a4bd5c8caaeaa30ae07670))
+* **ui:** stream vf ask answers token-by-token over SSE ([#580](https://github.com/magicpro97/vibeflow/issues/580)) ([#598](https://github.com/magicpro97/vibeflow/issues/598)) ([860fb12](https://github.com/magicpro97/vibeflow/commit/860fb12d05174c304a9673671e19ccc626837b02))
+* vf ask — inline code Q&A (CLI multi-turn + Web-UI) ([#562](https://github.com/magicpro97/vibeflow/issues/562)) ([#579](https://github.com/magicpro97/vibeflow/issues/579)) ([3fd1bcd](https://github.com/magicpro97/vibeflow/commit/3fd1bcd80aea098a0a480e4e7e61369f762be874))
+
+
+### Bug Fixes
+
+* **gate:** cap defaultRun with a timeout so a hung verification command can't block orchestration ([#533](https://github.com/magicpro97/vibeflow/issues/533)) ([#573](https://github.com/magicpro97/vibeflow/issues/573)) ([2f65300](https://github.com/magicpro97/vibeflow/commit/2f65300cf2a47c041f61f1a6cb16fe25cc5756f9))
+* **orchestrator:** close [#611](https://github.com/magicpro97/vibeflow/issues/611) post-merge nits — wire engine cost/tokens, drop dead import, LAN-warning test seam ([#614](https://github.com/magicpro97/vibeflow/issues/614)) ([1d69020](https://github.com/magicpro97/vibeflow/commit/1d69020d0e051d40787b29c1096958cb89dc83e9))
+
+
+### Performance
+
+* **server:** make POST /api/ask non-blocking (async spawn) ([#584](https://github.com/magicpro97/vibeflow/issues/584)) ([#597](https://github.com/magicpro97/vibeflow/issues/597)) ([8d31998](https://github.com/magicpro97/vibeflow/commit/8d319985d1d9c60f24dc8d58c5e8322ef468cf89))
+
+
+### Refactors
+
+* **dispatch:** extract makeReviewer to dispatch-reviewer.ts ([#503](https://github.com/magicpro97/vibeflow/issues/503)) ([#571](https://github.com/magicpro97/vibeflow/issues/571)) ([d9f0f21](https://github.com/magicpro97/vibeflow/commit/d9f0f2158d54156a4d1bddd19c0e06f348a8073f))
+* **gates:** extract e2e-selector warnings to gates-e2e.ts ([#515](https://github.com/magicpro97/vibeflow/issues/515)) ([#574](https://github.com/magicpro97/vibeflow/issues/574)) ([0ced824](https://github.com/magicpro97/vibeflow/commit/0ced82456554507e2de0e9d8bfa0625cf00657aa))
+* **orchestrate:** extract terminal-focus + spec-first helpers under the 400-line cap ([#472](https://github.com/magicpro97/vibeflow/issues/472)) ([#572](https://github.com/magicpro97/vibeflow/issues/572)) ([43da46b](https://github.com/magicpro97/vibeflow/commit/43da46b8ebdfa9d29b043b5f7414de150ca99a73))
+
+
+### Documentation
+
+* **skills:** add dispatch-prompt test pitfalls to the vf skill ([#577](https://github.com/magicpro97/vibeflow/issues/577) follow-up) ([#596](https://github.com/magicpro97/vibeflow/issues/596)) ([33e20fe](https://github.com/magicpro97/vibeflow/commit/33e20fe20df21096bdb10dd83c07f557e736b49b))
+
+
+### Tests
+
+* **coverage:** cover unreachable spawnSync catch branches ([#570](https://github.com/magicpro97/vibeflow/issues/570)) ([bea08b7](https://github.com/magicpro97/vibeflow/commit/bea08b7aa46cc90e538628a52308bf1584a7538d)), closes [#477](https://github.com/magicpro97/vibeflow/issues/477) [#478](https://github.com/magicpro97/vibeflow/issues/478) [#495](https://github.com/magicpro97/vibeflow/issues/495) [#499](https://github.com/magicpro97/vibeflow/issues/499)
+
 ## [Unreleased]
 
 ### Features
