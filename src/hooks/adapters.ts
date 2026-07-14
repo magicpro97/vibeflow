@@ -11,9 +11,15 @@
  * downgrade banner instead of advertising blocking we cannot actually honor.
  */
 
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Engine } from "../core.js";
+
+/** Stable marker the generator emits in the opencode plugin so the live-
+ *  guardrail probe can distinguish generator output from a hand-rolled file
+ *  that happens to mention `vf hook`. Kept in sync with `src/commands/doctor.ts`. */
+const GUARDRAIL_SENTINEL = "vibeflow-guardrail";
 
 /** Resolve the absolute path to dist/cli.js (or src/cli.ts in dev). */
 function cliPath(): string {
@@ -23,6 +29,38 @@ function cliPath(): string {
   // In dev (bun test / ts-node): self is src/hooks/adapters.ts → walk up to root then dist/.
   const root = join(dirname(self), "..", "..");
   return join(root, "dist", "cli.js");
+}
+
+/**
+ * Detect a stale opencode plugin — the generator hard-codes the absolute CLI
+ * path into `const VF_CLI = "..."`. If the user moves/reinstalls the CLI
+ * (e.g. `npm i -g @vibeflow/cli` to a different prefix, or a fresh clone of
+ * the repo), the path the plugin invokes is no longer the path the live CLI
+ * is actually running from. The plugin will then either fail to load or
+ * silently fall back to "allow" — a quiet loss of the guardrail.
+ *
+ * Returns the stale status, or `null` if the plugin isn't armed (no file, no
+ * sentinel) so the caller can distinguish "no plugin" from "out-of-date plugin".
+ */
+export function opencodePluginStale(
+  base: string,
+): { stale: boolean; expected: string; actual: string | null } | null {
+  const pluginPath = join(base, ".opencode", "plugin", "vf-guard.ts");
+  let raw: string;
+  try {
+    raw = readFileSync(pluginPath, "utf8");
+  } catch {
+    return null;
+  }
+  if (!raw.includes(GUARDRAIL_SENTINEL)) return null;
+  // Extract the absolute path from `const VF_CLI = "...";`
+  const match = /const\s+VF_CLI\s*=\s*"([^"]+)"/.exec(raw);
+  if (!match || !match[1]) {
+    // Plugin is malformed — count as stale with a clear signal.
+    return { stale: true, expected: cliPath(), actual: null };
+  }
+  const expected = cliPath();
+  return { stale: match[1] !== expected, expected, actual: match[1] };
 }
 
 /** Whether an engine can veto an action before it runs, or only detect after the fact. */

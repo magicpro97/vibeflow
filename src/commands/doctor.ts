@@ -18,6 +18,7 @@
 // All helpers used by `doctor` (liveGuardrailArmed, guardrailOffNote)
 // come from the seams module via the barrel.
 
+import { opencodePluginStale } from "../hooks/adapters.js";
 import type { Engine, EngineReadiness } from "./_shared.js";
 import {
   ENGINES,
@@ -91,16 +92,10 @@ export function liveGuardrailArmed(base: string): boolean {
   // delegate to `vf hook` does NOT report as armed.
   try {
     const raw = readFileSync(join(base, ".opencode", "plugin", "vf-guard.ts"), "utf8");
-    // The generator's plugin always references BOTH the absolute CLI path
-    // (`.../dist/cli.js`) and the literal `"hook"` arg in its `spawnSync`
-    // call. A hand-rolled plugin that doesn't delegate to `vf hook` is
-    // missing the `dist/cli.js` token, so the conjunction is a robust probe.
-    if (
-      raw.includes(GUARDRAIL_SENTINEL) &&
-      /dist[\\/]cli\.js/.test(raw) &&
-      /["']hook["']/.test(raw)
-    )
-      return true;
+    // The generator's plugin always references the literal `"hook"` arg in
+    // its `spawnSync` call. A hand-rolled plugin that doesn't delegate to
+    // `vf hook` is missing that arg, so the sentinel + arg check is enough.
+    if (raw.includes(GUARDRAIL_SENTINEL) && /["']hook["']/.test(raw)) return true;
   } catch {
     /* not armed via opencode */
   }
@@ -151,9 +146,13 @@ export async function doctor(
     // Test seam: lets unit tests inject a custom hasCommand to
     // exercise the "missing required tool" branch (line 203-204).
     hasCommand?: (cmd: string) => boolean;
+    // Test seam: override the base directory used for live-guardrail
+    // detection and opencode-plugin staleness checks. Defaults to cwd().
+    base?: string;
   } = {},
 ): Promise<number> {
   const _hasCommand = inject.hasCommand ?? hasCommand;
+  const base = inject.base ?? cwd();
   const checks: Array<[string, boolean, "required" | "optional"]> = [
     ["node", _hasCommand("node"), "required"],
     ["git", _hasCommand("git"), "required"],
@@ -178,9 +177,22 @@ export async function doctor(
   out("vf", `  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
   out(
     "vf",
-    `  ${gitGuardrailArmed(cwd()) ? c.green("commit-time guardrail: ON (.githooks/pre-commit)") : c.yellow("commit-time guardrail: OFF — run 'vf hooks install' or re-init to arm .githooks/pre-commit")}`,
+    `  ${gitGuardrailArmed(base) ? c.green("commit-time guardrail: ON (.githooks/pre-commit)") : c.yellow("commit-time guardrail: OFF — run 'vf hooks install' or re-init to arm .githooks/pre-commit")}`,
   );
-  out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
+  out("vf", `  ${liveGuardrailArmed(base) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
+
+  // #624: detect a stale opencode plugin. The generator hard-codes the
+  // absolute CLI path; if the user reinstalled/moved the CLI the plugin
+  // silently falls back to "allow" — a quiet loss of the guardrail.
+  const opencodeStale = opencodePluginStale(base);
+  if (opencodeStale?.stale) {
+    out(
+      "vf",
+      c.yellow(
+        `  ⚠ opencode plugin is STALE: hard-coded path ${opencodeStale.actual ?? "(missing)"} does not match current CLI ${opencodeStale.expected}. Run \`vf hooks emit --yes\` to refresh.`,
+      ),
+    );
+  }
 
   // Issue #163 (F2): stale logbus lock detection
   const lockFile = join(cwd(), ".vibeflow", "logs", "current", "current.log.lock");

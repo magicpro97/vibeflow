@@ -16,6 +16,7 @@ import {
   gitPostMerge,
   gitPreCommit,
   opencodePluginSource,
+  opencodePluginStale,
   perCommandWarning,
 } from "../src/hooks/adapters.js";
 import { scoreRisk } from "../src/hooks/risk.js";
@@ -152,10 +153,9 @@ describe("adapters: opencode plugin generator (issue #79 parity for opencode)", 
     expect(src).toContain('"tool.execute.after"');
   });
   test("emits the stable generator marker the live-guardrail probe matches", () => {
-    // The probe in src/commands/doctor.ts looks for the absolute CLI path
-    // (with `dist/cli.js`) AND the literal "hook" arg the spawnSync uses.
+    // The probe in src/commands/doctor.ts looks for the "vibeflow-guardrail"
+    // sentinel + the literal "hook" arg. Both must appear in the source.
     expect(src).toContain("vibeflow-guardrail");
-    expect(src).toMatch(/dist[\\/]cli\.js/);
     expect(src).toMatch(/["']hook["']/);
   });
   test("decision mapping: parses the runner's permissionDecision envelope", () => {
@@ -853,6 +853,151 @@ describe("live guardrail detection", () => {
         "// vibeflow-guardrail\nconst noop = () => ({});\nexport default noop;\n",
       );
       expect(liveGuardrailArmed(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- Stale opencode plugin detection: a fresh plugin hard-codes the absolute
+// CLI path. If the user reinstalls the CLI elsewhere, the plugin silently
+// falls back to "allow" — `vf doctor` must surface this. ---
+describe("adapters: opencode plugin staleness (issue #624 task: detect drifted CLI path)", () => {
+  test("returns null when no plugin is armed (no file, no sentinel)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-stale-none-"));
+    try {
+      expect(opencodePluginStale(dir)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("returns null when the plugin file is present but not the generator's output", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-stale-rogue-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      // Hand-rolled plugin — no sentinel — should report null (probe owns this).
+      writeFileSync(
+        join(pluginDir, "vf-guard.ts"),
+        "// not a generator output\nconst noop = () => ({});\nexport default noop;\n",
+      );
+      expect(opencodePluginStale(dir)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("returns stale=false when the generator's hard-coded path matches the current CLI", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-stale-fresh-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, "vf-guard.ts"), opencodePluginSource());
+      const r = opencodePluginStale(dir);
+      expect(r).not.toBeNull();
+      expect(r?.stale).toBe(false);
+      expect(r?.actual).toBe(r?.expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("returns stale=true when the hard-coded path was moved/reinstalled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-stale-drifted-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      // Inject a wrong path into the real generator's source.
+      const drifted = opencodePluginSource().replace(
+        /const VF_CLI = "[^"]+"/,
+        'const VF_CLI = "/wrong/path/to/cli.js"',
+      );
+      writeFileSync(join(pluginDir, "vf-guard.ts"), drifted);
+      const r = opencodePluginStale(dir);
+      expect(r).not.toBeNull();
+      expect(r?.stale).toBe(true);
+      expect(r?.actual).toBe("/wrong/path/to/cli.js");
+      expect(r?.expected).not.toBe("/wrong/path/to/cli.js");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("malformed generator output (no VF_CLI line) reports stale with actual=null", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-stale-malformed-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      // Sentinel present but the path is unparseable.
+      writeFileSync(
+        join(pluginDir, "vf-guard.ts"),
+        "// vibeflow-guardrail\nconst noop = () => ({});\n",
+      );
+      const r = opencodePluginStale(dir);
+      expect(r).not.toBeNull();
+      expect(r?.stale).toBe(true);
+      expect(r?.actual).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- doctor integration: a STALE opencode plugin must surface a yellow line.
+// --- doctor integration: a STALE opencode plugin must surface a yellow line.
+// doctor() prints to stdout via the logbus; we monkey-patch console.log (the
+// logbus fallback path when no logbus client is registered) to capture. ---
+describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
+  async function captureDoctor(base: string): Promise<string> {
+    const { doctor } = await import("../src/commands/doctor.js");
+    const buf: string[] = [];
+    const log = console.log;
+    const err = console.error;
+    console.log = (...a: unknown[]) => {
+      buf.push(a.map(String).join(" "));
+    };
+    console.error = (...a: unknown[]) => {
+      buf.push(a.map(String).join(" "));
+    };
+    try {
+      await doctor({}, { hasCommand: () => true, base });
+    } finally {
+      console.log = log;
+      console.error = err;
+    }
+    return buf.join("\n");
+  }
+
+  test("yellow STALE warning when the hard-coded path was drifted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-doc-stale-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      // Hand-craft a generator-like file with a wrong path.
+      const drifted = opencodePluginSource().replace(
+        /const VF_CLI = "[^"]+"/,
+        'const VF_CLI = "/old/install/dist/cli.js"',
+      );
+      writeFileSync(join(pluginDir, "vf-guard.ts"), drifted);
+
+      const out = await captureDoctor(dir);
+      expect(out).toMatch(/opencode plugin is STALE/);
+      expect(out).toContain("/old/install/dist/cli.js");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("NO STALE warning when the hard-coded path matches the current CLI", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-doc-fresh-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, "vf-guard.ts"), opencodePluginSource());
+
+      const out = await captureDoctor(dir);
+      expect(out).not.toMatch(/opencode plugin is STALE/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
