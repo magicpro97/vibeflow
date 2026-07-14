@@ -79,6 +79,16 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
       }
     }
   });
+
+  test("opencode → run --format json --auto -", () => {
+    const r = engineCommand("opencode");
+    expect(isUnavailable(r)).toBe(false);
+    if (!isUnavailable(r)) {
+      expect(r.cmd).toBe("opencode");
+      expect(r.args).toEqual(["run", "--format", "json", "--auto", "-"]);
+      expect(r.promptMode).toBe("stdin");
+    }
+  });
 });
 
 describe("engineCommand resume (#618 PR2a)", () => {
@@ -916,6 +926,16 @@ describe("parseEngineSummary codex --json (#618 PR2b-2)", () => {
       '{"type":"turn.completed"}';
     // reasoning must NOT be treated as the summary
     expect(parseEngineSummary(raw)).toBeUndefined();
+  });
+});
+
+describe("parseEngineSummary opencode JSONL stream", () => {
+  const opencodeStream = readFileSync("test/fixtures/opencode-jsonl-stream.txt", "utf8");
+  test("extracts summary from type:text events combined into fenced json", () => {
+    const s = parseEngineSummary(opencodeStream);
+    expect(s).toBeDefined();
+    expect(s?.confidence).toBe(0.9);
+    expect(s?.files_changed).toEqual(["src/x.ts"]);
   });
 });
 

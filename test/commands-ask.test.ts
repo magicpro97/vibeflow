@@ -104,7 +104,7 @@ describe("framePrompt", () => {
 });
 
 describe("askInvocation", () => {
-  test("claude/codex stream via stdin; copilot via arg", () => {
+  test("claude/codex stream via stdin; copilot via arg; opencode via stdin", () => {
     expect(askInvocation("claude")).toEqual({ cmd: "claude", args: ["-p"], promptMode: "stdin" });
     expect(askInvocation("codex")).toEqual({
       cmd: "codex",
@@ -115,6 +115,11 @@ describe("askInvocation", () => {
       cmd: "copilot",
       args: ["-p", "--allow-all"],
       promptMode: "arg",
+    });
+    expect(askInvocation("opencode")).toEqual({
+      cmd: "opencode",
+      args: ["run", "--format", "json", "-"],
+      promptMode: "stdin",
     });
   });
 });
@@ -158,6 +163,13 @@ describe("resumeInvocation (#562 multi-turn — engine-native continue)", () => 
   });
   test("copilot has no resume → error string", () => {
     expect(typeof resumeInvocation("copilot")).toBe("string");
+  });
+  test("opencode resumes via --continue", () => {
+    expect(resumeInvocation("opencode")).toEqual({
+      cmd: "opencode",
+      args: ["run", "--continue", "--format", "json", "-"],
+      promptMode: "stdin",
+    });
   });
 });
 
