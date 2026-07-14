@@ -45,7 +45,7 @@ import {
 
 /** Engine binary name. The shim records it for the audit trail; the
  *  spawner is responsible for the actual exec. */
-export type Engine = "claude" | "codex" | "copilot";
+export type Engine = "claude" | "codex" | "copilot" | "opencode";
 
 /** A denied tool call — recorded in the audit log when a wrapped engine
  *  tries to invoke a tool the shim refuses. */
@@ -167,7 +167,7 @@ export async function coord(
   // stale brief). Exit code 2 is RESERVED for the A0 spec's "fresh
   // brief but §2 Non-negotiables violated" case (not yet implemented
   // — see issue #200). Per the A1 cross-review.
-  if (engine !== "claude" && engine !== "codex" && engine !== "copilot") {
+  if (engine !== "claude" && engine !== "codex" && engine !== "copilot" && engine !== "opencode") {
     out(
       "vf",
       c.red(`vf coord ${engine}: unknown engine. Expected one of claude, codex, copilot.`),

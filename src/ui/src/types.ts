@@ -1,7 +1,7 @@
 // Copied from src/core/types.ts and src/logbus/types.ts — keep in sync manually.
 // Only what the UI needs; no Node/Bun imports.
 
-export type Engine = "claude" | "codex" | "copilot";
+export type Engine = "claude" | "codex" | "copilot" | "opencode";
 export type GateState = "pass" | "fail" | "running" | "pending";
 
 export interface WorkUnit {

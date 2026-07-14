@@ -73,7 +73,7 @@ export interface JsonMcpEntry {
 
 /** Codex MCP entry: a structured TOML section the caller serializes to config.toml. */
 export interface TomlMcpEntry {
-  engine: "codex";
+  engine: "codex" | "opencode";
   configPath: string;
   /** e.g. "mcp_servers.codegraph" → [mcp_servers.codegraph]. */
   section: string;
@@ -139,7 +139,7 @@ export function buildStdioEntry(
   server: StdioServer,
   tools: string[],
 ): McpEntry {
-  if (engine === "codex") {
+  if (engine === "codex" || engine === "opencode") {
     return {
       engine,
       configPath: CODEX_CONFIG,
@@ -169,7 +169,7 @@ export function buildStdioEntry(
  */
 export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer): McpEntry | null {
   const transport = def.transport ?? "stdio";
-  if (engine === "codex") {
+  if (engine === "codex" || engine === "opencode") {
     if (transport === "sse") return null;
     if (transport === "http") {
       return {

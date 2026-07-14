@@ -204,6 +204,12 @@ export function engineCommand(
         : { cmd: "codex", args: ["exec", "--json", "-"] };
     case "copilot":
       return copilotCommand(probe);
+    case "opencode":
+      return {
+        cmd: "opencode",
+        args: ["run", "--format", "json", "--auto", "-"],
+        promptMode: "stdin",
+      };
   }
 }
 

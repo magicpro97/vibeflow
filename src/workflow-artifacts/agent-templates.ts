@@ -195,6 +195,12 @@ const ENGINE_META: Record<
     skillDir: ".github/skills/",
     instructionFile: ".github/copilot-instructions.md",
   },
+  opencode: {
+    name: "OpenCode",
+    agentDir: ".opencode/agents/",
+    skillDir: ".opencode/skills/",
+    instructionFile: "AGENTS.md",
+  },
 };
 
 export function copyUsageGuide(

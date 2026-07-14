@@ -1,7 +1,7 @@
 import type { RoleModel, RoleSpec, ToolIntent } from "./role.js";
 
 /** Engine keys consumed by `renderForEngine` / `agentFilePath`. */
-export type AgentEngine = "claude" | "codex" | "copilot";
+export type AgentEngine = "claude" | "codex" | "copilot" | "opencode";
 
 /** Map from engine-agnostic `ToolIntent` to Claude Code's tool names. */
 const CLAUDE_TOOL_MAP: Record<ToolIntent, string> = {
@@ -217,6 +217,8 @@ export function renderForEngine(engine: AgentEngine, spec: RoleSpec): string {
       return renderCodexAgent(spec);
     case "copilot":
       return renderCopilotAgent(spec);
+    case "opencode":
+      return renderCodexAgent(spec);
   }
 }
 
@@ -239,5 +241,7 @@ export function agentFilePath(engine: AgentEngine, name: string): string {
       return `.codex/agents/${safe}.toml`;
     case "copilot":
       return `.github/agents/${safe}.md`;
+    case "opencode":
+      return `.opencode/agents/${safe}.md`;
   }
 }

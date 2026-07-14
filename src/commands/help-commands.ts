@@ -50,7 +50,7 @@ ${c.bold("Examples:")}
   vf init --no-hooks
   vf init --dry-run`,
 
-  run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot> [--yes]")}
+  run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot|opencode> [--yes]")}
 Write the dispatch prompt for one engine. Without --yes it is a read-only dry run;
 --yes launches the engine CLI behind the source-protection gate.
 
@@ -62,7 +62,8 @@ ${c.bold("Options:")}
 
 ${c.bold("Examples:")}
   vf run claude
-  vf run codex --yes`,
+  vf run codex --yes
+  vf run opencode --yes`,
 
   ask: () => `${c.bold("vf ask")} ${c.dim('<path>:<start>[-<end>] "<question>" [--engine <e>] [--resume]')}
 Inline code Q&A: read a line range, frame it (file + language-fenced snippet +

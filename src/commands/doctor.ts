@@ -251,11 +251,13 @@ export function detectRepo(path?: string): RepoDetection {
       claude: has("CLAUDE.md") || has(".claude"),
       codex: has("AGENTS.md") || has(".codex"),
       copilot: has(".github/copilot-instructions.md"),
+      opencode: has("AGENTS.md"),
     },
     clis: {
       claude: hasCommand("claude"),
       codex: hasCommand("codex"),
       copilot: hasCommand("copilot") || hasCommand("gh"),
+      opencode: hasCommand("opencode"),
     },
   };
 }

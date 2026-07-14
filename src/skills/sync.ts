@@ -16,6 +16,7 @@ const ENGINE_MIRROR: Record<Engine, string> = {
   claude: join(".claude", "skills"),
   codex: join(".agents", "skills"),
   copilot: join(".github", "skills"),
+  opencode: join(".opencode", "skills"),
 };
 
 function mirrorsFor(engines?: Engine[]): string[] {

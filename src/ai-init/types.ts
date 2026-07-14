@@ -11,6 +11,7 @@ const INSTRUCTION_FILES_BY_ENGINE: Record<Engine, readonly string[]> = {
   claude: ["CLAUDE.md"],
   codex: ["AGENTS.md"],
   copilot: ["AGENTS.md", ".github/copilot-instructions.md"],
+  opencode: ["AGENTS.md"],
 };
 /** When `engines` is empty/absent, default to a single engine's scope
  *  instead of ALL engines. This prevents the instruction-writer from

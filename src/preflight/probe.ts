@@ -66,6 +66,8 @@ export function probeInvocation(engine: Engine, prompt = PROBE_PROMPT): ProbeInv
       return { cmd: "codex", args: ["doctor"], input: prompt };
     case "copilot":
       throw new Error("copilot uses `gh auth status`; no probe invocation exists");
+    case "opencode":
+      return { cmd: "opencode", args: ["run", "--format", "json", "-"], input: prompt };
   }
 }
 
@@ -93,6 +95,7 @@ export function ghInstallHint(): string {
 /** Install hint surfaced when an engine binary is missing. */
 export function installHint(engine: Engine): string {
   if (engine === "copilot") return "copilot CLI not found — install GitHub Copilot CLI";
+  if (engine === "opencode") return "opencode CLI not found — install opencode CLI";
   return `${engine} CLI not found — install the ${engine} CLI`;
 }
 
@@ -110,6 +113,7 @@ export function installHint(engine: Engine): string {
 export function probeSucceeded(engine: Engine, status: number, stdout: string): boolean {
   if (status !== 0) return false;
   if (engine === "codex") return /\b0 fail ok\b/i.test(stdout) || /\b0 fail\b/i.test(stdout);
+  if (engine === "opencode") return containsToken(stdout);
   if (engine === "claude") {
     const fromJson = claudeResultText(stdout);
     if (fromJson !== undefined) return containsToken(fromJson);

@@ -63,5 +63,7 @@ export function engineFiles(
           () => `# Copilot Instructions\n\n${engineBody("copilot", ctx)}\n`,
         ),
       };
+    case "opencode":
+      return { "AGENTS.md": body };
   }
 }

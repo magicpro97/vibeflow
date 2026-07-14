@@ -116,6 +116,9 @@ function tryParseSummary(block: string): EngineSummary | undefined {
  */
 export function parseEngineSummary(stdout: string): EngineSummary | undefined {
   if (!stdout) return undefined;
+  // opencode `--format json` JSONL: collect all `type: "text"` events' part.text,
+  // then parse the combined text for the fenced json summary.
+  const opencodeTexts: string[] = [];
   // codex `exec --json` JSONL: scan forward for the agent_message item's fenced summary.
   // Target agent_message SPECIFICALLY — the `reasoning` event echoes the same json and must
   // NOT be mistaken for the answer. Track whether we saw ANY item.completed — if we scanned
@@ -124,7 +127,15 @@ export function parseEngineSummary(stdout: string): EngineSummary | undefined {
   let sawItemCompleted = false;
   for (const block of extractJsonObjects(stdout)) {
     try {
-      const obj = JSON.parse(block.trim()) as { type?: string; item?: Record<string, unknown> };
+      const obj = JSON.parse(block.trim()) as {
+        type?: string;
+        item?: Record<string, unknown>;
+        part?: Record<string, unknown>;
+      };
+      // opencode text event
+      if (obj.type === "text" && typeof obj.part?.text === "string") {
+        opencodeTexts.push(obj.part.text as string);
+      }
       if (obj.type === "item.completed") {
         sawItemCompleted = true;
         if (obj.item?.type === "agent_message" && typeof obj.item.text === "string") {
@@ -137,6 +148,12 @@ export function parseEngineSummary(stdout: string): EngineSummary | undefined {
     }
   }
   if (sawItemCompleted) return undefined;
+  // opencode: combined text events → recursively parse for fenced json summary
+  if (opencodeTexts.length > 0) {
+    const combined = opencodeTexts.join("\n");
+    const inner = parseEngineSummary(combined);
+    if (inner) return inner;
+  }
   const fences = [...stdout.matchAll(/```json\s*([\s\S]*?)```/g)].map((m) => m[1] ?? "");
   for (const block of fences.reverse()) {
     const s = tryParseSummary(block);
@@ -155,10 +172,12 @@ export function parseEngineSummary(stdout: string): EngineSummary | undefined {
  *  copilot has no by-id resume so it never produces an id to capture. */
 export function parseSessionId(stdout: string): string | undefined {
   if (!stdout) return undefined;
-  // codex: thread.started is the first event → scan forward
+  // opencode: step_start carries sessionID → scan forward (before codex, both are JSONL)
+  // codex: thread.started carries thread_id → scan forward
   for (const block of extractJsonObjects(stdout)) {
     try {
       const obj = JSON.parse(block.trim()) as Record<string, unknown>;
+      if (obj.type === "step_start" && typeof obj.sessionID === "string") return obj.sessionID;
       if (obj.type === "thread.started" && typeof obj.thread_id === "string") return obj.thread_id;
     } catch {
       // not JSON — skip

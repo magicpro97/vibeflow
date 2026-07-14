@@ -53,6 +53,18 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
 - **Resume:** NOT SUPPORTED by id. The CLI only offers `--continue` (most-recent session), so VibeFlow never captures a copilot session id and a `--resume` run of a copilot unit always re-runs fresh.
 - **Version guard:** the CLI has a history of silent breaking auto-updates (github/copilot-cli#1606 removed `--headless --stdio`); when `copilot --version` can't be read, dispatch proceeds with a warning.
 
+### opencode
+
+- **Fresh invocation:** `opencode run --format json -` (prompt on stdin via `-`)
+- **Resume:** `opencode run --continue --format json -` (most recent session)
+- **Auto perms:** `--auto`, auto-approves permissions not explicitly denied
+- **Output shape:** JSONL — one JSON event per line. Key events:
+  - `{"type":"step_start","sessionID":"ses_..."}` — carries the session id.
+  - `{"type":"text","part":{"type":"text","text":"..."}}` — the model's text response; VibeFlow summary is the fenced json block inside `text`.
+  - `{"type":"step_finish","part":{"tokens":{...}}}` — last line, carries token usage.
+- **Session id:** `sessionID` on the first `step_start` event (forward scan).
+- **Fixture:** N/A (opencode output format is stable, no known traps).
+
 ## Crash-resume (`vf orchestrate --resume`)
 
 - Capture: dispatch persists the engine session id into `DispatchMarker.engineSessionId` (claude `session_id`, codex `thread_id`). copilot persists none.
@@ -80,7 +92,13 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
    copilot --help | grep -E "allow-all|continue|resume|-p"
    ```
 
-4. Run `bun run check`. The dispatch tests + codex fixture assert the shapes above; a red suite after a bump means the CLI changed its contract.
+4. **opencode** — confirm `--format json` + `--continue` still work:
+   ```bash
+   echo 'Reply with exactly READY' | opencode run --format json -
+   ```
+   Confirm the first event has `type: "step_start"` with `sessionID`, and the response text appears in a `type: "text"` event with `part.text`. Also confirm `opencode run --continue --help` still works.
+
+5. Run `bun run check`. The dispatch tests + codex fixture assert the shapes above; a red suite after a bump means the CLI changed its contract.
 
 ## Related surfaces that can drift with a CLI change
 

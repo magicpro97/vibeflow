@@ -34,6 +34,7 @@ const ENFORCEMENT: Record<Engine, EngineEnforcementCapability> = {
   claude: { preActionBlocking: "native" },
   codex: { preActionBlocking: "post-hoc-only" },
   copilot: { preActionBlocking: "native" },
+  opencode: { preActionBlocking: "post-hoc-only" },
 };
 
 /** Report whether an engine enforces guardrails natively or post-hoc only. */
