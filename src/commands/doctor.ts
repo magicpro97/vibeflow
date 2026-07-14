@@ -85,6 +85,25 @@ export function liveGuardrailArmed(base: string): boolean {
   } catch {
     /* not armed via Copilot */
   }
+  // Opencode plugin: `.opencode/plugin/vf-guard.ts` auto-loads and shells out
+  // to `vf hook`. We don't parse the TS source — we just look for the
+  // generator's stable marker so a hand-rolled plugin that doesn't actually
+  // delegate to `vf hook` does NOT report as armed.
+  try {
+    const raw = readFileSync(join(base, ".opencode", "plugin", "vf-guard.ts"), "utf8");
+    // The generator's plugin always references BOTH the absolute CLI path
+    // (`.../dist/cli.js`) and the literal `"hook"` arg in its `spawnSync`
+    // call. A hand-rolled plugin that doesn't delegate to `vf hook` is
+    // missing the `dist/cli.js` token, so the conjunction is a robust probe.
+    if (
+      raw.includes(GUARDRAIL_SENTINEL) &&
+      /dist[\\/]cli\.js/.test(raw) &&
+      /["']hook["']/.test(raw)
+    )
+      return true;
+  } catch {
+    /* not armed via opencode */
+  }
   return false;
 }
 /** #624 Task 4: the COMMIT-TIME git guardrail — .githooks/pre-commit routed via

@@ -15,6 +15,7 @@ import {
   gitPostCheckout,
   gitPostMerge,
   gitPreCommit,
+  opencodePluginSource,
   perCommandWarning,
 } from "../src/hooks/adapters.js";
 import { scoreRisk } from "../src/hooks/risk.js";
@@ -111,6 +112,9 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
   test("engineEnforcement: copilot is now native (per preToolUse fail-closed semantics)", () => {
     expect(engineEnforcement("claude").preActionBlocking).toBe("native");
     expect(engineEnforcement("copilot").preActionBlocking).toBe("native");
+    // opencode is native too: it has a `tool.execute.before` plugin hook that
+    // can throw to veto a tool call — semantically equivalent to PreToolUse.
+    expect(engineEnforcement("opencode").preActionBlocking).toBe("native");
     // codex stays post-hoc-only: it has no native pre-tool veto.
     expect(engineEnforcement("codex").preActionBlocking).toBe("post-hoc-only");
   });
@@ -118,15 +122,53 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
   test("perCommandWarning: empty for native, warns for detection-only", () => {
     expect(perCommandWarning("claude")).toBe("");
     expect(perCommandWarning("copilot")).toBe("");
+    expect(perCommandWarning("opencode")).toBe("");
     expect(perCommandWarning("codex")).toContain("detection-only");
   });
 
   test("downgradeBannerText: empty for native engines, warns only for codex", () => {
     expect(downgradeBannerText("claude")).toBe("");
     expect(downgradeBannerText("copilot")).toBe("");
+    expect(downgradeBannerText("opencode")).toBe("");
     const codexBanner = downgradeBannerText("codex");
     expect(codexBanner.length).toBeGreaterThan(0);
     expect(codexBanner.toLowerCase()).toContain("detection");
+  });
+});
+
+// --- Opencode plugin generator: emitted source must be valid TS that
+// auto-loads from .opencode/plugin/, hard-codes the absolute CLI path, and
+// contains the stable generator marker used by liveGuardrailArmed. ---
+describe("adapters: opencode plugin generator (issue #79 parity for opencode)", () => {
+  const src = opencodePluginSource();
+  test("emits a `default` export of an async factory returning the opencode plugin shape", () => {
+    expect(src).toMatch(/export\s+default\s+VfGuard/);
+  });
+  test("hard-codes the absolute CLI path so the plugin does not depend on PATH", () => {
+    expect(src).toMatch(/const VF_CLI\s*=\s*"[^"]+\/dist\/cli\.js"/);
+  });
+  test("declares tool.execute.before (veto) and tool.execute.after (observation)", () => {
+    expect(src).toContain('"tool.execute.before"');
+    expect(src).toContain('"tool.execute.after"');
+  });
+  test("emits the stable generator marker the live-guardrail probe matches", () => {
+    // The probe in src/commands/doctor.ts looks for the absolute CLI path
+    // (with `dist/cli.js`) AND the literal "hook" arg the spawnSync uses.
+    expect(src).toContain("vibeflow-guardrail");
+    expect(src).toMatch(/dist[\\/]cli\.js/);
+    expect(src).toMatch(/["']hook["']/);
+  });
+  test("decision mapping: parses the runner's permissionDecision envelope", () => {
+    // The runner prints hookSpecificOutput.permissionDecision = "deny"|"ask"|"allow".
+    // The plugin must unpack it AND tolerate the trailing "[hook] ..." log line.
+    expect(src).toContain('"deny"');
+    expect(src).toContain('"ask"');
+    // Parse the first line only — the runner writes a JSON envelope + a log line.
+    // Source contains `split("\\n", 1)` — 1 backslash + n in the emitted TS source.
+    expect(src).toMatch(/split\("\\n"/);
+  });
+  test("VfGuard factory returns a record (no extra surface)", () => {
+    expect(src).toMatch(/const VfGuard\s*=\s*async\s*\(\)\s*=>\s*\(\{/);
   });
 });
 
@@ -776,6 +818,41 @@ describe("live guardrail detection", () => {
         }),
       );
       expect(liveGuardrailArmed(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // --- Opencode plugin: live detection. The probe must NOT report armed for
+  // a hand-rolled plugin that does not delegate to `vf hook`, and MUST report
+  // armed for the real generator output. ---
+  test("ON when .opencode/plugin/vf-guard.ts is the real generator (delegates to vf hook)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-opencode-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      // Empty file → OFF
+      writeFileSync(join(pluginDir, "vf-guard.ts"), "// placeholder\n");
+      expect(liveGuardrailArmed(dir)).toBe(false);
+      // Real generator output → ON
+      writeFileSync(join(pluginDir, "vf-guard.ts"), opencodePluginSource());
+      expect(liveGuardrailArmed(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("OFF when .opencode/plugin/vf-guard.ts exists but does NOT delegate to vf hook", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-opencode-rogue-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      // Hand-rolled plugin that mentions the sentinel but does not call vf hook.
+      writeFileSync(
+        join(pluginDir, "vf-guard.ts"),
+        "// vibeflow-guardrail\nconst noop = () => ({});\nexport default noop;\n",
+      );
+      expect(liveGuardrailArmed(dir)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
