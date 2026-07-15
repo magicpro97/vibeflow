@@ -1,0 +1,6 @@
+{"type":"step_start","sessionID":"sess-abc-123"}
+{"type":"text","part":{"text":"Let me work through this..."}}
+{"type":"text","part":{"text":"```json"}}
+{"type":"text","part":{"text":"{\"confidence\":0.9,\"files_changed\":[\"src/x.ts\"],\"commands_run\":[],\"tests_run\":[],\"skills_used\":[],\"uncertainty\":\"\"}"}}
+{"type":"text","part":{"text":"```"}}
+{"type":"text","part":{"text":"Done!"}}

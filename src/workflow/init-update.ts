@@ -45,7 +45,7 @@ export function ensureInitUpdated(base: string): InitUpdateResult {
   let synced: string[] = [];
 
   if (seeded || needsVersionUpdate) {
-    const result = syncSkillMirrors(base, { engines: ["claude", "codex", "copilot"] });
+    const result = syncSkillMirrors(base, { engines: ["claude", "codex", "copilot", "opencode"] });
     synced = result.synced;
   }
 

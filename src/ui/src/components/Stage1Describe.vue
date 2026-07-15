@@ -120,7 +120,7 @@
     <div class="space-y-1.5">
       <label class="text-xs text-neutral-500 flex items-center">
         Engine
-        <InfoTip tip="AI engine to use: claude (Anthropic), codex (OpenAI), or copilot (GitHub). Auto-detected on scan." />
+        <InfoTip tip="AI engine to use: claude (Anthropic), codex (OpenAI), copilot (GitHub), or opencode (OpenCode). Auto-detected on scan." />
       </label>
       <div class="flex flex-col gap-2">
         <label v-for="eng in engines" :key="eng.key" class="flex flex-col cursor-pointer">
@@ -462,7 +462,12 @@ function isValidUrl(s: string): boolean {
   }
 }
 
-const engines = reactive([{ key: "claude" }, { key: "codex" }, { key: "copilot" }]);
+const engines = reactive([
+  { key: "claude" },
+  { key: "codex" },
+  { key: "copilot" },
+  { key: "opencode" },
+]);
 const selectedEngine = ref("claude");
 const readyEngines = ref<Set<string>>(new Set());
 const engineLevels = ref<Map<string, string>>(new Map());
@@ -603,7 +608,7 @@ async function runDetect() {
           ?.filter((r) => r.level !== "ready")
           .map((r) => r.engine)
           .join(", ");
-        engineWarning.value = `No AI engine available (${notReady || "none"} not ready). Install claude, codex, or copilot CLI before dispatching.`;
+        engineWarning.value = `No AI engine available (${notReady || "none"} not ready). Install claude, codex, copilot, or opencode CLI before dispatching.`;
       } else {
         engineWarning.value = null;
       }

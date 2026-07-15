@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeToolConfigs } from "../src/commands/tools-mcp-config.js";
@@ -260,5 +260,86 @@ describe("writeToolConfigs engine gating (#427)", () => {
     writeToolConfigs(base, settings);
     expect(existsSync(join(base, ".mcp.json"))).toBe(true);
     expect(existsSync(join(base, CODEX_MCP))).toBe(true);
+  });
+
+  // #628: opencode was missing from writeToolConfigs entirely (no writer, no gating) —
+  // codegraph/lsp/user MCP servers silently never reached opencode.json.
+  test("engines=[opencode] writes opencode.json but NOT .mcp.json/.codex", () => {
+    const settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings, ["opencode"]);
+    expect(existsSync(join(base, "opencode.json"))).toBe(true);
+    expect(existsSync(join(base, ".mcp.json"))).toBe(false);
+    expect(existsSync(join(base, CODEX_MCP))).toBe(false);
+  });
+});
+
+describe("writeToolConfigs opencode.json (#628)", () => {
+  const OPENCODE_FILE = "opencode.json";
+
+  test("writes opencode.json's mcp map in opencode's JSON shape (command array, not TOML)", () => {
+    const settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings, ["opencode"]);
+    const config = JSON.parse(readFileSync(join(base, OPENCODE_FILE), "utf8"));
+    expect(config.mcp.codegraph).toEqual({
+      type: "local",
+      command: ["codegraph", "serve", "--mcp"],
+    });
+  });
+
+  test("preserves unrelated top-level keys (model, permission) on re-write", () => {
+    writeFileSync(
+      join(base, OPENCODE_FILE),
+      JSON.stringify({ model: "anthropic/claude", permission: { "*": "ask" } }),
+    );
+    const settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings, ["opencode"]);
+    const config = JSON.parse(readFileSync(join(base, OPENCODE_FILE), "utf8"));
+    expect(config.model).toBe("anthropic/claude");
+    expect(config.permission).toEqual({ "*": "ask" });
+    expect(config.mcp.codegraph).toBeDefined();
+  });
+
+  test("a user-declared stdio server merges into opencode.json's mcp map", () => {
+    const settings = writeSettings(base, {
+      tools: { codegraph: false, lsp: false },
+      mcpServers: { myserver: { command: "my-tool", args: ["--flag"] } },
+    });
+    writeToolConfigs(base, settings, ["opencode"]);
+    const config = JSON.parse(readFileSync(join(base, OPENCODE_FILE), "utf8"));
+    expect(config.mcp.myserver).toEqual({ type: "local", command: ["my-tool", "--flag"] });
+  });
+
+  test("a user-declared http server becomes opencode's remote type", () => {
+    const settings = writeSettings(base, {
+      tools: { codegraph: false, lsp: false },
+      mcpServers: { remote: { transport: "http", url: "https://example.com/mcp" } },
+    });
+    writeToolConfigs(base, settings, ["opencode"]);
+    const config = JSON.parse(readFileSync(join(base, OPENCODE_FILE), "utf8"));
+    expect(config.mcp.remote).toEqual({ type: "remote", url: "https://example.com/mcp" });
+  });
+
+  test("disabling codegraph removes it from opencode.json on the next write", () => {
+    let settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings, ["opencode"]);
+    expect(JSON.parse(readFileSync(join(base, OPENCODE_FILE), "utf8")).mcp.codegraph).toBeDefined();
+    settings = writeSettings(base, { tools: { codegraph: false, lsp: false } });
+    writeToolConfigs(base, settings, ["opencode"]);
+    expect(
+      JSON.parse(readFileSync(join(base, OPENCODE_FILE), "utf8")).mcp.codegraph,
+    ).toBeUndefined();
+  });
+
+  test("a corrupt opencode.json is left untouched (no data loss)", () => {
+    writeFileSync(join(base, OPENCODE_FILE), "{not valid json");
+    const settings = writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    writeToolConfigs(base, settings, ["opencode"]);
+    expect(readFileSync(join(base, OPENCODE_FILE), "utf8")).toBe("{not valid json");
+  });
+
+  test("no tools enabled and no user servers → opencode.json is not created", () => {
+    const settings = writeSettings(base, { tools: { codegraph: false, lsp: false } });
+    writeToolConfigs(base, settings, ["opencode"]);
+    expect(existsSync(join(base, OPENCODE_FILE))).toBe(false);
   });
 });

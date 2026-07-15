@@ -165,12 +165,14 @@ export const ENGINE_INSTRUCTION_SCOPE: Record<Engine, string[]> = {
   claude: ["CLAUDE.md"],
   codex: ["AGENTS.md"],
   copilot: ["AGENTS.md", ".github/copilot-instructions.md"],
+  opencode: ["AGENTS.md"],
 };
 
 export const ENGINE_SKILL_DIR: Record<Engine, string> = {
   claude: ".claude/skills/",
   codex: ".agents/skills/",
   copilot: ".github/skills/",
+  opencode: ".opencode/skills/",
 };
 
 export const INIT_DEFAULT_ENGINE: Engine = "copilot";

@@ -21,6 +21,7 @@ import type {
   Engine,
   JsonMcpEntry,
   McpServerDef,
+  OpencodeServerDef,
   TomlMcpEntry,
   ToolName,
   VibeSettings,
@@ -44,19 +45,30 @@ export function repoLanguages(
 /** Repo-relative MCP config files VibeFlow owns and may safely read+rewrite. */
 const CLAUDE_MCP_FILE = ".mcp.json";
 const CODEX_MCP_FILE = join(".codex", "config.toml");
+const OPENCODE_MCP_FILE = "opencode.json";
 
 /** Claude `.mcp.json` shape (only the slice we touch). */
 interface ClaudeMcpFile {
   mcpServers: Record<string, McpServerDef>;
 }
 
-/** #552: sidecar recording the server names VibeFlow wrote into .mcp.json last run, so the
- *  next run strips them ALL (even a now-deleted skill's server, which has no live source and
- *  would otherwise orphan) before re-adding current sources. Non-vf servers stay untouched. */
-const MCP_MANAGED_FILE = join(".vibeflow", ".mcp-managed.json");
+/** opencode.json shape (only the `mcp` slice we touch — other top-level keys like
+ *  `permission`, `model`, `agent` are user-owned and preserved as-is). */
+interface OpencodeConfigFile {
+  $schema?: string;
+  mcp?: Record<string, OpencodeServerDef>;
+  [key: string]: unknown;
+}
 
-function readManagedNames(base: string): string[] {
-  const p = join(base, MCP_MANAGED_FILE);
+/** #552: sidecar of server names VibeFlow wrote into .mcp.json last run, so the next run
+ *  strips them ALL (even a deleted skill's server) before re-adding current sources. */
+const MCP_MANAGED_FILE = join(".vibeflow", ".mcp-managed.json");
+/** Same as MCP_MANAGED_FILE, but for opencode.json's `mcp` map (separate sidecar so the
+ *  two writers' bookkeeping never clobbers each other in the same `vf init` run). */
+const OPENCODE_MCP_MANAGED_FILE = join(".vibeflow", ".opencode-mcp-managed.json");
+
+function readManagedNames(base: string, file: string = MCP_MANAGED_FILE): string[] {
+  const p = join(base, file);
   if (!existsSync(p)) return [];
   try {
     const v = JSON.parse(readFileSync(p, "utf8"));
@@ -66,8 +78,8 @@ function readManagedNames(base: string): string[] {
   }
 }
 
-function writeManagedNames(base: string, names: string[]): void {
-  writeFileSafe(join(base, MCP_MANAGED_FILE), JSON.stringify(names.sort(), null, 2));
+function writeManagedNames(base: string, names: string[], file: string = MCP_MANAGED_FILE): void {
+  writeFileSafe(join(base, file), JSON.stringify(names.sort(), null, 2));
 }
 
 /** Every MCP server name VibeFlow manages, across BOTH tools AND user servers — the keys we
@@ -151,6 +163,71 @@ function writeClaudeMcp(
   const hasServers = Object.keys(file.mcpServers).length > 0;
   if (!hasServers && !existsSync(path)) return false;
   writeFileSafe(path, JSON.stringify({ mcpServers: file.mcpServers }, null, 2));
+  return true;
+}
+
+/** Read `opencode.json`, preserving untouched top-level keys (model, permission, agent).
+ *  `corrupt` mirrors readClaudeMcp: an unparseable existing file is left untouched. */
+function readOpencodeConfig(path: string): OpencodeConfigFile & { corrupt: boolean } {
+  if (!existsSync(path)) return { mcp: {}, corrupt: false };
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as OpencodeConfigFile;
+    return { ...parsed, mcp: parsed.mcp ?? {}, corrupt: false };
+  } catch {
+    return { mcp: {}, corrupt: true };
+  }
+}
+
+/** Merge enabled-tool servers into `opencode.json`'s `mcp` map (#628: opencode had no
+ *  writer at all). Same strip-then-readd lockstep as writeClaudeMcp; other keys untouched. */
+function writeOpencodeMcp(
+  base: string,
+  settings: VibeSettings,
+  languages: string[],
+  extraStrip: readonly string[] = [],
+): boolean {
+  const path = join(base, OPENCODE_MCP_FILE);
+  const file = readOpencodeConfig(path);
+  if (file.corrupt) {
+    out(
+      "vf",
+      c.yellow(`! ${OPENCODE_MCP_FILE} is not valid JSON — left untouched. Fix it, then re-run.`),
+    );
+    return false;
+  }
+  const mcp = { ...file.mcp } as Record<string, OpencodeServerDef>;
+  const ctx = { workspace: base, languages };
+  const managed = resolveTools({ codegraph: true, lsp: true }, "opencode", ctx);
+  const managedNames = managed.entries.flatMap((e) =>
+    Object.keys((e as { servers: Record<string, unknown> }).servers),
+  );
+  for (const name of [
+    ...managedNames,
+    ...Object.keys(skillMcpServers(discoverSkills(base))),
+    ...Object.keys(settings.mcpServers ?? {}),
+    ...extraStrip,
+    ...readManagedNames(base, OPENCODE_MCP_MANAGED_FILE),
+  ])
+    delete mcp[name];
+  const merged = resolveTools(settings.tools, "opencode", ctx);
+  for (const entry of merged.entries) {
+    Object.assign(mcp, (entry as { servers: Record<string, OpencodeServerDef> }).servers);
+  }
+  const userServers = { ...skillMcpServers(discoverSkills(base)), ...(settings.mcpServers ?? {}) };
+  const writtenNames: string[] = [];
+  for (const [name, def] of Object.entries(userServers)) {
+    const entry = buildUserEntry("opencode", name, def);
+    if (entry) {
+      Object.assign(mcp, (entry as { servers: Record<string, OpencodeServerDef> }).servers);
+      writtenNames.push(name);
+    }
+  }
+  writeManagedNames(base, writtenNames, OPENCODE_MCP_MANAGED_FILE);
+  const hasServers = Object.keys(mcp).length > 0;
+  if (!hasServers && !existsSync(path)) return false;
+  const { corrupt: _corrupt, mcp: _oldMcp, ...rest } = file;
+  const out2 = { $schema: "https://opencode.ai/config.json", ...rest, mcp };
+  writeFileSafe(path, JSON.stringify(out2, null, 2));
   return true;
 }
 
@@ -312,7 +389,9 @@ export function writeToolConfigs(
   const needsMcpJson = !engines || engines.includes("claude") || engines.includes("copilot");
   if (needsMcpJson) writeClaudeMcp(base, settings, languages, removedMcpNames);
   if (!engines || engines.includes("codex")) writeCodexMcp(base, settings, languages);
+  if (!engines || engines.includes("opencode"))
+    writeOpencodeMcp(base, settings, languages, removedMcpNames);
   if (!engines || engines.includes("copilot")) printCopilotMcp(base, settings, languages);
 }
 
-export { CLAUDE_MCP_FILE };
+export { CLAUDE_MCP_FILE, OPENCODE_MCP_FILE };

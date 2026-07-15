@@ -33,6 +33,7 @@ export const ENGINE_IDE: Record<Engine, string> = {
   claude: "claude-code",
   codex: "codex-cli",
   copilot: "copilot-cli",
+  opencode: "opencode-cli",
 };
 
 export interface MemoryBackendOpts {

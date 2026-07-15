@@ -17,6 +17,7 @@ export const ENGINE_CONFIGS: Record<AgentEngine, EngineConfig> = {
   },
   codex: { instructionFiles: ["AGENTS.md"], skillRoot: ".agents/skills" },
   copilot: { instructionFiles: [".github/copilot-instructions.md"], skillRoot: ".github/skills" },
+  opencode: { instructionFiles: ["AGENTS.md"], skillRoot: ".opencode/skills" },
 };
 
 /**

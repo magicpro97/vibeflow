@@ -23,6 +23,7 @@ import * as lsp from "./lsp.js";
 const CLAUDE_CONFIG = ".mcp.json";
 const COPILOT_CONFIG = "~/.copilot/mcp-config.json";
 const CODEX_CONFIG = "~/.codex/config.toml";
+const OPENCODE_CONFIG = "opencode.json";
 
 /** A single install command. NOT executed here — returned for the caller to approve/run. */
 export interface InstallStep {
@@ -86,7 +87,23 @@ export interface TomlMcpEntry {
   tools: string[];
 }
 
-export type McpEntry = JsonMcpEntry | TomlMcpEntry;
+/** opencode's `mcp` config shape (opencode.json), verified against
+ *  https://opencode.ai/docs/mcp-servers/ — JSON, NOT the codex TOML shape.
+ *  `command` is the FULL argv (binary + args) as one array; env var is
+ *  `environment`, not `env`. */
+export type OpencodeServerDef =
+  | { type: "local"; command: string[]; environment?: Record<string, string> }
+  | { type: "remote"; url: string; headers?: Record<string, string> };
+
+/** opencode MCP entry: merges into the top-level `mcp` map in opencode.json. */
+export interface OpencodeMcpEntry {
+  engine: "opencode";
+  configPath: string;
+  servers: Record<string, OpencodeServerDef>;
+  tools: string[];
+}
+
+export type McpEntry = JsonMcpEntry | TomlMcpEntry | OpencodeMcpEntry;
 
 /** Options for detection, injectable so callers/tests can stub PATH lookups. */
 export interface DetectOpts {
@@ -150,6 +167,14 @@ export function buildStdioEntry(
       tools,
     };
   }
+  if (engine === "opencode") {
+    return {
+      engine,
+      configPath: OPENCODE_CONFIG,
+      servers: { [name]: { type: "local", command: [server.command, ...server.args] } },
+      tools,
+    };
+  }
   if (engine === "copilot") {
     return {
       engine,
@@ -169,6 +194,30 @@ export function buildStdioEntry(
  */
 export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer): McpEntry | null {
   const transport = def.transport ?? "stdio";
+  if (engine === "opencode") {
+    // opencode's remote type covers both http and sse (single "remote" shape,
+    // see https://opencode.ai/docs/mcp-servers/) — unlike codex, sse is not rejected.
+    if (transport === "http" || transport === "sse") {
+      const r = def as { url: string; headers?: Record<string, string> };
+      return {
+        engine,
+        configPath: OPENCODE_CONFIG,
+        servers: {
+          [name]: r.headers
+            ? { type: "remote", url: r.url, headers: r.headers }
+            : { type: "remote", url: r.url },
+        },
+        tools: [],
+      };
+    }
+    const stdio = def as { command: string; args?: string[] };
+    return {
+      engine,
+      configPath: OPENCODE_CONFIG,
+      servers: { [name]: { type: "local", command: [stdio.command, ...(stdio.args ?? [])] } },
+      tools: [],
+    };
+  }
   if (engine === "codex") {
     if (transport === "sse") return null;
     if (transport === "http") {

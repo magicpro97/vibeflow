@@ -2,18 +2,24 @@
  * Hook adapters: project the single VibeFlow hook protocol onto each engine's native
  * hook configuration. Every generated config delegates to one entrypoint — `vf hook` —
  * which reads a JSON event on stdin and returns an allow/warn/require_approval/block
- * decision (see hooks/runner.ts). One source of truth, three engines + git.
+ * decision (see hooks/runner.ts). One source of truth, four engines + git.
  *
- * Enforcement honesty: as of issue #79, Claude Code AND GitHub Copilot CLI both expose
- * a native pre-action vetoing hook (PreToolUse / preToolUse, fail-closed). Codex CLI
- * has no equivalent vetoing pre-tool hook today, so we wire it as DETECTION-ONLY
- * (post-hoc events) and surface a downgrade banner instead of advertising blocking
- * we cannot actually honor.
+ * Enforcement honesty: Claude Code (PreToolUse), GitHub Copilot CLI (preToolUse),
+ * AND opencode (`tool.execute.before` plugin that throws to block) all expose a
+ * native pre-action vetoing hook. Codex CLI has no equivalent vetoing pre-tool
+ * hook today, so we wire it as DETECTION-ONLY (post-hoc events) and surface a
+ * downgrade banner instead of advertising blocking we cannot actually honor.
  */
 
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Engine } from "../core.js";
+
+/** Stable marker the generator emits in the opencode plugin so the live-
+ *  guardrail probe can distinguish generator output from a hand-rolled file
+ *  that happens to mention `vf hook`. Kept in sync with `src/commands/doctor.ts`. */
+const GUARDRAIL_SENTINEL = "vibeflow-guardrail";
 
 /** Resolve the absolute path to dist/cli.js (or src/cli.ts in dev). */
 function cliPath(): string {
@@ -25,6 +31,38 @@ function cliPath(): string {
   return join(root, "dist", "cli.js");
 }
 
+/**
+ * Detect a stale opencode plugin — the generator hard-codes the absolute CLI
+ * path into `const VF_CLI = "..."`. If the user moves/reinstalls the CLI
+ * (e.g. `npm i -g @vibeflow/cli` to a different prefix, or a fresh clone of
+ * the repo), the path the plugin invokes is no longer the path the live CLI
+ * is actually running from. The plugin will then either fail to load or
+ * silently fall back to "allow" — a quiet loss of the guardrail.
+ *
+ * Returns the stale status, or `null` if the plugin isn't armed (no file, no
+ * sentinel) so the caller can distinguish "no plugin" from "out-of-date plugin".
+ */
+export function opencodePluginStale(
+  base: string,
+): { stale: boolean; expected: string; actual: string | null } | null {
+  const pluginPath = join(base, ".opencode", "plugins", "vf-guard.ts");
+  let raw: string;
+  try {
+    raw = readFileSync(pluginPath, "utf8");
+  } catch {
+    return null;
+  }
+  if (!raw.includes(GUARDRAIL_SENTINEL)) return null;
+  // Extract the absolute path from `const VF_CLI = "...";`
+  const match = /const\s+VF_CLI\s*=\s*"([^"]+)"/.exec(raw);
+  if (!match || !match[1]) {
+    // Plugin is malformed — count as stale with a clear signal.
+    return { stale: true, expected: cliPath(), actual: null };
+  }
+  const expected = cliPath();
+  return { stale: match[1] !== expected, expected, actual: match[1] };
+}
+
 /** Whether an engine can veto an action before it runs, or only detect after the fact. */
 export interface EngineEnforcementCapability {
   preActionBlocking: "native" | "post-hoc-only";
@@ -34,6 +72,10 @@ const ENFORCEMENT: Record<Engine, EngineEnforcementCapability> = {
   claude: { preActionBlocking: "native" },
   codex: { preActionBlocking: "post-hoc-only" },
   copilot: { preActionBlocking: "native" },
+  // opencode exposes a plugin system with `tool.execute.before` that can
+  // throw to block a tool call before it runs — semantically equivalent to
+  // Claude Code's PreToolUse and Copilot CLI's preToolUse.
+  opencode: { preActionBlocking: "native" },
 };
 
 /** Report whether an engine enforces guardrails natively or post-hoc only. */
@@ -128,6 +170,154 @@ export function copilotHookConfig(): string {
   return JSON.stringify(config, null, 2);
 }
 
+/** Opencode `.opencode/plugins/vf-guard.ts` — NATIVE enforcement via the plugin
+ *  system. Opencode auto-loads any `*.ts` / `*.js` under `.opencode/plugins/` (the
+ *  official, documented directory — note the plural; opencode never loads a
+ *  singular `.opencode/plugin/`) and
+ *  exposes a `tool.execute.before` hook that can MUTATE args and THROW to block
+ *  a tool call before it runs (semantically equivalent to Claude Code's
+ *  PreToolUse and Copilot CLI's preToolUse). The generated plugin shells out
+ *  to `vf hook` with a JSON payload and surfaces the decision:
+ *    - block / require_approval → throw an Error → opencode aborts the tool call
+ *    - allow / warn             → return silently
+ *  Plugin source is TypeScript; opencode runs it via bun/ts-node. The path to
+ *  the CLI is hard-coded as an absolute path so the plugin works regardless of
+ *  the user's cwd or PATH. */
+export function opencodePluginSource(): string {
+  const cmd = cliPath();
+  // We use a top-of-file marker that the live-guardrail probe matches, so
+  // `doctor` and `hooks status` recognize the plugin as armed.
+  return `// VibeFlow guardrail plugin for opencode (auto-loaded from .opencode/plugins/).
+// Generated by \`vf hooks emit --yes\`. Do not edit by hand — re-run the
+// generator after upgrading VibeFlow.
+// # vibeflow-guardrail
+//
+// Block semantics: a decision of "block" or "require_approval" from the
+// \`vf hook\` runner is surfaced as a thrown Error, which opencode treats as
+// a hard veto of the tool call. "allow" and "warn" return silently.
+import { spawnSync } from "node:child_process";
+
+// Absolute path to the VibeFlow CLI that owns the risk model. Hard-coded
+// at generate-time so the plugin does not depend on the user's PATH or cwd.
+const VF_CLI = ${JSON.stringify(cmd)};
+
+interface BeforeInput {
+  tool: string;
+  sessionID?: string;
+  callID?: string;
+}
+interface BeforeOutput {
+  args: unknown;
+}
+interface AfterInput {
+  tool: string;
+  sessionID?: string;
+  callID?: string;
+}
+interface AfterOutput {
+  title: string;
+  output: string;
+  metadata: unknown;
+}
+
+/** Map an opencode tool name + args to the VibeFlow hook input schema. */
+function buildEvent(
+  event: "pre-tool-use" | "post-tool-use",
+  input: BeforeInput | AfterInput,
+  output: BeforeOutput | AfterOutput,
+): Record<string, unknown> {
+  const args = (output as BeforeOutput).args;
+  const filePath =
+    typeof args === "object" && args !== null && "filePath" in args
+      ? (args as { filePath?: string }).filePath
+      : undefined;
+  const content =
+    typeof args === "object" && args !== null && "content" in args
+      ? (args as { content?: string }).content
+      : undefined;
+  const command =
+    typeof args === "object" && args !== null && "command" in args
+      ? (args as { command?: string }).command
+      : undefined;
+  return {
+    event,
+    tool: input.tool,
+    workspace: process.cwd(),
+    ...(filePath ? { files: [filePath] } : {}),
+    ...(typeof content === "string" ? { content } : {}),
+    ...(typeof command === "string" ? { command } : {}),
+  };
+}
+
+/** Map the \`vf hook\` runner's permissionDecision envelope to the internal
+ *  block/allow semantics the plugin uses to decide whether to throw. The
+ *  runner is intentionally Copilot-schema-shaped so a single source of truth
+ *  serves every engine adapter; the plugin is the only consumer that needs
+ *  to unpack it. */
+function callHook(event: Record<string, unknown>): {
+  decision: "allow" | "warn" | "require_approval" | "block" | "error";
+  reasons: string[];
+} {
+  try {
+    const r = spawnSync("node", [VF_CLI, "hook"], {
+      input: JSON.stringify(event),
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    if (r.status !== 0) {
+      return { decision: "allow", reasons: [\`vf hook exit \${r.status}\`] };
+    }
+    // The runner prints the JSON envelope on the first line and a free-form
+    // "[hook] ..." log on the second line; parse only the first line so the
+    // trailing log does not poison JSON.parse.
+    const firstLine = (r.stdout || "").split("\\n", 1)[0]?.trim() ?? "";
+    const parsed = JSON.parse(firstLine || "{}") as {
+      hookSpecificOutput?: {
+        permissionDecision?: "allow" | "ask" | "deny";
+        permissionDecisionReason?: string;
+      };
+    };
+    const perm = parsed.hookSpecificOutput?.permissionDecision ?? "allow";
+    const reason = parsed.hookSpecificOutput?.permissionDecisionReason ?? "";
+    const decision =
+      perm === "deny" ? "block" : perm === "ask" ? "require_approval" : "allow";
+    return {
+      decision,
+      reasons: reason ? [reason] : [],
+    };
+  } catch (e) {
+    return { decision: "allow", reasons: [\`vf hook threw: \${(e as Error).message}\`] };
+  }
+}
+
+const VfGuard = async () => ({
+  "tool.execute.before": async (
+    input: BeforeInput,
+    output: BeforeOutput,
+  ): Promise<void> => {
+    const event = buildEvent("pre-tool-use", input, output);
+    const { decision, reasons } = callHook(event);
+    if (decision === "block" || decision === "require_approval") {
+      const why = reasons.length > 0 ? \`: \${reasons.join("; ")}\` : "";
+      throw new Error(\`VibeFlow hook \${decision}\${why}\`);
+    }
+    // allow / warn: no-op, opencode proceeds with the tool call.
+  },
+  "tool.execute.after": async (
+    _input: AfterInput,
+    _output: AfterOutput,
+  ): Promise<void> => {
+    // Post-tool observation is a future expansion. Today, pre-tool covers
+    // the destructive/secret/workspace-escape attack surface; post-tool is
+    // reserved for emission (audit log, knowledge write-back) so the gate
+    // stays fail-closed.
+  },
+});
+
+export default VfGuard;
+`;
+}
+
 /**
  * A portable git pre-commit that funnels staged files through `vf hook`. Fails CLOSED:
  * command not found or empty decision → block. Calls `node <absolute-path> hook`.
@@ -195,6 +385,9 @@ export function engineHookFiles(engines?: Engine[]): Record<string, string> {
     ...(!engines || engines.includes("codex") ? { ".codex/hooks.json": codexHookConfig() } : {}),
     ...(!engines || engines.includes("copilot")
       ? { ".github/hooks/copilot.json": copilotHookConfig() }
+      : {}),
+    ...(!engines || engines.includes("opencode")
+      ? { ".opencode/plugins/vf-guard.ts": opencodePluginSource() }
       : {}),
     ".githooks/pre-commit": gitPreCommit(),
     ".githooks/post-checkout": gitPostCheckout(),

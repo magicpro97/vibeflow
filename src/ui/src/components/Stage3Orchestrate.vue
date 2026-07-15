@@ -45,7 +45,7 @@
           v-if="!preflightResult.anyReady"
           class="text-xs text-neutral-500 flex items-center gap-1"
         >
-          ⚠ No engine ready — agents cannot run. Install claude, codex, or copilot CLI.
+          ⚠ No engine ready — agents cannot run. Install claude, codex, copilot, or opencode CLI.
         </span>
       </div>
 

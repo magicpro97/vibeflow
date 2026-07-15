@@ -135,7 +135,10 @@ export function askInvocation(engine: Engine): AskInvocation {
       // copilot takes the prompt as an argv token (promptMode "arg"); --allow-all
       // is its omnibus permission flag (see dispatch.ts copilotCommand).
       return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" };
+    case "opencode":
+      return { cmd: "opencode", args: ["run", "--format", "json", "-"], promptMode: "stdin" };
   }
+  throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
 }
 
 /**
@@ -145,6 +148,7 @@ export function askInvocation(engine: Engine): AskInvocation {
  *   - claude: `-c -p` (continue most recent, print mode, prompt on stdin)
  *   - codex:  `exec resume --last -` (resume most recent, prompt on stdin)
  *   - copilot: no stable resume flag → returns a string (unsupported) so the caller errors.
+ *   - opencode: `-c/--continue` resumes most recent session.
  */
 export function resumeInvocation(engine: Engine): AskInvocation | string {
   switch (engine) {
@@ -154,7 +158,14 @@ export function resumeInvocation(engine: Engine): AskInvocation | string {
       return { cmd: "codex", args: ["exec", "resume", "--last", "-"], promptMode: "stdin" };
     case "copilot":
       return "resume is not supported for copilot — omit --resume to ask a fresh question";
+    case "opencode":
+      return {
+        cmd: "opencode",
+        args: ["run", "--continue", "--format", "json", "-"],
+        promptMode: "stdin",
+      };
   }
+  throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
 }
 
 /** Choose the engine: an explicit override must be ready; else first ready in ENGINES order. */

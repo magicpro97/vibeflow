@@ -15,8 +15,9 @@ import * as lsp from "../src/tools/lsp.js";
 const WORKSPACE = "/abs/repo";
 
 function asJson(entry: McpEntry): JsonMcpEntry {
-  if (entry.engine === "codex") throw new Error("expected JSON entry, got codex TOML");
-  return entry;
+  if ((entry as TomlMcpEntry).section !== undefined)
+    throw new Error("expected JSON entry, got TOML entry");
+  return entry as JsonMcpEntry;
 }
 
 describe("codegraph tool", () => {

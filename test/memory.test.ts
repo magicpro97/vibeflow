@@ -45,6 +45,7 @@ describe("memory.ENGINE_IDE", () => {
       claude: "claude-code",
       codex: "codex-cli",
       copilot: "copilot-cli",
+      opencode: "opencode-cli",
     });
   });
 });
