@@ -186,12 +186,44 @@ export async function doctor(
   // silently falls back to "allow" — a quiet loss of the guardrail.
   const opencodeStale = opencodePluginStale(base);
   if (opencodeStale?.stale) {
-    out(
-      "vf",
-      c.yellow(
-        `  ⚠ opencode plugin is STALE: hard-coded path ${opencodeStale.actual ?? "(missing)"} does not match current CLI ${opencodeStale.expected}. Run \`vf hooks emit --yes\` to refresh.`,
-      ),
-    );
+    const fix = Boolean(flags.fix);
+    if (fix) {
+      try {
+        const { emitHookFiles } = await import("./hooks.js");
+        // emitHookFiles always re-emits .githooks/* (VibeFlow-owned, engine-
+        // agnostic), so filter to the opencode plugin only — that's what the
+        // user came here to fix.
+        const all = emitHookFiles(base, ["opencode"]);
+        const written = all.filter((rel) => rel.startsWith(".opencode/"));
+        if (written.length > 0) {
+          out(
+            "vf",
+            c.green(
+              `  ✓ opencode plugin refreshed (${written.join(", ")}) — hard-coded path now matches current CLI ${opencodeStale.expected}`,
+            ),
+          );
+        } else {
+          out(
+            "vf",
+            c.yellow("  ! could not refresh opencode plugin (emitHookFiles wrote nothing)"),
+          );
+        }
+      } catch (e) {
+        out(
+          "vf",
+          c.yellow(
+            `  ! opencode plugin is STALE and auto-refresh failed: ${(e as Error).message}. Run \`vf hooks emit --yes\` manually.`,
+          ),
+        );
+      }
+    } else {
+      out(
+        "vf",
+        c.yellow(
+          `  ⚠ opencode plugin is STALE: hard-coded path ${opencodeStale.actual ?? "(missing)"} does not match current CLI ${opencodeStale.expected}. Run \`vf doctor --fix\` to refresh automatically, or \`vf hooks emit --yes\` manually.`,
+        ),
+      );
+    }
   }
 
   // Issue #163 (F2): stale logbus lock detection

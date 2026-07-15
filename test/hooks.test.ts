@@ -1002,6 +1002,49 @@ describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("--fix refreshes a drifted plugin in place and prints the success line", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-doc-fix-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      // Drift the plugin.
+      const drifted = opencodePluginSource().replace(
+        /const VF_CLI = "[^"]+"/,
+        'const VF_CLI = "/old/install/dist/cli.js"',
+      );
+      writeFileSync(join(pluginDir, "vf-guard.ts"), drifted);
+
+      const { doctor } = await import("../src/commands/doctor.js");
+      const buf: string[] = [];
+      const log = console.log;
+      const err = console.error;
+      console.log = (...a: unknown[]) => {
+        buf.push(a.map(String).join(" "));
+      };
+      console.error = (...a: unknown[]) => {
+        buf.push(a.map(String).join(" "));
+      };
+      try {
+        await doctor({ fix: true }, { hasCommand: () => true, base: dir });
+      } finally {
+        console.log = log;
+        console.error = err;
+      }
+      const out = buf.join("\n");
+      // Success line, no warning.
+      expect(out).toMatch(/opencode plugin refreshed/);
+      expect(out).not.toMatch(/opencode plugin is STALE/);
+      // The on-disk plugin now has the current CLI path.
+      const refreshed = readFileSync(join(pluginDir, "vf-guard.ts"), "utf8");
+      const m = /const VF_CLI = "([^"]+)"/.exec(refreshed);
+      expect(m).not.toBeNull();
+      // The refreshed path must NOT be the drifted one.
+      expect(m?.[1]).not.toBe("/old/install/dist/cli.js");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // --- Integration: Claude's exec form (argv spawned directly, no shell) must evaluate the
