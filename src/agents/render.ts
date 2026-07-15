@@ -208,6 +208,22 @@ export function renderCopilotAgent(spec: RoleSpec): string {
   ].join("\n");
 }
 
+/** Render an OpenCode agent file: Markdown + YAML frontmatter (opencode.ai/docs/agents).
+ * No `name` field — opencode derives the agent name from the filename. No `tools` field
+ * either — opencode's schema is `permission` (per-tool allow/deny), not a tool allowlist;
+ * RoleSpec's `tools` here means "needs full access", which is opencode's default, so we
+ * omit `permission` and let it fall through to allow-everything. Path: `.opencode/agents/<name>.md`. */
+export function renderOpencodeAgent(spec: RoleSpec): string {
+  return [
+    "---",
+    `description: ${yamlQuote(spec.description)}`,
+    "mode: subagent",
+    "---",
+    "",
+    spec.body,
+  ].join("\n");
+}
+
 /** Render the agent file body for a given engine. */
 export function renderForEngine(engine: AgentEngine, spec: RoleSpec): string {
   switch (engine) {
@@ -218,7 +234,7 @@ export function renderForEngine(engine: AgentEngine, spec: RoleSpec): string {
     case "copilot":
       return renderCopilotAgent(spec);
     case "opencode":
-      return renderCodexAgent(spec);
+      return renderOpencodeAgent(spec);
   }
 }
 

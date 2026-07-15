@@ -5,6 +5,7 @@ import {
   renderCodexAgent,
   renderCopilotAgent,
   renderForEngine,
+  renderOpencodeAgent,
   safeAgentName,
   yamlQuote,
 } from "../src/agents/render.js";
@@ -56,6 +57,28 @@ describe("renderCopilotAgent", () => {
     expect(out).toMatch(/^description:\s+CLI specialist/m);
     expect(out).not.toMatch(/^model:\s+sonnet/m);
     expect(out).toContain("# CLI Engine");
+  });
+});
+
+// #628: renderForEngine("opencode") used to fall through to renderCodexAgent (TOML),
+// but agentFilePath("opencode") writes a `.md` path — TOML content in a .md file was
+// never valid opencode agent config. opencode's real schema (opencode.ai/docs/agents)
+// is markdown + YAML frontmatter with `description`/`mode`, no `name`/`tools` fields.
+describe("renderOpencodeAgent", () => {
+  test("emits Markdown + YAML frontmatter, not TOML", () => {
+    const out = renderOpencodeAgent(SPEC);
+    expect(out).toMatch(/^---/);
+    expect(out).toMatch(/^description:\s+CLI specialist/m);
+    expect(out).toMatch(/^mode:\s+subagent/m);
+    expect(out).not.toMatch(/^name\s*=/m);
+    expect(out).not.toMatch(/developer_instructions/);
+    expect(out).toContain("# CLI Engine");
+  });
+
+  test("renderForEngine routes opencode to renderOpencodeAgent, not renderCodexAgent", () => {
+    const out = renderForEngine("opencode", SPEC);
+    expect(out).toBe(renderOpencodeAgent(SPEC));
+    expect(out).not.toMatch(/developer_instructions/);
   });
 });
 
