@@ -13,7 +13,7 @@ const ENGINE_FILES = [
   ".claude/settings.json",
   ".codex/hooks.json",
   ".github/hooks/copilot.json",
-  ".opencode/plugin/vf-guard.ts",
+  ".opencode/plugins/vf-guard.ts",
   ".githooks/pre-commit",
   ".githooks/post-checkout",
   ".githooks/post-merge",

@@ -138,7 +138,7 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
 });
 
 // --- Opencode plugin generator: emitted source must be valid TS that
-// auto-loads from .opencode/plugin/, hard-codes the absolute CLI path, and
+// auto-loads from .opencode/plugins/, hard-codes the absolute CLI path, and
 // contains the stable generator marker used by liveGuardrailArmed. ---
 describe("adapters: opencode plugin generator (issue #79 parity for opencode)", () => {
   const src = opencodePluginSource();
@@ -826,10 +826,10 @@ describe("live guardrail detection", () => {
   // --- Opencode plugin: live detection. The probe must NOT report armed for
   // a hand-rolled plugin that does not delegate to `vf hook`, and MUST report
   // armed for the real generator output. ---
-  test("ON when .opencode/plugin/vf-guard.ts is the real generator (delegates to vf hook)", () => {
+  test("ON when .opencode/plugins/vf-guard.ts is the real generator (delegates to vf hook)", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-gd-opencode-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       // Empty file → OFF
       writeFileSync(join(pluginDir, "vf-guard.ts"), "// placeholder\n");
@@ -842,10 +842,10 @@ describe("live guardrail detection", () => {
     }
   });
 
-  test("OFF when .opencode/plugin/vf-guard.ts exists but does NOT delegate to vf hook", () => {
+  test("OFF when .opencode/plugins/vf-guard.ts exists but does NOT delegate to vf hook", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-gd-opencode-rogue-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       // Hand-rolled plugin that mentions the sentinel but does not call vf hook.
       writeFileSync(
@@ -875,7 +875,7 @@ describe("adapters: opencode plugin staleness (issue #624 task: detect drifted C
   test("returns null when the plugin file is present but not the generator's output", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-stale-rogue-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       // Hand-rolled plugin — no sentinel — should report null (probe owns this).
       writeFileSync(
@@ -891,7 +891,7 @@ describe("adapters: opencode plugin staleness (issue #624 task: detect drifted C
   test("returns stale=false when the generator's hard-coded path matches the current CLI", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-stale-fresh-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       writeFileSync(join(pluginDir, "vf-guard.ts"), opencodePluginSource());
       const r = opencodePluginStale(dir);
@@ -906,7 +906,7 @@ describe("adapters: opencode plugin staleness (issue #624 task: detect drifted C
   test("returns stale=true when the hard-coded path was moved/reinstalled", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-stale-drifted-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       // Inject a wrong path into the real generator's source.
       const drifted = opencodePluginSource().replace(
@@ -927,7 +927,7 @@ describe("adapters: opencode plugin staleness (issue #624 task: detect drifted C
   test("malformed generator output (no VF_CLI line) reports stale with actual=null", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-stale-malformed-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       // Sentinel present but the path is unparseable.
       writeFileSync(
@@ -949,7 +949,11 @@ describe("adapters: opencode plugin staleness (issue #624 task: detect drifted C
 // doctor() prints to stdout via the logbus; we monkey-patch console.log (the
 // logbus fallback path when no logbus client is registered) to capture. ---
 describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
-  async function captureDoctor(base: string): Promise<string> {
+  async function captureDoctor(
+    base: string,
+    flags: Record<string, string | boolean> = {},
+    emitHookFiles?: (base: string, engines?: string[]) => string[],
+  ): Promise<string> {
     const { doctor } = await import("../src/commands/doctor.js");
     const buf: string[] = [];
     const log = console.log;
@@ -961,7 +965,7 @@ describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
       buf.push(a.map(String).join(" "));
     };
     try {
-      await doctor({}, { hasCommand: () => true, base });
+      await doctor(flags, { hasCommand: () => true, base, emitHookFiles });
     } finally {
       console.log = log;
       console.error = err;
@@ -972,7 +976,7 @@ describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
   test("yellow STALE warning when the hard-coded path was drifted", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-doc-stale-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       // Hand-craft a generator-like file with a wrong path.
       const drifted = opencodePluginSource().replace(
@@ -992,7 +996,7 @@ describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
   test("NO STALE warning when the hard-coded path matches the current CLI", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-doc-fresh-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       writeFileSync(join(pluginDir, "vf-guard.ts"), opencodePluginSource());
 
@@ -1006,7 +1010,7 @@ describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
   test("--fix refreshes a drifted plugin in place and prints the success line", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-doc-fix-"));
     try {
-      const pluginDir = join(dir, ".opencode", "plugin");
+      const pluginDir = join(dir, ".opencode", "plugins");
       mkdirSync(pluginDir, { recursive: true });
       // Drift the plugin.
       const drifted = opencodePluginSource().replace(
@@ -1041,6 +1045,48 @@ describe("doctor: surfaces opencode plugin staleness (issue #624)", () => {
       expect(m).not.toBeNull();
       // The refreshed path must NOT be the drifted one.
       expect(m?.[1]).not.toBe("/old/install/dist/cli.js");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Two defensive branches that can't happen through the real emitHookFiles
+  // (it always writes the opencode file when asked) but must still degrade
+  // gracefully if the write layer ever misbehaves. Mock the dynamic import's
+  // module to force each branch.
+  test("--fix prints a warning when emitHookFiles writes nothing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-doc-fix-empty-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugins");
+      mkdirSync(pluginDir, { recursive: true });
+      const drifted = opencodePluginSource().replace(
+        /const VF_CLI = "[^"]+"/,
+        'const VF_CLI = "/old/install/dist/cli.js"',
+      );
+      writeFileSync(join(pluginDir, "vf-guard.ts"), drifted);
+
+      const out = await captureDoctor(dir, { fix: true }, () => []);
+      expect(out).toMatch(/could not refresh opencode plugin/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--fix prints a warning when emitHookFiles throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-doc-fix-throw-"));
+    try {
+      const pluginDir = join(dir, ".opencode", "plugins");
+      mkdirSync(pluginDir, { recursive: true });
+      const drifted = opencodePluginSource().replace(
+        /const VF_CLI = "[^"]+"/,
+        'const VF_CLI = "/old/install/dist/cli.js"',
+      );
+      writeFileSync(join(pluginDir, "vf-guard.ts"), drifted);
+
+      const out = await captureDoctor(dir, { fix: true }, () => {
+        throw new Error("disk full");
+      });
+      expect(out).toMatch(/auto-refresh failed: disk full/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

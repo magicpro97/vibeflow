@@ -86,12 +86,12 @@ export function liveGuardrailArmed(base: string): boolean {
   } catch {
     /* not armed via Copilot */
   }
-  // Opencode plugin: `.opencode/plugin/vf-guard.ts` auto-loads and shells out
-  // to `vf hook`. We don't parse the TS source — we just look for the
-  // generator's stable marker so a hand-rolled plugin that doesn't actually
-  // delegate to `vf hook` does NOT report as armed.
+  // Opencode plugin: `.opencode/plugins/vf-guard.ts` (plural — the documented
+  // directory) auto-loads and shells out to `vf hook`. We don't parse the TS
+  // source — we just look for the generator's stable marker so a hand-rolled
+  // plugin that doesn't actually delegate to `vf hook` does NOT report as armed.
   try {
-    const raw = readFileSync(join(base, ".opencode", "plugin", "vf-guard.ts"), "utf8");
+    const raw = readFileSync(join(base, ".opencode", "plugins", "vf-guard.ts"), "utf8");
     // The generator's plugin always references the literal `"hook"` arg in
     // its `spawnSync` call. A hand-rolled plugin that doesn't delegate to
     // `vf hook` is missing that arg, so the sentinel + arg check is enough.
@@ -149,6 +149,10 @@ export async function doctor(
     // Test seam: override the base directory used for live-guardrail
     // detection and opencode-plugin staleness checks. Defaults to cwd().
     base?: string;
+    // Test seam: override the `emitHookFiles` used by `--fix` so unit tests
+    // can force the "wrote nothing" / "threw" defensive branches without
+    // mock.module() (which leaks across test files in the same process).
+    emitHookFiles?: (base: string, engines?: Engine[]) => string[];
   } = {},
 ): Promise<number> {
   const _hasCommand = inject.hasCommand ?? hasCommand;
@@ -189,7 +193,7 @@ export async function doctor(
     const fix = Boolean(flags.fix);
     if (fix) {
       try {
-        const { emitHookFiles } = await import("./hooks.js");
+        const emitHookFiles = inject.emitHookFiles ?? (await import("./hooks.js")).emitHookFiles;
         // emitHookFiles always re-emits .githooks/* (VibeFlow-owned, engine-
         // agnostic), so filter to the opencode plugin only — that's what the
         // user came here to fix.
