@@ -11,7 +11,6 @@ import {
 import { parseFrontmatter } from "../frontmatter.js";
 import type { UserMcpServer } from "../tools/index.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
-import { sharedCatalogDir } from "./catalog.js";
 
 /**
  * Directories that may contain `<name>/SKILL.md` folders.
