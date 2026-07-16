@@ -23,12 +23,11 @@ describe("importSkillFromDir", () => {
     );
     writeFileSync(join(src, "my-skill", "references", "notes.md"), "domain notes");
 
-    const result = importSkillFromDir(repo, join(src, "my-skill"));
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    const result = importSkillFromDir(repo, join(src, "my-skill"), { catalogDir });
     expect(result.ok).toBe(true);
-    expect(existsSync(join(repo, ".vibeflow", "skills", "my-skill", "SKILL.md"))).toBe(true);
-    expect(
-      existsSync(join(repo, ".vibeflow", "skills", "my-skill", "references", "notes.md")),
-    ).toBe(true);
+    expect(existsSync(join(catalogDir, "my-skill", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(catalogDir, "my-skill", "references", "notes.md"))).toBe(true);
   });
 
   test("rejects invalid skill (placeholder body)", () => {
@@ -56,7 +55,8 @@ describe("importSkillFromDir", () => {
       join(src1, "my-skill", "SKILL.md"),
       "---\nname: my-skill\ndescription: First version of the skill body for import backup test.\n---\n\n# v1\n\nFirst version body text that is long enough to pass the placeholder check.\n",
     );
-    const r1 = importSkillFromDir(repo, join(src1, "my-skill"));
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    const r1 = importSkillFromDir(repo, join(src1, "my-skill"), { catalogDir });
     expect(r1.ok).toBe(true);
     // Second import — should backup the first before overwriting
     mkdirSync(join(src2, "my-skill"));
@@ -64,10 +64,10 @@ describe("importSkillFromDir", () => {
       join(src2, "my-skill", "SKILL.md"),
       "---\nname: my-skill\ndescription: Second version of the skill body for import backup test.\n---\n\n# v2\n\nSecond version body text that is long enough to pass the placeholder check.\n",
     );
-    const r2 = importSkillFromDir(repo, join(src2, "my-skill"));
+    const r2 = importSkillFromDir(repo, join(src2, "my-skill"), { catalogDir });
     expect(r2.ok).toBe(true);
     // Verify backup exists under .vibeflow/skills/.backup/<ts>/my-skill
-    const backupRoot = join(repo, ".vibeflow", "skills", ".backup");
+    const backupRoot = join(catalogDir, ".backup");
     expect(existsSync(backupRoot)).toBe(true);
   });
 

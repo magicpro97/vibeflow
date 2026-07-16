@@ -124,7 +124,8 @@ describe("migrateToSharedCatalog", () => {
     const timestamps = readdirSync(backupRoot);
     expect(timestamps.length).toBeGreaterThanOrEqual(1);
     // Backed up copy has old content
-    const backedUp = join(backupRoot, timestamps[0]!, "clash", "SKILL.md");
+    const ts = timestamps[0] ?? "";
+    const backedUp = join(backupRoot, ts, "clash", "SKILL.md");
     expect(existsSync(backedUp)).toBe(true);
   });
 

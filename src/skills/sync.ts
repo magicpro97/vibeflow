@@ -138,11 +138,15 @@ export function syncSkillMirrors(
   return { ok: errors.length === 0, mode, synced, errors, warnings };
 }
 
-export function verifySkillSync(repo: string, engines?: Engine[]): SkillSyncResult {
+export function verifySkillSync(
+  repo: string,
+  engines?: Engine[],
+  opts: { catalogDir?: string } = {},
+): SkillSyncResult {
   const mirrors = mirrorsFor(engines);
   const errors: string[] = [];
   const synced: string[] = [];
-  for (const name of skillNames(repo)) {
+  for (const name of skillNames(repo, { catalogDir: opts.catalogDir })) {
     for (const mirror of mirrors) {
       const dst = join(repo, mirror, name, "SKILL.md");
       if (!existsSync(dst)) {

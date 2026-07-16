@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { sharedCatalogDir } from "./catalog.js";
 import {
   CTX_DIR,
   type Skill,
@@ -11,6 +10,7 @@ import {
 import { parseFrontmatter } from "../frontmatter.js";
 import type { UserMcpServer } from "../tools/index.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
+import { sharedCatalogDir } from "./catalog.js";
 
 /**
  * Directories that may contain `<name>/SKILL.md` folders.
