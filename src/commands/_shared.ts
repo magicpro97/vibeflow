@@ -56,6 +56,7 @@ export * from "../scanner.js";
 export * from "../settings.js";
 export * from "../skills/crystallize.js";
 export * from "../skills/auto-crystallize.js";
+export * from "../skills/catalog.js";
 export * from "../skills/importer.js";
 export * from "../skills/registry.js";
 export * from "../skills/resolver.js";

@@ -19,6 +19,7 @@
 // come from the seams module via the barrel.
 
 import { opencodePluginStale } from "../hooks/adapters.js";
+import { sharedCatalogDir, sharedSkillNames } from "../skills/catalog.js";
 import type { Engine, EngineReadiness } from "./_shared.js";
 import {
   CTX7_AUTH_STATUS_REL,
