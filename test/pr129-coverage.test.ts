@@ -151,7 +151,7 @@ describe("commands.ensureCtx7Auth (PR129 coverage shim)", () => {
     setTTY(false);
     const { ensureCtx7Auth } = await import("../src/commands.js");
     const r = await ensureCtx7Auth();
-    expect(r).toEqual({ authenticated: false, fallback: true });
+    expect(r).toEqual({ authenticated: false, fallback: true, mode: "non-tty-fallback" });
   });
 
   test("isTTY + whoami 'Logged in' → authenticated, no prompt (lines 686-691)", async () => {
@@ -163,7 +163,7 @@ describe("commands.ensureCtx7Auth (PR129 coverage shim)", () => {
     };
     const { ensureCtx7Auth } = await import("../src/commands.js");
     const r = await ensureCtx7Auth({ spawner: spawner as never });
-    expect(r).toEqual({ authenticated: true, fallback: false });
+    expect(r).toEqual({ authenticated: true, fallback: false, mode: "tty" });
     expect(calls.length).toBe(1);
   });
 
@@ -179,7 +179,7 @@ describe("commands.ensureCtx7Auth (PR129 coverage shim)", () => {
       spawner: spawner as never,
       askConfirm: async () => false,
     });
-    expect(r).toEqual({ authenticated: false, fallback: true });
+    expect(r).toEqual({ authenticated: false, fallback: true, mode: "tty-skipped" });
     expect(calls.length).toBe(1);
   });
 
@@ -196,7 +196,7 @@ describe("commands.ensureCtx7Auth (PR129 coverage shim)", () => {
       spawner: spawner as never,
       askConfirm: async () => true,
     });
-    expect(r).toEqual({ authenticated: true, fallback: false });
+    expect(r).toEqual({ authenticated: true, fallback: false, mode: "tty" });
     expect(call).toBe(2);
   });
 
@@ -213,7 +213,7 @@ describe("commands.ensureCtx7Auth (PR129 coverage shim)", () => {
       spawner: spawner as never,
       askConfirm: async () => true,
     });
-    expect(r).toEqual({ authenticated: false, fallback: true });
+    expect(r).toEqual({ authenticated: false, fallback: true, mode: "tty-skipped" });
     expect(call).toBe(2);
   });
 
@@ -229,7 +229,7 @@ describe("commands.ensureCtx7Auth (PR129 coverage shim)", () => {
         }) as never,
       askConfirm: async () => null,
     });
-    expect(r).toEqual({ authenticated: false, fallback: true });
+    expect(r).toEqual({ authenticated: false, fallback: true, mode: "tty-skipped" });
   });
 });
 

@@ -141,17 +141,18 @@ describe("vf doctor — ctx7 auth status line (#630)", () => {
     mkdirSync(ctxDir, { recursive: true });
     writeFileSync(
       join(tmp, ".vibeflow", CTX7_AUTH_STATUS_REL),
-      JSON.stringify({ authenticated: false, mode: "non-tty-fallback", timestamp: "2026-07-16T00:00:00Z" }),
+      JSON.stringify({
+        authenticated: false,
+        mode: "non-tty-fallback",
+        timestamp: "2026-07-16T00:00:00Z",
+      }),
     );
 
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
     try {
-      const code = await doctor(
-        {},
-        { readiness: [r("claude", "ready")], base: tmp },
-      );
+      const code = await doctor({}, { readiness: [r("claude", "ready")], base: tmp });
       expect(code).toBe(0);
       expect(logs.some((l) => l.includes("ctx7: unauthenticated"))).toBe(true);
       expect(logs.some((l) => l.includes("HTTP fallback"))).toBe(true);
@@ -174,10 +175,7 @@ describe("vf doctor — ctx7 auth status line (#630)", () => {
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
     try {
-      const code = await doctor(
-        {},
-        { readiness: [r("claude", "ready")], base: tmp },
-      );
+      const code = await doctor({}, { readiness: [r("claude", "ready")], base: tmp });
       expect(code).toBe(0);
       expect(logs.some((l) => l.includes("ctx7:") && l.includes("authenticated"))).toBe(true);
     } finally {
@@ -194,10 +192,7 @@ describe("vf doctor — ctx7 auth status line (#630)", () => {
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
     try {
-      const code = await doctor(
-        {},
-        { readiness: [r("claude", "ready")], base: tmp },
-      );
+      const code = await doctor({}, { readiness: [r("claude", "ready")], base: tmp });
       expect(code).toBe(0);
       expect(logs.some((l) => l.includes("ctx7:"))).toBe(false);
     } finally {
@@ -216,10 +211,7 @@ describe("vf doctor — ctx7 auth status line (#630)", () => {
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
     try {
-      const code = await doctor(
-        {},
-        { readiness: [r("claude", "ready")], base: tmp },
-      );
+      const code = await doctor({}, { readiness: [r("claude", "ready")], base: tmp });
       expect(code).toBe(0);
       expect(logs.some((l) => l.includes("ctx7:"))).toBe(false);
     } finally {

@@ -75,11 +75,13 @@ export async function ensureCtx7Auth(
   if (!process.stdin.isTTY) {
     out(
       "vf",
-      c.yellow(
-        "! ctx7 auth check skipped (non-interactive) — using find-skills (HTTP) fallback",
-      ),
+      c.yellow("! ctx7 auth check skipped (non-interactive) — using find-skills (HTTP) fallback"),
     );
-    const result: Ctx7AuthResult = { authenticated: false, fallback: true, mode: "non-tty-fallback" };
+    const result: Ctx7AuthResult = {
+      authenticated: false,
+      fallback: true,
+      mode: "non-tty-fallback",
+    };
     writeCtx7AuthStatus(base, result);
     return result;
   }
