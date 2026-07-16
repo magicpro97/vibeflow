@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { sharedCatalogDir } from "./catalog.js";
 import {
   CTX_DIR,
   type Skill,
@@ -10,19 +11,18 @@ import {
 import { parseFrontmatter } from "../frontmatter.js";
 import type { UserMcpServer } from "../tools/index.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
+import { sharedCatalogDir } from "./catalog.js";
 
 /**
- * Directories (relative to a repo) that may contain `<name>/SKILL.md` folders.
+ * Directories that may contain `<name>/SKILL.md` folders.
  *
- * Built from two single sources of truth:
- *  - CTX_DIR/skills        — the canonical local-authoring root
- *  - SKILL_MIRRORS          — per-engine roots (workflow-artifacts.ts)
- *  - .kiro/skills           — Kiro engine (third-party, not in our mirror list)
+ * Resolution order (first root wins on name collision):
+ *  1. CTX_DIR/skills        — project-local override (repo can vendor/shadow)
+ *  2. .kiro/skills          — Kiro engine (third-party, not in our mirror list)
+ *  3. SKILL_MIRRORS         — per-engine roots (workflow-artifacts.ts)
  *
- * Audit (C2) found this list had drifted from the WRITE side
- * (`src/skills/sync.ts:MIRRORS`), so a skill synced to `.agents/skills/`
- * or `.github/skills/` was invisible to `vf skills list`. The fix:
- * derive from `SKILL_MIRRORS` so they can never disagree.
+ * `discoverSkills` also scans the SHARED catalog (~/.vibeflow/skills/) AFTER
+ * project-local roots, so a project-local skill always shadows the shared one.
  */
 const SKILL_ROOTS: string[] = [join(CTX_DIR, "skills"), join(".kiro", "skills"), ...SKILL_MIRRORS];
 
@@ -174,14 +174,19 @@ export function parseSkill(
   };
 }
 
-/** Discover every valid skill under the known roots in `repo`, de-duplicated by name. */
-export function discoverSkills(repo: string): Skill[] {
+/** Discover every valid skill under the known roots in `repo`, de-duplicated by name.
+ *  Resolution order: project-local roots first, then the shared user-scoped catalog
+ *  (~/.vibeflow/skills/). A project-local skill always shadows a shared one. */
+export function discoverSkills(
+  repo: string,
+  inject: { sharedCatalogDir?: () => string } = {},
+): Skill[] {
   const byName = new Map<string, Skill>();
+
+  // Scan project-local roots (relative to repo)
   for (const root of SKILL_ROOTS) {
     const base = join(repo, root);
     if (!existsSync(base)) continue;
-    // base is verified to exist via existsSync above, so
-    // readdirSync should not throw in practice.
     const entries = readdirSync(base);
     for (const entry of entries) {
       const dir = join(base, entry);
@@ -190,16 +195,34 @@ export function discoverSkills(repo: string): Skill[] {
       if (!existsSync(skillMd)) continue;
       const skill = parseSkill(skillMd, dir);
       if (!skill) continue;
-      // Issue #93: dedup on the lowercased name as a defense-in-depth —
-      // parseSkill now lowercases incoming names, so this is a no-op for
-      // well-formed frontmatter, but it guarantees the registry stays
-      // consistent if a future change ever lets a non-canonical name
-      // through parseSkill (e.g. a relaxed regex). First root wins
-      // (.vibeflow/ over .kiro/ over .claude/) — closest to the project.
       const key = skill.name.toLowerCase();
       if (!byName.has(key)) byName.set(key, skill);
     }
   }
+
+  // Scan the shared user-scoped catalog (absolute path, lowest priority)
+  const _sharedDir = inject.sharedCatalogDir ?? sharedCatalogDir;
+  try {
+    const shared = _sharedDir();
+    if (existsSync(shared)) {
+      const entries = readdirSync(shared);
+      for (const entry of entries) {
+        if (entry.startsWith(".")) continue;
+        const dir = join(shared, entry);
+        if (!statSync(dir).isDirectory()) continue;
+        const skillMd = join(dir, "SKILL.md");
+        if (!existsSync(skillMd)) continue;
+        const skill = parseSkill(skillMd, dir);
+        if (!skill) continue;
+        const key = skill.name.toLowerCase();
+        // Project-local wins — only add if not already present
+        if (!byName.has(key)) byName.set(key, skill);
+      }
+    }
+  } catch {
+    // shared catalog inaccessible — continue with local-only
+  }
+
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
