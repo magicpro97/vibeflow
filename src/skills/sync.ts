@@ -9,9 +9,8 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { ENGINES, type Engine, c } from "../core.js";
+import { sharedCatalogDir } from "./catalog.js";
 import { validateSkillDir } from "./validator.js";
-
-const CANONICAL = join(".vibeflow", "skills");
 const ENGINE_MIRROR: Record<Engine, string> = {
   claude: join(".claude", "skills"),
   codex: join(".agents", "skills"),
@@ -50,17 +49,19 @@ export interface SkillSyncResult {
 // Test seam: exported so unit tests can exercise the statSync
 // catch fallback (line 36-37) by injecting a throwing statSync.
 export function skillNames(
-  repo: string,
+  _repo: string,
   inject: {
     readdirSync?: (path: string) => string[];
     statSync?: (path: string) => { isDirectory(): boolean };
+    catalogDir?: string;
   } = {},
 ): string[] {
   const _readdirSync = inject.readdirSync ?? readdirSync;
   const _statSync = inject.statSync ?? statSync;
-  const base = join(repo, CANONICAL);
+  const base = inject.catalogDir ?? sharedCatalogDir();
   if (!existsSync(base)) return [];
   return _readdirSync(base).filter((n) => {
+    if (n.startsWith(".")) return false;
     try {
       return _statSync(join(base, n)).isDirectory();
     } catch {
@@ -80,12 +81,12 @@ function pointerBody(name: string, mode: SyncMode): string {
     "",
     "Canonical skill lives at:",
     "",
-    `\`${".vibeflow/skills/"}${name}/SKILL.md\``,
+    `\`~/.vibeflow/skills/${name}/SKILL.md\``,
     "",
     "Before using this skill:",
     "1. Read canonical SKILL.md",
-    `2. Read linked files under .vibeflow/skills/${name}/references/ (if present)`,
-    `3. Run scripts from .vibeflow/skills/${name}/scripts/ (if present) only when instructed`,
+    `2. Read linked files under ~/.vibeflow/skills/${name}/references/ (if present)`,
+    `3. Run scripts from ~/.vibeflow/skills/${name}/scripts/ (if present) only when instructed`,
     "",
     `Sync mode: ${mode}`,
     "",
@@ -99,6 +100,7 @@ export function syncSkillMirrors(
     // to exercise the catch fallback in skillNames (line 36-37).
     readdirSync?: (path: string) => string[];
     statSync?: (path: string) => { isDirectory(): boolean };
+    catalogDir?: string;
   } = {},
 ): SkillSyncResult {
   const mode: SyncMode = opts.mode ?? "pointer";
@@ -106,15 +108,16 @@ export function syncSkillMirrors(
   const synced: string[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
+  const catalog = opts.catalogDir ?? sharedCatalogDir();
 
   for (const name of skillNames(repo, opts)) {
-    const src = join(repo, CANONICAL, name);
+    const src = join(catalog, name);
     const validation = validateSkillDir(src);
     if (!validation.ok) {
-      errors.push(...validation.errors.map((e) => `${CANONICAL}/${name}: ${e}`));
+      errors.push(...validation.errors.map((e) => `~/.vibeflow/skills/${name}: ${e}`));
       continue;
     }
-    warnings.push(...validation.warnings.map((w) => `${CANONICAL}/${name}: ${w}`));
+    warnings.push(...validation.warnings.map((w) => `~/.vibeflow/skills/${name}: ${w}`));
     try {
       for (const mirror of mirrors) {
         const dst = join(repo, mirror, name);
