@@ -155,6 +155,23 @@ A skill that fails validation is never promoted; errors and warnings are
 returned to the caller. Re-importing an existing name creates a timestamped
 backup under `.vibeflow/skills/.backup/` before overwriting.
 
+## Non-TTY auth observability
+
+When `vf init` runs non-interactively (CI, cron, `--autopilot`), the ctx7 auth
+check cannot prompt for device OAuth. In this case the init prints a yellow
+warning and falls back to the HTTP-only discovery path (`runFindSkillsFallback`).
+
+The auth decision is persisted to `.vibeflow/ai-context/ctx7-auth-status.json`
+so it survives past the init run. Running `vf doctor` reads this file and prints
+the current ctx7 auth state — e.g.:
+
+```text
+ctx7: unauthenticated — using HTTP fallback (rate-limited, no direct install)
+```
+
+This lets operators confirm whether a given init run used the full ctx7 CLI
+install path or the degraded HTTP-only discovery.
+
 ## npm packages are not skills by default
 
 npm should be treated as a package/tool dependency source, not a trusted skill registry.
