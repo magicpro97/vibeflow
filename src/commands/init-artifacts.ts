@@ -120,6 +120,7 @@ export async function writeInitArtifacts(params: {
     ctx7Inject?: {
       spawner?: typeof spawnSync;
       askConfirm?: (q: string) => Promise<boolean | null>;
+      base?: string;
     };
   };
 }): Promise<number> {
@@ -256,7 +257,11 @@ export async function writeInitArtifacts(params: {
   }
 
   // Phase 1.7: ctx7 auth check
-  let ctx7Auth: Ctx7AuthResult = { authenticated: false, fallback: true };
+  let ctx7Auth: Ctx7AuthResult = {
+    authenticated: false,
+    fallback: true,
+    mode: "non-tty-fallback",
+  };
   if (ai && !dry && !result.refused && process.stdin.isTTY) {
     out("vf");
     out("vf", panel("ctx7", c.bold("auth")));

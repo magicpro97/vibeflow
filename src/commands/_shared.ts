@@ -193,6 +193,8 @@ export {
   ensureCtx7Auth,
   defaultAskConfirm,
   runFindSkillsFallback,
+  writeCtx7AuthStatus,
+  CTX7_AUTH_STATUS_REL,
 } from "./init-ctx7.js";
 export type { Ctx7AuthResult } from "./init-ctx7.js";
 
