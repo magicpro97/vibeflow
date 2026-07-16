@@ -19,7 +19,7 @@
 import { mkdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { type DiscoveryResult, searchSkillsHttp } from "../discovery/context7.js";
-import { CTX_DIR, c, join, out, scanRepo, spawnSync, writeFileSafe } from "./_shared.js";
+import { CTX_DIR, c, cwd, join, out, scanRepo, spawnSync, writeFileSafe } from "./_shared.js";
 
 /**
  * Check ctx7 auth status. If not logged in, prompt the user to login via
@@ -32,18 +32,58 @@ export interface Ctx7AuthResult {
   authenticated: boolean;
   /** true when ctx7 login was skipped or failed (use find-skills fallback). */
   fallback: boolean;
+  /** How the auth decision was reached — persisted alongside the result so
+   *  `vf doctor` can explain a degraded run after the fact (issue #630). */
+  mode: "tty" | "non-tty-fallback" | "tty-skipped";
+}
+
+/** Relative path (under CTX_DIR) of the persisted ctx7 auth-decision file. */
+export const CTX7_AUTH_STATUS_REL = join("ai-context", "ctx7-auth-status.json");
+
+/** Persist the auth decision so it survives past the `vf init` run — issue #630.
+ *  Best-effort: a write failure here must never fail `vf init`. */
+export function writeCtx7AuthStatus(base: string, result: Ctx7AuthResult): void {
+  try {
+    writeFileSafe(
+      join(base, CTX_DIR, CTX7_AUTH_STATUS_REL),
+      JSON.stringify(
+        {
+          authenticated: result.authenticated,
+          mode: result.mode,
+          timestamp: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    /* best effort — observability only, never block init */
+  }
 }
 
 export async function ensureCtx7Auth(
   inject: {
     spawner?: typeof spawnSync;
     askConfirm?: (q: string) => Promise<boolean | null>;
+    base?: string;
   } = {},
 ): Promise<Ctx7AuthResult> {
   const spawn = inject.spawner ?? spawnSync;
   const ask = inject.askConfirm ?? defaultAskConfirm;
+  const base = inject.base ?? cwd();
+
   if (!process.stdin.isTTY) {
-    return { authenticated: false, fallback: true };
+    out(
+      "vf",
+      c.yellow("! ctx7 auth check skipped (non-interactive) — using find-skills (HTTP) fallback"),
+    );
+    const result: Ctx7AuthResult = {
+      authenticated: false,
+      fallback: true,
+      mode: "non-tty-fallback",
+    };
+    writeCtx7AuthStatus(base, result);
+    return result;
   }
 
   // Step 1: quick check
@@ -55,7 +95,9 @@ export async function ensureCtx7Auth(
     whoami.status === 0 && whoami.stdout != null && !whoami.stdout.includes("Not logged in");
 
   if (alreadyAuth) {
-    return { authenticated: true, fallback: false };
+    const result: Ctx7AuthResult = { authenticated: true, fallback: false, mode: "tty" };
+    writeCtx7AuthStatus(base, result);
+    return result;
   }
 
   // Step 2: prompt user
@@ -66,7 +108,9 @@ export async function ensureCtx7Auth(
 
   if (answer === false || answer === null) {
     out("vf", c.yellow("! ctx7 login skipped — using find-skills (HTTP) fallback"));
-    return { authenticated: false, fallback: true };
+    const result: Ctx7AuthResult = { authenticated: false, fallback: true, mode: "tty-skipped" };
+    writeCtx7AuthStatus(base, result);
+    return result;
   }
 
   // Step 3: run device OAuth login
@@ -80,11 +124,15 @@ export async function ensureCtx7Auth(
 
   if (login.status === 0) {
     out("vf", c.green("✔ ctx7 authenticated"));
-    return { authenticated: true, fallback: false };
+    const result: Ctx7AuthResult = { authenticated: true, fallback: false, mode: "tty" };
+    writeCtx7AuthStatus(base, result);
+    return result;
   }
 
   out("vf", c.yellow("! ctx7 login failed or timed out — using find-skills (HTTP) fallback"));
-  return { authenticated: false, fallback: true };
+  const result: Ctx7AuthResult = { authenticated: false, fallback: true, mode: "tty-skipped" };
+  writeCtx7AuthStatus(base, result);
+  return result;
 }
 
 /**

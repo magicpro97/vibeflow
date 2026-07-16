@@ -21,6 +21,8 @@
 import { opencodePluginStale } from "../hooks/adapters.js";
 import type { Engine, EngineReadiness } from "./_shared.js";
 import {
+  CTX7_AUTH_STATUS_REL,
+  CTX_DIR,
   ENGINES,
   Spinner,
   c,
@@ -39,6 +41,35 @@ import {
   statSync,
   table,
 } from "./_shared.js";
+
+/** Shape written by `ensureCtx7Auth` (issue #630). Untrusted on-disk JSON —
+ *  callers must not assume the fields are present/well-typed. */
+interface Ctx7AuthStatus {
+  authenticated?: unknown;
+  mode?: unknown;
+}
+
+/** Print the persisted ctx7 auth decision (issue #630), if any. Observability
+ *  only — absence of the file means no AI-enabled `vf init` has run yet, not
+ *  an error, so this prints nothing rather than a warning. */
+function printCtx7AuthStatus(base: string): void {
+  const path = join(base, CTX_DIR, CTX7_AUTH_STATUS_REL);
+  if (!existsSync(path)) return;
+  let status: Ctx7AuthStatus;
+  try {
+    status = JSON.parse(readFileSync(path, "utf8")) as Ctx7AuthStatus;
+  } catch {
+    return; // malformed file — skip rather than crash `vf doctor`
+  }
+  if (status.authenticated === true) {
+    out("vf", `  ctx7: ${c.green("authenticated")}`);
+    return;
+  }
+  out(
+    "vf",
+    `  ${c.yellow("ctx7: unauthenticated — using HTTP fallback (rate-limited, no direct install)")}`,
+  );
+}
 
 // ponytail: inlined from seams.ts (#391) — guardrail diagnostics
 const GUARDRAIL_SENTINEL = "vibeflow-guardrail";
@@ -184,6 +215,7 @@ export async function doctor(
     `  ${gitGuardrailArmed(base) ? c.green("commit-time guardrail: ON (.githooks/pre-commit)") : c.yellow("commit-time guardrail: OFF — run 'vf hooks install' or re-init to arm .githooks/pre-commit")}`,
   );
   out("vf", `  ${liveGuardrailArmed(base) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
+  printCtx7AuthStatus(base);
 
   // #624: detect a stale opencode plugin. The generator hard-codes the
   // absolute CLI path; if the user reinstalled/moved the CLI the plugin

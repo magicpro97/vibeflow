@@ -111,6 +111,7 @@ export async function init(
     ctx7Inject?: {
       spawner?: typeof spawnSync;
       askConfirm?: (q: string) => Promise<boolean | null>;
+      base?: string;
     };
     // Test seam: replace the real `spawnSync` used by the codegraph
     // install + index blocks (commands.ts L433-436). Lets unit tests
