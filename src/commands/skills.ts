@@ -25,7 +25,6 @@ import {
   join,
   matchSkillsForTask,
   migrateToSharedCatalog,
-  migrateToSharedCatalog,
   out,
   readFileSync,
   readState,

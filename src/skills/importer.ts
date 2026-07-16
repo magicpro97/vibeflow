@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { validateSkillDir } from "./validator.js";
 import { sharedCatalogDir } from "./catalog.js";
+import { validateSkillDir } from "./validator.js";
 
 // ponytail: CANONICAL is now a function — lazy so tests can inject a fake homedir,
 // and doesn't create ~/.vibeflow/skills/ at import time.

@@ -7,8 +7,8 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -16,9 +16,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
 /** User-scoped shared skill catalog. All projects on this machine share it. */
-export function sharedCatalogDir(
-  inject: { homedir?: () => string } = {},
-): string {
+export function sharedCatalogDir(inject: { homedir?: () => string } = {}): string {
   const home = (inject.homedir ?? homedir)();
   const dir = join(home, ".vibeflow", "skills");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -26,9 +24,7 @@ export function sharedCatalogDir(
 }
 
 /** List skill names in the shared catalog. */
-export function sharedSkillNames(
-  inject: { homedir?: () => string } = {},
-): string[] {
+export function sharedSkillNames(inject: { homedir?: () => string } = {}): string[] {
   const dir = sharedCatalogDir(inject);
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((n) => {
