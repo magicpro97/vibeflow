@@ -1,8 +1,13 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { sharedCatalogDir } from "./catalog.js";
 import { validateSkillDir } from "./validator.js";
 
-const CANONICAL = join(".vibeflow", "skills");
+// ponytail: CANONICAL is now a function — lazy so tests can inject a fake homedir,
+// and doesn't create ~/.vibeflow/skills/ at import time.
+function canonicalDir(inject?: { catalogDir?: string }): string {
+  return inject?.catalogDir ?? sharedCatalogDir();
+}
 
 export interface ImportResult {
   ok: boolean;
@@ -36,7 +41,10 @@ function backupIfExists(
 export function importSkillFromDir(
   repo: string,
   sourceDir: string,
-  inject: { cpSync?: (src: string, dst: string, opts: { recursive: boolean }) => void } = {},
+  inject: {
+    cpSync?: (src: string, dst: string, opts: { recursive: boolean }) => void;
+    catalogDir?: string;
+  } = {},
 ): ImportResult {
   const _cpSync = inject.cpSync ?? cpSync;
   const errors: string[] = [];
@@ -54,8 +62,9 @@ export function importSkillFromDir(
   warnings.push(...validation.warnings);
 
   const name = validation.name ?? basename(sourceDir);
-  const dst = join(repo, CANONICAL, name);
-  mkdirSync(join(repo, CANONICAL), { recursive: true });
+  const catalog = canonicalDir(inject);
+  const dst = join(catalog, name);
+  mkdirSync(catalog, { recursive: true });
   try {
     backupIfExists(dst, inject);
     _cpSync(sourceDir, dst, { recursive: true });
@@ -79,6 +88,7 @@ export function importSkillsFromParent(
   inject: {
     readdirSync?: (path: string) => string[];
     statSync?: (path: string) => { isDirectory(): boolean };
+    catalogDir?: string;
   } = {},
 ): ImportResult {
   const _readdirSync = inject.readdirSync ?? readdirSync;
@@ -104,7 +114,7 @@ export function importSkillsFromParent(
     } catch {
       /* not a directory — skip (stat throws for broken symlinks) */
     }
-    const result = importSkillFromDir(repo, dir);
+    const result = importSkillFromDir(repo, dir, { catalogDir: inject.catalogDir });
     errors.push(...result.errors);
     warnings.push(...result.warnings);
     if (result.ok) imported.push(...result.imported);

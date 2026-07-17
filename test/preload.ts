@@ -15,6 +15,19 @@ if (process.stdin.isTTY) {
   Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
 }
 
+// Issue #631: isolate the shared skill catalog (~/.vibeflow/skills/) for the
+// whole test run via VF_SKILLS_HOME (see src/skills/catalog.ts). Without
+// this, any test that exercises curateSkillsFromEvidence/syncSkillMirrors/
+// discoverSkills without its own catalogDir/sharedCatalogDir inject writes
+// to and reads from the REAL user home, polluting sibling tests that run in
+// the same worker process.
+if (!process.env.VF_SKILLS_HOME) {
+  const fs = require("node:fs") as typeof import("node:fs");
+  const os = require("node:os") as typeof import("node:os");
+  const path = require("node:path") as typeof import("node:path");
+  process.env.VF_SKILLS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "vf-test-skills-home-"));
+}
+
 // #559: suppress real OS desktop notifications for the whole test run. The
 // merge-when-green suite exercises post-claim terminals that call the real
 // notify() default path; without this a macOS/Linux runner would pop a real

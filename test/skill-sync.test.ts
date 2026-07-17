@@ -14,7 +14,11 @@ describe("syncSkillMirrors pointer mode (default)", () => {
   test("writes a small pointer SKILL.md to the default engine mirror (copilot)", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-"));
     dirs.push(repo);
-    const src = join(repo, ".vibeflow", "skills", "project-fit-skill");
+    // Issue #631: catalogDir is now an isolated shared-catalog stand-in, separate
+    // from repo's project-local .vibeflow/skills/ (which shadows it when present).
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-catalog-"));
+    dirs.push(catalogDir);
+    const src = join(catalogDir, "project-fit-skill");
     mkdirSync(join(src, "references"), { recursive: true });
     mkdirSync(join(src, "scripts"), { recursive: true });
     writeFileSync(
@@ -24,14 +28,14 @@ describe("syncSkillMirrors pointer mode (default)", () => {
     writeFileSync(join(src, "references", "domain.md"), "domain notes");
     writeFileSync(join(src, "scripts", "helper.js"), "console.log('ok')\n");
 
-    const result = syncSkillMirrors(repo, { mode: "pointer" });
+    const result = syncSkillMirrors(repo, { mode: "pointer", catalogDir });
     expect(result.ok).toBe(true);
     // Default is copilot only — must NOT touch .claude/ or .agents/ skill dirs.
     const pointer = readFileSync(
       join(repo, ".github", "skills", "project-fit-skill", "SKILL.md"),
       "utf8",
     );
-    expect(pointer).toContain(".vibeflow/skills/project-fit-skill/SKILL.md");
+    expect(pointer).toContain("~/.vibeflow/skills/project-fit-skill/SKILL.md");
     expect(
       existsSync(join(repo, ".github", "skills", "project-fit-skill", "references", "domain.md")),
     ).toBe(false);
@@ -46,7 +50,8 @@ describe("syncSkillMirrors pointer mode (default)", () => {
     mkdirSync(src, { recursive: true });
     writeFileSync(join(src, "SKILL.md"), "---\nname: bad-skill\n---\n\nTODO\n");
 
-    const result = syncSkillMirrors(repo, { mode: "pointer" });
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    const result = syncSkillMirrors(repo, { mode: "pointer", catalogDir });
     expect(result.ok).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
     expect(existsSync(join(repo, ".claude", "skills", "bad-skill"))).toBe(false);
@@ -61,11 +66,12 @@ describe("syncSkillMirrors pointer mode (default)", () => {
       join(src, "SKILL.md"),
       "---\nname: picked-engine-skill\ndescription: Only one engine mirror.\n---\n\n# Picked\n\nActionable body content for validation. This is more than fifty characters long.\n",
     );
+    const catalogDir = join(repo, ".vibeflow", "skills");
     const result = syncSkillMirrors(repo, {
       mode: "pointer",
       engines: ["claude"],
+      catalogDir,
     });
-    writeFileSync("/tmp/picked-debug.json", JSON.stringify(result, null, 2));
     expect(result.ok).toBe(true);
     // Only the claude mirror should exist; the others must be absent.
     expect(existsSync(join(repo, ".claude", "skills", "picked-engine-skill"))).toBe(true);
@@ -82,10 +88,12 @@ describe("syncSkillMirrors pointer mode (default)", () => {
       join(src, "SKILL.md"),
       "---\nname: ok-skill\ndescription: An ok skill.\n---\n\n# Ok\n\nActionable body content for validation. This is more than fifty characters long so it passes the body check.\n",
     );
+    const catalogDir = join(repo, ".vibeflow", "skills");
     const result = syncSkillMirrors(repo, {
       mode: "pointer",
       // Force a non-engine value to exercise the filter branch.
       engines: ["not-a-real-engine" as unknown as "claude"],
+      catalogDir,
     });
     expect(result.ok).toBe(true);
     // Unknown engine filtered out → no mirrors written.
@@ -104,7 +112,8 @@ describe("syncSkillMirrors full mode", () => {
       "---\nname: project-fit-skill\ndescription: Project-specific workflow skill.\n---\n\n# Project Fit\n\nUse this skill for project-specific workflow guidance.\n",
     );
     writeFileSync(join(src, "references", "domain.md"), "domain notes");
-    const result = syncSkillMirrors(repo, { mode: "full" });
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    const result = syncSkillMirrors(repo, { mode: "full", catalogDir });
     expect(result.ok).toBe(true);
     // Default is copilot mirror only
     expect(
@@ -140,7 +149,8 @@ describe("full mode mirrors the references/ subtree (#326)", () => {
     writeFileSync(join(src, "scripts", "doctor.sh"), "#!/bin/sh\necho ok\n");
 
     const engines = ["claude", "codex", "copilot"] as const;
-    const result = syncSkillMirrors(repo, { mode: "full", engines: [...engines] });
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    const result = syncSkillMirrors(repo, { mode: "full", engines: [...engines], catalogDir });
     expect(result.ok).toBe(true);
 
     const mirrorRoot: Record<(typeof engines)[number], string> = {
@@ -176,7 +186,8 @@ describe("verifySkillSync", () => {
       join(src, "SKILL.md"),
       "---\nname: missing-mirror\ndescription: Missing mirror test skill.\n---\n\n# Missing Mirror\n\nEnough actionable body content for validation.\n",
     );
-    const result = verifySkillSync(repo);
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    const result = verifySkillSync(repo, undefined, { catalogDir });
     expect(result.ok).toBe(false);
     // Mirror paths are joined with the platform separator; just check the
     // trailing segment to be cross-platform safe.
@@ -192,8 +203,9 @@ describe("verifySkillSync", () => {
       join(src, "SKILL.md"),
       "---\nname: all-good\ndescription: All good mirror test skill.\n---\n\n# All Good\n\nEnough actionable body content for validation.\n",
     );
-    syncSkillMirrors(repo, { mode: "pointer" });
-    const result = verifySkillSync(repo);
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    syncSkillMirrors(repo, { mode: "pointer", catalogDir });
+    const result = verifySkillSync(repo, undefined, { catalogDir });
     expect(result.ok).toBe(true);
   });
 });

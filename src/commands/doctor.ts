@@ -19,6 +19,7 @@
 // come from the seams module via the barrel.
 
 import { opencodePluginStale } from "../hooks/adapters.js";
+import { sharedCatalogDir, sharedSkillNames } from "../skills/catalog.js";
 import type { Engine, EngineReadiness } from "./_shared.js";
 import {
   CTX7_AUTH_STATUS_REL,
@@ -261,6 +262,14 @@ export async function doctor(
       );
     }
   }
+
+  // Issue #631: shared skill catalog report
+  const catalogPath = sharedCatalogDir();
+  const catalogSkills = sharedSkillNames();
+  out(
+    "vf",
+    `  shared catalog: ${c.dim(catalogPath)} (${catalogSkills.length} skill${catalogSkills.length === 1 ? "" : "s"})`,
+  );
 
   // Issue #163 (F2): stale logbus lock detection
   const lockFile = join(cwd(), ".vibeflow", "logs", "current", "current.log.lock");

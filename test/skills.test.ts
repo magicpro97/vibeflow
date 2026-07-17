@@ -126,6 +126,52 @@ describe("registry provenance (never auto-verify external skills)", () => {
     }
   });
 
+  test("discoverSkills scans the shared catalog and skips dotfiles/non-dirs/missing-SKILL.md/unparseable (line 202-223)", () => {
+    const dir = tmpRepo();
+    const shared = mkdtempSync(join(tmpdir(), "vf-shared-cat-"));
+    try {
+      mkdirSync(join(shared, ".backup"));
+      writeFileSync(join(shared, "loose-file.txt"), "not a dir");
+      mkdirSync(join(shared, "no-skill-md"));
+      mkdirSync(join(shared, "broken-skill"));
+      writeFileSync(join(shared, "broken-skill", "SKILL.md"), "not frontmatter at all");
+      mkdirSync(join(shared, "shared-reader"));
+      writeFileSync(
+        join(shared, "shared-reader", "SKILL.md"),
+        ["---", "name: shared-reader", "description: a shared catalog skill", "---"].join("\n"),
+      );
+      const found = discoverSkills(dir, { sharedCatalogDir: () => shared });
+      expect(found.map((s) => s.name)).toEqual(["shared-reader"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(shared, { recursive: true, force: true });
+    }
+  });
+
+  test("discoverSkills: project-local skill shadows a same-named shared catalog skill (line 218)", () => {
+    const dir = tmpRepo();
+    const shared = mkdtempSync(join(tmpdir(), "vf-shared-cat-shadow-"));
+    try {
+      const localDir = join(dir, CTX_DIR, "skills", "shadowed");
+      mkdirSync(localDir, { recursive: true });
+      writeFileSync(
+        join(localDir, "SKILL.md"),
+        ["---", "name: shadowed", "description: local wins", "---"].join("\n"),
+      );
+      mkdirSync(join(shared, "shadowed"));
+      writeFileSync(
+        join(shared, "shadowed", "SKILL.md"),
+        ["---", "name: shadowed", "description: shared loses", "---"].join("\n"),
+      );
+      const found = discoverSkills(dir, { sharedCatalogDir: () => shared });
+      expect(found).toHaveLength(1);
+      expect(found[0]?.description).toBe("local wins");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(shared, { recursive: true, force: true });
+    }
+  });
+
   // Issue #93: parseSkill normalized names per-root by REJECTING any
   // mixed-case `name:` (the lowercase regex), and discoverSkills deduped
   // by raw string equality. The combined effect: a skill whose frontmatter

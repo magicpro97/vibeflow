@@ -104,6 +104,18 @@ Old or unsafe skill → deprecated
 
 Skills requiring shell, network, write access, or credentials must be explicitly approved.
 
+## Shared catalog trust boundary
+
+The shared skill catalog at `~/.vibeflow/skills/` is machine-wide: a skill promoted
+in one project becomes available to every project on the same machine. This is a
+deliberate tradeoff — re-discovery per project is eliminated, but trust granted in
+project A extends to project B without a second review.
+
+Mitigation: the security-scan gate (when landed) blocks any skill sourced from an
+untrusted provider (Context7 unauthenticated fallback, find-skills HTTP, community
+import) from reaching the shared store until it passes automated review. Until that
+gate lands, only manually-reviewed skills should be promoted to `verified` status.
+
 ## npm package risk model
 
 npm packages are external executable dependencies, not trusted skills.

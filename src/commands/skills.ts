@@ -24,6 +24,7 @@ import {
   importSkillsFromParent,
   join,
   matchSkillsForTask,
+  migrateToSharedCatalog,
   out,
   readFileSync,
   readState,
@@ -297,6 +298,26 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       ),
     );
     return 0;
+  }
+  if (sub === "migrate") {
+    const result = migrateToSharedCatalog(repo);
+    if (!result.migrated.length && !result.errors.length) {
+      out("vf", c.dim("No project-scoped skills to migrate (nothing at .vibeflow/skills/)."));
+      return 0;
+    }
+    for (const name of result.collisions) {
+      out("vf", c.yellow(`! collision: ${name} — backed up existing, overwrote (last-write-wins)`));
+    }
+    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
+    if (result.migrated.length) {
+      out(
+        "vf",
+        c.green(
+          `✔ migrated ${result.migrated.length} skill(s) to ~/.vibeflow/skills/: ${result.migrated.join(", ")}`,
+        ),
+      );
+    }
+    return result.errors.length ? 1 : 0;
   }
   out(
     "vf",

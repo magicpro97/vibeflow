@@ -152,7 +152,17 @@ Purpose:
 .vibeflow/attachments/                              # uploaded sample files (web UI)
 .vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md   # copied from src/skills/ on init
 .vibeflow/ai-context/SKILL_TAXONOMY.md             # copied from src/skills/ on init
-.vibeflow/skills/<name>/                           # canonical skill store (mirrored to engines)
+.vibeflow/skills/<name>/                           # per-project overrides (shadow shared catalog)
+  SKILL.md                                         # required
+  references/                                      # optional
+  scripts/                                         # optional
+  assets/                                          # optional
+```
+
+### Shared skill catalog (user-scoped)
+
+```text
+~/.vibeflow/skills/<name>/                         # canonical skill store (machine-wide)
   SKILL.md                                         # required
   references/                                      # optional
   scripts/                                         # optional

@@ -832,6 +832,18 @@ describe("probeInvocation (test seam)", () => {
   // path (line 438-441) without depending on Bun.spawn override,
   // which was unreliable on CI. The 4 runAttempts tests cover both
   // non-copilot success/fail and copilot gh success/fail paths.
+
+  test("checkEngine with no opts.spawner builds and calls the real defaultSpawner fallback (line 132-135)", () => {
+    // Every other checkEngine test in this file injects opts.spawner,
+    // so the `opts.spawner ?? (real defaultSpawner closure)` fallback
+    // on line 132-135 never runs there. Force it here via the
+    // top-level import (not require()) with no spawner override.
+    const r = checkEngine("claude", opts({ has: () => true }));
+    // "claude" is unlikely to be on PATH in CI; either outcome proves
+    // the fallback spawner closure actually executed (it's the only
+    // path that can produce ready/probe-failed/no-binary here).
+    expect(["ready", "probe-failed", "no-binary"]).toContain(r.level);
+  });
 });
 
 describe("runAttempts (extracted helper)", () => {
