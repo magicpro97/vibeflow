@@ -1343,6 +1343,14 @@ describe("commands.skills subcommand branches", () => {
   afterEach(() => {
     process.chdir(orig);
     rmSync(dir, { recursive: true, force: true });
+    // migrate/import subcommands have no catalogDir seam — they write to
+    // the (sandboxed, per-run) shared catalog. Clean up so fixture skills
+    // don't leak into other tests in the same run.
+    const { sharedCatalogDir } = require("../src/skills/catalog.js");
+    const catalog = sharedCatalogDir();
+    for (const name of ["migrate-me", "clash", "err-skill", "good-skill"]) {
+      rmSync(join(catalog, name), { recursive: true, force: true });
+    }
   });
 
   test("skills: list with no skills found returns 0 (line 1660-1666)", () => {
@@ -1525,6 +1533,60 @@ describe("commands.skills subcommand branches", () => {
   test.skip("skills: sync rejects bad engine (line 1733-1735)", () => {
     expect(skills("sync", ["--engine", "bogus"])).toBe(2);
     expect(skills("sync", ["--engine=bogus"])).toBe(2);
+  });
+
+  test("skills: migrate with nothing to migrate returns 0 (line 304-306)", () => {
+    // No .vibeflow/skills/ in this fresh repo → migrateToSharedCatalog
+    // returns empty result → early-return branch.
+    expect(skills("migrate", [])).toBe(0);
+  });
+
+  test("skills: migrate moves project skills to the shared catalog and returns 0 (line 312-320)", () => {
+    mkdirSync(join(dir, ".vibeflow", "skills", "migrate-me"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "migrate-me", "SKILL.md"),
+      "---\nname: migrate-me\ndescription: a skill to migrate.\n---\n\n# Migrate\n",
+    );
+    expect(skills("migrate", [])).toBe(0);
+    expect(existsSync(join(dir, ".vibeflow", "skills", "migrate-me"))).toBe(false);
+  });
+
+  test("skills: migrate reports a collision and still returns 0 (line 308-310)", () => {
+    // First migrate seeds the shared catalog with "clash".
+    mkdirSync(join(dir, ".vibeflow", "skills", "clash"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "clash", "SKILL.md"),
+      "---\nname: clash\ndescription: version one.\n---\n\n# v1\n",
+    );
+    expect(skills("migrate", [])).toBe(0);
+    // Recreate the same-named project skill so the second migrate collides.
+    mkdirSync(join(dir, ".vibeflow", "skills", "clash"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "clash", "SKILL.md"),
+      "---\nname: clash\ndescription: version two.\n---\n\n# v2\n",
+    );
+    expect(skills("migrate", [])).toBe(0);
+  });
+
+  test("skills: migrate surfaces per-entry errors and returns 1 (line 311, 320)", async () => {
+    const { sharedCatalogDir } = require("../src/skills/catalog.js");
+    const catalog = sharedCatalogDir();
+    // Pre-create the destination as read-only so the internal cpSync fails,
+    // landing in migrateToSharedCatalog's error branch for this entry.
+    mkdirSync(join(catalog, "err-skill"), { recursive: true });
+    const { chmodSync } = await import("node:fs");
+    chmodSync(catalog, 0o500);
+    mkdirSync(join(dir, ".vibeflow", "skills", "err-skill"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "err-skill", "SKILL.md"),
+      "---\nname: err-skill\ndescription: will fail to migrate.\n---\n\n# Fail\n",
+    );
+    try {
+      expect(skills("migrate", [])).toBe(1);
+    } finally {
+      chmodSync(catalog, 0o755);
+      rmSync(join(catalog, "err-skill"), { recursive: true, force: true });
+    }
   });
 
   test("skills: sync --mode=full returns 0 (line 1743-1754)", () => {

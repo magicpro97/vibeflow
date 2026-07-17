@@ -78,6 +78,20 @@ describe("sharedSkillNames", () => {
   });
 });
 
+describe("sharedSkillNames statSync catch (line 39-40)", () => {
+  test("a broken symlink entry is filtered out, not thrown", () => {
+    const tmpHome = mkdtempSync(join(tmpdir(), "vf-cat-brokensym-"));
+    dirs.push(tmpHome);
+    const inject = { homedir: () => tmpHome };
+    const catalog = sharedCatalogDir(inject);
+    mkdirSync(join(catalog, "real-one"));
+    const { symlinkSync } = require("node:fs") as typeof import("node:fs");
+    symlinkSync("/nonexistent/target-abc", join(catalog, "broken-link"));
+    const names = sharedSkillNames(inject);
+    expect(names).toEqual(["real-one"]);
+  });
+});
+
 describe("migrateToSharedCatalog", () => {
   test("migrates skills from project to shared catalog", () => {
     const tmpHome = mkdtempSync(join(tmpdir(), "vf-mig-home-"));
@@ -168,5 +182,67 @@ describe("migrateToSharedCatalog", () => {
     expect(result.skipped).toContain(".hidden");
     expect(result.skipped).toContain("loose-file.txt");
     expect(result.migrated).toHaveLength(0);
+  });
+
+  test("statSync throw on an entry skips it, not thrown (line 90-91)", () => {
+    const tmpHome = mkdtempSync(join(tmpdir(), "vf-mig-statthrow-home-"));
+    const repo = mkdtempSync(join(tmpdir(), "vf-mig-statthrow-repo-"));
+    dirs.push(tmpHome, repo);
+    const inject = { homedir: () => tmpHome };
+
+    const projSkills = join(repo, ".vibeflow", "skills");
+    mkdirSync(join(projSkills, "real-skill"), { recursive: true });
+    writeFileSync(join(projSkills, "real-skill", "SKILL.md"), "# Real\n");
+    const { symlinkSync } = require("node:fs") as typeof import("node:fs");
+    symlinkSync("/nonexistent/target-xyz", join(projSkills, "broken-link"));
+
+    const result = migrateToSharedCatalog(repo, inject);
+    expect(result.skipped).toContain("broken-link");
+    expect(result.migrated).toContain("real-skill");
+  });
+
+  test("readdirSync throw on projectStore itself is captured in errors, not thrown (line 75)", () => {
+    const tmpHome = mkdtempSync(join(tmpdir(), "vf-mig-readdirfail-home-"));
+    const repo = mkdtempSync(join(tmpdir(), "vf-mig-readdirfail-repo-"));
+    dirs.push(tmpHome, repo);
+    const inject = { homedir: () => tmpHome };
+
+    const projSkills = join(repo, ".vibeflow", "skills");
+    mkdirSync(projSkills, { recursive: true });
+    const { chmodSync } = require("node:fs") as typeof import("node:fs");
+    chmodSync(projSkills, 0o000);
+
+    try {
+      const result = migrateToSharedCatalog(repo, inject);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.migrated).toHaveLength(0);
+    } finally {
+      chmodSync(projSkills, 0o755);
+    }
+  });
+
+  test("catch block: cpSync failure on an entry is captured in errors, not thrown (line 115)", () => {
+    const tmpHome = mkdtempSync(join(tmpdir(), "vf-mig-cpfail-home-"));
+    const repo = mkdtempSync(join(tmpdir(), "vf-mig-cpfail-repo-"));
+    dirs.push(tmpHome, repo);
+    const inject = { homedir: () => tmpHome };
+
+    // Pre-create the destination as a read-only dir so cpSync's mkdir/write inside it fails.
+    const catalog = sharedCatalogDir(inject);
+    const dst = join(catalog, "fail-skill");
+    mkdirSync(dst);
+    const { chmodSync } = require("node:fs") as typeof import("node:fs");
+    chmodSync(catalog, 0o500);
+
+    const projSkills = join(repo, ".vibeflow", "skills");
+    mkdirSync(join(projSkills, "fail-skill"), { recursive: true });
+    writeFileSync(join(projSkills, "fail-skill", "SKILL.md"), "# Fail\n");
+
+    try {
+      const result = migrateToSharedCatalog(repo, inject);
+      expect(result.errors.length).toBeGreaterThan(0);
+    } finally {
+      chmodSync(catalog, 0o755);
+    }
   });
 });
