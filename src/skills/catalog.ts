@@ -15,9 +15,14 @@ import {
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
-/** User-scoped shared skill catalog. All projects on this machine share it. */
+/** User-scoped shared skill catalog. All projects on this machine share it.
+ *  Test seam: VF_SKILLS_HOME overrides the home dir. os.homedir() caches its
+ *  result after the first call in a process (Bun), so env.HOME mocks alone
+ *  are unreliable across a full test suite — an explicit env var is read
+ *  fresh every call, matching the VF_NO_NOTIFY/VF_DENY_TOOLS precedent.
+ *  Priority: explicit inject.homedir > VF_SKILLS_HOME > real homedir. */
 export function sharedCatalogDir(inject: { homedir?: () => string } = {}): string {
-  const home = (inject.homedir ?? homedir)();
+  const home = inject.homedir ? inject.homedir() : (process.env.VF_SKILLS_HOME ?? homedir());
   const dir = join(home, ".vibeflow", "skills");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;

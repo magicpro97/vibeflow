@@ -14,7 +14,11 @@ describe("syncSkillMirrors pointer mode (default)", () => {
   test("writes a small pointer SKILL.md to the default engine mirror (copilot)", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-"));
     dirs.push(repo);
-    const src = join(repo, ".vibeflow", "skills", "project-fit-skill");
+    // Issue #631: catalogDir is now an isolated shared-catalog stand-in, separate
+    // from repo's project-local .vibeflow/skills/ (which shadows it when present).
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-catalog-"));
+    dirs.push(catalogDir);
+    const src = join(catalogDir, "project-fit-skill");
     mkdirSync(join(src, "references"), { recursive: true });
     mkdirSync(join(src, "scripts"), { recursive: true });
     writeFileSync(
@@ -24,7 +28,6 @@ describe("syncSkillMirrors pointer mode (default)", () => {
     writeFileSync(join(src, "references", "domain.md"), "domain notes");
     writeFileSync(join(src, "scripts", "helper.js"), "console.log('ok')\n");
 
-    const catalogDir = join(repo, ".vibeflow", "skills");
     const result = syncSkillMirrors(repo, { mode: "pointer", catalogDir });
     expect(result.ok).toBe(true);
     // Default is copilot only — must NOT touch .claude/ or .agents/ skill dirs.

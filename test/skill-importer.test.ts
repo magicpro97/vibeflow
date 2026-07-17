@@ -104,7 +104,11 @@ describe("importSkillsFromParent", () => {
       ].join("\n");
       writeFileSync(join(src, name, "SKILL.md"), skillText);
     }
-    const result = importSkillsFromParent(repo, src);
+    // Isolated catalogDir — without this the import writes to the real shared
+    // catalog (~/.vibeflow/skills/) and leaks "alpha"/"beta" into other tests.
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-import-multi-catalog-"));
+    dirs.push(catalogDir);
+    const result = importSkillsFromParent(repo, src, { catalogDir });
     expect(result.ok).toBe(true);
     expect(result.imported).toContain("alpha");
     expect(result.imported).toContain("beta");

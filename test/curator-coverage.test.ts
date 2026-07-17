@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sharedCatalogDir } from "../src/skills/catalog.js";
 import { curateSkillsFromEvidence } from "../src/skills/curator.js";
 
 function seedEvidence(dir: string, rows: string[]): void {
@@ -86,9 +87,13 @@ describe("curator coverage gaps", () => {
     seedValidSkill(dir, "postgres-skill");
     const result = curateSkillsFromEvidence(dir, "claude", { skipCache: true });
     expect(result.installed).toContain("postgres-skill");
-    // Mirror sync produced the canonical skill.
-    const canonical = join(dir, ".vibeflow", "skills", "postgres-skill", "SKILL.md");
+    // Issue #631: canonical skill store moved to the shared user-scoped
+    // catalog (~/.vibeflow/skills/), not the project-local .vibeflow/skills/.
+    const canonical = join(sharedCatalogDir(), "postgres-skill", "SKILL.md");
     expect(existsSync(canonical)).toBe(true);
     expect(readFileSync(canonical, "utf8")).toContain("name: postgres-skill");
+    // curateSkillsFromEvidence has no catalogDir override — it writes to the
+    // real shared catalog. Clean up so it doesn't leak into other tests.
+    rmSync(join(sharedCatalogDir(), "postgres-skill"), { recursive: true, force: true });
   });
 });

@@ -1685,6 +1685,11 @@ describe("commands.skills subcommand branches", () => {
     } finally {
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
+      // `vf skills import` has no catalogDir seam — it writes to the real
+      // shared catalog (~/.vibeflow/skills/). Clean up so "good-skill"
+      // doesn't leak into other tests' discoverSkills() results.
+      const { sharedCatalogDir } = require("../src/skills/catalog.js");
+      rmSync(join(sharedCatalogDir(), "good-skill"), { recursive: true, force: true });
     }
   });
 

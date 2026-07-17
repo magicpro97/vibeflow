@@ -88,6 +88,7 @@ export function importSkillsFromParent(
   inject: {
     readdirSync?: (path: string) => string[];
     statSync?: (path: string) => { isDirectory(): boolean };
+    catalogDir?: string;
   } = {},
 ): ImportResult {
   const _readdirSync = inject.readdirSync ?? readdirSync;
@@ -113,7 +114,7 @@ export function importSkillsFromParent(
     } catch {
       /* not a directory — skip (stat throws for broken symlinks) */
     }
-    const result = importSkillFromDir(repo, dir);
+    const result = importSkillFromDir(repo, dir, { catalogDir: inject.catalogDir });
     errors.push(...result.errors);
     warnings.push(...result.warnings);
     if (result.ok) imported.push(...result.imported);
