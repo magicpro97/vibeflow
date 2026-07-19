@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/magicpro97/vibeflow/compare/v0.13.0...v0.14.0) (2026-07-19)
+
+
+### Features
+
+* **dispatch:** add opencode engine support ([#628](https://github.com/magicpro97/vibeflow/issues/628)) ([4534533](https://github.com/magicpro97/vibeflow/commit/45345333e70455a5c89a8d5e852e9392ed50e386))
+* **engine:** add Antigravity CLI support ([#637](https://github.com/magicpro97/vibeflow/issues/637)) ([28193cf](https://github.com/magicpro97/vibeflow/commit/28193cf239585d6c8eaea2efb02b8e38a10e41b8))
+* **init:** warn explicitly when ctx7 auth falls back non-interactively ([#635](https://github.com/magicpro97/vibeflow/issues/635)) ([724f853](https://github.com/magicpro97/vibeflow/commit/724f853a4b30c1a4a01f0f4db7e40b90695582ef))
+
+
+### Bug Fixes
+
+* **skills:** union project-local + shared catalog, fix test isolation leaks ([#631](https://github.com/magicpro97/vibeflow/issues/631)) ([#636](https://github.com/magicpro97/vibeflow/issues/636)) ([5a4a05c](https://github.com/magicpro97/vibeflow/commit/5a4a05cfc9feea25d234c1da6d2a65f949f3354e))
+
 ## [0.13.0](https://github.com/magicpro97/vibeflow/compare/v0.12.1...v0.13.0) (2026-07-13)
 
 
