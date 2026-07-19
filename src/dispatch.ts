@@ -257,8 +257,9 @@ export function materializePrompt(
   cli: { cmd: string; args: string[]; promptMode?: "stdin" | "arg" },
   prompt: string,
 ): { cmd: string; args: string[]; input: string } {
+  const normCmd = cli.cmd.replace(/\\/g, "/");
   if (
-    basename(cli.cmd, extname(cli.cmd)) === "agy" &&
+    basename(normCmd, extname(normCmd)) === "agy" &&
     Buffer.byteLength(prompt, "utf8") >= 30 * 1024
   ) {
     throw new Error("Antigravity prompt too large for agy argv; shorten or split the task");
