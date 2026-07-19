@@ -132,3 +132,28 @@ describe("orchestrate — wave-aware handoff (#612)", () => {
     expect(nameOf(promptAt(seen, 0))).toBe("e");
   });
 });
+
+// --- Codex P1: antigravity engine must force concurrency=1 ---
+describe("orchestrate — antigravity concurrency clamp", () => {
+  test("antigravity forces concurrency 1 even when --concurrency is high", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-ag-conc-"));
+    writeState(dir, [unit("x"), unit("y")]);
+    const logs: string[] = [];
+    const origErr = console.error;
+    console.error = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    const seen: Array<{ name: string; prompt: string }> = [];
+    try {
+      await orchestrate({ yes: true, engine: "antigravity", concurrency: "100" }, dir, {
+        spawner: recordingSpawner(seen),
+      });
+      const concLine = logs.find((l) => l.includes("concurrency"));
+      expect(concLine).toBeDefined();
+      if (concLine) expect(concLine).toMatch(/concurrency 1\b/);
+      expect(seen.length).toBe(2);
+    } finally {
+      console.error = origErr;
+    }
+  });
+});

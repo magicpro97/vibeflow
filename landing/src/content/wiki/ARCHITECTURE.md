@@ -7,12 +7,12 @@ last_updated: 2026-06-24
 
 # Architecture
 
-![VibeFlow architecture — four layers from npm CLI to tool adapters](/diagrams/architecture.svg)
-
 ## Contents
 
 - [Overview](#overview)
 - [Main Components](#main-components)
+- [Stuck Detection](#stuck-detection)
+- [Crash Recovery](#crash-recovery)
 - [Tool Adapters](#tool-adapters)
 - [Source Modules](#source-modules)
 - [Core Data Flow](#core-data-flow)
@@ -29,7 +29,7 @@ Local Web UI
   ↓
 Workflow Orchestrator Core
   ↓
-Tool Adapters: Claude Code / Codex CLI / Copilot CLI
+Tool Adapters: Claude Code / Codex CLI / Copilot CLI / OpenCode / Antigravity CLI
 ```
 
 The system should run on the user's machine and should not send source code to a remote service controlled by the tool owner unless the user explicitly configures it.
@@ -56,6 +56,7 @@ vf ui
 vf run claude
 vf run codex
 vf run copilot
+vf run antigravity
 vf skills list
 vf tools status
 ```
@@ -81,9 +82,54 @@ Responsibilities:
 - Select local or external skills.
 - Generate project context files.
 - Generate tool-specific adapters.
-- Dispatch Claude Code, Codex, or Copilot CLI.
+- Dispatch Claude Code, Codex, Copilot, OpenCode, or Antigravity CLI.
 - Verify output.
 - Propose skill updates.
+
+## Stuck Detection
+
+The orchestrator runs a `StuckDetector` per in-flight work unit to surface hung engines
+without aborting sibling lanes. Three configurable detection patterns:
+
+- **Stalled:** no progress event within `stallSeconds` (default 120s).
+- **Looping:** same engine output repeated `loopThreshold` times (default 3).
+- **Evidence-stuck:** evidence count unchanged across `evidenceStallRounds + 1` checks (default 2 rounds → 3 checks).
+
+The detector is driven by `recordProgress()`, `recordOutput()`, and `recordEvidenceCount()` calls
+from the orchestrator's per-unit dispatch loop. `check()` returns a `StuckState` with a `reasons`
+array — consumer decides whether to warn, throttle, or escalate.
+
+See `src/orchestrator/stuck-detector.ts`.
+
+## Crash Recovery
+
+The orchestrator persists a marker (`~/.vibeflow/markers/<unit>.json`) for every unit
+it dispatches, plus an append-only timeline ledger (`<unit>.timeline`) next to it. These
+files are the source of truth for "what was the engine doing when the process died" — they
+survive a crash or Ctrl-C intact.
+
+`vf status` reads them back (never re-running anything): a table of UNIT / STATUS / CONF /
+EVID / UPDATED / ISSUE across all units, highlighting the `running` unit (the crash point)
+and flagging a `done` marker that published no evidence. `vf status timeline <unit>` dumps
+that unit's full transition ledger; `vf status --json` emits machine-readable output.
+
+See `src/commands/status.ts`, `src/orchestrator/marker.ts`, `src/orchestrator/timeline.ts`.
+
+Dispatch captures the engine's `session_id` (claude JSON envelope) into `DispatchMarker.engineSessionId`, persisted for crash-resume. PR2a (#618 PR2a) wires `resumeSessionId` through the dispatch layer so a claude unit can resume its prior session (`claude -p -r <id>`) instead of a fresh run. PR2b-1 wires `vf orchestrate --resume`: a crashed unit (marker `running`/`blocked`/`failed`) with a persisted `engineSessionId` resumes that claude session via the PR2a dispatch path; without `--resume`, or for codex/copilot (no persisted id), the unit re-runs fresh. PR2b-2 extends capture+resume to codex (`codex exec --json -` → `thread_id`; `codex exec resume <id>`). Copilot has no by-id resume and always runs fresh. The exact per-engine invocation flags, output-shape assumptions, verified CLI versions, and a re-verify procedure for CLI bumps live in `docs/ENGINE-COMPAT.md`.
+
+## Wave Handoff
+
+Units declare `depends_on` (carried from the planner's proposal onto the `WorkUnit`).
+`scheduleWaves` topologically orders them into dependency waves: each wave holds only
+units whose deps are already satisfied, and units within a wave run concurrently.
+`dispatchInWaves` runs the waves in order — after every wave, each finished unit's
+derived one-line summary (`deriveHandoff`: name + status + evidence count, sanitized and
+capped at 500 bytes) is recorded and injected as an `## Upstream context` block into its
+dependents' dispatch prompt in the next wave. This is best-effort context, not a contract.
+With no `depends_on`, `scheduleWaves` returns a single wave ⇒ one dispatch call ⇒ identical
+to the pre-#612 behavior.
+
+See `src/orchestrator/waves.ts`, `src/orchestrator/handoff.ts`, `src/orchestrator/plan.ts`.
 
 ## Tool Adapters
 
@@ -97,6 +143,8 @@ Canonical Context
 Claude Adapter  → CLAUDE.md + .claude/agents + .claude/skills
 Codex Adapter   → AGENTS.md + .codex/config.toml + prompt injection
 Copilot Adapter → AGENTS.md + .github/copilot-instructions.md + prompt injection
+OpenCode Adapter → AGENTS.md + opencode.json + .opencode/plugins/vf-guard.ts
+Antigravity Adapter → AGENTS.md + .agents/agents + .agents/skills + .agents/mcp_config.json + .agents/hooks.json
 ```
 
 ## Source modules

@@ -49,7 +49,7 @@ transient `probe-failed` results live 5s. `vf doctor --refresh` discards the cac
 re-probes immediately. Engines that fail the probe (presence, auth, or quota) degrade
 to detection-only per `HOOKS_AND_GUARDRAILS.md`.
 
-Checks node, git (required) and bun, claude, codex, copilot, docker (optional), plus
+Checks node, git (required) and bun, claude, codex, copilot, agy, docker (optional), plus
 whether the current directory is a git repo. The "Engine readiness" block reports each
 engine as ready / no-binary / no-auth / probe-failed. Without `--probe` it stops at
 presence/auth; with `--probe` it actually launches each engine with a trivial prompt and
@@ -85,7 +85,7 @@ ready ones. `--dry-run` skips the gate (nothing is written), as does the web int
 ## Dispatch
 
 ```bash
-vf run <claude|codex|copilot>   # write .vibeflow/dispatch/<engine>.md (dry)
+vf run <claude|codex|copilot|opencode|antigravity>   # write .vibeflow/dispatch/<engine>.md (dry)
 vf run <engine> --yes           # launch the engine CLI
 ```
 
@@ -101,8 +101,8 @@ vf ask --resume "ok, and is that thread-safe?"          # continue the last conv
 Reads the given line range, frames a prompt (file path + language-fenced snippet +
 your question), picks the first ready engine (or `--engine`), and streams the
 answer straight to your terminal. `--resume` continues the engine's most-recent
-conversation with a follow-up (no target needed — claude/codex only; the engine
-holds the history, vf stores no session state). Reuses vf's engine-readiness
+conversation with a follow-up (no target needed — Claude, Codex, OpenCode, and
+Antigravity; Antigravity uses workspace-scoped `agy --continue`). Reuses vf's engine-readiness
 selection — no new dispatch path, no dependency. Bad target/range, missing file,
 missing question, or no ready engine exits non-zero with an actionable message.
 Run `vf doctor --probe` if none are ready.

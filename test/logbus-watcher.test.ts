@@ -153,4 +153,48 @@ describe("watchLogbus()", () => {
     // The poll path still delivered the event despite fsWatch being unavailable.
     expect(seen.some((e) => e.text === "poll-only")).toBe(true);
   });
+
+  it("detects rotation via injected statSyncFn inode change — exercises line 71-72", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-watch-rot-inject-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const bus = new Logbus({ runId: "rot-inject", dir });
+    cleanups.push(() => bus.close());
+    // Write a seed event so current.log exists and the initial stat in watchLogbus
+    // () sets lastFileInode to the real inode.
+    bus.write({ channel: "vf", level: "info", text: "seed", runId: "rot-inject" });
+    const seen: LogEvent[] = [];
+    // Inject a statSyncFn that returns an inode different from the real file's
+    // inode, simulating a rotation. The createReadStream seam delivers mock data.
+    const mockEvent = JSON.stringify({
+      channel: "vf",
+      level: "info",
+      text: "rotated",
+      runId: "rot-inject",
+    });
+    const { Readable } = await import("node:stream");
+    // statSyncFn: first call is poll-initial (sees existing file), return diff inode
+    let pollCalls = 0;
+    const watcher = watchLogbus(bus, (ev) => seen.push(ev), {
+      pollMs: 30,
+      debounceMs: 5,
+      statSyncFn: (() => {
+        pollCalls++;
+        // Return a different inode than the real file to trigger rotation reset.
+        return { ino: 999999, size: mockEvent.length + 1 } as unknown as import("node:fs").Stats;
+      }) as unknown as typeof import("node:fs").statSync,
+      createReadStream: () =>
+        new Readable({
+          read() {
+            this.push(`${mockEvent}\n`);
+            this.push(null);
+          },
+        }) as unknown as import("node:fs").ReadStream,
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    watcher.close();
+    // The rotation-reset path (offset=0) read from the mock stream and delivered
+    // the event. At least one poll cycle should have hit the rotation detection.
+    expect(pollCalls).toBeGreaterThanOrEqual(1);
+    expect(seen.some((e) => e.text === "rotated")).toBe(true);
+  });
 });

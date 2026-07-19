@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { AskInvocation } from "../src/commands/ask.js";
 import { captureSpawnAsync, resumeInvocation, streamSpawnAsync } from "../src/commands/ask.js";
 import type { AsyncSpawner } from "../src/dispatch/types.js";
@@ -35,7 +35,7 @@ describe("resolveAskTarget — validation", () => {
   test("valid in-repo path resolves under activeRepo", () => {
     const r = resolveAskTarget(REPO, okBody);
     expect(r).toEqual({
-      absPath: "/repo/src/x.ts",
+      absPath: resolve(REPO, "src/x.ts"),
       start: 2,
       end: 4,
       question: "why?",
@@ -101,7 +101,7 @@ describe("resolveAskTarget — validation", () => {
 
   test("accepts a legit in-repo relative path", () => {
     const r = resolveAskTarget(REPO, { ...okBody, path: "src/deep/nested.ts" });
-    expect(r).toMatchObject({ absPath: "/repo/src/deep/nested.ts" });
+    expect(r).toMatchObject({ absPath: resolve(REPO, "src/deep/nested.ts") });
   });
 });
 
@@ -206,7 +206,7 @@ describe("realpathWithinRepo — symlink escape guard (#562 security)", () => {
       readiness: () => Promise.resolve([ready("claude")]),
       readText: () => "x",
       spawn: () => Promise.resolve({ code: 0, text: "A" }),
-      realpath: (p) => (p === "/repo/src/x.ts" ? "/etc/passwd" : p),
+      realpath: (p) => (p === resolve(REPO, "src/x.ts") ? "/etc/passwd" : p),
     });
     expect(r).toEqual({ error: "path escapes repo", status: 400 });
   });
@@ -353,7 +353,7 @@ describe("prepareAsk — extracted orchestration (#580)", () => {
   test("symlink escape → AskError", async () => {
     const r = await prepareAsk(REPO, okBody, {
       ...deps,
-      realpath: (p) => (p === "/repo/src/x.ts" ? "/etc/passwd" : p),
+      realpath: (p) => (p === resolve(REPO, "src/x.ts") ? "/etc/passwd" : p),
     });
     expect(r).toEqual({ error: "path escapes repo", status: 400 });
   });

@@ -10,6 +10,7 @@ import {
   engineCommand,
   isUnavailable,
   makeAsyncSpawner,
+  materializePrompt,
   parseEngineSummary,
   parseSessionId,
   runDispatch,
@@ -89,6 +90,14 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
       expect(r.promptMode).toBe("stdin");
     }
   });
+
+  test("antigravity → agy -p with argv prompt", () => {
+    expect(engineCommand("antigravity" as never)).toEqual({
+      cmd: "agy",
+      args: ["-p"],
+      promptMode: "arg",
+    });
+  });
 });
 
 describe("engineCommand resume (#618 PR2a)", () => {
@@ -121,6 +130,42 @@ describe("engineCommand resume (#618 PR2a)", () => {
   test("copilot ignores resumeSessionId in PR2a (fresh)", () => {
     const r = engineCommand("copilot", { has: () => true }, false, "sess-abc-123");
     expect(r).toMatchObject({ cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" });
+  });
+
+  test("antigravity explicit conversation resume uses --conversation before -p", () => {
+    expect(engineCommand("antigravity" as never, {}, false, "conversation-123")).toEqual({
+      cmd: "agy",
+      args: ["--conversation", "conversation-123", "-p"],
+      promptMode: "arg",
+    });
+  });
+});
+
+describe("antigravity argv boundary", () => {
+  test("rejects prompt at or above 30 KiB UTF-8 before spawn", () => {
+    const invocation = engineCommand("antigravity" as never);
+    if (isUnavailable(invocation)) throw new Error(invocation.unavailable);
+    expect(() => materializePrompt(invocation, "x".repeat(30 * 1024))).toThrow(
+      /prompt.*too large/i,
+    );
+  });
+
+  test("rejects >=30KiB when cmd is Windows-absolute agy.exe (resolveCli path)", () => {
+    expect(() =>
+      materializePrompt(
+        { cmd: "C:\\Users\\test\\agy.exe", args: ["-p"], promptMode: "arg" },
+        "x".repeat(30 * 1024),
+      ),
+    ).toThrow(/prompt.*too large/i);
+  });
+
+  test("rejects >=30KiB when cmd is POSIX-absolute agy (resolveCli path)", () => {
+    expect(() =>
+      materializePrompt(
+        { cmd: "/usr/local/bin/agy", args: ["-p"], promptMode: "arg" },
+        "x".repeat(30 * 1024),
+      ),
+    ).toThrow(/prompt.*too large/i);
   });
 });
 

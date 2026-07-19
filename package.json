@@ -1,7 +1,7 @@
 {
   "name": "@magicpro97/vibeflow",
   "version": "0.13.0",
-  "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI with shared context, skills, hooks, and verification.",
+  "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI with shared context, skills, hooks, and verification.",
   "type": "module",
   "bin": {
     "vf": "./bin/vf"
@@ -54,6 +54,8 @@
     "claude-code",
     "codex",
     "copilot",
+    "antigravity",
+    "agy",
     "skills",
     "cli",
     "local-first"

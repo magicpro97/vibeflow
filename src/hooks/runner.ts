@@ -175,6 +175,26 @@ function parseClaudeNative(obj: Record<string, unknown>): HookInput | null {
  *  - toolArgs holds the per-tool input; `command` is the field for the bash tool
  * Returns null if this isn't a Copilot-native payload or the event isn't modeled.
  */
+function parseAntigravityNative(obj: Record<string, unknown>): HookInput | null {
+  const toolCall = obj.toolCall as Record<string, unknown> | undefined;
+  if (!toolCall || typeof toolCall.name !== "string") return null;
+  const args = (toolCall.args ?? {}) as Record<string, unknown>;
+  const workspacePaths = Array.isArray(obj.workspacePaths) ? obj.workspacePaths : [];
+  const workspace = workspacePaths.find((path): path is string => typeof path === "string");
+  // PostToolUse payloads carry toolCall and must route through post-tool-use
+  // branch so post-action audit/verification runs. Any unrecognized or absent
+  // event defaults to pre-tool-use (conservative: treat as before-tool gate).
+  const event: HookInput["event"] = obj.event === "PostToolUse" ? "post-tool-use" : "pre-tool-use";
+  return {
+    event,
+    tool: toolCall.name,
+    workspace,
+    command: typeof args.CommandLine === "string" ? args.CommandLine : undefined,
+    files: typeof args.TargetFile === "string" ? [args.TargetFile] : undefined,
+    content: typeof args.Content === "string" ? args.Content : undefined,
+  };
+}
+
 function parseCopilotNative(obj: Record<string, unknown>): HookInput | null {
   const eventName = obj.hookEventName;
   if (typeof eventName !== "string") return null;
@@ -227,6 +247,8 @@ export function parseHookInput(raw: string): HookInput | null {
   // No usable legacy `event` field — try Claude Code's native payload shape.
   const claude = parseClaudeNative(obj);
   if (claude !== null) return claude;
+  const antigravity = parseAntigravityNative(obj);
+  if (antigravity !== null) return antigravity;
   // Then try GitHub Copilot's native payload shape (camelCase hookEventName).
   return parseCopilotNative(obj);
 }
@@ -256,6 +278,12 @@ export function exitCodeFor(_decision: HookDecision): number {
  * Stop:       `{decision:"block",reason:"..."}` to block, `{suppressOutput:true}` for silent
  * PostToolUse: `hookSpecificOutput.additionalContext` for feedback, `{suppressOutput:true}` silent
  */
+export function presentAntigravityDecision(result: HookResult): { json: string; exitCode: number } {
+  const decision =
+    result.decision === "block" ? "deny" : result.decision === "require_approval" ? "ask" : "allow";
+  return { json: JSON.stringify({ decision, reason: result.reasons.join("; ") }), exitCode: 0 };
+}
+
 export function presentDecision(
   result: HookResult,
   input: HookInput,

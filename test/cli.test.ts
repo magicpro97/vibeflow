@@ -566,8 +566,8 @@ describe("commands.init preserves human-curated ROOT engine files (data-loss P1)
 });
 
 describe("engines", () => {
-  test("there are exactly four supported engines (C3: priority is claude > copilot > codex > opencode)", () => {
-    expect(ENGINES).toEqual(["claude", "copilot", "codex", "opencode"]);
+  test("there are exactly five supported engines (priority: claude > copilot > codex > opencode > antigravity)", () => {
+    expect(ENGINES).toEqual(["claude", "copilot", "codex", "opencode", "antigravity"]);
   });
 });
 

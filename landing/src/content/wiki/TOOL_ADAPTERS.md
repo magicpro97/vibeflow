@@ -1,6 +1,6 @@
 ---
 title: Tool Adapters
-description: How tool adapters translate canonical context into engine-specific files for Claude Code, Codex CLI, and GitHub Copilot CLI.
+description: How tool adapters translate canonical context into engine-specific files for supported coding CLIs.
 category: explanation
 last_updated: 2026-06-24
 ---
@@ -14,13 +14,14 @@ last_updated: 2026-06-24
 - [Claude Code Adapter](#claude-code-adapter)
 - [Codex Adapter](#codex-adapter)
 - [Copilot CLI Adapter](#copilot-cli-adapter)
+- [Antigravity CLI Adapter](#antigravity-cli-adapter)
 - [Engine Quota Adapter](#engine-quota-adapter)
 - [Shared Adapter Contract](#shared-adapter-contract)
 - [Dispatch Result Schema](#dispatch-result-schema)
 
 ## Purpose
 
-Tool adapters make Claude Code, Codex CLI, and GitHub Copilot CLI work from the same canonical workflow context.
+Tool adapters make Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI work from the same canonical workflow context.
 
 The system should not maintain separate logic for each tool. It should generate tool-specific files from shared context.
 
@@ -129,6 +130,20 @@ Use the selected skill instructions below.
 Do not invent manual steps when a matching verified skill exists.
 Return JSON summary including skills used, files changed, tests run, and uncertainty.
 ```
+
+## Antigravity CLI adapter
+
+Generated files:
+
+```text
+AGENTS.md
+.agents/agents/<name>/agent.md
+.agents/skills/<name>/SKILL.md
+.agents/mcp_config.json
+.agents/hooks.json
+```
+
+Antigravity runs `agy -p <prompt>` with plain-text output. `agy --continue -p` resumes latest workspace session; `agy --conversation <id> -p` accepts a known explicit ID. The MCP writer preserves unmanaged servers and removes only VibeFlow-managed names. The hook writer merges its `vibeflow-guardrail` key into the hook config shape; enforcement is post-hoc-only until live denial proof.
 
 ## Engine quota adapter
 

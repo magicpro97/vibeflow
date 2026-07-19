@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hookSelftest, liveGuardrailArmed } from "../src/commands.js";
+import { emitHookFiles } from "../src/commands/hooks.js";
 import type { HookInput } from "../src/core.js";
 import {
   claudeHookConfig,
@@ -77,6 +78,46 @@ describe("evaluateHook: spec-stale advisory signal (Task 4)", () => {
 });
 
 // --- Defect 1 (issue #79): Copilot now joins the native enforcement tier ---
+describe("adapters: antigravity native enforcement", () => {
+  test("emits and merges only VibeFlow's named Antigravity hook into existing config", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-antigravity-hooks-"));
+    try {
+      const hookPath = join(base, ".agents", "hooks.json");
+      mkdirSync(join(base, ".agents"), { recursive: true });
+      writeFileSync(
+        hookPath,
+        JSON.stringify({ "user-hook": { PreToolUse: [{ matcher: "read_file" }] }, option: true }),
+      );
+      expect(emitHookFiles(base, ["antigravity"])).toContain(".agents/hooks.json");
+      const written = JSON.parse(readFileSync(hookPath, "utf8"));
+      expect(written).toMatchObject({
+        "user-hook": { PreToolUse: [{ matcher: "read_file" }] },
+        option: true,
+        "vibeflow-guardrail": { PreToolUse: expect.any(Array), PostToolUse: expect.any(Array) },
+      });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  // Coverage: mergeAntigravityHooks catch (line 430) fires when hooks.json has
+  // invalid JSON. emitHookFiles logs an error and continues, file is untouched.
+  test("corrupt hooks.json is left untouched by emitHookFiles (antigravity merge catch)", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-antigravity-hooks-corrupt-"));
+    try {
+      const hookPath = join(base, ".agents", "hooks.json");
+      mkdirSync(join(base, ".agents"), { recursive: true });
+      writeFileSync(hookPath, "{not valid json");
+      // No throw; the catch returns null, emitHookFiles logs an error and continues.
+      expect(() => emitHookFiles(base, ["antigravity"])).not.toThrow();
+      // File was NOT overwritten (mergeAntigravityHooks returned null).
+      expect(readFileSync(hookPath, "utf8")).toBe("{not valid json");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("adapters: copilot native enforcement (issue #79)", () => {
   test("copilotHookConfig emits the official Copilot hooks schema (version:1, hooks:{...})", () => {
     const raw = copilotHookConfig();
@@ -118,6 +159,8 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
     expect(engineEnforcement("opencode").preActionBlocking).toBe("native");
     // codex stays post-hoc-only: it has no native pre-tool veto.
     expect(engineEnforcement("codex").preActionBlocking).toBe("post-hoc-only");
+    // antigravity: real agy 1.1.4 PreToolUse deny canary did not fire in headless test — post-hoc-only until proven.
+    expect(engineEnforcement("antigravity").preActionBlocking).toBe("post-hoc-only");
   });
 
   test("perCommandWarning: empty for native, warns for detection-only", () => {
@@ -125,15 +168,19 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
     expect(perCommandWarning("copilot")).toBe("");
     expect(perCommandWarning("opencode")).toBe("");
     expect(perCommandWarning("codex")).toContain("detection-only");
+    expect(perCommandWarning("antigravity")).toContain("detection-only");
   });
 
-  test("downgradeBannerText: empty for native engines, warns only for codex", () => {
+  test("downgradeBannerText: empty for native engines, warns only for codex and antigravity", () => {
     expect(downgradeBannerText("claude")).toBe("");
     expect(downgradeBannerText("copilot")).toBe("");
     expect(downgradeBannerText("opencode")).toBe("");
     const codexBanner = downgradeBannerText("codex");
     expect(codexBanner.length).toBeGreaterThan(0);
     expect(codexBanner.toLowerCase()).toContain("detection");
+    const agBanner = downgradeBannerText("antigravity");
+    expect(agBanner.length).toBeGreaterThan(0);
+    expect(agBanner.toLowerCase()).toContain("detection");
   });
 });
 
@@ -146,7 +193,8 @@ describe("adapters: opencode plugin generator (issue #79 parity for opencode)", 
     expect(src).toMatch(/export\s+default\s+VfGuard/);
   });
   test("hard-codes the absolute CLI path so the plugin does not depend on PATH", () => {
-    expect(src).toMatch(/const VF_CLI\s*=\s*"[^"]+\/dist\/cli\.js"/);
+    expect(src).toContain("const VF_CLI =");
+    expect(src).toMatch(/dist.*cli\.js/);
   });
   test("declares tool.execute.before (veto) and tool.execute.after (observation)", () => {
     expect(src).toContain('"tool.execute.before"');

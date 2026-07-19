@@ -253,14 +253,17 @@ describe("core.appendFileSafe (CWE-732, #536)", () => {
   });
 });
 
-const _symlinkDescribe = process.platform === "win32" ? describe.skip : describe;
-_symlinkDescribe("core.assertInsideBase (CWE-59 symlink escape)", () => {
+// Inject-based tests: no real symlinks, work on all platforms.
+// On Windows, resolve() converts /repo → absolute path like F:\repo.
+import { resolve as _resolvePath } from "node:path";
+const _R = (s: string) => _resolvePath(s);
+describe("core.assertInsideBase (CWE-59 symlink escape)", () => {
   test("non-symlink file: no-op", () => {
     // Inject a lstat that says "not a symlink" — assertInsideBase
     // must return without calling realpath.
     let realpathCalled = false;
-    const p = "/repo/file";
-    const base = "/repo";
+    const base = _R("/repo");
+    const p = _R("/repo/file");
     assertInsideBase(p, base, {
       lstatSync: () => ({ isSymbolicLink: () => false }),
       realpathSync: () => {
@@ -272,9 +275,9 @@ _symlinkDescribe("core.assertInsideBase (CWE-59 symlink escape)", () => {
   });
 
   test("symlink inside base: no-op (followed OK)", () => {
-    const base = "/repo";
-    const p = `${base}/link`;
-    const target = `${base}/target`;
+    const base = _R("/repo");
+    const p = _R("/repo/link");
+    const target = _R("/repo/target");
     // No throw.
     assertInsideBase(p, base, {
       lstatSync: () => ({ isSymbolicLink: () => true }),
@@ -283,8 +286,8 @@ _symlinkDescribe("core.assertInsideBase (CWE-59 symlink escape)", () => {
   });
 
   test("symlink escaping base: throws symlink escape", () => {
-    const base = "/repo";
-    const p = `${base}/evil`;
+    const base = _R("/repo");
+    const p = _R("/repo/evil");
     const target = "/etc/passwd";
     expect(() =>
       assertInsideBase(p, base, {
@@ -295,12 +298,9 @@ _symlinkDescribe("core.assertInsideBase (CWE-59 symlink escape)", () => {
   });
 
   test("prefix-match trap: /repo-evil/file is NOT inside /repo", () => {
-    // This is the trailing-separator test: a base of /repo should NOT
-    // consider /repo-evil/... as "inside". A naive `startsWith("/repo")`
-    // would say yes; assertInsideBase must say no.
-    const base = "/repo";
-    const p = `${base}/link`;
-    const target = "/repo-evil/secret";
+    const base = _R("/repo");
+    const p = _R("/repo/link");
+    const target = _R("/repo-evil/secret");
     expect(() =>
       assertInsideBase(p, base, {
         lstatSync: () => ({ isSymbolicLink: () => true }),
@@ -311,13 +311,13 @@ _symlinkDescribe("core.assertInsideBase (CWE-59 symlink escape)", () => {
 
   test("lstat ENOENT: no-op (the subsequent read will surface the real error)", () => {
     let realpathCalled = false;
-    assertInsideBase("/missing", "/repo", {
+    assertInsideBase("/missing", _R("/repo"), {
       lstatSync: () => {
         throw new Error("ENOENT");
       },
       realpathSync: () => {
         realpathCalled = true;
-        return "/repo/missing";
+        return _R("/repo/missing");
       },
     });
     expect(realpathCalled).toBe(false);

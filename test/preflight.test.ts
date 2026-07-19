@@ -104,6 +104,17 @@ describe("preflight: auth", () => {
 });
 
 describe("preflight: live probe", () => {
+  test("antigravity probe uses agy -p with argv prompt and plain READY output", () => {
+    const { spawn, calls } = recordingSpawner(() => ({ status: 0, stdout: "READY\n" }));
+    const r = checkEngine("antigravity" as never, opts({ has: () => true, spawner: spawn }));
+    expect(r.level).toBe("ready");
+    expect(calls.find((x) => x.cmd === "agy")).toEqual({
+      cmd: "agy",
+      args: ["-p", "Reply with the single word READY and nothing else."],
+      input: "",
+    });
+  });
+
   test("claude probe success parses JSON envelope -> ready, exact argv + stdin", () => {
     const { spawn, calls } = recordingSpawner(() => ({
       status: 0,
@@ -803,28 +814,14 @@ describe("probeInvocation (test seam)", () => {
     expect(inv.args).toContain("doctor");
   });
 
-  test("preflight: result with code=ENOENT → no-binary (line 150)", async () => {
-    // failedProbe returns { level: "no-binary" } when result.code
-    // is "ENOENT". The async checkEngine path uses a spawner
-    // override. We need a spawner that returns code: "ENOENT"
-    // in the result. The simplest: use the checkEngine (sync) path
-    // via opts.spawner where we control the result.
-    // checkEngine uses sync spawner (Bun.spawnSync). We override
-    // Bun.spawnSync to return code: "ENOENT" via exitCode: 127
-    // and stderr: "ENOENT".
+  test("preflight: result with code=ENOENT → no-binary (line 150)", () => {
     const { checkEngine } = require("../src/preflight.js");
-    const origSync = Bun.spawnSync;
-    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => ({
-      exitCode: 127,
-      stdout: Buffer.from(""),
-      stderr: Buffer.from("spawn ENOENT"),
-    })) as unknown as typeof Bun.spawnSync;
-    try {
-      const r = checkEngine("claude", { has: () => true });
-      expect(r.level).toBe("no-binary");
-    } finally {
-      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = origSync;
-    }
+    const r = checkEngine("claude", {
+      has: () => true,
+      skipCache: true,
+      spawner: () => ({ status: 127, stdout: "", stderr: "spawn ENOENT", code: "ENOENT" }),
+    });
+    expect(r.level).toBe("no-binary");
   });
 
   // Removed the old test that overrode Bun.spawn directly — the new

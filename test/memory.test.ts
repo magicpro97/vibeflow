@@ -46,6 +46,7 @@ describe("memory.ENGINE_IDE", () => {
       codex: "codex-cli",
       copilot: "copilot-cli",
       opencode: "opencode-cli",
+      antigravity: "antigravity-cli",
     });
   });
 });

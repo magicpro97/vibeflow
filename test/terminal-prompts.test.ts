@@ -23,7 +23,7 @@ async function runPrompt(expression: string, input: string): Promise<unknown> {
     const result = await (${expression});
     process.stdout.write("\\n__RESULT__" + JSON.stringify(result));
   `;
-  const proc = Bun.spawn(["bun", "--input-type=module", "-e", script], {
+  const proc = Bun.spawn([process.execPath, "--input-type=module", "-e", script], {
     cwd: repoRoot,
     stdin: "pipe",
     stdout: "pipe",
@@ -52,7 +52,7 @@ async function runPromptWithChunks(expression: string, chunks: string[]): Promis
     const result = await (${expression});
     process.stdout.write("\\n__RESULT__" + JSON.stringify(result));
   `;
-  const proc = Bun.spawn(["bun", "--input-type=module", "-e", script], {
+  const proc = Bun.spawn([process.execPath, "--input-type=module", "-e", script], {
     cwd: repoRoot,
     stdin: "pipe",
     stdout: "pipe",

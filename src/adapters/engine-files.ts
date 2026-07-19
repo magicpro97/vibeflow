@@ -65,5 +65,7 @@ export function engineFiles(
       };
     case "opencode":
       return { "AGENTS.md": body };
+    case "antigravity":
+      return { "AGENTS.md": body };
   }
 }

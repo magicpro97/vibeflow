@@ -10,6 +10,7 @@ function tmpRepo(): string {
 }
 
 const ENGINE_FILES = [
+  ".agents/hooks.json",
   ".claude/settings.json",
   ".codex/hooks.json",
   ".github/hooks/copilot.json",

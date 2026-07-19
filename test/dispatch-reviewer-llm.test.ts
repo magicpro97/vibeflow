@@ -101,7 +101,8 @@ describe("getUnitDiff (ADR-001)", () => {
 describe("makeVibflowLLMFn (ADR-001)", () => {
   test("returns undefined when VIBEFLOW_AI not set", () => {
     const orig = process.env.VIBEFLOW_AI;
-    process.env.VIBEFLOW_AI = undefined;
+    // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
+    delete process.env.VIBEFLOW_AI;
     expect(makeVibflowLLMFn()).toBeUndefined();
     if (orig !== undefined) process.env.VIBEFLOW_AI = orig;
   });

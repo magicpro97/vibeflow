@@ -26,6 +26,7 @@ import type {
   ToolName,
   VibeSettings,
 } from "./_shared.js";
+import { ANTIGRAVITY_MCP_FILE, writeAntigravityMcp } from "./tools-mcp-antigravity.js";
 
 /** Languages detected in the active repo, used to build LSP install plans + entries. */
 // Test seam: exported so unit tests can exercise the try/catch fallback
@@ -50,6 +51,7 @@ const OPENCODE_MCP_FILE = "opencode.json";
 /** Claude `.mcp.json` shape (only the slice we touch). */
 interface ClaudeMcpFile {
   mcpServers: Record<string, McpServerDef>;
+  [key: string]: unknown;
 }
 
 /** opencode.json shape (only the `mcp` slice we touch — other top-level keys like
@@ -111,7 +113,7 @@ function readClaudeMcp(path: string): ClaudeMcpFile & { corrupt: boolean } {
   if (!existsSync(path)) return { mcpServers: {}, corrupt: false };
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ClaudeMcpFile>;
-    return { mcpServers: parsed.mcpServers ?? {}, corrupt: false };
+    return { ...parsed, mcpServers: parsed.mcpServers ?? {}, corrupt: false };
   } catch {
     return { mcpServers: {}, corrupt: true };
   }
@@ -391,7 +393,8 @@ export function writeToolConfigs(
   if (!engines || engines.includes("codex")) writeCodexMcp(base, settings, languages);
   if (!engines || engines.includes("opencode"))
     writeOpencodeMcp(base, settings, languages, removedMcpNames);
+  if (!engines || engines.includes("antigravity")) writeAntigravityMcp(base, settings, languages);
   if (!engines || engines.includes("copilot")) printCopilotMcp(base, settings, languages);
 }
 
-export { CLAUDE_MCP_FILE, OPENCODE_MCP_FILE };
+export { ANTIGRAVITY_MCP_FILE, CLAUDE_MCP_FILE, OPENCODE_MCP_FILE };

@@ -1,6 +1,52 @@
 import { describe, expect, test } from "bun:test";
 import type { HookInput, HookResult } from "../src/core.js";
-import { parseHookInput, presentDecision } from "../src/hooks/runner.js";
+import {
+  parseHookInput,
+  presentAntigravityDecision,
+  presentDecision,
+} from "../src/hooks/runner.js";
+
+describe("runner: Antigravity-native hook protocol", () => {
+  test("maps camelCase tool call payload and presents native deny", () => {
+    const input = parseHookInput(
+      JSON.stringify({
+        toolCall: { name: "run_command", args: { CommandLine: "rm -rf /", Cwd: "/repo" } },
+        workspacePaths: ["/repo"],
+      }),
+    );
+    expect(input).toMatchObject({
+      event: "pre-tool-use",
+      tool: "run_command",
+      command: "rm -rf /",
+      workspace: "/repo",
+    });
+    const result: HookResult = { decision: "block", risk: "critical", reasons: ["destructive"] };
+    expect(presentAntigravityDecision(result)).toEqual({
+      json: JSON.stringify({ decision: "deny", reason: "destructive" }),
+      exitCode: 0,
+    });
+  });
+
+  test("PostToolUse payload with toolCall maps to post-tool-use event", () => {
+    const input = parseHookInput(
+      JSON.stringify({
+        event: "PostToolUse",
+        toolCall: {
+          name: "write_to_file",
+          args: { TargetFile: "/repo/out.txt", Content: "audit me" },
+        },
+        workspacePaths: ["/repo"],
+      }),
+    );
+    expect(input).toMatchObject({
+      event: "post-tool-use",
+      tool: "write_to_file",
+      files: ["/repo/out.txt"],
+      content: "audit me",
+      workspace: "/repo",
+    });
+  });
+});
 
 // --- mapClaudeEvent branch coverage (reached via parseHookInput → parseClaudeNative) ---
 describe("runner: mapClaudeEvent branch coverage", () => {

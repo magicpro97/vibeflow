@@ -19,7 +19,9 @@ describe("commands.workflow subcommand", () => {
       process.chdir(dir);
       expect(workflow("delete", [], { repo: dir })).toBe(0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {}
     }
   });
 

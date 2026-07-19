@@ -1,7 +1,7 @@
 import type { RoleModel, RoleSpec, ToolIntent } from "./role.js";
 
 /** Engine keys consumed by `renderForEngine` / `agentFilePath`. */
-export type AgentEngine = "claude" | "codex" | "copilot" | "opencode";
+export type AgentEngine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
 
 /** Map from engine-agnostic `ToolIntent` to Claude Code's tool names. */
 const CLAUDE_TOOL_MAP: Record<ToolIntent, string> = {
@@ -224,6 +224,17 @@ export function renderOpencodeAgent(spec: RoleSpec): string {
   ].join("\n");
 }
 
+export function renderAntigravityAgent(spec: RoleSpec): string {
+  return [
+    "---",
+    `name: ${yamlQuote(spec.name)}`,
+    `description: ${yamlQuote(spec.description)}`,
+    "---",
+    "",
+    spec.body,
+  ].join("\n");
+}
+
 /** Render the agent file body for a given engine. */
 export function renderForEngine(engine: AgentEngine, spec: RoleSpec): string {
   switch (engine) {
@@ -235,6 +246,8 @@ export function renderForEngine(engine: AgentEngine, spec: RoleSpec): string {
       return renderCopilotAgent(spec);
     case "opencode":
       return renderOpencodeAgent(spec);
+    case "antigravity":
+      return renderAntigravityAgent(spec);
   }
 }
 
@@ -259,5 +272,7 @@ export function agentFilePath(engine: AgentEngine, name: string): string {
       return `.github/agents/${safe}.md`;
     case "opencode":
       return `.opencode/agents/${safe}.md`;
+    case "antigravity":
+      return `.agents/agents/${safe}/agent.md`;
   }
 }

@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
@@ -455,7 +456,7 @@ export function startServer(
         const ext = rel.slice(rel.lastIndexOf("."));
         const type = ASSET_TYPES[ext] ?? "application/octet-stream";
         try {
-          const data = readFileSync(fileUrl.pathname);
+          const data = readFileSync(fileURLToPath(fileUrl));
           return new Response(data, {
             headers: {
               "content-type": type,
@@ -479,7 +480,7 @@ export function startServer(
         const ext = rel.slice(rel.lastIndexOf("."));
         const type = ASSET_TYPES[ext];
         if (!type) return new Response("not found", { status: 404 });
-        const file = Bun.file(fileUrl.pathname);
+        const file = Bun.file(fileURLToPath(fileUrl));
         const ok = await file.exists();
         if (!ok) return new Response("not found", { status: 404 });
         return new Response(file, {

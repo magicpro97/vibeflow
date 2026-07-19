@@ -4,25 +4,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyGuidance, writeGuidance } from "../src/dispatch/guidance.js";
 
+const REPO = "/repo";
+
 describe("writeGuidance — append pre-dispatch guidance (#526 item 3)", () => {
   test("appends to .vibeflow/guidance/<unit>.md via injected writer (no real FS)", () => {
     const calls: { path: string; content: string }[] = [];
     writeGuidance("my-unit", "focus on edge cases", {
-      base: "/repo",
+      base: REPO,
       appendFile: (path, content) => calls.push({ path, content }),
     });
     expect(calls).toEqual([
-      { path: "/repo/.vibeflow/guidance/my-unit.md", content: "focus on edge cases\n" },
+      { path: join(REPO, ".vibeflow", "guidance", "my-unit.md"), content: "focus on edge cases\n" },
     ]);
   });
 
   test("sanitizes an untrusted unit name (path-traversal defense)", () => {
     const calls: { path: string; content: string }[] = [];
     writeGuidance("../../etc/passwd", "x", {
-      base: "/repo",
+      base: REPO,
       appendFile: (path, content) => calls.push({ path, content }),
     });
-    expect(calls[0]?.path).toBe("/repo/.vibeflow/guidance/etc-passwd.md");
+    expect(calls[0]?.path).toBe(join(REPO, ".vibeflow", "guidance", "etc-passwd.md"));
   });
 
   test("preserves a trailing newline the caller already supplied", () => {
@@ -39,9 +41,9 @@ describe("applyGuidance — prepend + clear before dispatch (#526 item 3)", () =
   test("guidance present → prepended to the prompt, then the file is cleared", () => {
     let cleared = "";
     const prompt = applyGuidance("u1", "ORIGINAL PROMPT", {
-      base: "/repo",
+      base: REPO,
       readGuidance: (path) => {
-        expect(path).toBe("/repo/.vibeflow/guidance/u1.md");
+        expect(path).toBe(join(REPO, ".vibeflow", "guidance", "u1.md"));
         return "STEER: use the new API";
       },
       clearGuidance: (path) => {
@@ -49,13 +51,13 @@ describe("applyGuidance — prepend + clear before dispatch (#526 item 3)", () =
       },
     });
     expect(prompt).toBe("STEER: use the new API\n\nORIGINAL PROMPT");
-    expect(cleared).toBe("/repo/.vibeflow/guidance/u1.md");
+    expect(cleared).toBe(join(REPO, ".vibeflow", "guidance", "u1.md"));
   });
 
   test("guidance absent → prompt UNCHANGED, nothing cleared (back-compat)", () => {
     let cleared = false;
     const prompt = applyGuidance("u1", "ORIGINAL PROMPT", {
-      base: "/repo",
+      base: REPO,
       readGuidance: () => undefined,
       clearGuidance: () => {
         cleared = true;
@@ -68,13 +70,13 @@ describe("applyGuidance — prepend + clear before dispatch (#526 item 3)", () =
   test("sanitizes the unit name when resolving the guidance path", () => {
     const seen: string[] = [];
     applyGuidance("../evil", "p", {
-      base: "/repo",
+      base: REPO,
       readGuidance: (path) => {
         seen.push(path);
         return undefined;
       },
     });
-    expect(seen[0]).toBe("/repo/.vibeflow/guidance/evil.md");
+    expect(seen[0]).toBe(join(REPO, ".vibeflow", "guidance", "evil.md"));
   });
 });
 

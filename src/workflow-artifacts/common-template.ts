@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentEngine } from "../agents/render.js";
 import { resolveTemplatePath } from "./template-path.js";
 import { ENGINE_CONFIGS } from "./types.js";
@@ -21,7 +22,7 @@ export function commonTemplateSkillPath(phaseName: string): string {
   if (resolved) return resolved;
   // Not found in either layout — return the prod-bundle path for a sensible
   // "not found at <path>" warning message (the caller checks exists()).
-  return new URL(`../templates/skills/${phaseName}/SKILL.md`, import.meta.url).pathname;
+  return fileURLToPath(new URL(`../templates/skills/${phaseName}/SKILL.md`, import.meta.url));
 }
 
 // ── Engine skill path helpers ───────────────────────────────────────────────
@@ -115,7 +116,7 @@ export function copySkillCreator(
   const onWarn = inject.onWarn ?? ((msg) => console.warn(msg));
   const written: string[] = [];
   const srcUrl = new URL("../../.agents/skills/skill-creator", import.meta.url);
-  const srcPath = srcUrl.pathname;
+  const srcPath = fileURLToPath(srcUrl);
   if (!exists(srcPath)) {
     onWarn(
       `vibeflow: skill-creator source not found at ${srcPath} — AI enrichment will be degraded. Check package.json files[] includes ".agents/skills/skill-creator".`,

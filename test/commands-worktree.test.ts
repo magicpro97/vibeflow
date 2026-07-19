@@ -261,6 +261,23 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
     const r2 = buildCreateArgs("feature", "/tmp/wt");
     expect(r2.args).toEqual(["feature", "/tmp/wt"]);
   });
+
+  // ---- (z-create) worktree() dispatches to worktreeCreate for "create" action ----
+  // Coverage: switch case "create" arm (lines 294,299) was uncovered on Windows
+  // because the E2E test (t) skips on Win32. Inject-driven test works everywhere.
+  test("(z-create) worktree() with action 'create' dispatches to worktreeCreate", () => {
+    process.chdir(dir);
+    const calls: { cmd: string; args: readonly string[] }[] = [];
+    const run = fakeRun({ status: 0, stdout: "", stderr: "" }, calls);
+    const code = worktree(["create", "feature"], {}, { runCommandSync: run });
+    expect(code).toBe(0);
+    expect(calls.length).toBe(1);
+    const c0 = calls[0];
+    if (!c0) throw new Error("expected one call");
+    expect(c0.args[0]).toBe("feature");
+    // cmd is the full path to the helper script (platform-dependent).
+    expect(c0.cmd).toMatch(/create-worktree\.sh$/);
+  });
 });
 
 describe("vf worktree (A6 #172) — E2E with real git + real helper script", () => {

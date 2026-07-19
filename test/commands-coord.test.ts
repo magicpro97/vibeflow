@@ -275,6 +275,21 @@ describe("coord shim (A1 #167 + #194)", () => {
     expect(code).toBe(1);
   });
 
+  // ---- antigravity engine is mapped to "agy" binary at spawn ----
+  test("(engine) coord antigravity spawns agy, not antigravity", async () => {
+    const fresh = new Date(Date.now() - 60_000).toISOString();
+    writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
+    let capturedEngine: string | null = null;
+    const spawner = async (engine: string, _args: readonly string[]): Promise<number> => {
+      capturedEngine = engine;
+      return 0;
+    };
+    const code = await coord(["antigravity"], {}, { now: () => Date.now(), spawner });
+    expect(code).toBe(0);
+    expect(capturedEngine).not.toBeNull();
+    expect(capturedEngine as string | null).toBe("agy");
+  });
+
   // ---- Unknown engine → exit 1 (usage error; same class as missing
   //      brief or stale brief). Exit 2 is reserved for the A0 spec's
   //      "fresh brief but §2 Non-negotiables violated" case (not yet
@@ -310,16 +325,16 @@ describe("coord shim (A1 #167 + #194)", () => {
     expect(code).toBe(1);
   });
 
-  // ---- emitHookFiles throws → catch warns and spawn still proceeds ----
+  // emitHookFiles throws → catch warns and spawn still proceeds.
+  // Works on all platforms (uses process.execPath, not /usr/bin/true).
   test("(defaultEngineSpawner) emitHookFiles throws → warning logged, spawn proceeds", async () => {
-    if (process.platform === "win32") return;
     // Plant a file where emitHookFiles expects a directory (hooks.ts writes
     // .claude/settings.json first; when .claude is a file, mkdirSync fails).
     writeFileSync(join(dir, ".claude"), "");
     const writes: Array<{ channel: string; level: string; text: string }> = [];
     setLogbusForTests({ write: (msg: any) => writes.push(msg) } as any);
     try {
-      const code = await defaultEngineSpawner("/usr/bin/true", []);
+      const code = await defaultEngineSpawner(process.execPath, ["-e", "process.exit(0)"]);
       expect(code).toBe(0);
       const warn = writes.find(
         (w) => w.level === "warn" && w.text.includes("hook emission failed"),

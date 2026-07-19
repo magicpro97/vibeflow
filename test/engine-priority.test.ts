@@ -40,15 +40,15 @@ function* walkSrc(dir: string): Generator<string> {
 }
 
 describe("engine-priority cross-file invariant (C3)", () => {
-  test("src/core.ts ENGINES is the canonical source: [claude, copilot, codex, opencode]", () => {
+  test("src/core.ts ENGINES is the canonical source: [claude, copilot, codex, opencode, antigravity]", () => {
     // Import the live value to confirm — this is what other modules see.
     const { ENGINES } = require("../src/core.js") as { ENGINES: readonly string[] };
-    expect(ENGINES).toEqual(["claude", "copilot", "codex", "opencode"]);
+    expect(ENGINES).toEqual(["claude", "copilot", "codex", "opencode", "antigravity"]);
   });
 
-  test("docs/USER_GUIDE.md says claude > copilot > codex", () => {
+  test("docs/USER_GUIDE.md lists all engines in priority order", () => {
     const doc = readFileSync(USER_GUIDE, "utf8");
-    expect(doc).toMatch(/claude\s*>\s*copilot\s*>\s*codex/);
+    expect(doc).toMatch(/claude\s*>\s*copilot\s*>\s*codex\s*>\s*opencode\s*>\s*antigravity/);
   });
 
   test("no .ts file under src/ redeclares a private engine-priority list", () => {

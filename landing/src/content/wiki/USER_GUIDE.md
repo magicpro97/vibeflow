@@ -18,7 +18,7 @@ last_updated: 2026-06-24
 - [7. Troubleshooting](#7-troubleshooting)
 
 VibeFlow is a local-first CLI (`vf`) that opens a web UI and orchestrates Claude Code,
-Codex CLI, and GitHub Copilot CLI through shared context, Anthropic-style skills, hooks,
+Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI (`agy`) through shared context, Anthropic-style skills, hooks,
 and verification. It never lets an engine work blindly: it scans your repo, resolves the
 skills a task needs **on demand**, plans non-overlapping work units, dispatches them in
 parallel, and refuses to "complete" anything without recorded evidence.
@@ -35,7 +35,7 @@ npx @magicpro97/vibeflow            # run without installing
 npm install -g @magicpro97/vibeflow # or install globally, then use `vf`
 ```
 
-Requirements: Node ≥ 18 and git. Engines (Claude Code / Codex / Copilot CLI) are optional
+Requirements: Node ≥ 18 and git. Engines (Claude Code / Codex / Copilot CLI / OpenCode / Antigravity `agy`) are optional
 — VibeFlow detects what you have and degrades gracefully. Context7 discovery needs no
 extra install (it rides the built-in `fetch`); an optional `CONTEXT7_API_KEY` raises the
 rate limit.
@@ -48,7 +48,7 @@ vf doctor --probe    # also run a live "reply READY" round-trip per engine
 vf doctor --refresh  # discard the probe-result cache and re-probe immediately
 ```
 
-You should see ✓/• marks for node, git, bun, claude, codex, copilot, docker, plus an
+You should see ✓/• marks for node, git, bun, claude, codex, copilot, agy, docker, plus an
 "Engine readiness" block. With `--probe` each engine is launched once with a trivial
 prompt and must reply `READY` — proving auth and a working CLI end to end.
 
@@ -173,7 +173,7 @@ vf config memory off
 
 `vf init --ai` runs the AI enrichment phase on top of the deterministic
 context. The chosen engine is the first ready one in priority order
-(`claude > copilot > codex`), unless `--engine` is set.
+(`claude > copilot > codex > opencode > antigravity`), unless `--engine` is set.
 
 ```bash
 vf init --ai                                # auto-pick the best engine

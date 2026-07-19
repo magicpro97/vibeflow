@@ -50,6 +50,7 @@ import {
   verify,
   workflow,
 } from "../src/commands.js";
+import { COMMAND_HELP } from "../src/commands/help-commands.js";
 import {
   CTX_DIR,
   type Engine,
@@ -1574,8 +1575,15 @@ describe("commands.skills subcommand branches", () => {
     // Pre-create the destination as read-only so the internal cpSync fails,
     // landing in migrateToSharedCatalog's error branch for this entry.
     mkdirSync(join(catalog, "err-skill"), { recursive: true });
-    const { chmodSync } = await import("node:fs");
-    chmodSync(catalog, 0o500);
+    if (process.platform === "win32") {
+      // On Windows, chmod doesn't prevent writes to a directory.
+      // Prevent writes via icacls (file owner can always change perms).
+      const { execSync } = await import("node:child_process");
+      execSync(`icacls "${catalog}" /deny "%USERNAME%":W`, { stdio: "pipe" });
+    } else {
+      const { chmodSync } = await import("node:fs");
+      chmodSync(catalog, 0o500);
+    }
     mkdirSync(join(dir, ".vibeflow", "skills", "err-skill"), { recursive: true });
     writeFileSync(
       join(dir, ".vibeflow", "skills", "err-skill", "SKILL.md"),
@@ -1584,7 +1592,13 @@ describe("commands.skills subcommand branches", () => {
     try {
       expect(skills("migrate", [])).toBe(1);
     } finally {
-      chmodSync(catalog, 0o755);
+      if (process.platform === "win32") {
+        const { execSync } = await import("node:child_process");
+        execSync(`icacls "${catalog}" /remove:d "%USERNAME%"`, { stdio: "pipe" });
+      } else {
+        const { chmodSync } = await import("node:fs");
+        chmodSync(catalog, 0o755);
+      }
       rmSync(join(catalog, "err-skill"), { recursive: true, force: true });
     }
   });
@@ -2518,6 +2532,15 @@ describe("commands.help branches", () => {
 
   test("printCommandHelp for unknown subcommand falls back to printHelp (line 2943-2944)", () => {
     expect(printCommandHelp("definitely-not-real")).toBe(0);
+  });
+
+  test("ask help --engine lists all engines incl opencode+antigravity, resume lists claude/codex/opencode/antigravity", () => {
+    const render = COMMAND_HELP.ask;
+    expect(render).toBeDefined();
+    if (!render) throw new Error("ask help missing");
+    const askHelp = render();
+    expect(askHelp).toMatch(/claude \| codex \| copilot \| opencode \| antigravity/);
+    expect(askHelp).toMatch(/claude\/codex\/opencode\/antigravity/);
   });
 });
 

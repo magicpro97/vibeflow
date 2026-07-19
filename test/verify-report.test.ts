@@ -279,7 +279,8 @@ test("defaultGoalEvalFn: catch block — git diff throws → still returns cover
   const orig = process.cwd();
   process.chdir("/tmp");
   const origEnv = process.env.VIBEFLOW_AI;
-  process.env.VIBEFLOW_AI = undefined;
+  // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
+  delete process.env.VIBEFLOW_AI;
   const result = await defaultGoalEvalFn("any goal");
   process.chdir(orig);
   if (origEnv !== undefined) process.env.VIBEFLOW_AI = origEnv;
@@ -288,14 +289,14 @@ test("defaultGoalEvalFn: catch block — git diff throws → still returns cover
 
 test("defaultGoalEvalFn: injected spawner throws → diff catch → covered=true (no bridge)", async () => {
   const origEnv = process.env.VIBEFLOW_AI;
-  process.env.VIBEFLOW_AI = undefined;
+  // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
+  delete process.env.VIBEFLOW_AI;
   let calls = 0;
   const result = await defaultGoalEvalFn("any goal", () => {
     calls++;
     throw new Error("ENOENT: git not found");
   });
   if (origEnv !== undefined) process.env.VIBEFLOW_AI = origEnv;
-  else process.env.VIBEFLOW_AI = undefined;
   expect(calls).toBe(1); // diff spawner attempted, bridge skipped
   expect(result).toEqual({ covered: true, uncovered: [] });
 });
@@ -308,7 +309,8 @@ test("defaultGoalEvalFn: injected spawner throws with bridge set → bridge catc
     calls++;
     throw new Error("ENOENT: bridge binary not found");
   });
-  if (origEnv === undefined) process.env.VIBEFLOW_AI = undefined;
+  // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
+  if (origEnv === undefined) delete process.env.VIBEFLOW_AI;
   else process.env.VIBEFLOW_AI = origEnv;
   expect(calls).toBe(2); // both diff + bridge spawners attempted and threw
   expect(result).toEqual({ covered: true, uncovered: [] });
@@ -316,7 +318,8 @@ test("defaultGoalEvalFn: injected spawner throws with bridge set → bridge catc
 
 test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI not set", async () => {
   const origEnv = process.env.VIBEFLOW_AI;
-  process.env.VIBEFLOW_AI = undefined;
+  // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
+  delete process.env.VIBEFLOW_AI;
   const result = await defaultGoalEvalFn("any goal");
   expect(result.covered).toBe(true);
   if (origEnv !== undefined) process.env.VIBEFLOW_AI = origEnv;

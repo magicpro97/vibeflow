@@ -166,7 +166,7 @@ function main() {
   // regex-rejected" case, so the duplicate read is bounded to files
   // that matter (not a hot path).
   for (const file of srcFiles) {
-    const relFile = path.relative(REPO_ROOT, file);
+    const relFile = path.relative(REPO_ROOT, file).split(path.sep).join("/");
     const { cap, waiver } = capFor(relFile);
     const lines = lineCount(file);
     const w = findWaiver(file);
@@ -204,7 +204,7 @@ function main() {
       const trimmed = line.trimStart();
       if (!trimmed.startsWith("//")) break;
       if (trimmed.startsWith("// size-waiver:") && !INLINE_WAIVER_REGEX.test(line)) {
-        waiverMismatches.push({ file: path.relative(REPO_ROOT, file), line: i, text: trimmed });
+        waiverMismatches.push({ file: path.relative(REPO_ROOT, file).split(path.sep).join("/"), line: i, text: trimmed });
       }
     }
   }

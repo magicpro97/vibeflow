@@ -34,6 +34,7 @@ export const ENGINE_IDE: Record<Engine, string> = {
   codex: "codex-cli",
   copilot: "copilot-cli",
   opencode: "opencode-cli",
+  antigravity: "antigravity-cli",
 };
 
 export interface MemoryBackendOpts {

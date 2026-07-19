@@ -50,7 +50,7 @@ ${c.bold("Examples:")}
   vf init --no-hooks
   vf init --dry-run`,
 
-  run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot|opencode> [--yes]")}
+  run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot|opencode|antigravity> [--yes]")}
 Write the dispatch prompt for one engine. Without --yes it is a read-only dry run;
 --yes launches the engine CLI behind the source-protection gate.
 
@@ -63,7 +63,8 @@ ${c.bold("Options:")}
 ${c.bold("Examples:")}
   vf run claude
   vf run codex --yes
-  vf run opencode --yes`,
+  vf run opencode --yes
+  vf run antigravity --yes`,
 
   ask: () => `${c.bold("vf ask")} ${c.dim('<path>:<start>[-<end>] "<question>" [--engine <e>] [--resume]')}
 Inline code Q&A: read a line range, frame it (file + language-fenced snippet +
@@ -71,10 +72,10 @@ your question), and stream a ready engine's answer straight to the terminal.
 Reuses vf's engine-readiness selection; no chat app, no copy-paste.
 
 ${c.bold("Options:")}
-  --engine <name>   force claude | codex | copilot (must be ready); else the
+  --engine <name>   force claude | codex | copilot | opencode | antigravity (must be ready); else the
                     first ready engine in priority order is used
   --resume          continue the engine's MOST RECENT conversation with a
-                    follow-up question (no target needed) — claude/codex only
+                    follow-up question (no target needed) — claude/codex/opencode/antigravity
 
 ${c.bold("Examples:")}
   vf ask src/cli.ts:210-267 "what does this switch do?"

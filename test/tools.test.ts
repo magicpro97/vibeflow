@@ -8,6 +8,8 @@ import {
   TOOLS,
   TOOL_ORDER,
   type TomlMcpEntry,
+  buildStdioEntry,
+  buildUserEntry,
   resolveTools,
 } from "../src/tools/index.js";
 import * as lsp from "../src/tools/lsp.js";
@@ -269,5 +271,87 @@ describe("codegraph.indexLooksHealthy", () => {
         // ignore
       }
     }
+  });
+});
+
+// ponytail: one describe per contract assertion — agy expects serverUrl, not url
+describe("antigravity MCP config contract", () => {
+  const stdioServer: StdioServer = {
+    command: "my-tool",
+    args: ["--mcp"],
+    env: {},
+  };
+
+  test("buildStdioEntry preserves stdio shape unchanged", () => {
+    const entry = buildStdioEntry("antigravity", "my-tool", stdioServer, ["tool1"]);
+    expect(entry.engine).toBe("antigravity");
+    expect(entry.configPath).toBe(".agents/mcp_config.json");
+    const server = (entry as any).servers["my-tool"];
+    expect(server.command).toBe("my-tool");
+    expect(server.args).toEqual(["--mcp"]);
+    expect(server.env).toEqual({});
+    expect((server as any).url).toBeUndefined();
+    expect((server as any).serverUrl).toBeUndefined();
+  });
+
+  test("buildUserEntry with http transport uses serverUrl not url", () => {
+    const entry = buildUserEntry("antigravity", "remote-tool", {
+      transport: "http",
+      url: "http://localhost:8080/mcp",
+    });
+    expect(entry).not.toBeNull();
+    const server = (entry as any).servers["remote-tool"];
+    expect(server.serverUrl).toBe("http://localhost:8080/mcp");
+    expect((server as any).url).toBeUndefined();
+  });
+
+  test("buildUserEntry with sse transport uses serverUrl not url", () => {
+    const entry = buildUserEntry("antigravity", "sse-tool", {
+      transport: "sse",
+      url: "http://localhost:9090/sse",
+    });
+    expect(entry).not.toBeNull();
+    const server = (entry as any).servers["sse-tool"];
+    expect(server.serverUrl).toBe("http://localhost:9090/sse");
+    expect((server as any).url).toBeUndefined();
+  });
+
+  test("buildUserEntry with stdio transport still works unchanged", () => {
+    const entry = buildUserEntry("antigravity", "local-tool", {
+      command: "local-tool",
+      args: ["--serve"],
+    });
+    expect(entry).not.toBeNull();
+    const server = (entry as any).servers["local-tool"];
+    expect(server.command).toBe("local-tool");
+    expect(server.args).toEqual(["--serve"]);
+    expect((server as any).serverUrl).toBeUndefined();
+  });
+
+  test("buildUserEntry with http transport includes headers when present", () => {
+    const entry = buildUserEntry("antigravity", "authed", {
+      transport: "http",
+      url: "http://localhost:8080/mcp",
+      headers: { Authorization: "Bearer tok" },
+    });
+    expect(entry).not.toBeNull();
+    const server = (entry as any).servers.authed;
+    expect(server.serverUrl).toBe("http://localhost:8080/mcp");
+    expect(server.headers).toEqual({ Authorization: "Bearer tok" });
+    expect((server as any).url).toBeUndefined();
+  });
+
+  test("non-antigravity engines still use url field (regression guard)", () => {
+    const claude = buildUserEntry("claude", "x", {
+      transport: "http",
+      url: "http://localhost:8080/mcp",
+    });
+    expect((claude as any).servers.x.url).toBe("http://localhost:8080/mcp");
+
+    const copilot = buildUserEntry("copilot", "y", {
+      transport: "sse",
+      url: "http://localhost:9090/sse",
+    });
+    expect((copilot as any).servers.y.url).toBe("http://localhost:9090/sse");
   });
 });
