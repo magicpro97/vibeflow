@@ -146,7 +146,7 @@ import type { Engine } from "../types.js";
 import InfoTip from "./InfoTip.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
 
-const ENGINES: Engine[] = ["claude", "codex", "copilot", "opencode"];
+const ENGINES: Engine[] = ["claude", "codex", "copilot", "opencode", "antigravity"];
 
 const store = useVfStore();
 // Pre-select engine from Stage1 choice (persisted in localStorage); fallback claude

@@ -322,7 +322,7 @@ export function pruneUnselectedEngineFolders(base: string, selectedEngine: Agent
     if (existsSync(agentDir)) {
       try {
         rmSync(agentDir, { recursive: true, force: true });
-        removed.push(join(dirname(cfg.skillRoot), "agents"));
+        removed.push(`${dirname(cfg.skillRoot)}/agents`);
       } catch {
         // best-effort
       }

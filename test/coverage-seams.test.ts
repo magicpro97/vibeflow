@@ -105,7 +105,9 @@ describe("commands coverage seams", () => {
       ).rejects.toThrow("disk on fire");
     } finally {
       console.error = origErr;
-      rmSync(dir, { recursive: true, force: true });
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {}
     }
   });
 });

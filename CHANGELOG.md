@@ -67,6 +67,7 @@
 
 ### Features
 
+* **engine:** add Antigravity CLI (`agy`) support: dispatch, `--continue`/explicit conversation resume, agents, skills, MCP, and hook config shape
 * **orchestrator:** stuck-detector with 3 detection patterns — stalled, looping, evidence-stuck ([#546](https://github.com/magicpro97/vibeflow/issues/546))
 * **ui:** live progress self-redraw + cost/token/elapsed footer in phase tracker ([#523](https://github.com/magicpro97/vibeflow/issues/523))
 * **agents:** role-loader with parseAgentRole, resolveRole, loadAgentRoles reusing parseFrontmatter ([#550](https://github.com/magicpro97/vibeflow/issues/550))

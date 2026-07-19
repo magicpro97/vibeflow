@@ -273,6 +273,173 @@ describe("writeToolConfigs engine gating (#427)", () => {
   });
 });
 
+describe("writeToolConfigs Antigravity MCP", () => {
+  const ANTIGRAVITY_FILE = join(".agents", "mcp_config.json");
+
+  test("preserves unrelated servers and removes stale managed servers on rewrite", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    writeFileSync(
+      join(base, ANTIGRAVITY_FILE),
+      JSON.stringify({ mcpServers: { user: { command: "user-tool", args: [] } }, option: true }),
+    );
+    let settings = writeSettings(base, {
+      tools: { codegraph: true, lsp: false },
+      mcpServers: { managed: { command: "managed-tool" } },
+    });
+    writeToolConfigs(base, settings, ["antigravity"]);
+    let config = JSON.parse(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8"));
+    expect(config.option).toBe(true);
+    expect(config.mcpServers.user).toBeDefined();
+    expect(config.mcpServers.codegraph).toBeDefined();
+    expect(config.mcpServers.managed).toBeDefined();
+
+    settings = writeSettings(base, { tools: { codegraph: false, lsp: false }, mcpServers: {} });
+    writeToolConfigs(base, settings, ["antigravity"]);
+    config = JSON.parse(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8"));
+    expect(config.mcpServers.user).toBeDefined();
+    expect(config.mcpServers.codegraph).toBeUndefined();
+    expect(config.mcpServers.managed).toBeUndefined();
+  });
+
+  /** #X: regression — an unmanaged Antigravity remote entry with serverUrl
+   *  (not url) must survive read/rewrite unchanged. The McpFile type must
+   *  accept the AntigravityRemoteServer shape, not just McpServerDef. */
+  test("unmanaged Antigravity remote {serverUrl} survives read/rewrite unchanged", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    writeFileSync(
+      join(base, ANTIGRAVITY_FILE),
+      JSON.stringify({
+        mcpServers: {
+          external: {
+            serverUrl: "https://ext.example.com/mcp",
+            headers: { Authorization: "Bearer x" },
+          },
+        },
+      }),
+    );
+    const settings = writeSettings(base, {
+      tools: { codegraph: false, lsp: false },
+    });
+    writeToolConfigs(base, settings, ["antigravity"]);
+    const config = JSON.parse(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8"));
+    expect(config.mcpServers.external).toBeDefined();
+    expect(config.mcpServers.external.serverUrl).toBe("https://ext.example.com/mcp");
+    expect(config.mcpServers.external.headers?.Authorization).toBe("Bearer x");
+  });
+
+  // P1 (Codex): first vf tools run with Antigravity tools disabled must NOT delete
+  // user-owned MCP servers named codegraph or lsp. Data-loss invariant: delete only
+  // names read from managed sidecar, then record every written entry including built-ins.
+  test("P1: user-owned codegraph/lsp survive first disabled Antigravity run", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    writeFileSync(
+      join(base, ANTIGRAVITY_FILE),
+      JSON.stringify({
+        mcpServers: {
+          codegraph: { command: "user-codegraph", args: ["--custom"] },
+          lsp: { command: "user-lsp", args: ["--port", "9999"] },
+          other: { command: "other-tool" },
+        },
+      }),
+    );
+    const settings = writeSettings(base, {
+      tools: { codegraph: false, lsp: false },
+    });
+    writeToolConfigs(base, settings, ["antigravity"]);
+    const config = JSON.parse(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8"));
+    expect(config.mcpServers.codegraph).toBeDefined();
+    expect(config.mcpServers.codegraph.command).toBe("user-codegraph");
+    expect(config.mcpServers.lsp).toBeDefined();
+    expect(config.mcpServers.lsp.command).toBe("user-lsp");
+    expect(config.mcpServers.other).toBeDefined();
+  });
+
+  test("P1: sidecar records written entries including built-in tools and user servers", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    const settings = writeSettings(base, {
+      tools: { codegraph: true, lsp: true },
+      mcpServers: { myserver: { command: "my-tool" } },
+    });
+    writeToolConfigs(base, settings, ["antigravity"]);
+    const MANAGED_SIDECAR = join(".vibeflow", ".antigravity-mcp-managed.json");
+    const managed = JSON.parse(readFileSync(join(base, MANAGED_SIDECAR), "utf8"));
+    expect(managed).toContain("codegraph");
+    expect(managed).toContain("myserver");
+  });
+
+  // P1 (Codex): config write failure must NOT update sidecar (false ownership claim).
+  // If .agents/mcp_config.json cannot be written, sidecar must remain with previous
+  // run's names so next run doesn't delete user-owned servers.
+  test("P1: config write failure leaves sidecar unchanged (no false ownership claim)", () => {
+    const MANAGED_SIDECAR = join(".vibeflow", ".antigravity-mcp-managed.json");
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    // First run: success — config written, sidecar records names.
+    const settings1 = writeSettings(base, {
+      tools: { codegraph: true, lsp: false },
+      mcpServers: { myserver: { command: "my-tool" } },
+    });
+    writeToolConfigs(base, settings1, ["antigravity"]);
+    const sidecarBefore = JSON.parse(readFileSync(join(base, MANAGED_SIDECAR), "utf8"));
+    expect(sidecarBefore).toContain("codegraph");
+    expect(sidecarBefore).toContain("myserver");
+    // Force config write to fail: replace .agents/ dir with a regular file.
+    rmSync(join(base, ".agents"), { recursive: true, force: true });
+    writeFileSync(join(base, ".agents"), "not a directory");
+    const settings2 = writeSettings(base, {
+      tools: { codegraph: false, lsp: false },
+      mcpServers: { othertool: { command: "other" } },
+    });
+    // writeFileSafe for .agents/mcp_config.json throws because .agents is a file.
+    expect(() => writeToolConfigs(base, settings2, ["antigravity"])).toThrow();
+    // Sidecar must NOT contain "othertool" — config write failed before sidecar write.
+    const sidecarAfter = JSON.parse(readFileSync(join(base, MANAGED_SIDECAR), "utf8"));
+    expect(sidecarAfter).toEqual(sidecarBefore);
+    expect(sidecarAfter).not.toContain("othertool");
+  });
+
+  // P1 (Codex): malformed mcpServers must not crash vf tools and file must remain byte-for-byte untouched.
+  test("corrupt mcpServers: null → file left untouched, no crash", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    const content = JSON.stringify({ mcpServers: null, option: true });
+    writeFileSync(join(base, ANTIGRAVITY_FILE), content);
+    const settings = writeSettings(base, { tools: { codegraph: false, lsp: false } });
+    expect(() => writeToolConfigs(base, settings, ["antigravity"])).not.toThrow();
+    expect(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8")).toBe(content);
+  });
+
+  test("corrupt mcpServers: array → file left untouched, no crash", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    const content = JSON.stringify({ mcpServers: ["a", "b"] });
+    writeFileSync(join(base, ANTIGRAVITY_FILE), content);
+    const settings = writeSettings(base, { tools: { codegraph: false, lsp: false } });
+    expect(() => writeToolConfigs(base, settings, ["antigravity"])).not.toThrow();
+    expect(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8")).toBe(content);
+  });
+
+  test("corrupt mcpServers: string → file left untouched, no crash", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    const content = JSON.stringify({ mcpServers: "nope" });
+    writeFileSync(join(base, ANTIGRAVITY_FILE), content);
+    const settings = writeSettings(base, { tools: { codegraph: false, lsp: false } });
+    expect(() => writeToolConfigs(base, settings, ["antigravity"])).not.toThrow();
+    expect(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8")).toBe(content);
+  });
+
+  // Coverage: readConfig catch (line 49) fires when the MCP config file has
+  // truly invalid JSON (not just bad mcpServers type). writeToolConfigs calls
+  // writeAntigravityMcp → readConfig → JSON.parse throws → returns null.
+  test("truly invalid JSON in mcp_config.json triggers readConfig catch, file untouched", () => {
+    mkdirSync(join(base, ".agents"), { recursive: true });
+    const content = "{not valid json";
+    writeFileSync(join(base, ANTIGRAVITY_FILE), content);
+    const settings = writeSettings(base, { tools: { codegraph: false, lsp: false } });
+    expect(() => writeToolConfigs(base, settings, ["antigravity"])).not.toThrow();
+    expect(readFileSync(join(base, ANTIGRAVITY_FILE), "utf8")).toBe(content);
+  });
+});
+
 describe("writeToolConfigs opencode.json (#628)", () => {
   const OPENCODE_FILE = "opencode.json";
 

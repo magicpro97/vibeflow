@@ -196,6 +196,7 @@ export async function doctor(
     ["claude", _hasCommand("claude"), "optional"],
     ["codex", _hasCommand("codex"), "optional"],
     ["copilot", _hasCommand("copilot"), "optional"],
+    ["agy", _hasCommand("agy"), "optional"],
     ["gh", _hasCommand("gh"), "optional"],
     ["docker", _hasCommand("docker"), "optional"],
   ];
@@ -360,12 +361,14 @@ export function detectRepo(path?: string): RepoDetection {
       codex: has("AGENTS.md") || has(".codex"),
       copilot: has(".github/copilot-instructions.md"),
       opencode: has("AGENTS.md"),
+      antigravity: has("AGENTS.md"),
     },
     clis: {
       claude: hasCommand("claude"),
       codex: hasCommand("codex"),
       copilot: hasCommand("copilot") || hasCommand("gh"),
       opencode: hasCommand("opencode"),
+      antigravity: hasCommand("agy"),
     },
   };
 }

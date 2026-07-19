@@ -148,7 +148,7 @@ import { useVfStore } from "../store.js";
 import type { Engine } from "../types.js";
 /** All engine tools in canonical priority order — mirrors ENGINES in
  *  src/core/types.ts (kept in sync; the UI bundle can't import backend types). */
-const ALL_ENGINES: Engine[] = ["claude", "copilot", "codex"];
+const ALL_ENGINES: Engine[] = ["claude", "copilot", "codex", "opencode", "antigravity"];
 import HookApprovalModal from "./HookApprovalModal.vue";
 import InfoTip from "./InfoTip.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
@@ -175,7 +175,8 @@ const store = useVfStore();
 const engine = computed<Engine>(() => {
   const agents = store.state?.work_units?.map((u) => u.owner_agent).filter(Boolean) ?? [];
   const first = agents[0];
-  if (first === "codex" || first === "copilot") return first;
+  if (first === "codex" || first === "copilot" || first === "opencode" || first === "antigravity")
+    return first;
   return "claude";
 });
 const orchestrating = ref(false);

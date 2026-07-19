@@ -10,11 +10,11 @@
  * hook today, so we wire it as DETECTION-ONLY (post-hoc events) and surface a
  * downgrade banner instead of advertising blocking we cannot actually honor.
  */
-
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Engine } from "../core.js";
+import { antigravityHookConfig } from "./antigravity.js";
 
 /** Stable marker the generator emits in the opencode plugin so the live-
  *  guardrail probe can distinguish generator output from a hand-rolled file
@@ -60,7 +60,8 @@ export function opencodePluginStale(
     return { stale: true, expected: cliPath(), actual: null };
   }
   const expected = cliPath();
-  return { stale: match[1] !== expected, expected, actual: match[1] };
+  const actual = JSON.parse(`"${match[1]}"`) as string;
+  return { stale: actual !== expected, expected, actual };
 }
 
 /** Whether an engine can veto an action before it runs, or only detect after the fact. */
@@ -76,6 +77,7 @@ const ENFORCEMENT: Record<Engine, EngineEnforcementCapability> = {
   // throw to block a tool call before it runs — semantically equivalent to
   // Claude Code's PreToolUse and Copilot CLI's preToolUse.
   opencode: { preActionBlocking: "native" },
+  antigravity: { preActionBlocking: "post-hoc-only" },
 };
 
 /** Report whether an engine enforces guardrails natively or post-hoc only. */
@@ -376,7 +378,6 @@ export function gitPostMerge(): string {
   ].join("\n");
 }
 
-/** All engine hook configs as a path→content map for a target repo. */
 export function engineHookFiles(engines?: Engine[]): Record<string, string> {
   return {
     ...(!engines || engines.includes("claude")
@@ -388,6 +389,9 @@ export function engineHookFiles(engines?: Engine[]): Record<string, string> {
       : {}),
     ...(!engines || engines.includes("opencode")
       ? { ".opencode/plugins/vf-guard.ts": opencodePluginSource() }
+      : {}),
+    ...(!engines || engines.includes("antigravity")
+      ? { ".agents/hooks.json": antigravityHookConfig(cliPath()) }
       : {}),
     ".githooks/pre-commit": gitPreCommit(),
     ".githooks/post-checkout": gitPostCheckout(),

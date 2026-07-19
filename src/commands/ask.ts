@@ -137,6 +137,8 @@ export function askInvocation(engine: Engine): AskInvocation {
       return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" };
     case "opencode":
       return { cmd: "opencode", args: ["run", "--format", "json", "-"], promptMode: "stdin" };
+    case "antigravity":
+      return { cmd: "agy", args: ["-p"], promptMode: "arg" };
   }
   throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
 }
@@ -164,6 +166,8 @@ export function resumeInvocation(engine: Engine): AskInvocation | string {
         args: ["run", "--continue", "--format", "json", "-"],
         promptMode: "stdin",
       };
+    case "antigravity":
+      return { cmd: "agy", args: ["--continue", "-p"], promptMode: "arg" };
   }
   throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
 }
@@ -195,6 +199,13 @@ export function pickEngine(
  * lost). Mirrors dispatch.ts materializePrompt so both paths agree. #562.
  */
 export function materializeArgs(inv: AskInvocation, prompt: string): string[] {
+  if (
+    inv.cmd === "agy" &&
+    inv.promptMode === "arg" &&
+    Buffer.byteLength(prompt, "utf8") >= 30 * 1024
+  ) {
+    throw new Error("Antigravity prompt too large for agy argv; shorten or split the task");
+  }
   if (inv.promptMode !== "arg") return inv.args;
   const flag = inv.args.findIndex((a) => a === "-p" || a === "--prompt");
   if (flag === -1) return [...inv.args, prompt];

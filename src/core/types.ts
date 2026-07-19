@@ -1,4 +1,4 @@
-export type Engine = "claude" | "codex" | "copilot" | "opencode";
+export type Engine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
 
 /**
  * Canonical engine priority. Single source of truth for "which engine
@@ -9,7 +9,7 @@ export type Engine = "claude" | "codex" | "copilot" | "opencode";
  * this list, you MUST also update docs/USER_GUIDE.md AND the
  * cross-file invariant test in test/engine-priority.test.ts.
  */
-export const ENGINES: Engine[] = ["claude", "copilot", "codex", "opencode"];
+export const ENGINES: Engine[] = ["claude", "copilot", "codex", "opencode", "antigravity"];
 
 export type GateState = "pass" | "fail" | "running" | "pending";
 

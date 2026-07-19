@@ -81,7 +81,7 @@ test("readLocalSpec: reads decisions.md verbatim", () => {
   expect(readLocalSpec(base)).toContain("must return 200");
 });
 test("specSnapshotPath: lives under .vibeflow/spec-snapshot/<taskId>.md", () => {
-  expect(specSnapshotPath("/b", "T1")).toBe("/b/.vibeflow/spec-snapshot/T1.md");
+  expect(specSnapshotPath("/b", "T1")).toBe(join("/b", ".vibeflow", "spec-snapshot", "T1.md"));
 });
 test("specStaleSignals: no snapshot → no signals", () => {
   expect(specStaleSignals(freshBase(), "T1", "anything")).toEqual([]);

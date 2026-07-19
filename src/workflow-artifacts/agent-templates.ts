@@ -201,6 +201,12 @@ const ENGINE_META: Record<
     skillDir: ".opencode/skills/",
     instructionFile: "AGENTS.md",
   },
+  antigravity: {
+    name: "Antigravity CLI",
+    agentDir: ".agents/agents/",
+    skillDir: ".agents/skills/",
+    instructionFile: "AGENTS.md",
+  },
 };
 
 export function copyUsageGuide(

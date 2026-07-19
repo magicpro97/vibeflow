@@ -207,18 +207,16 @@ describe("migrateToSharedCatalog", () => {
     dirs.push(tmpHome, repo);
     const inject = { homedir: () => tmpHome };
 
+    // Replace project skills directory with a FILE so readdirSync throws ENOTDIR.
+    // Portable across Windows and POSIX (no chmod dependency).
     const projSkills = join(repo, ".vibeflow", "skills");
     mkdirSync(projSkills, { recursive: true });
-    const { chmodSync } = require("node:fs") as typeof import("node:fs");
-    chmodSync(projSkills, 0o000);
+    rmSync(projSkills, { recursive: true, force: true });
+    writeFileSync(projSkills, "");
 
-    try {
-      const result = migrateToSharedCatalog(repo, inject);
-      expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.migrated).toHaveLength(0);
-    } finally {
-      chmodSync(projSkills, 0o755);
-    }
+    const result = migrateToSharedCatalog(repo, inject);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.migrated).toHaveLength(0);
   });
 
   test("catch block: cpSync failure on an entry is captured in errors, not thrown (line 115)", () => {
@@ -227,22 +225,17 @@ describe("migrateToSharedCatalog", () => {
     dirs.push(tmpHome, repo);
     const inject = { homedir: () => tmpHome };
 
-    // Pre-create the destination as a read-only dir so cpSync's mkdir/write inside it fails.
+    // Replace catalog dir with a FILE so cpSync under catalog throws ENOTDIR.
+    // Portable across Windows and POSIX (no chmod dependency).
     const catalog = sharedCatalogDir(inject);
-    const dst = join(catalog, "fail-skill");
-    mkdirSync(dst);
-    const { chmodSync } = require("node:fs") as typeof import("node:fs");
-    chmodSync(catalog, 0o500);
+    rmSync(catalog, { recursive: true, force: true });
+    writeFileSync(catalog, "");
 
     const projSkills = join(repo, ".vibeflow", "skills");
     mkdirSync(join(projSkills, "fail-skill"), { recursive: true });
-    writeFileSync(join(projSkills, "fail-skill", "SKILL.md"), "# Fail\n");
+    writeFileSync(join(projSkills, "fail-skill", "SKILL.md"), "# Fail");
 
-    try {
-      const result = migrateToSharedCatalog(repo, inject);
-      expect(result.errors.length).toBeGreaterThan(0);
-    } finally {
-      chmodSync(catalog, 0o755);
-    }
+    const result = migrateToSharedCatalog(repo, inject);
+    expect(result.errors.length).toBeGreaterThan(0);
   });
 });

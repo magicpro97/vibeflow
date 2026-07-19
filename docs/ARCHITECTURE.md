@@ -29,7 +29,7 @@ Local Web UI
   ↓
 Workflow Orchestrator Core
   ↓
-Tool Adapters: Claude Code / Codex CLI / Copilot CLI
+Tool Adapters: Claude Code / Codex CLI / Copilot CLI / OpenCode / Antigravity CLI
 ```
 
 The system should run on the user's machine and should not send source code to a remote service controlled by the tool owner unless the user explicitly configures it.
@@ -56,6 +56,7 @@ vf ui
 vf run claude
 vf run codex
 vf run copilot
+vf run antigravity
 vf skills list
 vf tools status
 ```
@@ -81,7 +82,7 @@ Responsibilities:
 - Select local or external skills.
 - Generate project context files.
 - Generate tool-specific adapters.
-- Dispatch Claude Code, Codex, or Copilot CLI.
+- Dispatch Claude Code, Codex, Copilot, OpenCode, or Antigravity CLI.
 - Verify output.
 - Propose skill updates.
 
@@ -142,6 +143,8 @@ Canonical Context
 Claude Adapter  → CLAUDE.md + .claude/agents + .claude/skills
 Codex Adapter   → AGENTS.md + .codex/config.toml + prompt injection
 Copilot Adapter → AGENTS.md + .github/copilot-instructions.md + prompt injection
+OpenCode Adapter → AGENTS.md + opencode.json + .opencode/plugins/vf-guard.ts
+Antigravity Adapter → AGENTS.md + .agents/agents + .agents/skills + .agents/mcp_config.json + .agents/hooks.json
 ```
 
 ## Source modules

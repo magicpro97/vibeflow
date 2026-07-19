@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * Resolve a path under the shipped `templates/` directory, working in BOTH:
@@ -20,11 +21,15 @@ import { existsSync } from "node:fs";
  * is always `dist/cli.js` (depth 1), so `../../templates` resolved OUTSIDE the
  * package and every phase silently fell back to a stub. Trying both depths fixes
  * both modes.
+ *
+ * NOTE (Bun 1.3.14 Windows regression): `url.pathname` on Windows returns
+ * `/F:/Code/vibeflow/...` (leading `/`), which `existsSync` can't resolve.
+ * `fileURLToPath` normalises to `F:\Code\vibeflow\...` — works everywhere.
  */
 export function resolveTemplatePath(relative: string): string | null {
   for (const prefix of ["../templates", "../../templates"]) {
     const url = new URL(`${prefix}/${relative}`, import.meta.url);
-    const path = url.pathname;
+    const path = fileURLToPath(url);
     if (existsSync(path)) return path;
   }
   return null;

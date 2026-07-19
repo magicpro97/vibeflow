@@ -255,7 +255,7 @@ async function main(argv: string[]): Promise<number> {
       return await discover(positionals[0], positionals.slice(1), flags);
     case "hook":
       if (flags.selftest) return hookSelftest();
-      return await hook();
+      return await hook({ antigravity: flags.antigravity === true });
     case "hooks":
       return hooks(positionals[0], flags);
     case "verify":

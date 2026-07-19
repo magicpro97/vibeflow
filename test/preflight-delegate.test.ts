@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { preflightDelegate } from "../src/preflight-delegate";
 import type { EngineReadiness } from "../src/preflight.js";
 import { ProbeCache } from "../src/preflight.js";
@@ -23,6 +23,13 @@ const NO_AUTH: EngineReadiness = {
 };
 
 describe("preflightDelegate: default functions (test seams)", () => {
+  beforeEach(() => {
+    // Clear the shared ProbeCache so test-injected `has: () => false` isn't
+    // bypassed by a stale "ready" entry left by an earlier test in the suite.
+    // biome-ignore format: type assertion must stay on one line
+    const { setSharedCache } = require("../src/preflight.js") as typeof import("../src/preflight.js");
+    setSharedCache(undefined);
+  });
   test("defaultPresenceCheck shells out to checkEngine (line 95-104)", async () => {
     const { defaultPresenceCheck } = await import("../src/preflight-delegate.js");
     // Inject has()=false for every command → no-binary

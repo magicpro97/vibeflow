@@ -121,6 +121,11 @@ describe("askInvocation", () => {
       args: ["run", "--format", "json", "-"],
       promptMode: "stdin",
     });
+    expect(askInvocation("antigravity" as never)).toEqual({
+      cmd: "agy",
+      args: ["-p"],
+      promptMode: "arg",
+    });
   });
 });
 
@@ -143,6 +148,39 @@ describe("materializeArgs (#562 — copilot -p takes a VALUE, order matters)", (
       "--foo",
       "Q",
     ]);
+  });
+});
+
+describe("antigravity argv guard (30KiB UTF-8 limit)", () => {
+  test("prompt under 30KiB passes through normally", () => {
+    const result = materializeArgs({ cmd: "agy", args: ["-p"], promptMode: "arg" }, "small prompt");
+    expect(result).toEqual(["-p", "small prompt"]);
+  });
+
+  test("prompt at 30KiB exactly throws (>=, not >)", () => {
+    const big = "x".repeat(30 * 1024);
+    expect(() => materializeArgs({ cmd: "agy", args: ["-p"], promptMode: "arg" }, big)).toThrow(
+      "Antigravity prompt too large for agy argv",
+    );
+  });
+
+  test("prompt over 30KiB throws clear error", () => {
+    const big = "x".repeat(30 * 1024 + 1);
+    expect(() => materializeArgs({ cmd: "agy", args: ["-p"], promptMode: "arg" }, big)).toThrow(
+      "Antigravity prompt too large for agy argv",
+    );
+  });
+
+  test("non-agy engines are unaffected", () => {
+    expect(() =>
+      materializeArgs({ cmd: "copilot", args: ["-p"], promptMode: "arg" }, "x".repeat(30001)),
+    ).not.toThrow();
+  });
+
+  test("agy with stdin mode is unaffected (prompt not on argv)", () => {
+    expect(() =>
+      materializeArgs({ cmd: "agy", args: ["-p"], promptMode: "stdin" }, "x".repeat(30001)),
+    ).not.toThrow();
   });
 });
 
@@ -169,6 +207,13 @@ describe("resumeInvocation (#562 multi-turn — engine-native continue)", () => 
       cmd: "opencode",
       args: ["run", "--continue", "--format", "json", "-"],
       promptMode: "stdin",
+    });
+  });
+  test("antigravity resumes its workspace conversation via --continue -p", () => {
+    expect(resumeInvocation("antigravity" as never)).toEqual({
+      cmd: "agy",
+      args: ["--continue", "-p"],
+      promptMode: "arg",
     });
   });
 });

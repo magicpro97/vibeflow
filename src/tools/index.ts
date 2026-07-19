@@ -24,6 +24,7 @@ const CLAUDE_CONFIG = ".mcp.json";
 const COPILOT_CONFIG = "~/.copilot/mcp-config.json";
 const CODEX_CONFIG = "~/.codex/config.toml";
 const OPENCODE_CONFIG = "opencode.json";
+const ANTIGRAVITY_CONFIG = ".agents/mcp_config.json";
 
 /** A single install command. NOT executed here — returned for the caller to approve/run. */
 export interface InstallStep {
@@ -50,6 +51,12 @@ export interface StdioServer {
 export interface RemoteServer {
   type: "http" | "sse";
   url: string;
+  headers?: Record<string, string>;
+}
+
+/** Agy remote MCP server — uses serverUrl per official agy contract, not url. */
+export interface AntigravityRemoteServer {
+  serverUrl: string;
   headers?: Record<string, string>;
 }
 
@@ -103,7 +110,14 @@ export interface OpencodeMcpEntry {
   tools: string[];
 }
 
-export type McpEntry = JsonMcpEntry | TomlMcpEntry | OpencodeMcpEntry;
+export interface AntigravityMcpEntry {
+  engine: "antigravity";
+  configPath: string;
+  servers: Record<string, StdioServer | AntigravityRemoteServer>;
+  tools: string[];
+}
+
+export type McpEntry = JsonMcpEntry | TomlMcpEntry | OpencodeMcpEntry | AntigravityMcpEntry;
 
 /** Options for detection, injectable so callers/tests can stub PATH lookups. */
 export interface DetectOpts {
@@ -175,6 +189,9 @@ export function buildStdioEntry(
       tools,
     };
   }
+  if (engine === "antigravity") {
+    return { engine, configPath: ANTIGRAVITY_CONFIG, servers: { [name]: server }, tools };
+  }
   if (engine === "copilot") {
     return {
       engine,
@@ -217,6 +234,18 @@ export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer)
       servers: { [name]: { type: "local", command: [stdio.command, ...(stdio.args ?? [])] } },
       tools: [],
     };
+  }
+  if (engine === "antigravity") {
+    const configPath = ANTIGRAVITY_CONFIG;
+    let server: StdioServer | AntigravityRemoteServer;
+    if (transport === "stdio") {
+      const s = def as { command: string; args?: string[]; env?: Record<string, string> };
+      server = { command: s.command, args: s.args ?? [], env: s.env ?? {} };
+    } else {
+      const r = def as { url: string; headers?: Record<string, string> };
+      server = r.headers ? { serverUrl: r.url, headers: r.headers } : { serverUrl: r.url };
+    }
+    return { engine, configPath, servers: { [name]: server }, tools: [] };
   }
   if (engine === "codex") {
     if (transport === "sse") return null;

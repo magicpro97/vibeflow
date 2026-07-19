@@ -467,6 +467,7 @@ const engines = reactive([
   { key: "codex" },
   { key: "copilot" },
   { key: "opencode" },
+  { key: "antigravity" },
 ]);
 const selectedEngine = ref("claude");
 const readyEngines = ref<Set<string>>(new Set());
@@ -608,13 +609,13 @@ async function runDetect() {
           ?.filter((r) => r.level !== "ready")
           .map((r) => r.engine)
           .join(", ");
-        engineWarning.value = `No AI engine available (${notReady || "none"} not ready). Install claude, codex, copilot, or opencode CLI before dispatching.`;
+        engineWarning.value = `No AI engine available (${notReady || "none"} not ready). Install claude, codex, copilot, opencode, or agy CLI before dispatching.`;
       } else {
         engineWarning.value = null;
       }
       // Populate readyEngines + recommendedEngine from preflight results
       const readinessArr = pf?.readiness ?? [];
-      const ENGINE_PRIORITY = ["claude", "copilot", "codex"] as const;
+      const ENGINE_PRIORITY = ["claude", "copilot", "codex", "opencode", "antigravity"] as const;
       const readyKeys = readinessArr
         .filter((r: { level: string }) => r.level === "ready")
         .map((r: { engine: string }) => r.engine);

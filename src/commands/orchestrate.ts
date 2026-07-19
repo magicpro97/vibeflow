@@ -176,8 +176,7 @@ export async function orchestrate(
     );
   }
 
-  // Nothing left to dispatch — every unit is already complete. Report the goal verdict and exit
-  // without launching the engine (a no-op dispatch would only re-review finished work).
+  // Nothing left to dispatch — every unit is already complete. Report the goal verdict and exit without launching the engine (a no-op dispatch would only re-review finished work).
   if (units.length === 0) {
     out("vf");
     out("vf", c.green("All work units already complete — nothing to dispatch."));
@@ -191,7 +190,6 @@ export async function orchestrate(
     for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
     return verdict.verdict === "met" ? 0 : 1;
   }
-
   const launch = announceLaunch(engine, mode);
   if (launch.skip) return 1;
   // Stronger gate: a real (cli) dispatch requires a live-ready engine. When the caller injects
@@ -257,6 +255,9 @@ export async function orchestrate(
     );
     for (const [a, b] of conflicts) out("vf", c.dim(`  - ${a} ⨯ ${b}`));
   }
+
+  // ponytail: antigravity stays serial until a concurrent non-TTY canary is added (agy 1.1.4).
+  if (engine === "antigravity") concurrency = 1;
 
   const spinner = new Spinner();
   spinner.start(

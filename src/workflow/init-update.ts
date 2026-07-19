@@ -12,6 +12,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CTX_DIR, VERSION, readState, writeState } from "../core.js";
 import { syncSkillMirrors } from "../skills/sync.js";
 
@@ -88,7 +89,7 @@ function seedVfSkillIfNeeded(base: string): boolean {
   // Resolve bundled vf skill source — ships at <package>/.agents/skills/vf/
   // (same pattern as copySkillCreator in common-template.ts).
   const srcUrl = new URL("../../.agents/skills/vf", import.meta.url);
-  const srcPath = srcUrl.pathname;
+  const srcPath = fileURLToPath(srcUrl);
   if (!existsSync(srcPath)) return false; // bundled skill not found
 
   mkdirSync(dstDir, { recursive: true });

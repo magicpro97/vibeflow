@@ -19,6 +19,7 @@ CLI is bumped you know exactly what to re-check.
 | codex    | 0.144.1          | 2026-07-12 | brew `codex`                      |
 | copilot  | 1.0.69           | 2026-07-12 | brew `copilot` (GitHub Copilot CLI) |
 | opencode | 1.17.18          | 2026-07-12 | brew `anomalyco/tap/opencode`     |
+| agy      | 1.1.4            | 2026-07-19 | `%LOCALAPPDATA%\\agy\\bin\\agy.exe` |
 | bun      | 1.3.9            | 2026-07-12 | (runtime)                         |
 
 ## Per-engine integration contract
@@ -52,6 +53,15 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
 - **Fresh invocation:** `copilot -p <prompt> --allow-all` (prompt is an argv value, not stdin; argv is ~32K-capped so large prompts are written to `.vibeflow/dispatch/<unit>.md` and a short pointer is passed instead)
 - **Resume:** NOT SUPPORTED by id. The CLI only offers `--continue` (most-recent session), so VibeFlow never captures a copilot session id and a `--resume` run of a copilot unit always re-runs fresh.
 - **Version guard:** the CLI has a history of silent breaking auto-updates (github/copilot-cli#1606 removed `--headless --stdio`); when `copilot --version` can't be read, dispatch proceeds with a warning.
+
+### antigravity
+
+- **Fresh invocation:** `agy -p <prompt>`; prompt is one argv value and output is plain text. VibeFlow parses a fenced JSON block when present; other prose has no structured summary.
+- **Prompt limit:** VibeFlow rejects a UTF-8 prompt at or above 30 KiB before spawn. `agy` has no supported prompt-file/stdin replacement for print mode.
+- **Resume:** `agy --continue -p <prompt>` resumes latest workspace conversation. `agy --conversation <id> -p <prompt>` resumes an explicit known ID. VibeFlow does not scrape or persist undocumented conversation IDs.
+- **Workspace files:** `AGENTS.md`, `.agents/agents/<name>/agent.md`, `.agents/skills/`, `.agents/mcp_config.json`.
+- **Hooks (unproven):** `.agents/hooks.json` uses `PreToolUse` / `PostToolUse` in the emitted config, but the `agy 1.1.4` PreToolUse deny canary did not fire in headless test. VibeFlow classifies antigravity as **post-hoc-only** until native enforcement is proven. Hook config generation is preserved (forward-compatible if agy later honors it), but no native guardrail is advertised.
+- **Auth / reliability:** Google OAuth/keyring is required; `vf doctor --probe` is the live readiness check. Authenticated `agy 1.1.4` print, continue, and workspace-agent canaries passed on 2026-07-19. Explicit-ID resume had no safe captured ID.
 
 ### opencode
 
@@ -98,7 +108,9 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
    ```
    Confirm the first event has `type: "step_start"` with `sessionID`, and the response text appears in a `type: "text"` event with `part.text`. Also confirm `opencode run --continue --help` still works.
 
-5. Run `bun run check`. The dispatch tests + codex fixture assert the shapes above; a red suite after a bump means the CLI changed its contract.
+5. **agy** — run authenticated scratch-directory canaries: `agy -p`, `agy --continue -p`, `agy --conversation <id> -p` when a safe known ID exists, `--agent <name>` with `.agents/agents/<name>/agent.md`, and a `PreToolUse` deny hook. Confirm plain output, native deny behavior, and no scratch files remain.
+
+6. Run `bun run check`. The dispatch tests + codex fixture assert the shapes above; a red suite after a bump means the CLI changed its contract.
 
 ## Related surfaces that can drift with a CLI change
 

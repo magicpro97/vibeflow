@@ -41,6 +41,7 @@ import {
   liveGuardrailArmed,
   out,
   parseHookInput,
+  presentAntigravityDecision,
   presentDecision,
   readSettings,
   resolveHookPolicy,
@@ -103,8 +104,10 @@ export async function hook(
   inject: {
     stdin?: { on: any; once: any; resume: any; pause: any };
     stdinTimeoutMs?: number;
+    antigravity?: boolean;
   } = {},
 ): Promise<number> {
+  const antigravity = inject.antigravity === true;
   // Claude Code spawns the hook with a JSON payload on stdin but does NOT
   // close the pipe. The kernel/pipe can split the payload across multiple
   // "data" events (e.g. > 64 KiB crosses the typical pipe chunk boundary),
@@ -208,7 +211,9 @@ export async function hook(
   const result = evaluateHook(input, () => process.env, policy, specStale);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
-  const { json, exitCode } = presentDecision(result, input, buildVerifyGate(cwd()));
+  const { json, exitCode } = antigravity
+    ? presentAntigravityDecision(result)
+    : presentDecision(result, input, buildVerifyGate(cwd()));
   out("vf", json);
   // #542: mirror the decision onto the durable "hook" logbus channel (until now a
   // defined-but-unused channel). Keeps the existing hook-audit.log; adds the ordered
@@ -384,8 +389,9 @@ export function installHooks(base?: string): number {
   return status;
 }
 
-/** Project-relative path to Claude Code's shared settings file. */
+/** Project-relative paths to engine-owned settings files that must be merged. */
 const CLAUDE_SETTINGS_REL = ".claude/settings.json";
+const ANTIGRAVITY_HOOKS_REL = ".agents/hooks.json";
 
 /**
  * Merge the generated `hooks` block into an EXISTING `.claude/settings.json`,
@@ -413,6 +419,19 @@ function mergeClaudeSettings(absPath: string, generated: string): string | null 
   return JSON.stringify({ ...existing, hooks: incoming.hooks }, null, 2);
 }
 
+/** Merge only VibeFlow's named Antigravity hook, preserving every other top-level key. */
+function mergeAntigravityHooks(absPath: string, generated: string): string | null {
+  const incoming = JSON.parse(generated) as Record<string, unknown>;
+  if (!existsSync(absPath)) return JSON.stringify(incoming, null, 2);
+  try {
+    const existing = JSON.parse(readFileSync(absPath, "utf8")) as unknown;
+    if (!existing || typeof existing !== "object" || Array.isArray(existing)) return null;
+    return JSON.stringify({ ...existing, ...incoming }, null, 2);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Write every engine hook config into `base`, all delegating to `vf hook`, and
  * chmod the shell git hooks executable. Returns the relative paths written.
@@ -432,8 +451,11 @@ export function emitHookFiles(base: string, engines?: Engine[]): string[] {
   const written: string[] = [];
   for (const [rel, content] of Object.entries(files)) {
     const dest = join(base, rel);
-    if (rel === CLAUDE_SETTINGS_REL) {
-      const merged = mergeClaudeSettings(dest, content);
+    if (rel === CLAUDE_SETTINGS_REL || rel === ANTIGRAVITY_HOOKS_REL) {
+      const merged =
+        rel === CLAUDE_SETTINGS_REL
+          ? mergeClaudeSettings(dest, content)
+          : mergeAntigravityHooks(dest, content);
       if (merged === null) {
         out("vf", c.yellow(`! ${rel} is not valid JSON — left untouched. Fix it, then re-run.`), {
           level: "error",

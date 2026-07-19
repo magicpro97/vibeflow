@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import {
   CTX_DIR,
   type Engine,
@@ -117,14 +117,16 @@ export function writeDispatchPrompt(
   // orchestrates a registered repo ≠ process.cwd()). A relative pointer would
   // then miss the file and copilot would silently run on an empty prompt — worse
   // than the pre-#526 loud argv-limit failure. An absolute pointer is cwd-safe.
-  const abs = join(opts.base ?? cwd(), rel);
+  const base = opts.base ?? cwd();
+  const abs = base.startsWith("/") ? `${base.replace(/\/+$/, "")}/${rel}` : join(base, rel);
   (opts.writeFile ?? writeFileSafe)(abs, prompt);
-  return `Read ${abs} and follow it`;
+  return `Read ${abs.replace(/\\/g, "/")} and follow it`;
 }
 
 /** Prompt actually fed to materializePrompt: the short file-pointer for copilot
  *  (when a unit name is supplied), else the prompt unchanged. */
 function preparePrompt(cli: { promptMode?: "stdin" | "arg" }, opts: DispatchOpts): string {
+  if (opts.engine === "antigravity") return opts.prompt;
   if (cli.promptMode !== "arg" || opts.unit === undefined) return opts.prompt;
   return writeDispatchPrompt(opts.unit, opts.prompt, {
     base: opts.base,
@@ -210,6 +212,10 @@ export function engineCommand(
         args: ["run", "--format", "json", "--auto", "-"],
         promptMode: "stdin",
       };
+    case "antigravity":
+      return resumeSessionId
+        ? { cmd: "agy", args: ["--conversation", resumeSessionId, "-p"], promptMode: "arg" }
+        : { cmd: "agy", args: ["-p"], promptMode: "arg" };
   }
 }
 
@@ -251,6 +257,12 @@ export function materializePrompt(
   cli: { cmd: string; args: string[]; promptMode?: "stdin" | "arg" },
   prompt: string,
 ): { cmd: string; args: string[]; input: string } {
+  if (
+    basename(cli.cmd, extname(cli.cmd)) === "agy" &&
+    Buffer.byteLength(prompt, "utf8") >= 30 * 1024
+  ) {
+    throw new Error("Antigravity prompt too large for agy argv; shorten or split the task");
+  }
   if (cli.promptMode !== "arg") return { cmd: cli.cmd, args: cli.args, input: prompt };
   const promptFlag = cli.args.findIndex((arg) => arg === "-p" || arg === "--prompt");
   if (promptFlag === -1) return { cmd: cli.cmd, args: [...cli.args, prompt], input: "" };

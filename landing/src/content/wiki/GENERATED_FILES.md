@@ -15,6 +15,7 @@ last_updated: 2026-06-24
 - [GitHub Copilot Files](#github-copilot-files)
 - [Claude Files](#claude-files)
 - [Codex Files](#codex-files)
+- [Antigravity Files](#antigravity-files)
 - [.vibeflow Files](#vibeflow-files)
 - [Dispatch Files](#dispatch-files)
 - [Hook Files](#hook-files)
@@ -137,6 +138,18 @@ Purpose:
 - prompt template generated from canonical context
 ```
 
+## Antigravity files
+
+```text
+AGENTS.md
+.agents/agents/<name>/agent.md
+.agents/skills/<name>/SKILL.md
+.agents/mcp_config.json
+.agents/hooks.json
+```
+
+`mcp_config.json` preserves non-VibeFlow servers. `hooks.json` preserves all top-level keys except VibeFlow's own `vibeflow-guardrail` key.
+
 ## .vibeflow files
 
 ```text
@@ -152,7 +165,17 @@ Purpose:
 .vibeflow/attachments/                              # uploaded sample files (web UI)
 .vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md   # copied from src/skills/ on init
 .vibeflow/ai-context/SKILL_TAXONOMY.md             # copied from src/skills/ on init
-.vibeflow/skills/<name>/                           # canonical skill store (mirrored to engines)
+.vibeflow/skills/<name>/                           # per-project overrides (shadow shared catalog)
+  SKILL.md                                         # required
+  references/                                      # optional
+  scripts/                                         # optional
+  assets/                                          # optional
+```
+
+### Shared skill catalog (user-scoped)
+
+```text
+~/.vibeflow/skills/<name>/                         # canonical skill store (machine-wide)
   SKILL.md                                         # required
   references/                                      # optional
   scripts/                                         # optional
@@ -186,6 +209,7 @@ decomposed (3+ files across multiple modules, or delegated agents). See
 .vibeflow/dispatch/claude.md
 .vibeflow/dispatch/codex.md
 .vibeflow/dispatch/copilot.md
+.vibeflow/dispatch/antigravity.md
 ```
 
 Each dispatch file should include:
@@ -210,6 +234,7 @@ per-event `.vibeflow/hooks/*.ts` scripts; instead every config delegates to the 
 .claude/settings.json        (Claude PreToolUse/PostToolUse/Stop → `vf hook`)
 .codex/hooks.json            (Codex post-command/post-write/verify-result → `vf hook`)
 .github/hooks/copilot.json   (Copilot preToolUse (fail-closed) + postToolUse → `vf hook`)
+.agents/hooks.json           (Antigravity PreToolUse/PostToolUse → `vf hook --antigravity`; named-key merge)
 .githooks/pre-commit         (fail-closed shell hook routing staged files → `vf hook`)
 ```
 

@@ -17,7 +17,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import type { AgentEngine } from "../src/agents/render.js";
 import type { WorkflowPhase } from "../src/ai-init-workflow.js";
@@ -635,7 +635,11 @@ describe("resolveTemplatePath — dual-mode resolution (#285→#292 regression)"
     // 'implement' ships a real templates/skills/implement/SKILL.md
     const p = resolveTemplatePath("skills/implement/SKILL.md");
     expect(p).not.toBeNull();
-    expect(p).toMatch(/templates\/skills\/implement\/SKILL\.md$/);
+    // ponytail: regex uses platform-specific path separator
+    const sepPattern = sep === "\\" ? "\\\\" : "/";
+    expect(p).toMatch(
+      new RegExp(`templates${sepPattern}skills${sepPattern}implement${sepPattern}SKILL\\.md$`),
+    );
     expect(existsSync(p as string)).toBe(true);
   });
 

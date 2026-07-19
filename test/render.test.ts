@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   agentFilePath,
+  renderAntigravityAgent,
   renderClaudeAgent,
   renderCodexAgent,
   renderCopilotAgent,
@@ -79,6 +80,18 @@ describe("renderOpencodeAgent", () => {
     const out = renderForEngine("opencode", SPEC);
     expect(out).toBe(renderOpencodeAgent(SPEC));
     expect(out).not.toMatch(/developer_instructions/);
+  });
+});
+
+describe("renderAntigravityAgent", () => {
+  test("emits name and description YAML frontmatter in the documented nested agent path", () => {
+    const out = renderAntigravityAgent(SPEC);
+    expect(out).toMatch(/^name:\s+cli-engine/m);
+    expect(out).toMatch(/^description:\s+CLI specialist/m);
+    expect(renderForEngine("antigravity" as never, SPEC)).toBe(out);
+    expect(agentFilePath("antigravity" as never, "My Role")).toBe(
+      ".agents/agents/My Role/agent.md",
+    );
   });
 });
 
