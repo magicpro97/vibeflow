@@ -19,6 +19,7 @@ import { dispatchInWaves } from "../orchestrator/waves.js";
 import {
   MS_PER_SECOND,
   defaultRun,
+  isComplete,
   makeDispatcher,
   makeReviewer,
   makeSharedTypecheckGate,
@@ -162,11 +163,6 @@ export async function orchestrate(
       ? state.work_units
       : [normalizeUnit({ name: "task", status: "pending", confidence: 0 })];
 
-  // Only dispatch units that aren't already complete — a unit that is done at confidence 1.0
-  // WITH evidence is finished; re-launching the engine against it wastes a round-trip and risks
-  // clobbering accepted work. Completed units are still carried into the ledger + goal eval.
-  const isComplete = (u: WorkUnit) =>
-    u.status === "done" && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;
   const done = allUnits.filter(isComplete);
   const units: WorkUnit[] = allUnits.filter((u) => !isComplete(u));
   if (done.length) {
