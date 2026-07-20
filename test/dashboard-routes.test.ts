@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { WorkUnit } from "../src/core/types.js";
 import type { LogEvent } from "../src/logbus/types.js";
 import {
@@ -9,6 +12,13 @@ import {
   workflowStatus,
 } from "../src/server/dashboard.js";
 import type { WorkflowDashboardItem } from "../src/server/dashboard.js";
+
+function tmpRepo(name: string, state: object): string {
+  const dir = mkdtempSync(join(tmpdir(), `vf-db-${name}-`));
+  mkdirSync(join(dir, ".vibeflow", "logs"), { recursive: true });
+  writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(state));
+  return dir;
+}
 
 describe("workflowStatus", () => {
   test("running wins over blocked/done", () => {
@@ -234,6 +244,43 @@ describe("matchesDashboardEvent", () => {
     ).toBe(false);
   });
 
+  test("unit filter excludes workflow events when includeWorkflowEvents=false", () => {
+    const unitSel = { ...sel, unit: "u1" };
+    expect(
+      matchesDashboardEvent(
+        {
+          seq: 1,
+          ts: 0,
+          runId: "r",
+          workflowId: "TASK-A",
+          repoPath: "/repo/a",
+          channel: "vf" as const,
+          level: "info" as const,
+          text: "wf",
+        },
+        unitSel,
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      matchesDashboardEvent(
+        {
+          seq: 2,
+          ts: 0,
+          runId: "r",
+          workflowId: "TASK-A",
+          repoPath: "/repo/a",
+          unit: "u1",
+          channel: "vf" as const,
+          level: "info" as const,
+          text: "unit",
+        },
+        unitSel,
+        false,
+      ),
+    ).toBe(true);
+  });
+
   test("unit filter includes workflow events when includeWorkflowEvents=true", () => {
     const unitSel = { ...sel, unit: "u1" };
     expect(
@@ -286,5 +333,107 @@ describe("matchesDashboardEvent", () => {
         true,
       ),
     ).toBe(false);
+  });
+});
+
+describe("buildDashboardItems with valid state", () => {
+  const dirs: string[] = [];
+
+  afterAll(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test("produces waves and sort for multiple repos", () => {
+    const r1 = tmpRepo("r1", {
+      task_id: "T-R1",
+      goal: "build",
+      success_criteria: [],
+      work_units: [
+        { name: "a", status: "done", confidence: 1, depends_on: [], gates: {}, resources: {} },
+        {
+          name: "b",
+          status: "running",
+          confidence: 0.5,
+          depends_on: ["a"],
+          gates: {},
+          resources: {},
+        },
+      ],
+      totals: { units: 2, done: 1, tokens: 100, cost_usd: 0.01, wall_seconds: 5 },
+    });
+    dirs.push(r1);
+    const r2 = tmpRepo("r2", {
+      task_id: "T-R2",
+      goal: "test",
+      success_criteria: [],
+      work_units: [
+        { name: "x", status: "done", confidence: 1, depends_on: [], gates: {}, resources: {} },
+      ],
+      totals: { units: 1, done: 1, tokens: 50, cost_usd: 0, wall_seconds: 10 },
+    });
+    dirs.push(r2);
+    const r3 = tmpRepo("r3", {
+      task_id: "T-R3",
+      goal: "old",
+      success_criteria: [],
+      work_units: [
+        { name: "y", status: "done", confidence: 1, depends_on: [], gates: {}, resources: {} },
+      ],
+    });
+    dirs.push(r3);
+    const items = buildDashboardItems([
+      {
+        path: r1,
+        name: "r1",
+        lastUsed: 300,
+        goal: "",
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0 },
+      },
+      {
+        path: r2,
+        name: "r2",
+        lastUsed: 200,
+        goal: "",
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0 },
+      },
+      {
+        path: r3,
+        name: "r3",
+        lastUsed: 100,
+        goal: "",
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0 },
+      },
+    ]);
+    expect(items).toHaveLength(3);
+    expect(items[0]?.status).toBe("running");
+    expect(items[0]?.waves).toEqual([["a"], ["b"]]);
+    expect(items[0]?.totals.wall_seconds).toBe(5);
+    expect(items[1]?.status).toBe("done");
+    expect(items[1]?.totals.wall_seconds).toBe(10);
+    expect(items[2]?.status).toBe("done");
+    expect(items[2]?.totals.wall_seconds).toBe(0);
+  });
+
+  test("handles cyclic dependency (no ready units)", () => {
+    const dir = tmpRepo("cycle", {
+      task_id: "T-CYCLE",
+      goal: "cycle",
+      success_criteria: [],
+      work_units: [
+        { name: "a", status: "done", confidence: 1, depends_on: ["a"], gates: {}, resources: {} },
+      ],
+    });
+    dirs.push(dir);
+    const items = buildDashboardItems([
+      {
+        path: dir,
+        name: "cycle",
+        lastUsed: 0,
+        goal: "",
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0 },
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.waves).toEqual([["a"]]);
   });
 });

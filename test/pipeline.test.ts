@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { pipelineEdges, pipelineWaves, primaryNodeDetail } from "../src/ui/src/lib/pipeline.js";
+import {
+  pipelineEdges,
+  pipelineWaves,
+  primaryNodeDetail,
+  waitingOn,
+} from "../src/ui/src/lib/pipeline.js";
 import type { WorkUnit } from "../src/ui/src/types.js";
 
 function unit(name: string, status: WorkUnit["status"], depends_on: string[] = []): WorkUnit {
@@ -29,6 +34,10 @@ describe("workflow pipeline projection", () => {
     ]);
   });
 
+  test("pipelineWaves handles cyclic dependency (no ready units)", () => {
+    expect(pipelineWaves([unit("a", "done", ["a"])])).toEqual([["a"]]);
+  });
+
   test("returns every dependency edge for SVG rendering", () => {
     expect(pipelineEdges(units)).toEqual([
       { from: "workunit1", to: "workunit2" },
@@ -55,5 +64,29 @@ describe("workflow pipeline projection", () => {
     expect(primaryNodeDetail(target, new Map(units.map((u) => [u.name, u])))).toBe(
       "Waiting for: workunit2, workunit3",
     );
+  });
+
+  test("waitingOn flags missing dep not in byName map", () => {
+    const a = unit("a", "done");
+    const b = unit("b", "pending", ["a", "missing"]);
+    const byName = new Map([["a", a]]);
+    expect(waitingOn(b, byName)).toEqual(["missing"]);
+  });
+
+  test("primaryNodeDetail returns empty for done unit", () => {
+    const a = unit("a", "done");
+    expect(primaryNodeDetail(a, new Map([["a", a]]))).toBe("");
+  });
+
+  test("primaryNodeDetail returns failed gates for blocked unit", () => {
+    const a = unit("a", "blocked");
+    a.gates.build = "fail";
+    a.gates.test = "fail";
+    expect(primaryNodeDetail(a, new Map([["a", a]]))).toBe("Failed: build, test");
+  });
+
+  test("primaryNodeDetail returns Blocked for blocked unit without failed gates", () => {
+    const a = unit("a", "blocked");
+    expect(primaryNodeDetail(a, new Map([["a", a]]))).toBe("Blocked");
   });
 });
