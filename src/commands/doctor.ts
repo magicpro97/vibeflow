@@ -217,6 +217,12 @@ export async function doctor(
     `  ${gitGuardrailArmed(base) ? c.green("commit-time guardrail: ON (.githooks/pre-commit)") : c.yellow("commit-time guardrail: OFF — run 'vf hooks install' or re-init to arm .githooks/pre-commit")}`,
   );
   out("vf", `  ${liveGuardrailArmed(base) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
+  out(
+    "vf",
+    c.yellow(
+      "  codex hook coverage: native Bash/shell only; config is global at ~/.codex/ (Edit/Write/apply_patch/MCP calls remain unguarded)",
+    ),
+  );
   printCtx7AuthStatus(base);
 
   // #624: detect a stale opencode plugin. The generator hard-codes the

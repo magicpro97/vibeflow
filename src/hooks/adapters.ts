@@ -6,9 +6,9 @@
  *
  * Enforcement honesty: Claude Code (PreToolUse), GitHub Copilot CLI (preToolUse),
  * AND opencode (`tool.execute.before` plugin that throws to block) all expose a
- * native pre-action vetoing hook. Codex CLI has no equivalent vetoing pre-tool
- * hook today, so we wire it as DETECTION-ONLY (post-hoc events) and surface a
- * downgrade banner instead of advertising blocking we cannot actually honor.
+ * native pre-action vetoing hook for ALL tool calls. Codex CLI's PreToolUse fires
+ * for the Bash/shell tool only — we wire it as NATIVE-BASH-ONLY and surface a
+ * downgrade banner noting that Edit/Write/apply_patch are not natively blocked.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,17 +31,17 @@ function cliPath(): string {
   return join(root, "dist", "cli.js");
 }
 
-/**
- * Detect a stale opencode plugin — the generator hard-codes the absolute CLI
- * path into `const VF_CLI = "..."`. If the user moves/reinstalls the CLI
- * (e.g. `npm i -g @vibeflow/cli` to a different prefix, or a fresh clone of
- * the repo), the path the plugin invokes is no longer the path the live CLI
- * is actually running from. The plugin will then either fail to load or
- * silently fall back to "allow" — a quiet loss of the guardrail.
- *
- * Returns the stale status, or `null` if the plugin isn't armed (no file, no
- * sentinel) so the caller can distinguish "no plugin" from "out-of-date plugin".
- */
+/** Prefer Bun; safe under Node; injectable for tests. */
+export function hookRuntime(which?: (name: string) => string | null): "bun" | "node" {
+  const lookup = which ?? (typeof Bun === "undefined" ? () => null : Bun.which);
+  try {
+    return lookup("bun") ? "bun" : "node";
+  } catch {
+    return "node";
+  }
+}
+
+/** Detect a generated opencode plugin whose hard-coded CLI path is stale. */
 export function opencodePluginStale(
   base: string,
 ): { stale: boolean; expected: string; actual: string | null } | null {
@@ -66,12 +66,12 @@ export function opencodePluginStale(
 
 /** Whether an engine can veto an action before it runs, or only detect after the fact. */
 export interface EngineEnforcementCapability {
-  preActionBlocking: "native" | "post-hoc-only";
+  preActionBlocking: "native" | "native-bash-only" | "post-hoc-only";
 }
 
 const ENFORCEMENT: Record<Engine, EngineEnforcementCapability> = {
   claude: { preActionBlocking: "native" },
-  codex: { preActionBlocking: "post-hoc-only" },
+  codex: { preActionBlocking: "native-bash-only" },
   copilot: { preActionBlocking: "native" },
   // opencode exposes a plugin system with `tool.execute.before` that can
   // throw to block a tool call before it runs — semantically equivalent to
@@ -90,27 +90,30 @@ export function engineEnforcement(engine: Engine): EngineEnforcementCapability {
  * engines with native blocking. commands.ts calls this to print the banner.
  */
 export function downgradeBannerText(engine: Engine): string {
-  if (engineEnforcement(engine).preActionBlocking === "native") return "";
-  return `! ${engine}: detection-only guardrails. This engine has no vetoing pre-action hook, so VibeFlow can only flag risky actions after they happen (post-command/post-write/verify-result), not block them beforehand. Use Claude Code for native blocking.`;
+  const cap = engineEnforcement(engine).preActionBlocking;
+  if (cap === "native") return "";
+  if (cap === "post-hoc-only") {
+    return `! ${engine}: detection-only guardrails. This engine has no vetoing pre-action hook, so VibeFlow can only flag risky actions after they happen (post-command/post-write/verify-result), not block them beforehand. Use Claude Code for native blocking.`;
+  }
+  return `! ${engine}: native blocking for Bash/shell only; non-Bash tool calls are unguarded. Use Claude Code for full native blocking.`;
 }
 
 /** Per-command warning for detection-only engines. Empty for native engines. */
 export function perCommandWarning(engine: Engine): string {
-  if (engineEnforcement(engine).preActionBlocking === "native") return "";
-  return `! ${engine}: detection-only — this action was flagged but NOT blocked. Use Claude Code for native blocking.`;
+  const cap = engineEnforcement(engine).preActionBlocking;
+  if (cap === "native") return "";
+  if (cap === "post-hoc-only") {
+    return `! ${engine}: detection-only — this action was flagged but NOT blocked. Use Claude Code for native blocking.`;
+  }
+  return `! ${engine}: this action was detected but may NOT be natively blocked (only Bash/shell has native blocking). Use Claude Code for full native blocking.`;
 }
 
-/** Claude Code `.claude/settings.json` hooks section delegating to `vf hook`.
- *  Uses absolute path so the subprocess always finds the CLI regardless of PATH. */
+/** Claude Code `.claude/settings.json` hooks section. */
 export function claudeHookConfig(): string {
   const cmd = cliPath();
-  // Exec form (`command` + `args`), NOT a shell string: Claude spawns argv directly with no
-  // shell, so an absolute path containing a space, `$`, or a backtick is passed verbatim.
-  // A shell-string `node "<path>" hook` only survives spaces — `$`/backtick still expand
-  // inside double quotes and make `node` load the wrong path (the hook then exits non-zero
-  // with no JSON; per the hooks spec that is a NON-blocking error, so the tool call still
-  // runs but the guardrail is silently skipped and a stack trace is shown).
-  const delegate = [{ type: "command", command: "node", args: [cmd, "hook"] }];
+  const runtime = hookRuntime();
+  // Exec form preserves a CLI path containing shell metacharacters.
+  const delegate = [{ type: "command", command: runtime, args: [cmd, "hook"] }];
   const config = {
     hooks: {
       PreToolUse: [
@@ -124,20 +127,15 @@ export function claudeHookConfig(): string {
   return JSON.stringify(config, null, 2);
 }
 
-/** Codex `.codex/hooks.json` — DETECTION-ONLY (post-hoc events; no vetoing pre-* hooks).
- *  NOTE: this emits a VibeFlow-internal schema ({detectionOnly, hooks:{"post-command":…}}),
- *  which does NOT match Codex's native hooks schema (PascalCase events + matcher, like Claude's).
- *  Reconciling that is a separate change; here we only keep the path double-quoted so it at
- *  least survives spaces. The quote does NOT survive `$`/backtick in the path — the robust
- *  exec form used by claudeHookConfig isn't applied until the schema question is resolved. */
+/** Codex native hooks: PreToolUse blocks Bash/shell only. */
 export function codexHookConfig(): string {
   const cmd = cliPath();
+  const runtime = hookRuntime();
+  const delegate = `${runtime} "${cmd}" hook`;
   const config = {
-    detectionOnly: true,
     hooks: {
-      "post-command": `node "${cmd}" hook`,
-      "post-write": `node "${cmd}" hook`,
-      "verify-result": `node "${cmd}" hook`,
+      PreToolUse: [{ command: delegate }],
+      PostToolUse: [{ command: delegate }],
     },
   };
   return JSON.stringify(config, null, 2);
@@ -151,7 +149,7 @@ export function codexHookConfig(): string {
  *  re-review: the previous `vf hook` substring never appeared in real generated configs
  *  because generators emit `node "<abs>" hook`, not `vf hook`). */
 function hookCommand(): string {
-  return `"${cliPath()}" hook # vibeflow-guardrail`;
+  return `${hookRuntime()} "${cliPath()}" hook # vibeflow-guardrail`;
 }
 
 /** Copilot `.github/hooks/copilot.json` — NATIVE enforcement via preToolUse (fail-closed).

@@ -12,7 +12,6 @@ function tmpRepo(): string {
 const ENGINE_FILES = [
   ".agents/hooks.json",
   ".claude/settings.json",
-  ".codex/hooks.json",
   ".github/hooks/copilot.json",
   ".opencode/plugins/vf-guard.ts",
   ".githooks/pre-commit",
@@ -20,11 +19,18 @@ const ENGINE_FILES = [
   ".githooks/post-merge",
 ];
 
+const EXCLUDE_CODEX: import("../src/core.js").Engine[] = [
+  "claude",
+  "copilot",
+  "opencode",
+  "antigravity",
+];
+
 describe("emitHookFiles", () => {
   test("writes every engine hook config, all delegating to `vf hook`", () => {
     const dir = tmpRepo();
     try {
-      const written = emitHookFiles(dir);
+      const written = emitHookFiles(dir, EXCLUDE_CODEX);
       expect(written.sort()).toEqual([...ENGINE_FILES].sort());
       for (const rel of ENGINE_FILES) {
         const p = join(dir, rel);
@@ -52,7 +58,7 @@ describe("emitHookFiles", () => {
           env: { FOO: "bar" },
         }),
       );
-      emitHookFiles(dir);
+      emitHookFiles(dir, EXCLUDE_CODEX);
       const merged = JSON.parse(readFileSync(join(dir, ".claude/settings.json"), "utf8"));
       // Pre-existing keys survive…
       expect(merged.permissions).toEqual({ allow: ["Bash(npm test)"] });
@@ -70,14 +76,88 @@ describe("emitHookFiles", () => {
     try {
       mkdirSync(join(dir, ".claude"), { recursive: true });
       writeFileSync(join(dir, ".claude/settings.json"), "{ not valid json");
-      const written = emitHookFiles(dir);
+      const written = emitHookFiles(dir, EXCLUDE_CODEX);
       // The corrupt file is skipped (not in the written list) and left as-is.
       expect(written).not.toContain(".claude/settings.json");
       expect(readFileSync(join(dir, ".claude/settings.json"), "utf8")).toBe("{ not valid json");
       // The other engine files still got written.
-      expect(written).toContain(".codex/hooks.json");
+      expect(written).toContain(".githooks/pre-commit");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("emitHookFiles with codex + isolatedHome: writes under isolatedHome/.codex, merges preserving keys, sets config.toml, leaves malformed untouched", () => {
+    const dir = tmpRepo();
+    const isolatedHome = mkdtempSync(join(tmpdir(), "vf-codex-home-"));
+    try {
+      mkdirSync(join(isolatedHome, ".codex"), { recursive: true });
+
+      // First call: no existing hooks.json → creates new with hook config
+      const written1 = emitHookFiles(dir, ["codex"], isolatedHome);
+      expect(written1).toContain("~/.codex/hooks.json");
+
+      const hooksPath = join(isolatedHome, ".codex", "hooks.json");
+      expect(existsSync(hooksPath)).toBe(true);
+      const data1 = JSON.parse(readFileSync(hooksPath, "utf8")) as {
+        hooks: { PreToolUse?: unknown[]; PostToolUse?: unknown[] };
+      };
+      expect(data1.hooks.PreToolUse).toBeDefined();
+      expect(data1.hooks.PostToolUse).toBeDefined();
+
+      // config.toml has [features] codex_hooks = true
+      const configPath = join(isolatedHome, ".codex", "config.toml");
+      expect(existsSync(configPath)).toBe(true);
+      expect(readFileSync(configPath, "utf8")).toContain("codex_hooks = true");
+
+      // Existing false flag, existing [features], and no [features] are all
+      // repaired without disturbing unrelated TOML content.
+      for (const original of [
+        "[features]\ncodex_hooks = false\nother = true\n",
+        "[features]\nother = true\n",
+        'title = "keep"\n',
+      ]) {
+        writeFileSync(configPath, original);
+        emitHookFiles(dir, ["codex"], isolatedHome);
+        const updated = readFileSync(configPath, "utf8");
+        expect(updated).toContain("codex_hooks = true");
+        expect(updated).toContain(original.includes("title") ? 'title = "keep"' : "other = true");
+      }
+
+      // Seed existing hooks.json with unrelated top-level and hooks keys
+      writeFileSync(
+        hooksPath,
+        JSON.stringify({
+          someGlobalSetting: "value",
+          hooks: {
+            unrelatedKey: "keep-me",
+            PreToolUse: [{ old: "entry" }],
+          },
+        }),
+      );
+      const written2 = emitHookFiles(dir, ["codex"], isolatedHome);
+      const merged = JSON.parse(readFileSync(hooksPath, "utf8")) as {
+        someGlobalSetting: string;
+        hooks: { unrelatedKey: string; PreToolUse: unknown[]; PostToolUse: unknown[] };
+      };
+      // Unrelated top-level keys preserved
+      expect(merged.someGlobalSetting).toBe("value");
+      // Unrelated hooks keys preserved
+      expect(merged.hooks.unrelatedKey).toBe("keep-me");
+      // PreToolUse was overwritten (not the old value)
+      expect(merged.hooks.PreToolUse).not.toEqual([{ old: "entry" }]);
+      // PostToolUse was added
+      expect(merged.hooks.PostToolUse).toBeDefined();
+
+      // Malformed hooks.json is left untouched
+      const corrupt = "{ invalid json";
+      writeFileSync(hooksPath, corrupt);
+      const written3 = emitHookFiles(dir, ["codex"], isolatedHome);
+      expect(written3).not.toContain("~/.codex/hooks.json");
+      expect(readFileSync(hooksPath, "utf8")).toBe(corrupt);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(isolatedHome, { recursive: true, force: true });
     }
   });
 });
@@ -86,10 +166,14 @@ describe("armHooks", () => {
   test("persists the policy to SETTINGS.json AND emits the engine configs", () => {
     const dir = tmpRepo();
     try {
-      const armed = armHooks(dir, {
-        templates: ["block-destructive", "protect-secrets"],
-        custom: [{ name: "no-prod", kind: "command", pattern: "deploy prod", risk: "high" }],
-      });
+      const armed = armHooks(
+        dir,
+        {
+          templates: ["block-destructive", "protect-secrets"],
+          custom: [{ name: "no-prod", kind: "command", pattern: "deploy prod", risk: "high" }],
+        },
+        EXCLUDE_CODEX,
+      );
       expect(armed.sort()).toEqual([...ENGINE_FILES].sort());
 
       const settings = readSettings(dir);
@@ -106,7 +190,7 @@ describe("armHooks", () => {
   test("an empty-template policy still persists (explicit all-off opt-out)", () => {
     const dir = tmpRepo();
     try {
-      armHooks(dir, { templates: [], custom: [] });
+      armHooks(dir, { templates: [], custom: [] }, EXCLUDE_CODEX);
       expect(readSettings(dir).hooks?.templates).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

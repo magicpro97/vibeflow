@@ -130,9 +130,9 @@ describe("hook adapters", () => {
     const files = engineHookFiles();
     expect(Object.keys(files)).toContain(".claude/settings.json");
     expect(Object.keys(files)).toContain(".githooks/pre-commit");
-    expect(claudeHookConfig()).toContain("node");
+    expect(claudeHookConfig()).toMatch(/"command":\s*"(?:bun|node)"/);
     expect(claudeHookConfig()).toContain("hook");
-    expect(files[".githooks/pre-commit"]).toContain("node");
+    expect(files[".githooks/pre-commit"]).toMatch(/(?:bun|node) "/);
     expect(files[".githooks/pre-commit"]).toContain("hook");
   });
 });

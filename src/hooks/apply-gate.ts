@@ -143,8 +143,9 @@ export async function defaultConfirm(
 }
 
 /**
- * Apply-time gate (#547). Gates ONLY detection-only engines (codex) — native engines
- * (claude/copilot) already vetoed mid-loop, so they pass through with no double gate.
+ * Apply-time gate (#547). Gates engines without complete native coverage: Codex's
+ * native hook blocks Bash/shell only, so its non-Bash changes still need this
+ * post-hoc diff gate. Fully native engines (claude/copilot/opencode) pass through.
  * Risk is computed FAIL-CLOSED: a classifier throw ⇒ `critical`. At/above `threshold`
  * (default `high`) the diff is routed to `confirm` (default: the web-UI modal); below it,
  * the diff is allowed.
@@ -154,7 +155,7 @@ export async function enforceApplyGate(
   diff: string,
   deps: ApplyGateDeps = {},
 ): Promise<{ allowed: boolean; risk: RiskLevel; reasons: string[] }> {
-  if (engineEnforcement(engine).preActionBlocking !== "post-hoc-only") {
+  if (engineEnforcement(engine).preActionBlocking === "native") {
     return { allowed: true, risk: "none", reasons: [`${engine} blocks natively — no apply-gate`] };
   }
 
