@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { DEFAULTS, nowEpoch, safeText, stringifyEvent } from "./logbus/types.js";
-import type { LogEvent, LogEventInput } from "./logbus/types.js";
+import type { LogContext, LogEvent, LogEventInput } from "./logbus/types.js";
 
 // Re-exports from moved modules
 export { out } from "./logbus/out.js";
@@ -21,6 +21,7 @@ export { tmpdir } from "node:os";
 export class Logbus {
   private readonly dir: string;
   private readonly runId: string;
+  private readonly context: LogContext;
   private readonly thresholdBytes: number;
   private readonly maxRotations: number;
   private readonly retentionDays: number;
@@ -41,10 +42,12 @@ export class Logbus {
     maxRotations?: number;
     retentionDays?: number;
     retentionMaxBytes?: number;
+    context?: LogContext;
   }) {
     this.runId = opts.runId;
     void this.runId;
     this.dir = opts.dir;
+    this.context = { ...opts.context };
     this.thresholdBytes = opts.thresholdBytes ?? DEFAULTS.thresholdBytes;
     this.maxRotations = opts.maxRotations ?? DEFAULTS.maxRotations;
     this.retentionDays = opts.retentionDays ?? DEFAULTS.retentionDays;
@@ -84,6 +87,8 @@ export class Logbus {
       seq: typeof input.seq === "number" ? input.seq : ++this.seq,
       ts: typeof input.ts === "number" ? input.ts : nowEpoch(),
       runId: input.runId,
+      workflowId: input.workflowId ?? this.context.workflowId,
+      repoPath: input.repoPath ?? this.context.repoPath,
       unit: input.unit,
       channel: input.channel,
       level: input.level,
@@ -349,10 +354,12 @@ export class Logbus {
 
 let active: Logbus | null = null;
 
-export function installLogbus(opts: { dir?: string; runId?: string } = {}): Logbus {
+export function installLogbus(
+  opts: { dir?: string; runId?: string; context?: LogContext } = {},
+): Logbus {
   const dir = opts.dir ?? join(process.cwd(), ".vibeflow", "logs");
   const runId = opts.runId ?? `run-${Date.now().toString(36)}`;
-  active = new Logbus({ runId, dir });
+  active = new Logbus({ runId, dir, context: opts.context });
   return active;
 }
 

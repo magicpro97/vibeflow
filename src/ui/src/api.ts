@@ -1,5 +1,11 @@
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
-import type { TimelineEntry, VibeSettings, WorkflowState } from "./types.js";
+import type {
+  DashboardSelection,
+  TimelineEntry,
+  VibeSettings,
+  WorkflowDashboardItem,
+  WorkflowState,
+} from "./types.js";
 
 const CSRF = document.querySelector<HTMLMetaElement>('meta[name="vf-token"]')?.content ?? "";
 
@@ -144,6 +150,29 @@ export const api = {
       "GET",
       `/api/units/${encodeURIComponent(name)}/timeline`,
     ),
+  // #640: dashboard API
+  dashboard: {
+    workflows: () => req<{ workflows: WorkflowDashboardItem[] }>("GET", "/api/dashboard/workflows"),
+    logs: (sel: DashboardSelection, since = 0, limit = 200, includeWorkflowEvents = true) => {
+      const p = new URLSearchParams({
+        repoPath: sel.repoPath,
+        workflowId: sel.workflowId,
+        since: String(since),
+        limit: String(Math.min(limit, 1000)),
+        includeWorkflowEvents: String(includeWorkflowEvents),
+      });
+      if (sel.unit) p.set("unit", sel.unit);
+      return req<{ events: import("./types.js").LogEvent[] }>("GET", `/api/dashboard/logs?${p}`);
+    },
+    streamUrl: (sel: DashboardSelection & { since?: number; runId?: string }) => {
+      const p = new URLSearchParams({ repoPath: sel.repoPath, workflowId: sel.workflowId });
+      if (sel.unit) p.set("unit", sel.unit);
+      if (sel.since && sel.since > 0) p.set("since", String(sel.since));
+      if (sel.runId) p.set("runId", sel.runId);
+      p.set("token", CSRF);
+      return `/api/dashboard/logs/stream?${p.toString()}`;
+    },
+  },
   // #562: ask an engine about a code snippet (Web-UI surface for `vf ask`).
   ask: {
     run: (payload: {

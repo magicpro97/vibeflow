@@ -25,6 +25,14 @@ export interface WorkUnit {
   knowledge_heavy?: boolean;
   /** Linked canary test: file + human author + when linked. Absent = not yet covered. */
   canary?: { file: string; author: string; linkedAt: string };
+  depends_on?: string[];
+  upstreamHandoffs?: Array<{ unit: string; summary: string }>;
+  acceptance_criteria?: Array<{
+    id: string;
+    criterion: string;
+    verification?: string;
+    required?: boolean;
+  }>;
 }
 
 export interface Attachment {
@@ -61,11 +69,35 @@ export interface LogEvent {
   seq: number;
   ts: number;
   runId: string;
+  workflowId?: string;
+  repoPath?: string;
   unit?: string;
   channel: Channel;
   level: LogLevel;
   text: string;
   meta?: Record<string, unknown>;
+}
+
+export type WorkflowDashboardStatus = "running" | "blocked" | "pending" | "done";
+
+export interface WorkflowDashboardItem {
+  key: string;
+  repoPath: string;
+  repoName: string;
+  taskId: string;
+  goal: string;
+  updatedAt: number;
+  workUnits: WorkUnit[];
+  totals: { units: number; done: number; tokens: number; cost_usd: number; wall_seconds: number };
+  status: WorkflowDashboardStatus;
+  waves: string[][];
+  latestEvent?: LogEvent;
+}
+
+export interface DashboardSelection {
+  repoPath: string;
+  workflowId: string;
+  unit?: string;
 }
 
 export type ToolTier = "codegraph" | "lsp" | "native";

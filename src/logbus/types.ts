@@ -5,6 +5,11 @@
 export type Channel = "vf" | "engine-stdout" | "engine-stderr" | "user" | "hook";
 export type LogLevel = "info" | "warn" | "error" | "debug";
 
+export interface LogContext {
+  workflowId?: string;
+  repoPath?: string;
+}
+
 export interface LogEvent {
   /** Monotonic per-bus sequence number; doubles as the dedup key for SSE re-connect. */
   seq: number;
@@ -12,6 +17,10 @@ export interface LogEvent {
   ts: number;
   /** Per-run UUID — shared across all events of a single workflow run. */
   runId: string;
+  /** Stable workflow identity (state.task_id); absent for legacy events. */
+  workflowId?: string;
+  /** Absolute local repo path; absent for legacy events. */
+  repoPath?: string;
   /** Optional work-unit attribution. */
   unit?: string;
   channel: Channel;

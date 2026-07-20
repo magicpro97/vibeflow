@@ -30,6 +30,7 @@ import {
   handleUnitFailure,
   installLogbus,
   isUnavailable,
+  join,
   makeAsyncSpawner,
   out,
   planProtection,
@@ -78,7 +79,12 @@ export async function run(
   // M2: install the logbus for the same reason as orchestrate(). The CLI install point
   // (in main()) deliberately avoids this so commands like `vf --help` keep their
   // stdout-routed `out("vf", …)` rendering.
-  installLogbus();
+  const base = inject.base ?? cwd();
+  const state = readState(base);
+  installLogbus({
+    dir: join(base, CTX_DIR, "logs"),
+    context: state ? { workflowId: state.task_id, repoPath: base } : undefined,
+  });
   if (!engineArg || !(ENGINES as string[]).includes(engineArg)) {
     out("vf", c.red(`Usage: vf run <${ENGINES.join("|")}>`), {
       level: "error",
@@ -86,13 +92,7 @@ export async function run(
     return 2;
   }
   const engine = engineArg as Engine;
-  const base = inject.base ?? cwd();
-  // PR28 audit Task 6 (M2): the old `const ctx = defaultContext()` left the goal as
-  // a literal placeholder string. The engine then receives a prompt that is just
-  // "Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine."
-  // Same trap as `applyDispatch`. Refuse to dispatch when no state exists, and
-  // overlay state.goal onto the context when it does.
-  const state = readState(base);
+  // base and state already declared above for logbus context
   if (!state) {
     out(
       "vf",

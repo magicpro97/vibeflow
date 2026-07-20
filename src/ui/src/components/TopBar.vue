@@ -13,6 +13,7 @@
       >VibeFlow</span>
       <span v-if="repoName" class="text-neutral-700">/</span>
       <span v-if="repoName" class="text-[11px] text-neutral-500 truncate max-w-32">{{ repoName }}</span>
+      <span v-if="repoTaskId" class="text-[10px] text-neutral-700 font-mono truncate max-w-24">{{ repoTaskId }}</span>
       <!-- Tagline when no repo is active -->
       <span v-if="!repoName && !store.state" class="text-[10px] text-neutral-800 hidden sm:inline">AI coding agents</span>
     </div>
@@ -113,6 +114,18 @@ const repoName = computed(() => {
   if (path && store.state)
     return path.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? path;
   return null;
+});
+
+const repoTaskId = computed(() => {
+  if (store.stage === 0) {
+    const sel = store.selectedWorkflowKey;
+    if (sel) {
+      const parts = sel.split("\u0000");
+      return parts[1];
+    }
+    return null;
+  }
+  return store.state?.task_id ?? null;
 });
 
 const serverOnline = ref(true);

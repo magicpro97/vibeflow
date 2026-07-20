@@ -326,15 +326,40 @@ possible (`HOOKS_AND_GUARDRAILS.md`, `SECURITY_MODEL.md`):
 - the orchestrator commits/merges; sub-agents must not push or merge
 ```
 
+## Pipeline observability
+
+The workflow dashboard (Home screen) shows every registered workflow as a
+dependency pipeline. Each work unit appears as a node in the correct wave
+(layer). Node colors reflect status: pending (neutral), running (animated blue),
+verifying (animated amber), done (green), blocked (red). Edge arrows indicate
+`depends_on` relationships.
+
+Node detail shows:
+- Owner agent and elapsed time
+- First failing gate (blocked) or "waiting for: a, b" text
+- No dependency cycle or missing-dep warnings
+
+A dashboard log drawer scoped to the selected workflow and unit replaces the
+ad-hoc project log drawer. Events carry `workflowId` and `repoPath` for
+correlation; legacy events lacking these fields remain visible only within
+their selected repo file (never leaked across workflows).
+
+### Log ownership
+
+Every `out()` call in a workflow run stamps `(repoPath, task_id)` onto the
+event. This is set once at `installLogbus()` time and merged into all writes.
+Non-workflow commands produce unowned events that remain valid and parseable.
+
 ## Mapping to the rest of the spec
 
 ```text
 AGENT_ORCHESTRATION_POLICY.md → policy (roles, confidence thresholds, debate, parallelism)
 WORK_UNIT_ORCHESTRATION.md     → mechanism (file-backed units, gates, ledger)  [this doc]
 HOOKS_AND_GUARDRAILS.md        → enforcement points (final-verify, skill-compliance, pre-write)
-WEB_UI_DESIGN.md               → operator view (work-unit board, gates, resource meter)
+WEB_UI_DESIGN.md               → operator view (work-unit board, gates, resource meter, pipeline graph)
 GENERATED_FILES.md             → .vibeflow/workunits/* file layout
 WORKFLOW.md                    → end-to-end run that drives these units
+ADR-006.md                     → pipeline observability decision record
 ```
 
 ---

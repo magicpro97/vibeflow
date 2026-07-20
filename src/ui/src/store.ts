@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { api } from "./api.js";
 import type { AskPrefill } from "./lib/ask-prefill.js";
-import type { ProjectEntry, VibeSettings, WorkflowState } from "./types.js";
+import type { ProjectEntry, VibeSettings, WorkflowDashboardItem, WorkflowState } from "./types.js";
 
 /** Pure function — extracted for testability without Pinia context. */
 export function stageReachable(n: 1 | 2 | 3 | 4, state: WorkflowState | null): boolean {
@@ -28,6 +28,18 @@ export const useVfStore = defineStore("vf", () => {
   const reuseGoal = ref<string | null>(null); // one-shot prefill for Stage1Describe
   const askOpen = ref(false);
   const askPrefill = ref<AskPrefill | null>(null);
+  const selectedWorkflowKey = ref<string | null>(null);
+  const selectedUnit = ref<string | null>(null);
+  const dashboardWorkflows = ref<WorkflowDashboardItem[]>([]);
+
+  function selectWorkflow(key: string | null) {
+    selectedWorkflowKey.value = key;
+    selectedUnit.value = null;
+  }
+
+  function selectUnit(name: string | null) {
+    selectedUnit.value = name;
+  }
 
   function openAsk(prefill: AskPrefill | null = null) {
     askPrefill.value = prefill;
@@ -127,5 +139,10 @@ export const useVfStore = defineStore("vf", () => {
     setStage,
     isStageReachable,
     pushLog,
+    selectedWorkflowKey,
+    selectedUnit,
+    dashboardWorkflows,
+    selectWorkflow,
+    selectUnit,
   };
 });

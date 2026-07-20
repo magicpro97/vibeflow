@@ -113,7 +113,11 @@ export async function orchestrate(
   // SOLE destination for engine stderr bytes (stdio is now piped in dispatch.ts), so an
   // uninstalled bus at this point would silently drop them. installLogbus is idempotent —
   // a second call replaces the active bus with a fresh one (the previous one is closed).
-  const logbus = installLogbus();
+  const state = readState(base);
+  const logbus = installLogbus({
+    dir: join(base, CTX_DIR, "logs"),
+    context: state ? { workflowId: state.task_id, repoPath: base } : undefined,
+  });
 
   // M5: show the "watch live" tip once, if the UI server is running.
   if (!tipState.shown) {
@@ -129,8 +133,6 @@ export async function orchestrate(
       /* UI server not running — that's ok */
     }
   }
-
-  const state = readState(base);
   if (!state) {
     out("vf", c.yellow("No workflow. Run `vf init` first."), {
       level: "error",

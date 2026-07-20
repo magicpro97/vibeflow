@@ -68,6 +68,32 @@ describe("replayFromLog (test seam)", () => {
     expect(events[events.length - 1]?.text).toBe("tail-marker");
   });
 
+  test("filters by runId when provided (backward-compatible optional arg)", () => {
+    dir = mkdtempSync(join(tmpdir(), "vf-replay-"));
+    const logFile = join(dir, "runid-filter.log");
+    const lines = [
+      JSON.stringify({ seq: 1, ts: 1, runId: "r1", level: "info", text: "a" }),
+      JSON.stringify({ seq: 2, ts: 2, runId: "r1", level: "info", text: "b" }),
+      JSON.stringify({ seq: 1, ts: 3, runId: "r2", level: "info", text: "c" }),
+      JSON.stringify({ seq: 3, ts: 4, runId: "r1", level: "info", text: "d" }),
+    ];
+    writeFileSync(logFile, lines.join("\n"));
+    // Without runId — all events with seq >= 0
+    expect(replayFromLog(logFile, 0, 100)).toHaveLength(4);
+    // With runId=r1 — only r1 events
+    const r1 = replayFromLog(logFile, 0, 100, "r1");
+    expect(r1).toHaveLength(3);
+    expect(r1.map((e) => e.text)).toEqual(["a", "b", "d"]);
+    // With runId=r2 — only r2 events
+    const r2 = replayFromLog(logFile, 0, 100, "r2");
+    expect(r2).toHaveLength(1);
+    expect(r2[0]?.text).toBe("c");
+    // With since=3 and runId=r1 — seq >= 3 from r1 only
+    const sinceGte = replayFromLog(logFile, 3, 100, "r1");
+    expect(sinceGte).toHaveLength(1);
+    expect(sinceGte[0]?.text).toBe("d");
+  });
+
   test("skips invalid JSON lines (line 194-196)", () => {
     dir = mkdtempSync(join(tmpdir(), "vf-replay-"));
     const logFile = join(dir, "mixed.log");
