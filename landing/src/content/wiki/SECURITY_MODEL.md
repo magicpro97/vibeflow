@@ -131,6 +131,20 @@ require_approval → elevated risk
 block → clearly unsafe or irreversible
 ```
 
+### Codex hook config is global, not per-repo
+
+Codex's native hook configuration is owned by Codex at `~/.codex/hooks.json`, not by an
+individual repository. `vf hooks emit --yes` merges VibeFlow's `PreToolUse` and `PostToolUse`
+entries there and enables `[features] codex_hooks = true` in `~/.codex/config.toml`. This
+affects every repository that uses Codex on that machine; VibeFlow warns before the write.
+
+Codex's native veto covers Bash/shell tool calls only. Edit, Write, apply_patch, and MCP calls
+are not intercepted by that hook, so VibeFlow retains its apply-time diff gate for Codex.
+
+To revert, remove VibeFlow's `PreToolUse` and `PostToolUse` entries from
+`~/.codex/hooks.json`, then remove or set `codex_hooks = false` under `[features]` in
+`~/.codex/config.toml`.
+
 ## Secrets handling
 
 Agents and hooks must not print or store secrets.

@@ -32,6 +32,7 @@ import {
   toolsSync,
   units,
 } from "../src/commands.js";
+import { emitHookFiles } from "../src/commands/hooks.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -278,12 +279,12 @@ describe("adapters", () => {
     expect(beforeFooter.endsWith("\n\n\n")).toBe(false);
   });
 
-  test("detection-only warning is inlined for codex (post-hoc) but NOT claude (native) — #624 Task 5", () => {
+  test("Bash-only native warning is inlined for codex but NOT claude (full native) — #634", () => {
     const ctx = defaultContext();
     const codex = engineFiles("codex", ctx, false)["AGENTS.md"] ?? "";
     const claude = engineFiles("claude", ctx, false)["CLAUDE.md"] ?? "";
-    expect(codex).toContain("Detection-only guardrails");
-    expect(claude).not.toContain("Detection-only guardrails");
+    expect(codex).toContain("Bash/shell only");
+    expect(claude).not.toContain("Bash/shell only");
   });
   test("dispatchPrompt includes the project hard rules in Constraints", () => {
     const p = dispatchPrompt("codex", defaultContext(), [
@@ -961,16 +962,49 @@ describe("hooks emit is non-destructive by default (bug 2)", () => {
     }
   });
 
-  test("emit --yes writes the per-engine hook config files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "vf-hooks-yes-"));
+  test("emit --yes reports files returned by the injectable writer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-hooks-yes-inject-"));
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(hooks("emit", { yes: true })).toBe(0);
-      for (const rel of EMITTED) expect(existsSync(join(dir, rel))).toBe(true);
+      const calls: string[] = [];
+      expect(
+        hooks("emit", { yes: true }, (base) => {
+          calls.push(base);
+          return ["~/.codex/hooks.json"];
+        }),
+      ).toBe(0);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toContain("vf-hooks-yes-inject-");
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("emit --yes via isolated emitHookFiles seam writes per-engine configs without touching global home", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-hooks-yes-"));
+    const isolatedHome = mkdtempSync(join(tmpdir(), "vf-codex-home-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const written = emitHookFiles(dir, ["claude", "copilot", "opencode"], isolatedHome);
+      const expected = [
+        ".claude/settings.json",
+        ".github/hooks/copilot.json",
+        ".opencode/plugins/vf-guard.ts",
+        ".githooks/pre-commit",
+        ".githooks/post-checkout",
+        ".githooks/post-merge",
+      ];
+      expect(written.sort()).toEqual([...expected].sort());
+      for (const rel of expected) {
+        expect(existsSync(join(dir, rel))).toBe(true);
+      }
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(isolatedHome, { recursive: true, force: true });
     }
   });
 });

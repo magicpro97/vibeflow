@@ -16,6 +16,7 @@ import {
   gitPostCheckout,
   gitPostMerge,
   gitPreCommit,
+  hookRuntime,
   opencodePluginSource,
   opencodePluginStale,
   perCommandWarning,
@@ -146,9 +147,9 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
     expect(typeof entry.powershell).toBe("string");
     expect(typeof entry.timeoutSec).toBe("number");
     expect(entry.timeoutSec).toBeGreaterThanOrEqual(30);
-    // bash + powershell must quote the path to survive spaces (e.g. C:\Program Files\...)
-    expect(entry.bash).toMatch(/"[^"]+"\s+hook/);
-    expect(entry.powershell).toMatch(/"[^"]+"\s+hook/);
+    // bash + powershell must include runtime + quoted path to survive spaces (e.g. C:\Program Files\...)
+    expect(entry.bash).toMatch(/^(bun|node) "[^"]+"\s+hook/);
+    expect(entry.powershell).toMatch(/^(bun|node) "[^"]+"\s+hook/);
   });
 
   test("engineEnforcement: copilot is now native (per preToolUse fail-closed semantics)", () => {
@@ -157,30 +158,50 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
     // opencode is native too: it has a `tool.execute.before` plugin hook that
     // can throw to veto a tool call — semantically equivalent to PreToolUse.
     expect(engineEnforcement("opencode").preActionBlocking).toBe("native");
-    // codex stays post-hoc-only: it has no native pre-tool veto.
-    expect(engineEnforcement("codex").preActionBlocking).toBe("post-hoc-only");
+    // codex is native-bash-only: PreToolUse fires for Bash tool calls only.
+    expect(engineEnforcement("codex").preActionBlocking).toBe("native-bash-only");
     // antigravity: real agy 1.1.4 PreToolUse deny canary did not fire in headless test — post-hoc-only until proven.
     expect(engineEnforcement("antigravity").preActionBlocking).toBe("post-hoc-only");
   });
 
-  test("perCommandWarning: empty for native, warns for detection-only", () => {
+  test("perCommandWarning: empty for native, distinguishes Bash-only and detection-only", () => {
     expect(perCommandWarning("claude")).toBe("");
     expect(perCommandWarning("copilot")).toBe("");
     expect(perCommandWarning("opencode")).toBe("");
-    expect(perCommandWarning("codex")).toContain("detection-only");
+    expect(perCommandWarning("codex")).toContain("Bash/shell");
     expect(perCommandWarning("antigravity")).toContain("detection-only");
   });
 
-  test("downgradeBannerText: empty for native engines, warns only for codex and antigravity", () => {
+  test("downgradeBannerText: empty for native engines, distinguishes Bash-only and detection-only", () => {
     expect(downgradeBannerText("claude")).toBe("");
     expect(downgradeBannerText("copilot")).toBe("");
     expect(downgradeBannerText("opencode")).toBe("");
     const codexBanner = downgradeBannerText("codex");
     expect(codexBanner.length).toBeGreaterThan(0);
-    expect(codexBanner.toLowerCase()).toContain("detection");
+    expect(codexBanner.toLowerCase()).toContain("bash");
     const agBanner = downgradeBannerText("antigravity");
     expect(agBanner.length).toBeGreaterThan(0);
     expect(agBanner.toLowerCase()).toContain("detection");
+  });
+});
+
+// --- hookRuntime: Bun-preferred / Node-fallback injectable runtime ---
+describe("hookRuntime: bun-preferred runtime resolution", () => {
+  test("returns a valid runtime string (bun or node)", () => {
+    expect(["bun", "node"]).toContain(hookRuntime());
+  });
+
+  test("prefers bun when bun is on PATH (Bun test env)", () => {
+    expect(hookRuntime()).toBe("bun");
+  });
+
+  test("uses injected lookup: node fallback when bun is absent, including lookup failure", () => {
+    expect(hookRuntime(() => null)).toBe("node");
+    expect(
+      hookRuntime(() => {
+        throw new Error("PATH unavailable");
+      }),
+    ).toBe("node");
   });
 });
 
@@ -252,7 +273,8 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
     expect(entries.length).toBeGreaterThan(0);
     for (const h of entries) {
       // Exec form: bare executable + path as a separate, untokenized arg.
-      expect(h.command).toBe("node");
+      // Runtime is either "bun" or "node" (hookRuntime resolution).
+      expect(["bun", "node"]).toContain(h.command);
       expect(Array.isArray(h.args)).toBe(true);
       expect(h.args?.[0]).toMatch(/[/\\\\]dist[/\\\\]cli\.js$/);
       expect(h.args?.[1]).toBe("hook");
@@ -261,11 +283,31 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
     }
   });
 
-  test("codex commands quote the path (shell-string schema; spaces survive)", () => {
-    const cfg = JSON.parse(codexHookConfig()) as { hooks: Record<string, string> };
-    for (const cmd of Object.values(cfg.hooks)) {
-      expect(cmd).toMatch(/^node "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
-    }
+  test("codexHookConfig emits real Codex PascalCase schema (PreToolUse/PostToolUse, command field)", () => {
+    const raw = codexHookConfig();
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty("detectionOnly");
+    expect(typeof parsed.hooks).toBe("object");
+    const hooks = parsed.hooks as Record<string, unknown>;
+    expect(Array.isArray(hooks.PreToolUse)).toBe(true);
+    expect(Array.isArray(hooks.PostToolUse)).toBe(true);
+    expect(hooks).not.toHaveProperty("post-command");
+    expect(hooks).not.toHaveProperty("post-write");
+    expect(hooks).not.toHaveProperty("verify-result");
+  });
+
+  test("codexHookConfig command field contains shell string with runtime + quoted path", () => {
+    const parsed = JSON.parse(codexHookConfig()) as {
+      hooks: { PreToolUse: Array<{ command: string }>; PostToolUse: Array<{ command: string }> };
+    };
+    const pre = parsed.hooks.PreToolUse[0];
+    const post = parsed.hooks.PostToolUse[0];
+    expect(pre).toBeDefined();
+    expect(post).toBeDefined();
+    if (!pre || !post) return; // satisfy TS — asserted above
+    // command string: "bun|node \"/path/to/cli.js\" hook"
+    expect(pre.command).toMatch(/^(bun|node) "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
+    expect(post.command).toMatch(/^(bun|node) "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
   });
 
   test('git pre-commit pipes through a quoted `node "<abs>" hook`', () => {

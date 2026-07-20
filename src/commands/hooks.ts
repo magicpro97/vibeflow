@@ -26,6 +26,7 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HookInput } from "../core.js";
 import { readLocalSpec, specStaleSignals } from "../spec-freshness.js";
@@ -433,6 +434,69 @@ function mergeAntigravityHooks(absPath: string, generated: string): string | nul
 }
 
 /**
+ * Merge the generated codex hooks block into an EXISTING `~/.codex/hooks.json`,
+ * preserving every unrelated top-level and hooks key. Only PreToolUse and
+ * PostToolUse are overwritten. Malformed existing JSON → return null (caller
+ * skips and warns).
+ */
+function mergeCodexHooks(absPath: string, generated: string): string | null {
+  const incoming = JSON.parse(generated) as {
+    hooks: { PreToolUse?: unknown[]; PostToolUse?: unknown[] };
+  };
+  if (!existsSync(absPath)) return JSON.stringify(incoming, null, 2);
+  let existing: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(readFileSync(absPath, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    existing = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const existingHooks =
+    existing.hooks && typeof existing.hooks === "object" && !Array.isArray(existing.hooks)
+      ? { ...(existing.hooks as Record<string, unknown>) }
+      : {};
+  return JSON.stringify(
+    {
+      ...existing,
+      hooks: {
+        ...existingHooks,
+        PreToolUse: incoming.hooks.PreToolUse,
+        PostToolUse: incoming.hooks.PostToolUse,
+      },
+    },
+    null,
+    2,
+  );
+}
+
+/**
+ * Idempotently ensure `[features] codex_hooks = true` in
+ * `homedir()/.codex/config.toml` with minimal string editing.
+ * Preserves all unrelated content. No-op if already `true`.
+ */
+function ensureCodexFeaturesToml(codexHome?: string): void {
+  const home = codexHome ?? homedir();
+  const configPath = join(home, ".codex", "config.toml");
+  if (!existsSync(configPath)) {
+    writeFileSafe(configPath, "[features]\ncodex_hooks = true");
+    return;
+  }
+  const raw = readFileSync(configPath, "utf8");
+  if (/codex_hooks\s*=\s*true/.test(raw)) return;
+  if (/codex_hooks\s*=/.test(raw)) {
+    writeFileSafe(configPath, raw.replace(/\bcodex_hooks\s*=\s*[^\n]+/, "codex_hooks = true"));
+    return;
+  }
+  if (/\[features\]/.test(raw)) {
+    writeFileSafe(configPath, raw.replace(/(\[features\])/, "$1\ncodex_hooks = true"));
+    return;
+  }
+  const sep = raw.endsWith("\n") ? "" : "\n";
+  writeFileSafe(configPath, `${raw}${sep}[features]\ncodex_hooks = true`);
+}
+
+/**
  * Write every engine hook config into `base`, all delegating to `vf hook`, and
  * chmod the shell git hooks executable. Returns the relative paths written.
  *
@@ -446,10 +510,34 @@ function mergeAntigravityHooks(absPath: string, generated: string): string | nul
  * a PreToolUse hook into a running agent, so only invoke this after an explicit
  * --yes / interactive opt-in.
  */
-export function emitHookFiles(base: string, engines?: Engine[]): string[] {
+export function emitHookFiles(base: string, engines?: Engine[], codexHome?: string): string[] {
   const files = engineHookFiles(engines);
   const written: string[] = [];
+  const hasCodex = ".codex/hooks.json" in files;
+  if (hasCodex) {
+    out(
+      "vf",
+      c.yellow(
+        "! codex: writes to ~/.codex/hooks.json and ~/.codex/config.toml — GLOBAL, affects every repo using Codex on this machine, not just this one.",
+      ),
+    );
+  }
   for (const [rel, content] of Object.entries(files)) {
+    if (rel === ".codex/hooks.json") {
+      const home = codexHome ?? homedir();
+      const dest = join(home, ".codex", "hooks.json");
+      const merged = mergeCodexHooks(dest, content);
+      if (merged === null) {
+        out("vf", c.yellow(`! ${rel} is not valid JSON — left untouched. Fix it, then re-run.`), {
+          level: "error",
+        });
+        continue;
+      }
+      writeFileSafe(dest, merged);
+      ensureCodexFeaturesToml(codexHome);
+      written.push("~/.codex/hooks.json");
+      continue;
+    }
     const dest = join(base, rel);
     if (rel === CLAUDE_SETTINGS_REL || rel === ANTIGRAVITY_HOOKS_REL) {
       const merged =
@@ -497,6 +585,7 @@ export function armHooks(base: string, config: HookConfig, engines?: Engine[]): 
 export function hooks(
   sub: string | undefined,
   flags: Record<string, string | boolean> = {},
+  emit: typeof emitHookFiles = emitHookFiles,
 ): number {
   switch (sub) {
     case "install":
@@ -522,7 +611,18 @@ export function hooks(
       // Default to a DRY RUN: writing .claude/settings.json hot-reloads a PreToolUse hook
       // into the running agent, so never overwrite engine configs without explicit --yes.
       if (!flags.yes || flags["dry-run"]) {
-        for (const rel of Object.keys(files)) out("vf", `${c.dim("[dry-run]")} ${rel}`);
+        for (const rel of Object.keys(files)) {
+          const display = rel === ".codex/hooks.json" ? "~/.codex/hooks.json" : rel;
+          out("vf", `${c.dim("[dry-run]")} ${display}`);
+        }
+        if (".codex/hooks.json" in files) {
+          out(
+            "vf",
+            c.yellow(
+              "! codex: writes to ~/.codex/hooks.json and ~/.codex/config.toml — GLOBAL, affects every repo using Codex on this machine, not just this one.",
+            ),
+          );
+        }
         out(
           "vf",
           c.yellow(
@@ -533,7 +633,7 @@ export function hooks(
         return 0;
       }
       // --yes: write per-engine hook configs into the active repo, all delegating to `vf hook`.
-      for (const rel of emitHookFiles(cwd())) {
+      for (const rel of emit(cwd())) {
         out("vf", `${c.green("+")} ${rel}`);
       }
       return 0;

@@ -22,18 +22,15 @@ function engineBody(engine: Engine, ctx: ProjectContext): string {
   const navLine = nav ? `- ${nav}\n` : "";
   const goal = (ctx.goal ?? "").trim();
   const title = engine === "claude" ? "# CLAUDE.md" : "# AGENTS.md";
-  // #624 Task 5: honesty for detection-only engines (Codex has no vetoing pre-tool
-  // hook). Tell the agent its risky actions are flagged AFTER the fact, not blocked,
-  // so it must lean on `vf verify` + the commit-time git gate rather than assume a
-  // live guardrail will stop a destructive action. Native engines get no such line.
-  const detectionOnly =
-    engineEnforcement(engine).preActionBlocking === "post-hoc-only"
-      ? "> ⚠ Detection-only guardrails on this engine: risky actions are flagged AFTER they run, not blocked. Rely on `vf verify` and the git pre-commit gate — do not assume a live hook will stop a destructive command.\n"
+  const enforcement = engineEnforcement(engine).preActionBlocking;
+  const guardrailNote =
+    enforcement === "native-bash-only"
+      ? "> ⚠ Codex native blocking covers Bash/shell only. Edit/Write/apply_patch/MCP calls remain unguarded by this hook; rely on `vf verify` and the git pre-commit gate. Codex hook config is global at `~/.codex/`.\n"
       : "";
   return `${title}
 ## ⚡ VibeFlow v${VERSION} Active — local-first orchestrator for AI coding agents (https://github.com/magicpro97/vibeflow).
 Project: ${ctx.name} · Goal: ${goal}
-${navLine}${detectionOnly}${VF_COMMANDS_SLIM}
+${navLine}${guardrailNote}${VF_COMMANDS_SLIM}
 ${VF_WORKFLOW_SLIM}
 Powered by VibeFlow v${VERSION} — https://github.com/magicpro97/vibeflow
 `;
