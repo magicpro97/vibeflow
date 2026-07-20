@@ -225,9 +225,35 @@ Reject
 Edit policy
 ```
 
+## Pipeline dashboard (ADR-006)
+
+The Home screen (stage 0) now shows a **Workflow Dashboard** listing every
+registered workflow. Each card displays repo, task ID, goal, done/total,
+running/blocked count, and latest activity. Selecting a card reveals:
+
+1. A **dependency pipeline** (CSS Grid + SVG) with one column per wave.
+   Nodes are keyboard-focusable `<button>` elements with status-based coloring:
+   pending (neutral), running (animated blue), verifying (animated amber),
+   done (green), blocked (red). An ordered text list provides screen-reader
+   access. No external graph library is used.
+
+2. A **scoped log drawer** showing only events for that workflow. When a unit
+   is selected, filters narrow to that unit while retaining workflow-level
+   lifecycle events. The existing active-session log pane
+   (`/api/logs/stream`) is unchanged.
+
+Dashboard polling interval: 2 s while any workflow is running, 15 s otherwise.
+One selected workflow gets a durable-log SSE stream.
+
+### Layout
+
+Desktop: pipeline graph on the left, log drawer on the right (lg breakpoint).
+Mobile: stacked vertically. The "Recent projects" section (Resume/Reuse/Delete)
+remains but is secondary to the active workflow cards.
+
 ## Real-time updates
 
-Use WebSocket or Server-Sent Events for:
+Use Server-Sent Events for:
 
 ```text
 - command logs
@@ -236,6 +262,7 @@ Use WebSocket or Server-Sent Events for:
 - skill usage
 - diff updates
 - verification progress
+- (dashboard) selected workflow durable log tail
 ```
 
 ---

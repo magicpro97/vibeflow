@@ -4,8 +4,8 @@
     <div class="flex flex-1 overflow-hidden">
       <!-- No Rail — Stepper in TopBar handles navigation -->
       <main class="flex-1 overflow-y-auto p-8 min-w-0">
-        <div class="max-w-4xl">
-          <ProjectList v-if="store.stage === 0" />
+        <div class="max-w-5xl">
+          <WorkflowDashboard v-if="store.stage === 0" />
           <Stage1Describe v-else-if="store.stage === 1" />
           <Stage2Generate v-else-if="store.stage === 2" />
           <Stage3Orchestrate v-else-if="store.stage === 3" />
@@ -35,6 +35,7 @@ import Stage3Orchestrate from "./components/Stage3Orchestrate.vue";
 import Stage4Verify from "./components/Stage4Verify.vue";
 import StatusBar from "./components/StatusBar.vue";
 import TopBar from "./components/TopBar.vue";
+import WorkflowDashboard from "./components/WorkflowDashboard.vue";
 import { useVfStore } from "./store.js";
 
 const store = useVfStore();

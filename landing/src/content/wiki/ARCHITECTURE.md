@@ -187,6 +187,24 @@ Result report
 Skill evolution proposal
 ```
 
+## Pipeline observability data flow (ADR-006)
+
+```text
+Registry + WORKFLOW_STATE + durable logs (current.log)
+  → buildDashboardItems() — read-only aggregation
+  → GET /api/dashboard/workflows — snapshot JSON
+  → GET /api/dashboard/logs — selected workflow durable events
+  → SSE /api/dashboard/logs/stream — live tail of selected workflow log
+  → Vue WorkflowDashboard (polling composable)
+  → PipelineGraph (CSS Grid + SVG) + WorkflowLogPane (scoped drawer)
+```
+
+Events carry optional `workflowId` (state.task_id) and `repoPath` for
+correlation. Legacy events without these fields are still parseable and
+visible within their repo's log file. The selection resolver validates
+`repoPath` against the registry, `workflowId` against the state, and
+`unit` against known unit names — all server-side.
+
 ## Canonical context principle
 
 The system should not maintain three independent instruction systems. It should maintain one canonical source:

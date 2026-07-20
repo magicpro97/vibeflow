@@ -4,6 +4,11 @@
     <div>
       <h1 class="text-sm font-semibold text-neutral-100">Plan</h1>
       <p class="text-[11px] text-neutral-600 mt-0.5">{{ units.length ? 'Review tasks, choose an engine, then hit Dispatch. Logs open automatically.' : 'Choose an engine and hit Dispatch — the engine will plan and create tasks automatically.' }}</p>
+      <div v-if="store.state" class="mt-1.5 flex items-center gap-2 text-[10px] text-neutral-600 font-mono">
+        <span class="text-neutral-500">Workflow {{ store.state.task_id }}</span>
+        <span class="text-neutral-700">·</span>
+        <button class="text-neutral-600 hover:text-neutral-300 transition-colors underline underline-offset-2" @click="viewPipeline">View pipeline</button>
+      </div>
     </div>
 
     <!-- Empty state — no init run yet -->
@@ -236,6 +241,22 @@ async function dispatchAll() {
   } finally {
     dispatching.value = false;
   }
+}
+
+function viewPipeline() {
+  if (!store.state) return;
+  const repoPath = (() => {
+    try {
+      const h = JSON.parse(localStorage.getItem("vf-repo-history") || "[]");
+      return h[0] ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  if (repoPath && store.state) {
+    store.selectWorkflow(`${repoPath}\u0000${store.state.task_id}`);
+  }
+  store.setStage(0);
 }
 
 function fmtTokens(n: number): string {

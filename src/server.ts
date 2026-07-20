@@ -8,7 +8,13 @@ import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { askStreamResponse } from "./server/ask-route.js";
 import { handleFileRoute } from "./server/file-route.js";
-import { listAttachments, replayFromLog, settingsView } from "./server/handlers.js";
+import {
+  listAttachments,
+  replayFromLog,
+  repoLanguages,
+  settingsView,
+  toolViews,
+} from "./server/handlers.js";
 import {
   clearPending,
   getPending,
@@ -22,7 +28,7 @@ import { resolveSkillNeeds } from "./skills/resolver.js";
 import { validateSkillRoots } from "./skills/validator.js";
 
 // Re-export the 4 test seams so the 5 importers don't change
-export { repoLanguages, toolViews, settingsView, replayFromLog } from "./server/handlers.js";
+export { repoLanguages, toolViews, settingsView, replayFromLog };
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const ASSETS_DIR = new URL("./assets/", import.meta.url);
@@ -329,6 +335,184 @@ export function startServer(
         const since = Math.max(0, Number(url.searchParams.get("since") ?? "0"));
         const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit") ?? "100")));
         return Response.json({ events: replayFromLog(bus.currentFile(), since, limit) });
+      }
+
+      // --- GET /api/dashboard/workflows ---
+      if (method === "GET" && path === "/api/dashboard/workflows") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        const { buildDashboardItems } = await import("./server/dashboard.js");
+        const { readRegistry } = await import("./registry.js");
+        const entries = readRegistry();
+        return Response.json({ workflows: buildDashboardItems(entries) });
+      }
+
+      // --- GET /api/dashboard/logs ---
+      if (method === "GET" && path === "/api/dashboard/logs") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        const { buildDashboardItems, matchesDashboardEvent, resolveDashboardSelection } =
+          await import("./server/dashboard.js");
+        const { readRegistry } = await import("./registry.js");
+        const entries = readRegistry();
+        const items = buildDashboardItems(entries);
+        const repoPath = url.searchParams.get("repoPath") ?? "";
+        const workflowId = url.searchParams.get("workflowId") ?? "";
+        const unit = url.searchParams.get("unit") || undefined;
+        const sel = resolveDashboardSelection(repoPath, workflowId, unit, items);
+        if ("error" in sel) {
+          return Response.json({ error: sel.error }, { status: sel.status });
+        }
+        const since = Math.max(0, Number(url.searchParams.get("since") ?? "0"));
+        const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit") ?? "200")));
+        const includeWorkflowEvents = url.searchParams.get("includeWorkflowEvents") !== "false";
+        const logFile = join(repoPath, CTX_DIR, "logs", "current.log");
+        const all = replayFromLog(logFile, since, 5000);
+        const filtered = all
+          .filter((ev) => matchesDashboardEvent(ev, sel, includeWorkflowEvents))
+          .slice(0, limit);
+        return Response.json({ events: filtered });
+      }
+
+      // --- SSE: /api/dashboard/logs/stream ---
+      if (method === "GET" && path === "/api/dashboard/logs/stream") {
+        // EventSource cannot send custom headers. Permit its token query only on
+        // explicit LAN binds; normal API calls still use the header guard.
+        if (bindAll && !guarded(req) && url.searchParams.get("token") !== token) {
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        }
+        const { buildDashboardItems, matchesDashboardEvent, resolveDashboardSelection } =
+          await import("./server/dashboard.js");
+        const { readRegistry } = await import("./registry.js");
+        const entries = readRegistry();
+        const items = buildDashboardItems(entries);
+        const repoPath = url.searchParams.get("repoPath") ?? "";
+        const workflowId = url.searchParams.get("workflowId") ?? "";
+        const unit = url.searchParams.get("unit") || undefined;
+        const since = Math.max(0, Number(url.searchParams.get("since") ?? "0"));
+        const runId = url.searchParams.get("runId") || undefined;
+        const sel = resolveDashboardSelection(repoPath, workflowId, unit, items);
+        if ("error" in sel) {
+          return Response.json({ error: sel.error }, { status: sel.status });
+        }
+        let offset = 0;
+        let lastInode = 0;
+        const logFile = join(sel.repoPath, CTX_DIR, "logs", "current.log");
+        try {
+          const { statSync: st } = await import("node:fs");
+          if (st(logFile).ino) lastInode = st(logFile).ino;
+        } catch {
+          /* */
+        }
+        const {
+          createReadStream,
+          existsSync,
+          statSync: statSync2,
+          watchFile,
+          unwatchFile,
+        } = await import("node:fs");
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder();
+              controller.enqueue(encoder.encode(": vibeflow-dashboard-logs-1\n\n"));
+              const safeEnqueue = (chunk: Uint8Array) => {
+                try {
+                  controller.enqueue(chunk);
+                } catch {
+                  /* */
+                }
+              };
+              // Catch-up replay from since cursor before live tailing
+              if (since > 0) {
+                try {
+                  const caught = replayFromLog(logFile, since, 1000, runId);
+                  for (const ev of caught) {
+                    if (matchesDashboardEvent(ev, sel, true)) {
+                      safeEnqueue(encoder.encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`));
+                    }
+                  }
+                } catch {
+                  /* best-effort catch-up */
+                }
+              }
+              // Seek offset past replayed events so readChunk only yields new data
+              try {
+                const st = statSync2(logFile);
+                offset = st.size;
+                if (st.ino) lastInode = st.ino;
+              } catch {
+                /* */
+              }
+              const heartbeat = setInterval(
+                () => safeEnqueue(encoder.encode(": keepalive\n\n")),
+                25_000,
+              );
+              const readChunk = () => {
+                if (!existsSync(logFile)) return;
+                let st: import("node:fs").Stats | undefined;
+                try {
+                  st = statSync2(logFile);
+                } catch {
+                  return;
+                }
+                if (st.ino !== lastInode || st.size < offset) {
+                  offset = 0;
+                  lastInode = st.ino;
+                }
+                if (st.size <= offset) return;
+                const stream = createReadStream(logFile, {
+                  start: offset,
+                  end: st.size,
+                  encoding: "utf8",
+                });
+                let buf = "";
+                stream.on("data", (chunk) => {
+                  buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+                  const lines = buf.split("\n");
+                  buf = lines.pop() ?? "";
+                  for (const line of lines) {
+                    if (!line) continue;
+                    try {
+                      const ev = JSON.parse(line) as LogEvent;
+                      if (matchesDashboardEvent(ev, sel, true)) {
+                        controller.enqueue(
+                          encoder.encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
+                        );
+                      }
+                    } catch {
+                      /* */
+                    }
+                  }
+                });
+                stream.on("end", () => {
+                  offset = st.size;
+                });
+                stream.resume();
+              };
+              const pollTimer = setInterval(readChunk, 500);
+              try {
+                watchFile(logFile, { persistent: false, interval: 250 }, readChunk);
+              } catch {
+                /* */
+              }
+              req.signal.addEventListener("abort", () => {
+                clearInterval(heartbeat);
+                clearInterval(pollTimer);
+                try {
+                  unwatchFile(logFile);
+                } catch {
+                  /* */
+                }
+              });
+            },
+          }),
+          {
+            headers: {
+              "content-type": "text/event-stream",
+              "cache-control": "no-cache",
+              "x-accel-buffering": "no",
+            },
+          },
+        );
       }
 
       // --- GET /events (deprecated SSE) ---

@@ -4,6 +4,11 @@
     <div>
       <h1 class="text-sm font-semibold text-neutral-100">Run agents</h1>
       <p class="text-[11px] text-neutral-600 mt-0.5">{{ anyRunning ? 'Agents are running — wait for them to finish, then verify.' : 'Click Run agents to start tasks. When all finish, you will be moved to Verify automatically.' }}</p>
+      <div v-if="store.state" class="mt-1.5 flex items-center gap-2 text-[10px] text-neutral-600 font-mono">
+        <span class="text-neutral-500">Workflow {{ store.state.task_id }}</span>
+        <span class="text-neutral-700">·</span>
+        <button class="text-neutral-600 hover:text-neutral-300 transition-colors underline underline-offset-2" @click="viewPipeline">View pipeline</button>
+      </div>
     </div>
 
     <!-- Preflight section -->
@@ -290,6 +295,22 @@ async function orchestrate() {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+function viewPipeline() {
+  if (!store.state) return;
+  const repoPath = (() => {
+    try {
+      const h = JSON.parse(localStorage.getItem("vf-repo-history") || "[]");
+      return h[0] ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  if (repoPath && store.state) {
+    store.selectWorkflow(`${repoPath}\u0000${store.state.task_id}`);
+  }
+  store.setStage(0);
+}
+
 function fmtTokens(n: number): string {
   return n >= 1_000_000
     ? `${(n / 1_000_000).toFixed(1)}M`

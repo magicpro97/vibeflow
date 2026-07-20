@@ -259,6 +259,36 @@
                   </ol>
                 </div>
 
+                <div v-if="u.depends_on && u.depends_on.length">
+                  <span class="text-[10px] text-neutral-600 font-medium">Depends on</span>
+                  <div class="flex flex-wrap gap-1 mt-1.5">
+                    <span
+                      v-for="d in u.depends_on" :key="d"
+                      class="px-1.5 py-0.5 bg-neutral-800/50 rounded text-neutral-400 font-mono text-[11px]"
+                    >{{ d }}</span>
+                  </div>
+                </div>
+                <div v-if="downstream(u.name).length > 0">
+                  <span class="text-[10px] text-neutral-600 font-medium">Downstream</span>
+                  <div class="flex flex-wrap gap-1 mt-1.5">
+                    <span
+                      v-for="d in downstream(u.name)" :key="d"
+                      class="px-1.5 py-0.5 bg-neutral-800/50 rounded text-neutral-400 font-mono text-[11px]"
+                    >{{ d }}</span>
+                  </div>
+                </div>
+                <div v-if="u.upstreamHandoffs?.length" class="border-t border-neutral-800/40 pt-2 mt-1">
+                  <span class="text-[10px] text-neutral-600 font-medium">Handoffs</span>
+                  <div v-for="h in u.upstreamHandoffs" :key="h.unit" class="mt-1 text-[11px] text-neutral-500 font-mono">
+                    <span class="text-neutral-400">{{ h.unit }}:</span> {{ h.summary }}
+                  </div>
+                </div>
+                <div class="border-t border-neutral-800/40 pt-2 mt-1">
+                  <button
+                    class="text-[10px] text-neutral-600 hover:text-neutral-300 transition-colors underline underline-offset-2"
+                    @click="viewPipeline(u.name)"
+                  >View pipeline{{ u.name ? ` (${u.name})` : '' }}</button>
+                </div>
                 <!-- Spec preview -->
                 <div v-if="u.spec">
                   <span class="text-[10px] text-neutral-600 font-medium">spec</span>
@@ -399,6 +429,25 @@ async function openFile(unit: string, c: ClassifiedEvidence) {
 function askAboutOpenedFile() {
   const prefill = prefillFromOpenedFile(openedFile.value);
   if (prefill) store.openAsk(prefill);
+}
+
+function downstream(name: string): string[] {
+  return (props.units ?? []).filter((u) => (u.depends_on ?? []).includes(name)).map((u) => u.name);
+}
+
+function viewPipeline(unit: string) {
+  const repoPath = (() => {
+    try {
+      const h = JSON.parse(localStorage.getItem("vf-repo-history") || "[]");
+      return h[0] ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  if (!repoPath || !store.state) return;
+  store.selectWorkflow(`${repoPath}\u0000${store.state.task_id}`);
+  if (unit) store.selectUnit(unit);
+  store.setStage(0);
 }
 
 function toggleExpand(name: string) {

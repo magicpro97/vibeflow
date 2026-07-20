@@ -274,3 +274,10 @@ export {
   PILOT_DATA_PATH,
 } from "./review-cross.js";
 export type { PilotEncounter } from "./review-cross.js";
+
+import type { WorkUnit } from "../core.js";
+// === work-unit completeness check ===
+// Extracted from orchestrate.ts (#643). Shared so server routes can test the
+// same condition without inlining the logic.
+export const isComplete = (u: WorkUnit) =>
+  u.status === "done" && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;

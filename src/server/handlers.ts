@@ -174,7 +174,12 @@ export function applySettings(repo: string, payload: Record<string, unknown>): V
 
 // Test seam: exported so unit tests can exercise the small/large file
 // paths (line 177-188) without going through the SSE handler.
-export function replayFromLog(filePath: string, since: number, limit: number): LogEvent[] {
+export function replayFromLog(
+  filePath: string,
+  since: number,
+  limit: number,
+  runId?: string,
+): LogEvent[] {
   if (!existsSync(filePath)) return [];
   const st = statSync(filePath);
   if (st.size === 0) return [];
@@ -202,6 +207,7 @@ export function replayFromLog(filePath: string, since: number, limit: number): L
     try {
       const ev = JSON.parse(line) as LogEvent;
       if (typeof ev.seq === "number" && ev.seq >= since) {
+        if (runId !== undefined && ev.runId !== runId) continue;
         events.push(ev);
         if (events.length >= limit) break;
       }

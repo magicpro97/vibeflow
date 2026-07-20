@@ -19,6 +19,7 @@ import { dispatchInWaves } from "../orchestrator/waves.js";
 import {
   MS_PER_SECOND,
   defaultRun,
+  isComplete,
   makeDispatcher,
   makeReviewer,
   makeSharedTypecheckGate,
@@ -113,7 +114,11 @@ export async function orchestrate(
   // SOLE destination for engine stderr bytes (stdio is now piped in dispatch.ts), so an
   // uninstalled bus at this point would silently drop them. installLogbus is idempotent —
   // a second call replaces the active bus with a fresh one (the previous one is closed).
-  const logbus = installLogbus();
+  const state = readState(base);
+  const logbus = installLogbus({
+    dir: join(base, CTX_DIR, "logs"),
+    context: state ? { workflowId: state.task_id, repoPath: base } : undefined,
+  });
 
   // M5: show the "watch live" tip once, if the UI server is running.
   if (!tipState.shown) {
@@ -129,8 +134,6 @@ export async function orchestrate(
       /* UI server not running — that's ok */
     }
   }
-
-  const state = readState(base);
   if (!state) {
     out("vf", c.yellow("No workflow. Run `vf init` first."), {
       level: "error",
@@ -160,11 +163,6 @@ export async function orchestrate(
       ? state.work_units
       : [normalizeUnit({ name: "task", status: "pending", confidence: 0 })];
 
-  // Only dispatch units that aren't already complete — a unit that is done at confidence 1.0
-  // WITH evidence is finished; re-launching the engine against it wastes a round-trip and risks
-  // clobbering accepted work. Completed units are still carried into the ledger + goal eval.
-  const isComplete = (u: WorkUnit) =>
-    u.status === "done" && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;
   const done = allUnits.filter(isComplete);
   const units: WorkUnit[] = allUnits.filter((u) => !isComplete(u));
   if (done.length) {
