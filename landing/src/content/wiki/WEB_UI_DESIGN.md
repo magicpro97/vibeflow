@@ -225,6 +225,35 @@ Reject
 Edit policy
 ```
 
+## 10. Diff Preview (#641)
+
+The Diff Preview shows code changes at the workflow or work-unit level,
+synchronized with the selected pipeline node.
+
+**Workflow-level summary**: changed-file count, additions/deletions totals,
+and baseline label (dispatch checkpoint when available, otherwise `HEAD`).
+Binary files are flagged; untracked files are reported separately from
+`git status --porcelain`.
+
+**Work-unit preview**: scope-limited unified diff filtered to the selected
+unit's declared paths. Capped at 200 KB / 2,000 lines with `truncated: true`
+and a local-command hint on overflow. No-diff, unsupported, binary, and
+truncated states are clearly labeled.
+
+**API contract** (`GET /api/dashboard/diff`):
+- Validates repo is a registry member, `workflowId` matches `task_id`,
+  unit exists.
+- Uses `git diff --no-ext-diff --binary <baseline> -- <validated scope>` —
+  never shell-interpolates input.
+- Rendition via `{{ }}` interpolation, never `v-html`.
+- Baseline defaults to the pre-dispatch checkpoint's base ref; falls back
+  to `HEAD`.
+
+**Integration points**:
+- Workflow Dashboard (stage 0): diff panel above the pipeline graph.
+  Selecting a pipeline node filters to that unit's scope.
+- Verify screen (stage 4): full workflow diff summary above the task table.
+
 ## Pipeline dashboard (ADR-006)
 
 The Home screen (stage 0) now shows a **Workflow Dashboard** listing every

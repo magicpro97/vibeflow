@@ -149,6 +149,11 @@ Antigravity Adapter → AGENTS.md + .agents/agents + .agents/skills + .agents/mc
 
 ## Source modules
 
+The web UI also exposes a read-only diff preview endpoint (`GET /api/dashboard/diff`)
+that returns workflow-level changed-file summaries and scope-limited work-unit diffs.
+Git operations use `spawnSync` with argv arrays (no shell interpolation).
+See `src/server/dashboard-diff.ts` and `docs/WEB_UI_DESIGN.md` section 10.
+
 ```text
 src/probe-cache.ts          # 60s stable / 5s short-TTL probe-result cache (vf doctor)
 src/engine-quota.ts         # parse claude / codex / copilot quota JSON; exhaustion signal

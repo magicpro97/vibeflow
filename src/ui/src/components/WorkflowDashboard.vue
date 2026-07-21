@@ -34,13 +34,21 @@
         </div>
 
         <div class="flex flex-col lg:flex-row gap-0">
-          <div class="flex-1 p-4 min-w-0">
-            <PipelineGraph
-              :units="selectedItem.workUnits"
-              :selected-unit="store.selectedUnit"
-              :workflow-key="store.selectedWorkflowKey ?? undefined"
-              @select="handleNodeSelect"
-            />
+          <div class="flex-1 min-w-0">
+            <div class="p-4 border-b border-neutral-800/40">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-[11px] text-neutral-500 font-medium">Diff preview</span>
+              </div>
+              <DiffPreview :selection="diffSelection" />
+            </div>
+            <div class="p-4">
+              <PipelineGraph
+                :units="selectedItem.workUnits"
+                :selected-unit="store.selectedUnit"
+                :workflow-key="store.selectedWorkflowKey ?? undefined"
+                @select="handleNodeSelect"
+              />
+            </div>
           </div>
           <div
             v-if="dashboardLogEvents.length > 0"
@@ -70,7 +78,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { api } from "../api.js";
 import { useWorkflowDashboard } from "../composables/useWorkflowDashboard.js";
 import { useVfStore } from "../store.js";
-import type { LogEvent, WorkflowDashboardItem } from "../types.js";
+import type { DashboardSelection, LogEvent, WorkflowDashboardItem } from "../types.js";
+import DiffPreview from "./DiffPreview.vue";
 import PipelineGraph from "./PipelineGraph.vue";
 import WorkflowCard from "./WorkflowCard.vue";
 import WorkflowLogPane from "./WorkflowLogPane.vue";
@@ -86,6 +95,16 @@ let dashboardLogRunId = "";
 const selectedItem = computed<WorkflowDashboardItem | undefined>(() =>
   workflows.value.find((w) => w.key === store.selectedWorkflowKey),
 );
+
+const diffSelection = computed<DashboardSelection | null>(() => {
+  const item = selectedItem.value;
+  if (!item) return null;
+  return {
+    repoPath: item.repoPath,
+    workflowId: item.taskId,
+    unit: store.selectedUnit ?? undefined,
+  };
+});
 
 function handleNodeSelect(unit: string) {
   store.selectUnit(unit);

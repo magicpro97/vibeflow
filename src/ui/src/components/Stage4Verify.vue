@@ -73,6 +73,14 @@
       </div>
     </div>
 
+    <!-- Diff preview -->
+    <div v-if="diffRepoPath && store.state">
+      <div class="text-[11px] text-neutral-600 mb-2 font-medium">Code changes</div>
+      <div class="rounded border border-neutral-800/40 p-3">
+        <DiffPreview :selection="{ repoPath: diffRepoPath, workflowId: store.state.task_id }" />
+      </div>
+    </div>
+
     <!-- Work unit table -->
     <div>
       <div class="text-[11px] text-neutral-600 mb-2 font-medium">Tasks</div>
@@ -209,6 +217,7 @@
 import { computed, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
 import { useVfStore } from "../store.js";
+import DiffPreview from "./DiffPreview.vue";
 import InfoTip from "./InfoTip.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
 
@@ -254,6 +263,14 @@ function cancelVerify() {
 onUnmounted(() => {
   verifyAbort?.abort();
   if (elapsedTimer) clearInterval(elapsedTimer);
+});
+
+const diffRepoPath = computed(() => {
+  if (store.state?.repo_path) return store.state.repo_path;
+  const match = store.projects.find((p) => p.goal === store.state?.goal);
+  if (match) return match.path;
+  const dw = store.dashboardWorkflows.find((w) => w.taskId === store.state?.task_id);
+  return dw?.repoPath ?? null;
 });
 
 const avgConfidence = computed<number | null>(() => {

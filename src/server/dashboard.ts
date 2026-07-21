@@ -5,6 +5,18 @@ import type { LogEvent } from "../logbus/types.js";
 import type { ProjectEntry } from "../registry.js";
 import { replayFromLog } from "./handlers.js";
 
+export {
+  resolveBaseline,
+  buildWorkflowDiffSummary,
+  buildUnitDiff,
+  buildDiffResponse,
+  type DiffFileEntry,
+  type WorkflowDiffSummary,
+  type WorkUnitDiffResult,
+  type DiffRequest,
+  type DiffResponse,
+} from "./dashboard-diff.js";
+
 export type WorkflowDashboardStatus = "running" | "blocked" | "pending" | "done";
 
 export interface WorkflowDashboardItem {

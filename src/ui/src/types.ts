@@ -151,3 +151,36 @@ export interface HookLogPayload {
   files?: string[];
   event?: string;
 }
+
+// ── Diff preview types (#641) ──────────────────────────────────────────────
+export interface DiffFileEntry {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "copied" | "unmerged" | "type-changed";
+  added: number;
+  deleted: number;
+  isBinary: boolean;
+}
+
+export interface WorkflowDiffSummary {
+  baseline: string | null;
+  baselineLabel: string;
+  files: DiffFileEntry[];
+  totalAdded: number;
+  totalDeleted: number;
+  untracked: string[];
+  truncated: boolean;
+}
+
+export interface WorkUnitDiffResult {
+  unit: string;
+  hasDiff: boolean;
+  reason?: string;
+  files: DiffFileEntry[];
+  diff: string;
+  truncated: boolean;
+}
+
+export interface DiffResponse {
+  summary: WorkflowDiffSummary;
+  unitDiff?: WorkUnitDiffResult;
+}
