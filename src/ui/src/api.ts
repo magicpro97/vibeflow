@@ -153,6 +153,17 @@ export const api = {
   // #640: dashboard API
   dashboard: {
     workflows: () => req<{ workflows: WorkflowDashboardItem[] }>("GET", "/api/dashboard/workflows"),
+    // #641: diff preview
+    diff: (sel: DashboardSelection, signal?: AbortSignal) => {
+      const p = new URLSearchParams({ repoPath: sel.repoPath, workflowId: sel.workflowId });
+      if (sel.unit) p.set("unit", sel.unit);
+      return req<import("./types.js").DiffResponse>(
+        "GET",
+        `/api/dashboard/diff?${p}`,
+        undefined,
+        signal,
+      );
+    },
     logs: (sel: DashboardSelection, since = 0, limit = 200, includeWorkflowEvents = true) => {
       const p = new URLSearchParams({
         repoPath: sel.repoPath,

@@ -337,6 +337,23 @@ export function startServer(
         return Response.json({ events: replayFromLog(bus.currentFile(), since, limit) });
       }
 
+      // --- GET /api/dashboard/diff ---
+      if (method === "GET" && path === "/api/dashboard/diff") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        const { buildDashboardItems, buildDiffResponse } = await import("./server/dashboard.js");
+        const { readRegistry } = await import("./registry.js");
+        const entries = readRegistry();
+        const items = buildDashboardItems(entries);
+        const repoPath = url.searchParams.get("repoPath") ?? "";
+        const workflowId = url.searchParams.get("workflowId") ?? "";
+        const unit = url.searchParams.get("unit") || undefined;
+        const result = buildDiffResponse(items, { repoPath, workflowId, unit });
+        if ("error" in result) {
+          return Response.json({ error: result.error }, { status: result.status });
+        }
+        return Response.json(result);
+      }
+
       // --- GET /api/dashboard/workflows ---
       if (method === "GET" && path === "/api/dashboard/workflows") {
         if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
