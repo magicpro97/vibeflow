@@ -26,6 +26,7 @@ import {
   syncAttachments,
 } from "./handlers.js";
 import { listPending, resolvePending } from "./pending-hooks.js";
+import { handlePlanReviewPost } from "./plan-review.js";
 
 export interface RouteCtx {
   getActiveRepo: () => string;
@@ -339,6 +340,10 @@ export async function handleMutationRoute(
       return Response.json({ error: "note too large" }, { status: 400 });
     writeGuidance(unit, note, { base: ctx.getActiveRepo() });
     return Response.json({ ok: true });
+  }
+
+  if (path === "/api/plan-review/revisions") {
+    return handlePlanReviewPost(ctx.getActiveRepo(), payload);
   }
 
   return null;

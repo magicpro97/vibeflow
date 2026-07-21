@@ -184,6 +184,28 @@ export const api = {
       return `/api/dashboard/logs/stream?${p.toString()}`;
     },
   },
+  // ── Plan Review API ──
+  planReview: {
+    get: (repoPath: string, workflowId: string) =>
+      req<{
+        revision: import("./types.js").PlanRevision;
+        revisions: import("./types.js").PlanRevision[];
+      }>(
+        "GET",
+        `/api/plan-review?repoPath=${encodeURIComponent(repoPath)}&workflowId=${encodeURIComponent(workflowId)}`,
+      ),
+    create: (payload: {
+      repoPath: string;
+      workflowId: string;
+      markdown: string;
+      createdBy: { type: "user" | "agent"; id: string; name: string };
+    }) =>
+      req<{ revision: import("./types.js").PlanRevision }>(
+        "POST",
+        "/api/plan-review/revisions",
+        payload,
+      ).then((r) => r.revision),
+  },
   // #562: ask an engine about a code snippet (Web-UI surface for `vf ask`).
   ask: {
     run: (payload: {

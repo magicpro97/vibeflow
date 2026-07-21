@@ -147,6 +147,25 @@ OpenCode Adapter → AGENTS.md + opencode.json + .opencode/plugins/vf-guard.ts
 Antigravity Adapter → AGENTS.md + .agents/agents + .agents/skills + .agents/mcp_config.json + .agents/hooks.json
 ```
 
+## Interactive Plan Review (PR1)
+
+The plan review subsystem persists plan markdown as file-backed immutable revisions
+under `.vibeflow/plan-review/`. Each revision is a write-once JSON file keyed by UUID;
+`index.json` tracks the current revision pointer per workflow. Blocks are parsed
+server-side into typed segments (heading, paragraph, list-run, fenced-code,
+fenced-mermaid) and rendered by the client through a safe semantic renderer
+(`plan-render.ts`) that HTML-escapes all content — no `v-html`.
+
+Selection anchors (`BlockAnchor`) provide the groundwork for threaded comments (PR2)
+without storing comment data in PR1. Mermaid sources are preserved as fallback text;
+no mermaid runtime is loaded.
+
+API surface: `GET /api/plan-review` and `POST /api/plan-review/revisions`, both
+CSRF-guarded, with scope caps (1,000 blocks, 1 MB markdown, 100 KB per block).
+
+See `src/plan-review/`, `src/server/plan-review.ts`, `src/ui/src/lib/plan-render.ts`,
+`src/ui/src/lib/plan-anchor.ts`, and `docs/adr/ADR-007-interactive-plan-review.md`.
+
 ## Source modules
 
 The web UI also exposes a read-only diff preview endpoint (`GET /api/dashboard/diff`)
@@ -162,6 +181,7 @@ src/skills/sync.ts          # canonical .vibeflow/skills → engine mirrors (poi
 src/skills/importer.ts      # Context7 + local-dir import (temp → validate → promote → sync)
 src/skills/validator.ts     # Anthropic skill-creator standard validation
 src/ai-init.ts              # writes canonical context files + engine instruction files
+src/plan-review/            # immutable revision store, blocks parser, types
 ```
 
 ## Core data flow

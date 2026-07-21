@@ -19,6 +19,7 @@ last_updated: 2026-06-24
 - [Resource and Progress Tracking](#resource-and-progress-tracking)
 - [Sub-Agent Guardrails](#sub-agent-guardrails)
 - [Mapping to the Rest of the Spec](#mapping-to-the-rest-of-the-spec)
+- [Plan Review Integration (PR1)](#plan-review-integration-pr1)
 
 ## Purpose
 
@@ -361,6 +362,38 @@ GENERATED_FILES.md             → .vibeflow/workunits/* file layout
 WORKFLOW.md                    → end-to-end run that drives these units
 ADR-006.md                     → pipeline observability decision record
 ```
+
+## Plan Review Integration (PR1)
+
+The interactive plan review subsystem gives operators a lightweight, persistent review
+surface for plan markdown before dispatch. It is complementary to the unit-level review
+gate — the plan review is about the *plan shape* (scope decomposition, dependencies,
+success criteria), while verification gates check *execution output*.
+
+PR1 delivers:
+- **Immutable revision storage** under `.vibeflow/plan-review/revisions/<uuid>.json`,
+  each file write-once with a parent chain (`parentId`). `index.json` tracks the
+  current revision pointer per workflow.
+- **Safe block renderer** that converts parsed markdown blocks (heading, paragraph,
+  list-run, fenced-code, fenced-mermaid) into HTML-escaped typed descriptors —
+  no `v-html`, no injection surface.
+- **Explicit and derived anchors**: `<!-- vf:block:<id> -->` comment markers carry
+  user-defined IDs; `deriveBlockId()` produces deterministic SHA-256 IDs for
+  markerless blocks.
+- **Mermaid source fallback**: fenced-mermaid blocks show source text rather than
+  requiring a mermaid runtime — zero JS dependency.
+- **Selection anchor groundwork** (`BlockAnchor` + mouseup/keyboard handlers) for
+  threaded comments (PR2).
+- **API routes** `GET /api/plan-review` and `POST /api/plan-review/revisions`,
+  both CSRF-guarded, with scope/security caps (1,000 blocks / 1 MB markdown /
+  100 KB per block).
+
+**Deferred:**
+- PR2: Threaded comment storage, dispatch gate (accept plan before unit dispatch).
+- PR3: AI replan loop (orchestrator consumes plan-review output, regenerates units).
+
+See `docs/adr/ADR-007-interactive-plan-review.md`, `src/plan-review/`,
+`src/server/plan-review.ts`, `src/ui/src/lib/plan-render.ts`.
 
 ---
 

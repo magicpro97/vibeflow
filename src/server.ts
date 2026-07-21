@@ -22,6 +22,7 @@ import {
   onPendingResolved,
   registerPending,
 } from "./server/pending-hooks.js";
+import { handlePlanReviewGet } from "./server/plan-review.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
@@ -363,6 +364,12 @@ export function startServer(
         return Response.json({ workflows: buildDashboardItems(entries) });
       }
 
+      // --- GET /api/plan-review (#PR1: guarded) ---
+      if (method === "GET" && path === "/api/plan-review") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handlePlanReviewGet(activeRepo, url);
+      }
+
       // --- GET /api/dashboard/logs ---
       if (method === "GET" && path === "/api/dashboard/logs") {
         if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
@@ -616,7 +623,8 @@ export function startServer(
             path === "/api/verify" ||
             path === "/api/hook/approve" ||
             path.startsWith("/api/guidance/") ||
-            path === "/api/upload")) ||
+            path === "/api/upload" ||
+            path === "/api/plan-review/revisions")) ||
         (method === "DELETE" && path === "/api/upload") ||
         (method === "DELETE" && (path === "/api/state" || path === "/api/projects"));
 

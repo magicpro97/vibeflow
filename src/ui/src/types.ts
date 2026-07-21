@@ -184,3 +184,22 @@ export interface DiffResponse {
   summary: WorkflowDiffSummary;
   unitDiff?: WorkUnitDiffResult;
 }
+
+// ── Plan Review types ──
+export interface PlanBlockRaw {
+  id: string;
+  type: string;
+  content: string;
+  lines?: { startLine: number; endLine: number };
+}
+
+export interface PlanRevision {
+  id: string;
+  workflowId: string;
+  parentId?: string;
+  markdown: string;
+  blocks: PlanBlockRaw[];
+  createdBy: { type: "user" | "agent"; id: string; name: string };
+  createdAt: string;
+  status: string;
+}

@@ -280,6 +280,42 @@ Desktop: pipeline graph on the left, log drawer on the right (lg breakpoint).
 Mobile: stacked vertically. The "Recent projects" section (Resume/Reuse/Delete)
 remains but is secondary to the active workflow cards.
 
+## 11. Interactive Plan Review (PR1)
+
+The Plan Review panel (Stage 2 of the intake wizard) is a file-backed plan-markdown
+review surface with three components:
+
+**PlanReview.vue** — parent container. Loads revisions via `store.loadRevisions()`
+when `repoPath` resolves (watches `store.repoPath`). Renders a split layout:
+revision rail on the left, canvas on the right.
+
+**PlanRevisionRail.vue** — left sidebar listing all stored revisions by creator name
+and timestamp. Click to select; the initial state shows a textarea for creating the
+first draft. When an anchor is active, displays the anchor blockId + quote preview
+with the note "Comment storage not implemented" (PR2).
+
+**PlanCanvas.vue** — right content area rendering typed blocks via `{{ }}`
+interpolation (never `v-html`). Each block type renders distinctly:
+- heading → styled by level (h1-h3 mapped to size classes)
+- paragraph → `<p>` with relaxed leading
+- list-run → `<ul><li>` with disc markers
+- fenced-code → `<pre><code>` with monospace
+- fenced-mermaid → fallback label + `<pre><code>` source (no mermaid runtime)
+
+Each block has a hover-reveal "Comment" button and mouseup selection handler — both
+emit a `BlockAnchor` (blockId, quote, selection range) as groundwork for threaded
+comments (PR2).
+
+**API surface** (`docs/adr/ADR-007-interactive-plan-review.md`):
+- `GET /api/plan-review?repoPath=&workflowId=` — fetch current revision + blocks
+- `POST /api/plan-review/revisions` — create new revision from markdown (CSRF-guarded)
+
+**Deferred to PR2:** threaded comment storage, dispatch gate, revision diff.
+**Deferred to PR3:** AI replan from review feedback.
+
+See `src/ui/src/components/PlanReview.vue`, `PlanCanvas.vue`, `PlanRevisionRail.vue`,
+`src/ui/src/lib/plan-render.ts`, `src/ui/src/lib/plan-anchor.ts`.
+
 ## Real-time updates
 
 Use Server-Sent Events for:
