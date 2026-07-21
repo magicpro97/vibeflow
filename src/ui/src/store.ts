@@ -1,8 +1,16 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { api } from "./api.js";
 import type { AskPrefill } from "./lib/ask-prefill.js";
-import type { ProjectEntry, VibeSettings, WorkflowDashboardItem, WorkflowState } from "./types.js";
+import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
+import { resolveRepoPath } from "./lib/resolve-repo-path.js";
+import type {
+  PlanRevision,
+  ProjectEntry,
+  VibeSettings,
+  WorkflowDashboardItem,
+  WorkflowState,
+} from "./types.js";
 
 /** Pure function — extracted for testability without Pinia context. */
 export function stageReachable(n: 1 | 2 | 3 | 4, state: WorkflowState | null): boolean {
@@ -39,6 +47,55 @@ export const useVfStore = defineStore("vf", () => {
 
   function selectUnit(name: string | null) {
     selectedUnit.value = name;
+  }
+
+  // ── Plan Review state ──
+  const revisions = ref<PlanRevision[]>([]);
+  const activeRevisionId = ref<string | null>(null);
+
+  const activeRevision = computed(
+    () => revisions.value.find((r) => r.id === activeRevisionId.value) ?? null,
+  );
+
+  const activeBlocks = computed<RenderDescriptor[]>(() => {
+    const rev = activeRevision.value;
+    if (!rev) return [];
+    return renderBlocks(rev.blocks);
+  });
+
+  /** Resolve repoPath with safe precedence (delegates to pure resolver). */
+  function currentRepoPath(): string | null {
+    return resolveRepoPath(selectedWorkflowKey.value, state.value, dashboardWorkflows.value);
+  }
+
+  const repoPath = computed(() => currentRepoPath());
+
+  async function loadRevisions() {
+    const rp = currentRepoPath();
+    const wfId = state.value?.task_id;
+    if (!rp || !wfId) return;
+    try {
+      const data = await api.planReview.get(rp, wfId);
+      if (data) {
+        revisions.value = data.revisions;
+        activeRevisionId.value = data.revision.id;
+      }
+    } catch {
+      /* plan-review endpoint may not exist yet */
+    }
+  }
+
+  async function createRevision(markdown: string) {
+    const rp = currentRepoPath();
+    const wfId = state.value?.task_id;
+    if (!rp || !wfId) return;
+    await api.planReview.create({
+      repoPath: rp,
+      workflowId: wfId,
+      markdown,
+      createdBy: { type: "user" as const, id: "user", name: "User" },
+    });
+    await loadRevisions();
   }
 
   function openAsk(prefill: AskPrefill | null = null) {
@@ -144,5 +201,12 @@ export const useVfStore = defineStore("vf", () => {
     dashboardWorkflows,
     selectWorkflow,
     selectUnit,
+    repoPath,
+    revisions,
+    activeRevisionId,
+    activeRevision,
+    activeBlocks,
+    loadRevisions,
+    createRevision,
   };
 });

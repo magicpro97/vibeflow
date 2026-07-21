@@ -78,6 +78,9 @@
       </div>
     </div>
 
+    <!-- Plan review -->
+    <PlanReview v-if="store.state" />
+
     <!-- Work unit table or guidance -->
     <div v-if="!units.length" class="rounded border border-neutral-800/40 px-4 py-5 space-y-1.5">
       <p class="text-sm text-neutral-400">No tasks yet</p>
@@ -149,6 +152,7 @@ import { usePoller } from "../composables/usePoller.js";
 import { useVfStore } from "../store.js";
 import type { Engine } from "../types.js";
 import InfoTip from "./InfoTip.vue";
+import PlanReview from "./PlanReview.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
 
 const ENGINES: Engine[] = ["claude", "codex", "copilot", "opencode", "antigravity"];
