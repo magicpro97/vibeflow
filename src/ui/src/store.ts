@@ -5,6 +5,7 @@ import type { AskPrefill } from "./lib/ask-prefill.js";
 import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
 import { resolveRepoPath } from "./lib/resolve-repo-path.js";
 import type {
+  PlanComment,
   PlanRevision,
   ProjectEntry,
   VibeSettings,
@@ -62,6 +63,70 @@ export const useVfStore = defineStore("vf", () => {
     if (!rev) return [];
     return renderBlocks(rev.blocks);
   });
+
+  // ── Comment state ──
+  const comments = ref<PlanComment[]>([]);
+  const commentLoading = ref(false);
+
+  async function loadComments() {
+    const rp = currentRepoPath();
+    const wfId = state.value?.task_id;
+    const revId = activeRevisionId.value;
+    if (!rp || !wfId || !revId) return;
+    commentLoading.value = true;
+    try {
+      comments.value = await api.planReview.comments.list(rp, wfId, revId);
+    } catch {
+      comments.value = [];
+    } finally {
+      commentLoading.value = false;
+    }
+  }
+
+  async function createComment(
+    body: string,
+    anchor?: import("./types.js").PlanCommentAnchor,
+    parentId?: string,
+  ) {
+    const rp = currentRepoPath();
+    const wfId = state.value?.task_id;
+    const revId = activeRevisionId.value;
+    if (!rp || !wfId || !revId) return;
+    await api.planReview.comments.create({
+      repoPath: rp,
+      workflowId: wfId,
+      revisionId: revId,
+      parentId,
+      anchor,
+      body,
+      createdBy: { type: "user" as const, id: "user", name: "User" },
+    });
+    await loadComments();
+  }
+
+  async function updateComment(id: string, body: string) {
+    const rp = currentRepoPath();
+    const wfId = state.value?.task_id;
+    if (!rp || !wfId) return;
+    await api.planReview.comments.update(id, body, rp, wfId);
+    await loadComments();
+  }
+
+  async function deleteComment(id: string) {
+    const rp = currentRepoPath();
+    const wfId = state.value?.task_id;
+    if (!rp || !wfId) return;
+    await api.planReview.comments.delete(id, rp, wfId);
+    await loadComments();
+  }
+
+  async function submitComment(id: string) {
+    const rp = currentRepoPath();
+    const wfId = state.value?.task_id;
+    if (!rp || !wfId) return;
+    await api.planReview.comments.submit(id, rp, wfId);
+    await loadComments();
+  }
 
   /** Resolve repoPath with safe precedence (delegates to pure resolver). */
   function currentRepoPath(): string | null {
@@ -208,5 +273,11 @@ export const useVfStore = defineStore("vf", () => {
     activeBlocks,
     loadRevisions,
     createRevision,
+    comments,
+    loadComments,
+    createComment,
+    updateComment,
+    deleteComment,
+    submitComment,
   };
 });

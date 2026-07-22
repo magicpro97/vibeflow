@@ -203,3 +203,25 @@ export interface PlanRevision {
   createdAt: string;
   status: string;
 }
+
+// ── Plan Review Comment types ──
+export interface PlanCommentAnchor {
+  blockId: string;
+  quote: string;
+  range?: { startOffset: number; endOffset: number };
+}
+
+export type PlanCommentStatus = "draft" | "open";
+
+export interface PlanComment {
+  id: string;
+  revisionId: string;
+  parentId?: string;
+  anchor?: PlanCommentAnchor;
+  body: string;
+  status: PlanCommentStatus;
+  depth: number;
+  createdAt: string;
+  createdBy: { type: "user" | "agent"; id: string; name: string };
+  updatedAt: string;
+}

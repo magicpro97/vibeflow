@@ -13,6 +13,16 @@
         @create="handleCreate"
       />
       <PlanCanvas :blocks="store.activeBlocks" @anchor="onAnchor" />
+      <PlanComments
+        :comments="store.comments"
+        :anchor="lastAnchor"
+        :loading="false"
+        @create="handleCreateComment"
+        @update="store.updateComment"
+        @delete="store.deleteComment"
+        @submit="store.submitComment"
+        @dismiss-anchor="lastAnchor = null"
+      />
     </div>
   </div>
 </template>
@@ -21,7 +31,9 @@
 import { ref, watch } from "vue";
 import type { BlockAnchor } from "../lib/plan-anchor.js";
 import { useVfStore } from "../store.js";
+import type { PlanCommentAnchor } from "../types.js";
 import PlanCanvas from "./PlanCanvas.vue";
+import PlanComments from "./PlanComments.vue";
 import PlanRevisionRail from "./PlanRevisionRail.vue";
 
 const store = useVfStore();
@@ -41,10 +53,22 @@ async function handleCreate(plan: string) {
   }
 }
 
+async function handleCreateComment(body: string, anchor?: PlanCommentAnchor, parentId?: string) {
+  await store.createComment(body, anchor, parentId);
+}
+
 watch(
   () => store.repoPath,
   (rp) => {
     if (rp) store.loadRevisions();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => store.activeRevisionId,
+  (revId) => {
+    if (revId) store.loadComments();
   },
   { immediate: true },
 );

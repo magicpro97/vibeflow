@@ -26,7 +26,11 @@ import {
   syncAttachments,
 } from "./handlers.js";
 import { listPending, resolvePending } from "./pending-hooks.js";
-import { handlePlanReviewPost } from "./plan-review.js";
+import {
+  handlePlanReviewCommentsDelete,
+  handlePlanReviewCommentsPost,
+  handlePlanReviewPost,
+} from "./plan-review.js";
 
 export interface RouteCtx {
   getActiveRepo: () => string;
@@ -92,6 +96,13 @@ export async function handleMutationRoute(
     if (!rawPath) return Response.json({ error: "path required" }, { status: 400 });
     deleteRegistry(rawPath);
     return Response.json({ ok: true });
+  }
+
+  if (
+    method === "DELETE" &&
+    (path === "/api/plan-review/comments" || path.startsWith("/api/plan-review/comments/"))
+  ) {
+    return handlePlanReviewCommentsDelete(ctx.getActiveRepo(), path, url);
   }
 
   const payload = (await req.json()) as Record<string, unknown>;
@@ -344,6 +355,10 @@ export async function handleMutationRoute(
 
   if (path === "/api/plan-review/revisions") {
     return handlePlanReviewPost(ctx.getActiveRepo(), payload);
+  }
+
+  if (path === "/api/plan-review/comments" || path.startsWith("/api/plan-review/comments/")) {
+    return handlePlanReviewCommentsPost(ctx.getActiveRepo(), path, payload);
   }
 
   return null;

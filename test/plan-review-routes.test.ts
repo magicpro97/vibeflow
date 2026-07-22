@@ -405,6 +405,55 @@ describe("POST /api/plan-review/revisions", () => {
   });
 });
 
+describe("handleMutationRoute coverage", () => {
+  test("DELETE /api/plan-review/comments/<uuid> with empty body reaches 404 not JSON parse", async () => {
+    const base = tmpRepo();
+    const wfId = "wf-del-cmt";
+    seedState(base, wfId);
+    register(base);
+    const { server, url } = await startServer();
+    try {
+      const token = await csrfToken(url);
+      const fakeId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+      const res = await fetch(
+        `${url}/api/plan-review/comments/${fakeId}?repoPath=${encodeURIComponent(base)}&workflowId=${wfId}`,
+        { method: "DELETE", headers: { "x-vibeflow-token": token } },
+      );
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("comment not found");
+    } finally {
+      server.stop();
+      cleanup(base);
+    }
+  });
+
+  test("POST /api/plan-review/comments with payload reaches handler path", async () => {
+    const base = tmpRepo();
+    const wfId = "wf-post-cmt";
+    seedState(base, wfId);
+    register(base);
+    const { server, url } = await startServer();
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/plan-review/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({
+          repoPath: base,
+          workflowId: wfId,
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("revisionId");
+    } finally {
+      server.stop();
+      cleanup(base);
+    }
+  });
+});
+
 describe("GET /api/plan-review with seeded plan via POST", () => {
   test("full round-trip: POST then GET returns same data", async () => {
     const base = tmpRepo();

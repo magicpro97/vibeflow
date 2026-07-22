@@ -1,11 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ctxPathIn, writeFileSafe } from "../core.js";
+import {
+  commentIndexPath,
+  commentPath,
+  loadAllCommentFiles,
+  loadCommentFile,
+  readCommentIndexFile,
+  resolveRootAnchor,
+  writeCommentIndexFile,
+} from "./comments.js";
 import type {
+  Comment,
+  CommentAnchor,
+  CommentId,
+  CommentIndex,
+  CreateCommentInput,
   CreateRevisionInput,
-  PlanReviewBlock,
-  PlanReviewBlockId,
   PlanReviewIndex,
   PlanReviewRevision,
   PlanReviewRevisionId,
@@ -13,10 +25,16 @@ import type {
 } from "./types.js";
 import {
   MAX_BLOCKS_PER_REVISION,
+  MAX_COMMENTS_PER_REVISION,
+  MAX_COMMENT_BODY_BYTES,
+  MAX_COMMENT_DEPTH,
   MAX_REVISIONS_LIST,
   assertCap,
   assertInputValid,
+  assertValidCommentId,
+  assertValidCreateCommentInput,
   isValidRevisionId,
+  utf8ByteLength,
 } from "./types.js";
 
 export interface CreateStoreOpts {
@@ -41,7 +59,7 @@ function indexPath(base: string): string {
 export function createPlanReviewStore(opts: CreateStoreOpts = {}): PlanReviewStore {
   const base = opts.base ?? process.cwd();
   const _exists = opts.existsSync ?? existsSync;
-  const _read = opts.readFileSync ?? readFileSync;
+  const _read = opts.readFileSync ?? (readFileSync as (p: string, enc: string) => string);
   const _readdir = opts.readdirSync ?? readdirSync;
 
   function readIndex(): PlanReviewIndex | null {
@@ -162,5 +180,214 @@ export function createPlanReviewStore(opts: CreateStoreOpts = {}): PlanReviewSto
     return readIndex();
   }
 
-  return { createRevision, loadRevision, listRevisions, listRevisionsByWorkflow, loadIndex };
+  function createComment(input: CreateCommentInput): Comment {
+    assertValidCreateCommentInput(input);
+    const revision = loadRevision(input.revisionId);
+    if (!revision) throw new Error(`Revision not found: ${input.revisionId}`);
+    const all = loadAllCommentFiles(base, _exists, _read, _readdir);
+    const revCount = all.filter((c) => c.revisionId === input.revisionId).length;
+    if (revCount >= MAX_COMMENTS_PER_REVISION) {
+      throw new Error(
+        `comments per revision exceeds cap (${revCount} >= ${MAX_COMMENTS_PER_REVISION})`,
+      );
+    }
+    const cache = new Map<string, Comment>();
+    for (const c of all) cache.set(c.id, c);
+    let depth = 0;
+    let anchor: CommentAnchor;
+    if (input.parentId) {
+      const parent = cache.get(input.parentId);
+      if (!parent) throw new Error(`Parent comment not found: ${input.parentId}`);
+      if (parent.revisionId !== input.revisionId)
+        throw new Error("Parent comment revision mismatch");
+      depth = parent.depth + 1;
+      assertCap(depth, MAX_COMMENT_DEPTH, "comment depth");
+      anchor = resolveRootAnchor(input.parentId, cache);
+    } else {
+      if (!input.anchor) throw new Error("Root comment requires anchor");
+      const blockIds = new Set(revision.blocks.map((b) => b.id));
+      if (!blockIds.has(input.anchor.blockId)) {
+        throw new Error(`Anchor blockId ${input.anchor.blockId} not found in revision blocks`);
+      }
+      anchor = input.anchor;
+    }
+    assertCap(utf8ByteLength(input.body), MAX_COMMENT_BODY_BYTES, "comment body");
+    const id = randomUUID() as CommentId;
+
+    const idxResult = readCommentIndexFile(base, _exists, _read);
+    if (idxResult === null && _exists(commentIndexPath(base))) {
+      throw new Error("Corrupt comment-index file");
+    }
+    const idx = idxResult ?? {
+      workflowId: revision.workflowId,
+      rootsByRevision: {},
+      updatedAt: new Date(0).toISOString(),
+    };
+
+    if (!input.parentId) {
+      if (idx.workflowId !== revision.workflowId) {
+        throw new Error(
+          `Comment index workflowId mismatch: "${idx.workflowId}" !== "${revision.workflowId}"`,
+        );
+      }
+    }
+
+    const idxMs = Date.parse(idx.updatedAt);
+    const floor = Number.isFinite(idxMs) ? idxMs + 1 : 0;
+    const now = Date.now();
+    _lastCreatedAtMs = Math.max(now, _lastCreatedAtMs + 1, floor);
+    const createdAt = new Date(_lastCreatedAtMs).toISOString();
+
+    const comment: Comment = {
+      id,
+      revisionId: input.revisionId,
+      parentId: input.parentId,
+      anchor,
+      body: input.body,
+      status: "draft",
+      depth,
+      createdAt,
+      createdBy: input.createdBy,
+      updatedAt: createdAt,
+    };
+    writeFileSafe(commentPath(base, id), JSON.stringify(comment, null, 2));
+
+    if (!input.parentId) {
+      const roots = idx.rootsByRevision[input.revisionId] ?? [];
+      roots.push(id);
+      idx.rootsByRevision[input.revisionId] = roots;
+    }
+    idx.updatedAt = createdAt;
+    writeCommentIndexFile(base, idx);
+
+    return comment;
+  }
+
+  function loadComment(id: CommentId): Comment | null {
+    return loadCommentFile(base, id, _exists, _read);
+  }
+
+  function listCommentsByRevision(revisionId: PlanReviewRevisionId): Comment[] {
+    if (!isValidRevisionId(revisionId)) return [];
+    return loadAllCommentFiles(base, _exists, _read, _readdir)
+      .filter((c) => c.revisionId === revisionId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+
+  function listCommentsByThread(rootId: CommentId): Comment[] {
+    assertValidCommentId(rootId);
+
+    const all = loadAllCommentFiles(base, _exists, _read, _readdir);
+    const root = all.find((c) => c.id === rootId);
+    if (!root) throw new Error(`Comment not found: ${rootId}`);
+    if (root.parentId) throw new Error("Root id must not be a reply");
+
+    const result: Comment[] = [root];
+    const queue = [rootId];
+    while (queue.length > 0) {
+      const cid = queue.shift();
+      if (!cid) break;
+      const children = all
+        .filter((c) => c.parentId === cid)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      for (const child of children) {
+        result.push(child);
+        queue.push(child.id);
+      }
+    }
+    return result;
+  }
+
+  function updateCommentBody(id: CommentId, body: string): Comment {
+    assertValidCommentId(id);
+
+    const parsed = loadCommentFile(base, id, _exists, _read);
+    if (!parsed) throw new Error(`Comment not found: ${id}`);
+    if (parsed.status !== "draft") throw new Error("Only draft comments can be edited");
+    assertCap(utf8ByteLength(body), MAX_COMMENT_BODY_BYTES, "comment body");
+
+    parsed.body = body;
+    parsed.updatedAt = new Date().toISOString();
+    writeFileSafe(commentPath(base, id), JSON.stringify(parsed, null, 2));
+    return parsed;
+  }
+
+  function deleteComment(id: CommentId): void {
+    assertValidCommentId(id);
+
+    const all = loadAllCommentFiles(base, _exists, _read, _readdir);
+    const target = all.find((c) => c.id === id);
+    if (!target) throw new Error(`Comment not found: ${id}`);
+    if (target.status !== "draft") throw new Error(`Cannot delete non-draft comment: ${id}`);
+
+    const toDelete = new Set<string>();
+    const queue = [id];
+    while (queue.length > 0) {
+      const cid = queue.shift();
+      if (!cid) break;
+      if (toDelete.has(cid)) continue;
+      const c = all.find((x) => x.id === cid);
+      if (c && c.status !== "draft") {
+        throw new Error(`Cannot delete non-draft comment: ${cid}`);
+      }
+      toDelete.add(cid);
+      for (const c of all) {
+        if (c.parentId === cid && !toDelete.has(c.id)) {
+          queue.push(c.id);
+        }
+      }
+    }
+
+    for (const did of toDelete) {
+      try {
+        unlinkSync(commentPath(base, did));
+      } catch {
+        // race: file already gone
+      }
+    }
+
+    const idx = readCommentIndexFile(base, _exists, _read);
+    if (idx) {
+      const roots = idx.rootsByRevision[target.revisionId];
+      if (roots) {
+        const remaining = roots.filter((rid) => !toDelete.has(rid));
+        if (remaining.length !== roots.length) {
+          idx.rootsByRevision[target.revisionId] = remaining;
+          idx.updatedAt = new Date().toISOString();
+          writeCommentIndexFile(base, idx);
+        }
+      }
+    }
+  }
+
+  function submitComment(id: CommentId): Comment {
+    assertValidCommentId(id);
+    const parsed = loadCommentFile(base, id, _exists, _read);
+    if (!parsed) throw new Error(`Comment not found: ${id}`);
+    if (parsed.status !== "draft") throw new Error("Only draft comments can be submitted");
+    parsed.status = "open";
+    parsed.updatedAt = new Date().toISOString();
+    writeFileSafe(commentPath(base, id), JSON.stringify(parsed, null, 2));
+    return parsed;
+  }
+
+  function loadCommentIndex(): CommentIndex | null {
+    return readCommentIndexFile(base, _exists, _read);
+  }
+
+  return {
+    createRevision,
+    loadRevision,
+    listRevisions,
+    listRevisionsByWorkflow,
+    loadIndex,
+    createComment,
+    loadComment,
+    listCommentsByRevision,
+    listCommentsByThread,
+    updateCommentBody,
+    deleteComment,
+    submitComment,
+    loadCommentIndex,
+  };
 }

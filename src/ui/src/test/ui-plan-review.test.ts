@@ -165,6 +165,229 @@ const stateD = { task_id: "wf-2" };
 const r8 = resolveRepoPath(null, stateD, dashboards);
 assert("precedence: dashboard match with null key", r8 === "/dashboard/repo");
 
+// ── 7. Comment API client URL/body shapes ──
+
+function commentListUrl(repoPath: string, workflowId: string, revisionId: string): string {
+  return `/api/plan-review/comments?repoPath=${encodeURIComponent(repoPath)}&workflowId=${encodeURIComponent(workflowId)}&revisionId=${encodeURIComponent(revisionId)}`;
+}
+
+assertDeep(
+  "comment list URL encodes all params",
+  commentListUrl("/my/repo", "wf-1", "rev-abc"),
+  "/api/plan-review/comments?repoPath=%2Fmy%2Frepo&workflowId=wf-1&revisionId=rev-abc",
+);
+
+function commentCreateBody(
+  repoPath: string,
+  workflowId: string,
+  revisionId: string,
+  body: string,
+  anchor?: { blockId: string; quote: string; range?: { startOffset: number; endOffset: number } },
+  parentId?: string,
+) {
+  return {
+    repoPath,
+    workflowId,
+    revisionId,
+    body,
+    anchor,
+    parentId,
+    createdBy: { type: "user", id: "user", name: "User" },
+  };
+}
+
+const cbody = commentCreateBody("/repo", "wf-1", "rev-1", "looks good", {
+  blockId: "b1",
+  quote: "hello",
+});
+assertDeep("comment create body shape (root)", cbody, {
+  repoPath: "/repo",
+  workflowId: "wf-1",
+  revisionId: "rev-1",
+  body: "looks good",
+  anchor: { blockId: "b1", quote: "hello" },
+  parentId: undefined,
+  createdBy: { type: "user", id: "user", name: "User" },
+});
+
+const rbody = commentCreateBody("/repo", "wf-1", "rev-1", "agreed", undefined, "parent-id");
+assert("comment create body reply has parentId", rbody.parentId === "parent-id");
+assert("comment create body reply has no anchor", rbody.anchor === undefined);
+
+function commentUpdateUrl(id: string): string {
+  return `/api/plan-review/comments/${encodeURIComponent(id)}`;
+}
+assert("comment update URL", commentUpdateUrl("abc-123") === "/api/plan-review/comments/abc-123");
+
+function commentSubmitUrl(id: string): string {
+  return `/api/plan-review/comments/${encodeURIComponent(id)}/submit`;
+}
+assert(
+  "comment submit URL",
+  commentSubmitUrl("abc-123") === "/api/plan-review/comments/abc-123/submit",
+);
+
+function commentDeleteUrl(id: string): string {
+  return `/api/plan-review/comments/${encodeURIComponent(id)}`;
+}
+assert("comment delete URL", commentDeleteUrl("x-y-z") === "/api/plan-review/comments/x-y-z");
+
+// ── 8. Thread grouping logic (pure) ──
+
+interface FakeComment {
+  id: string;
+  parentId?: string;
+  revisionId: string;
+  body: string;
+  depth: number;
+  createdAt: string;
+  status: string;
+}
+
+function groupThreads(comments: FakeComment[]) {
+  const roots = comments.filter((c) => !c.parentId);
+  return roots.map((root) => {
+    const all = [root];
+    const queue = [root.id];
+    while (queue.length > 0) {
+      const pid = queue.shift();
+      if (!pid) break;
+      const children = comments.filter((c) => c.parentId === pid);
+      children.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      for (const child of children) {
+        all.push(child);
+        queue.push(child.id);
+      }
+    }
+    return { root, comments: all };
+  });
+}
+
+const fakeComments: FakeComment[] = [
+  {
+    id: "r1",
+    revisionId: "rev-1",
+    body: "root",
+    depth: 0,
+    createdAt: "2024-01-01T00:00:00Z",
+    status: "open",
+  },
+  {
+    id: "c1",
+    parentId: "r1",
+    revisionId: "rev-1",
+    body: "reply",
+    depth: 1,
+    createdAt: "2024-01-01T01:00:00Z",
+    status: "draft",
+  },
+  {
+    id: "c2",
+    parentId: "r1",
+    revisionId: "rev-1",
+    body: "reply2",
+    depth: 1,
+    createdAt: "2024-01-01T02:00:00Z",
+    status: "draft",
+  },
+  {
+    id: "r2",
+    revisionId: "rev-1",
+    body: "second root",
+    depth: 0,
+    createdAt: "2024-01-01T03:00:00Z",
+    status: "draft",
+  },
+  {
+    id: "c3",
+    parentId: "c1",
+    revisionId: "rev-1",
+    body: "nested",
+    depth: 2,
+    createdAt: "2024-01-01T04:00:00Z",
+    status: "draft",
+  },
+];
+
+const threads = groupThreads(fakeComments);
+assert("thread count", threads.length === 2);
+const t0 = threads[0] as { root: { id: string }; comments: { id: string }[] };
+const t1 = threads[1] as { root: { id: string }; comments: { id: string }[] };
+assert("thread 1 root id", t0.root.id === "r1");
+assert("thread 1 has 4 comments (root + 2 replies + 1 nested)", t0.comments.length === 4);
+assert("thread 2 root id", t1.root.id === "r2");
+assert("thread 2 has 1 comment", t1.comments.length === 1);
+assert(
+  "nested reply in thread 1",
+  t0.comments.some((c) => c.id === "c3"),
+);
+assert("comments sorted by time", t0.comments[1]?.id === "c1");
+assert("comments sorted by time 2", t0.comments[2]?.id === "c2");
+
+// ── 9. Anchor to CommentAnchor mapping ──
+
+function anchorToCommentAnchor(anchor: {
+  blockId: string;
+  quote: string;
+  range?: { start: number; end: number };
+}) {
+  return {
+    blockId: anchor.blockId,
+    quote: anchor.quote,
+    range: anchor.range
+      ? { startOffset: anchor.range.start, endOffset: anchor.range.end }
+      : undefined,
+  };
+}
+
+const ca1 = anchorToCommentAnchor({ blockId: "b1", quote: "test", range: { start: 0, end: 4 } });
+assertDeep("anchor to comment anchor with range", ca1, {
+  blockId: "b1",
+  quote: "test",
+  range: { startOffset: 0, endOffset: 4 },
+});
+
+const ca2 = anchorToCommentAnchor({ blockId: "b2", quote: "no range" });
+assertDeep("anchor to comment anchor without range", ca2, {
+  blockId: "b2",
+  quote: "no range",
+  range: undefined,
+});
+
+// ── 10. Draft vs open comment behavior (pure logic) ──
+
+function canEditComment(status: string): boolean {
+  return status === "draft";
+}
+function canDeleteComment(status: string): boolean {
+  return status === "draft";
+}
+function canSubmitComment(status: string): boolean {
+  return status === "draft";
+}
+function canReplyToThread(threadComments: FakeComment[]): boolean {
+  const root = threadComments.find((c) => !c.parentId);
+  if (!root) return false;
+  return root.status === "open" || threadComments.some((c) => c.status === "draft");
+}
+
+assert("draft can edit", canEditComment("draft"));
+assert("open cannot edit", !canEditComment("open"));
+assert("draft can delete", canDeleteComment("draft"));
+assert("open cannot delete", !canDeleteComment("open"));
+assert("draft can submit", canSubmitComment("draft"));
+assert("open cannot submit", !canSubmitComment("open"));
+
+const openThread: FakeComment[] = [
+  { id: "t1", revisionId: "r", body: "x", depth: 0, createdAt: "", status: "open" },
+];
+assert("can reply to open thread", canReplyToThread(openThread));
+
+const draftThread: FakeComment[] = [
+  { id: "t2", revisionId: "r", body: "x", depth: 0, createdAt: "", status: "draft" },
+];
+assert("can reply to draft thread", canReplyToThread(draftThread));
+
 // ── Results ──
 
 if (failed > 0) {
