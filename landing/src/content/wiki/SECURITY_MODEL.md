@@ -15,6 +15,8 @@ last_updated: 2026-06-24
 - [Approval Required Actions](#approval-required-actions)
 - [Protected Paths](#protected-paths)
 - [External Skill Trust Model](#external-skill-trust-model)
+- [Shared Catalog Trust Boundary](#shared-catalog-trust-boundary)
+- [External Skill Security Scan](#external-skill-security-scan-optional)
 - [npm Package Risk Model](#npm-package-risk-model)
 - [Hook Enforcement](#hook-enforcement)
 - [Secrets Handling](#secrets-handling)
@@ -103,6 +105,47 @@ Old or unsafe skill → deprecated
 ```
 
 Skills requiring shell, network, write access, or credentials must be explicitly approved.
+
+## Shared catalog trust boundary
+
+The shared skill catalog at `~/.vibeflow/skills/` is machine-wide: a skill promoted
+in one project becomes available to every project on the same machine. This is a
+deliberate tradeoff — re-discovery per project is eliminated, but trust granted in
+project A extends to project B without a second review.
+
+Mitigation: the security-scan gate (see below) blocks a skill with HIGH/CRITICAL
+findings from being promoted to `verified`, so an untrusted skill (Context7
+unauthenticated fallback, find-skills HTTP, community import) cannot silently become
+trusted machine-wide. The gate is optional (degrades gracefully when the scanner is
+absent), so when it is not installed, only manually-reviewed skills should be
+promoted to `verified`.
+
+## External skill security scan (optional)
+
+`vf skills verify <name>` promotes a local skill to `verified`. Before the status is
+written, VibeFlow runs an optional static scan via NVIDIA SkillSpector
+(https://github.com/NVIDIA/skillspector) over the skill directory:
+
+```text
+skillspector scan <dir> --no-llm --format json --baseline <path>
+```
+
+- **Optional dependency.** If `skillspector` is not on `PATH`, promotion still
+  proceeds and is flagged `not-scanned` — the gate never hard-blocks on a missing
+  optional tool (same posture as the ctx7-absent fallback). Install to enable:
+  `uv tool install git+https://github.com/NVIDIA/skillspector.git`.
+- **Static only, no egress.** `--no-llm` is hard-coded by the wrapper (not merely
+  documented), so no skill content is ever sent over the network and no API key is
+  required — consistent with the "no silent network" posture above.
+- **Gate policy.** HIGH/CRITICAL `risk_severity` blocks promotion (exit 1, findings'
+  `rule_id`/`message` surfaced); MEDIUM warns but allows; LOW/NONE/not-scanned pass.
+- **Baseline suppression.** A per-skill baseline is stored at
+  `~/.vibeflow/security-baselines/<name>.yaml` — outside the skill's own tree, so a
+  re-import cannot wipe it and re-flag already-triaged findings.
+
+This gate closes the trust boundary opened by the shared catalog: a skill discovered
+once and promoted becomes trusted for every project on the machine, so the promotion
+step is the right place to enforce automated review.
 
 ## npm package risk model
 

@@ -158,6 +158,12 @@ Before creating or editing any skill, read these files in \`.vibeflow/ai-context
 
 **3e. VERIFY every skill:**
   Run \`vf skills validate\`. Read each SKILL.md. Empty/placeholder = bug, fix or delete.
+  Before promoting any skill to \`verified\` (\`vf skills verify <name>\`), a static
+  security scan runs if SkillSpector is installed. It is OPTIONAL — absent, promotion
+  still proceeds flagged not-scanned. To enable it (blocks HIGH/CRITICAL findings from
+  becoming verified), propose installing it (subject to the dependency-approval rule):
+  \`uv tool install git+https://github.com/NVIDIA/skillspector.git\`. Static only
+  (\`--no-llm\`), no API key, no skill content sent over the network.
 
 **3f. Update index:**
   Run \`vf skills list\` to render the updated \`.vibeflow/SKILL_INDEX.md\`.

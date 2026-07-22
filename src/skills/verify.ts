@@ -13,9 +13,10 @@
 // emitter only if we ever need to rewrite nested frontmatter structures.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { CTX_DIR, c, writeFileSafe } from "../core.js";
 import { out } from "../logbus.js";
+import { type ScanDeps, scanBlocksPromotion, scanSkillDir } from "./security-scan.js";
 
 export type VerifyStatus = "verified" | "unverified";
 
@@ -105,7 +106,7 @@ export function setSkillStatus(
  * `vf skills verify <name> [--undo]` command arm. Extracted from skills.ts so
  * that file stays under the 400-line cap (#80). Returns the process exit code.
  */
-export function verifySkillCommand(repo: string, rest: string[]): number {
+export function verifySkillCommand(repo: string, rest: string[], scanDeps: ScanDeps = {}): number {
   const name = rest[0]?.trim();
   const undo = rest.includes("--undo");
   if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
@@ -122,6 +123,25 @@ export function verifySkillCommand(repo: string, rest: string[]): number {
     return 1;
   }
   const target: VerifyStatus = undo ? "unverified" : "verified";
+
+  // #632 security gate: promotion to `verified` runs an optional static scan.
+  // Absent scanner → passes, flagged not-scanned (optional dep never hard-blocks,
+  // matching the ctx7-absent precedent). HIGH/CRITICAL blocks; MEDIUM warns.
+  // Demotion (--undo) is never gated.
+  if (!undo) {
+    const scan = scanSkillDir(dirname(skillMd), scanDeps);
+    if (!scan.scanned) {
+      out("vf", c.yellow(`! ${name}: security scan skipped (${scan.reason ?? "not-scanned"})`));
+    } else {
+      const gate = scanBlocksPromotion(scan);
+      if (gate.blocked) {
+        out("vf", c.red(`✗ Cannot verify "${name}": ${gate.reason}`), { level: "error" });
+        return 1;
+      }
+      if (gate.warn) out("vf", c.yellow(`⚠ ${name}: ${gate.reason}`));
+    }
+  }
+
   const result = setSkillStatus(skillMd, target, { existsSync, readFileSync, writeFileSafe });
   if (!result.ok) {
     out("vf", c.red(`Cannot ${undo ? "unverify" : "verify"} "${name}": ${result.reason}`), {

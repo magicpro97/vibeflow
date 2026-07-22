@@ -96,6 +96,8 @@ Install as draft or experimental
   ↓
 Run validation prompt
   ↓
+Static security scan (optional, HIGH/CRITICAL blocks — see SECURITY_MODEL.md)
+  ↓
 Promote to verified only after checks pass
 ```
 
