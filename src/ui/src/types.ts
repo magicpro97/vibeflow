@@ -225,3 +225,25 @@ export interface PlanComment {
   createdBy: { type: "user" | "agent"; id: string; name: string };
   updatedAt: string;
 }
+
+// ── #633: Skills catalog types ─────────────────────────────────────────────
+export type SkillStatus =
+  | "verified"
+  | "enriched"
+  | "experimental"
+  | "baseline"
+  | "template"
+  | "draft"
+  | "unverified"
+  | "deprecated";
+
+export type ScanStatus = "not-scanned" | "pass" | "warn" | "blocked";
+
+export interface SafeSkill {
+  name: string;
+  description: string;
+  version?: string;
+  status: SkillStatus;
+  origin: "project-local" | "shared";
+  securityScan: ScanStatus;
+}

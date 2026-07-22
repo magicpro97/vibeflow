@@ -1,6 +1,7 @@
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
 import type {
   DashboardSelection,
+  SafeSkill,
   TimelineEntry,
   VibeSettings,
   WorkflowDashboardItem,
@@ -60,15 +61,7 @@ export const api = {
     set: (s: Partial<VibeSettings>) =>
       req<{ settings: VibeSettings }>("POST", "/api/settings", s).then((r) => r.settings),
   },
-  skills: () =>
-    req<{
-      skills: string[];
-      needs: unknown;
-      validation?: { errors: string[]; warnings: string[] };
-    }>("GET", "/api/skills").then((r) => ({
-      skills: r.skills,
-      validation: r.validation ?? { errors: [], warnings: [] },
-    })),
+  skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
   attachments: () =>
     req<{ attachments: unknown[] }>("GET", "/api/attachments").then((r) => r.attachments),
   logsRecent: (since = 0, limit = 200) =>

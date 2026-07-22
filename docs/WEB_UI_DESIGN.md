@@ -78,6 +78,8 @@ S3/R2
 
 ### 3. Skills
 
+(Implementation: Skills Catalog panel via SkillPanel.vue — modal overlay from TopBar Skills button.)
+
 Shows:
 
 ```text
@@ -100,6 +102,20 @@ Actions:
 - View SKILL.md
 - View changelog
 ```
+
+**Panel behaviour.** The Skills Catalog panel (`SkillPanel.vue`) is a modal overlay
+controlled by `store.skillPanelOpen`. On close, it emits a `close` event; App.vue
+sets `skillPanelOpen = false` and returns keyboard focus to the Skills launcher
+button in the TopBar (matching the Settings panel pattern). Short error messages
+from the store (`skillError`) are displayed inline in the panel and cleared before
+each fetch. Skills loaded from the server are rendered with security-scan dots,
+origin, version, and deprecated styling. The panel auto-loads skills on mount when
+the list is empty.
+
+**Attachment skill badges.** In Stage1Describe, each uploaded attachment shows its
+assigned reader skill label. When that skill exists in the loaded catalog (`store.skills`),
+a coloured status badge (verified, enriched, experimental, etc.) is shown next to
+the skill label.
 
 ### 4. Context
 

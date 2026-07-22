@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { startServer } from "../src/server";
 
@@ -2569,4 +2573,65 @@ describe("bindAll security (#561)", () => {
     }
     expect(stderr.some((l) => l.includes("server exposed to LAN"))).toBe(false);
   });
+});
+
+test("GET /api/skills returns browser-safe skill objects", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-skills-test-"));
+  const orig = process.cwd();
+  process.chdir(dir);
+  try {
+    mkdirSync(join(dir, ".vibeflow", "skills", "test-skill"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "test-skill", "SKILL.md"),
+      [
+        "---",
+        "name: test-skill",
+        "description: a test skill",
+        "version: 1.0.0",
+        "status: verified",
+        "---",
+        "",
+        "# Test Skill",
+        "Does stuff.",
+      ].join("\n"),
+    );
+
+    const { server, url } = await startServer(0);
+    try {
+      const res = await fetch(`${url}/api/skills`);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+
+      const skills = body.skills as Record<string, unknown>[];
+      expect(Array.isArray(skills)).toBe(true);
+      expect(skills.length).toBeGreaterThanOrEqual(1);
+
+      const s = skills.find((sk) => sk.name === "test-skill") as Record<string, unknown>;
+      expect(s).toBeDefined();
+      expect(s.name).toBe("test-skill");
+      expect(s.description).toBe("a test skill");
+      expect(s.version).toBe("1.0.0");
+      expect(s.status).toBe("verified");
+      expect(s.origin).toBe("project-local");
+      expect(s.securityScan).toBe("not-scanned");
+      expect(s.dir).toBeUndefined();
+      expect(s.path).toBeUndefined();
+      expect(s.mcp).toBeUndefined();
+      expect(s.requires).toBeUndefined();
+      expect(s.capabilities).toBeUndefined();
+      expect(s.triggers).toBeUndefined();
+
+      expect(Array.isArray(body.needs)).toBe(true);
+      expect(body.validation).toBeDefined();
+      const v = body.validation as Record<string, unknown>;
+      expect(Array.isArray(v.errors)).toBe(true);
+      expect(Array.isArray(v.warnings)).toBe(true);
+    } finally {
+      server.stop();
+    }
+  } finally {
+    process.chdir(orig);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
