@@ -73,6 +73,14 @@ export interface PlanReviewStore {
   listRevisions(): PlanReviewRevisionId[];
   listRevisionsByWorkflow(workflowId: string, limit?: number): PlanReviewRevision[];
   loadIndex(): PlanReviewIndex | null;
+  createComment(input: CreateCommentInput): Comment;
+  loadComment(id: CommentId): Comment | null;
+  listCommentsByRevision(revisionId: PlanReviewRevisionId): Comment[];
+  listCommentsByThread(rootId: CommentId): Comment[];
+  updateCommentBody(id: CommentId, body: string): Comment;
+  deleteComment(id: CommentId): void;
+  submitComment(id: CommentId): Comment;
+  loadCommentIndex(): CommentIndex | null;
 }
 
 export const BLOCK_MARKER_REGEX = /^<!--\s*vf:block:([A-Fa-f0-9-]+)\s*-->$/;
@@ -130,5 +138,111 @@ export function assertInputValid(input: CreateRevisionInput): void {
   assertCap(utf8ByteLength(input.markdown), MAX_MARKDOWN_LENGTH, "markdown");
   for (const block of input.blocks) {
     assertCap(utf8ByteLength(block.content), MAX_BLOCK_CONTENT_LENGTH, "block content");
+  }
+}
+
+// --- Comment types ---
+
+export type CommentId = string & { __brand: "CommentId" };
+export type CommentStatus = "draft" | "open";
+
+export interface CommentAnchor {
+  blockId: PlanReviewBlockId;
+  quote: string;
+  range?: { startOffset: number; endOffset: number };
+}
+
+export interface Comment {
+  id: CommentId;
+  revisionId: PlanReviewRevisionId;
+  parentId?: CommentId;
+  anchor?: CommentAnchor;
+  body: string;
+  status: CommentStatus;
+  depth: number;
+  createdAt: string;
+  createdBy: CreatedBy;
+  updatedAt: string;
+}
+
+export interface CreateCommentInput {
+  revisionId: PlanReviewRevisionId;
+  parentId?: CommentId;
+  anchor?: CommentAnchor;
+  body: string;
+  createdBy: CreatedBy;
+}
+
+export interface CommentIndex {
+  workflowId: string;
+  rootsByRevision: Record<string, CommentId[]>;
+  updatedAt: string;
+}
+
+export const MAX_COMMENT_BODY_BYTES = 10_000;
+export const MAX_COMMENT_DEPTH = 5;
+export const MAX_COMMENTS_PER_REVISION = 100;
+export const MAX_QUOTE_LENGTH = 2000;
+
+export function isValidCommentId(id: string): id is CommentId {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+export function assertValidCommentId(id: string): asserts id is CommentId {
+  if (!isValidCommentId(id)) {
+    throw new Error(`Invalid comment ID: ${id}`);
+  }
+}
+
+export function assertValidCreateCommentInput(input: CreateCommentInput): void {
+  if (!isValidRevisionId(input.revisionId)) {
+    throw new Error(`Invalid revision ID: ${input.revisionId}`);
+  }
+  if (input.parentId !== undefined && !isValidCommentId(input.parentId)) {
+    throw new Error(`Invalid parent comment ID: ${input.parentId}`);
+  }
+  if (input.createdBy.id.length === 0) {
+    throw new Error("createdBy.id must be non-empty");
+  }
+  if (input.createdBy.name.length === 0) {
+    throw new Error("createdBy.name must be non-empty");
+  }
+  if (input.createdBy.type !== "user" && input.createdBy.type !== "agent") {
+    throw new Error("createdBy.type must be 'user' or 'agent'");
+  }
+  if (input.parentId === undefined && input.anchor === undefined) {
+    throw new Error("Root comment requires anchor");
+  }
+  if (input.parentId !== undefined && input.anchor !== undefined) {
+    throw new Error("Reply comment must not have anchor");
+  }
+  if (input.anchor !== undefined) {
+    if (!isValidBlockId(input.anchor.blockId)) {
+      throw new Error(`Invalid anchor blockId: ${input.anchor.blockId}`);
+    }
+    if (input.anchor.quote.length === 0) {
+      throw new Error("Anchor quote must be non-empty");
+    }
+    assertCap(utf8ByteLength(input.anchor.quote), MAX_QUOTE_LENGTH, "anchor quote");
+    if (input.anchor.range !== undefined) {
+      if (
+        !Number.isFinite(input.anchor.range.startOffset) ||
+        !Number.isFinite(input.anchor.range.endOffset)
+      ) {
+        throw new Error("Anchor range offsets must be finite");
+      }
+      if (
+        !Number.isInteger(input.anchor.range.startOffset) ||
+        !Number.isInteger(input.anchor.range.endOffset)
+      ) {
+        throw new Error("Anchor range offsets must be integers");
+      }
+      if (input.anchor.range.startOffset < 0 || input.anchor.range.endOffset < 0) {
+        throw new Error("Anchor range offsets must be nonnegative");
+      }
+      if (input.anchor.range.startOffset > input.anchor.range.endOffset) {
+        throw new Error("Anchor range start must not exceed end");
+      }
+    }
   }
 }

@@ -190,6 +190,17 @@ test("revisions are immutable — no delete API exposed", () => {
   expect(keys).not.toContain("deleteRevision");
 });
 
+test("comment methods are exposed on store", () => {
+  const store = createPlanReviewStore();
+  expect(typeof store.createComment).toBe("function");
+  expect(typeof store.loadComment).toBe("function");
+  expect(typeof store.listCommentsByRevision).toBe("function");
+  expect(typeof store.listCommentsByThread).toBe("function");
+  expect(typeof store.updateCommentBody).toBe("function");
+  expect(typeof store.deleteComment).toBe("function");
+  expect(typeof store.loadCommentIndex).toBe("function");
+});
+
 test("createRevision enforces blocks cap", () => {
   const base = tempDir();
   try {

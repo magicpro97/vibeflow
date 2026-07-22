@@ -205,6 +205,44 @@ export const api = {
         "/api/plan-review/revisions",
         payload,
       ).then((r) => r.revision),
+    comments: {
+      list: (repoPath: string, workflowId: string, revisionId: string) =>
+        req<{ comments: import("./types.js").PlanComment[] }>(
+          "GET",
+          `/api/plan-review/comments?repoPath=${encodeURIComponent(repoPath)}&workflowId=${encodeURIComponent(workflowId)}&revisionId=${encodeURIComponent(revisionId)}`,
+        ).then((r) => r.comments),
+      create: (payload: {
+        repoPath: string;
+        workflowId: string;
+        revisionId: string;
+        parentId?: string;
+        anchor?: import("./types.js").PlanCommentAnchor;
+        body: string;
+        createdBy: { type: "user" | "agent"; id: string; name: string };
+      }) =>
+        req<{ comment: import("./types.js").PlanComment }>(
+          "POST",
+          "/api/plan-review/comments",
+          payload,
+        ).then((r) => r.comment),
+      update: (id: string, body: string, repoPath: string, workflowId: string) =>
+        req<{ comment: import("./types.js").PlanComment }>(
+          "POST",
+          `/api/plan-review/comments/${encodeURIComponent(id)}`,
+          { body, repoPath, workflowId },
+        ).then((r) => r.comment),
+      submit: (id: string, repoPath: string, workflowId: string) =>
+        req<{ comment: import("./types.js").PlanComment }>(
+          "POST",
+          `/api/plan-review/comments/${encodeURIComponent(id)}/submit`,
+          { repoPath, workflowId },
+        ).then((r) => r.comment),
+      delete: (id: string, repoPath: string, workflowId: string) =>
+        req<{ ok: boolean }>(
+          "DELETE",
+          `/api/plan-review/comments/${encodeURIComponent(id)}?repoPath=${encodeURIComponent(repoPath)}&workflowId=${encodeURIComponent(workflowId)}`,
+        ),
+    },
   },
   // #562: ask an engine about a code snippet (Web-UI surface for `vf ask`).
   ask: {
