@@ -307,7 +307,8 @@ export function createPlanReviewStore(opts: CreateStoreOpts = {}): PlanReviewSto
     assertCap(utf8ByteLength(body), MAX_COMMENT_BODY_BYTES, "comment body");
 
     parsed.body = body;
-    parsed.updatedAt = new Date().toISOString();
+    // ponytail: clamp forward — same monotonic-clock invariant as submitComment.
+    parsed.updatedAt = new Date(Math.max(Date.now(), Date.parse(parsed.updatedAt))).toISOString();
     writeFileSafe(commentPath(base, id), JSON.stringify(parsed, null, 2));
     return parsed;
   }
@@ -366,7 +367,9 @@ export function createPlanReviewStore(opts: CreateStoreOpts = {}): PlanReviewSto
     if (!parsed) throw new Error(`Comment not found: ${id}`);
     if (parsed.status !== "draft") throw new Error("Only draft comments can be submitted");
     parsed.status = "open";
-    parsed.updatedAt = new Date().toISOString();
+    // ponytail: clamp forward — createdAt/updatedAt use a monotonic clock that can lead Date.now();
+    // a raw new Date() here can go backwards on a fast machine and break the >= invariant.
+    parsed.updatedAt = new Date(Math.max(Date.now(), Date.parse(parsed.updatedAt))).toISOString();
     writeFileSafe(commentPath(base, id), JSON.stringify(parsed, null, 2));
     return parsed;
   }
