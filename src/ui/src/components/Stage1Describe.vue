@@ -272,6 +272,7 @@
               <span class="font-mono text-neutral-400 flex-1 truncate" :title="att.name">{{ att.name }}</span>
               <span class="text-neutral-700 text-[10px]">{{ att.size > 1024 ? `${(att.size/1024).toFixed(1)}k` : `${att.size}b` }}</span>
               <span class="text-[10px] text-neutral-800 font-mono" :title="`Agent will use ${att.skill} to read this file`">{{ att.skill?.replace(/-reader$/,'').replace(/-/g,' ') }}</span>
+            <span v-if="skillStatus(att.skill)" class="text-[10px] px-1 rounded border" :class="skillBadgeClass(att.skill)">{{ skillStatus(att.skill) }}</span>
               <button
                 class="text-neutral-700 hover:text-red-400 transition-colors"
                 :aria-label="`Remove ${att.name}`"
@@ -354,6 +355,26 @@ const ENGINE_HINTS: Record<string, string> = {
 };
 
 const store = useVfStore();
+
+const BADGE_CLASS: Record<string, string> = {
+  verified: "border-green-800/40 text-green-500",
+  enriched: "border-blue-800/40 text-blue-400",
+  experimental: "border-yellow-800/40 text-yellow-400",
+  baseline: "border-neutral-800/40 text-neutral-400",
+  template: "border-neutral-800/40 text-neutral-400",
+  draft: "border-amber-800/40 text-amber-400",
+  unverified: "border-neutral-800/40 text-neutral-500",
+};
+
+function skillStatus(skillName: string): string | null {
+  const match = store.skills.find((s) => s.name === skillName);
+  return match ? match.status : null;
+}
+
+function skillBadgeClass(skillName: string): string {
+  const match = store.skills.find((s) => s.name === skillName);
+  return BADGE_CLASS[match?.status ?? ""] ?? "border-neutral-800/40 text-neutral-500";
+}
 
 // Show when project was inited with an older vf version
 const versionMismatch = computed(() => {

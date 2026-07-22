@@ -24,6 +24,8 @@ import {
 } from "./server/pending-hooks.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
+import { toSafeSkills } from "./skills/api-types.js";
+import { sharedCatalogDir } from "./skills/catalog.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
 import { validateSkillRoots } from "./skills/validator.js";
@@ -174,9 +176,10 @@ export function startServer(
           profile: scanRepo(activeRepo),
         });
         const validation = validateSkillRoots(activeRepo);
+        const skills = discoverSkills(activeRepo);
         return Response.json({
           ok: true,
-          skills: discoverSkills(activeRepo),
+          skills: toSafeSkills(skills, sharedCatalogDir()),
           needs,
           validation: { errors: validation.errors, warnings: validation.warnings },
         });

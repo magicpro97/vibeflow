@@ -74,6 +74,18 @@
       </button>
       <button
         class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-neutral-500 hover:text-white transition-colors duration-150 rounded"
+        title="Skills catalog"
+        aria-label="Open skills catalog"
+        @click="$emit('open-skills')"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 2v12M12 2v12M2 4h12M2 12h12" />
+          <path d="M6 2v12M10 2v12M2 6h12M2 10h12" />
+        </svg>
+        <span>Skills</span>
+      </button>
+      <button
+        class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-neutral-500 hover:text-white transition-colors duration-150 rounded"
         title="Settings"
         aria-label="Open settings"
         @click="$emit('open-settings')"
@@ -93,7 +105,7 @@ import { computed, onUnmounted, ref } from "vue";
 import { useVfStore } from "../store.js";
 import Stepper from "./Stepper.vue";
 
-defineEmits<{ "toggle-logs": []; "open-settings": []; "open-ask": [] }>();
+defineEmits<{ "toggle-logs": []; "open-settings": []; "open-ask": []; "open-skills": [] }>();
 const props = defineProps<{ logsOpen?: boolean }>();
 const logsOpen = computed(() => props.logsOpen ?? false);
 

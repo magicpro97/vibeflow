@@ -8,6 +8,7 @@ import type {
   PlanComment,
   PlanRevision,
   ProjectEntry,
+  SafeSkill,
   VibeSettings,
   WorkflowDashboardItem,
   WorkflowState,
@@ -35,6 +36,10 @@ export const useVfStore = defineStore("vf", () => {
   const version = document.querySelector<HTMLMetaElement>('meta[name="vf-version"]')?.content ?? "";
   const projects = ref<ProjectEntry[]>([]);
   const reuseGoal = ref<string | null>(null); // one-shot prefill for Stage1Describe
+  const skills = ref<SafeSkill[]>([]);
+  const skillPanelOpen = ref(false);
+  const skillLoading = ref(false);
+  const skillError = ref<string | null>(null);
   const askOpen = ref(false);
   const askPrefill = ref<AskPrefill | null>(null);
   const selectedWorkflowKey = ref<string | null>(null);
@@ -44,6 +49,8 @@ export const useVfStore = defineStore("vf", () => {
   function selectWorkflow(key: string | null) {
     selectedWorkflowKey.value = key;
     selectedUnit.value = null;
+    skills.value = [];
+    skillError.value = null;
   }
 
   function selectUnit(name: string | null) {
@@ -172,6 +179,26 @@ export const useVfStore = defineStore("vf", () => {
     askPrefill.value = null;
   }
 
+  async function loadSkills() {
+    skillLoading.value = true;
+    skillError.value = null;
+    try {
+      skills.value = await api.skills();
+    } catch (e) {
+      skills.value = [];
+      skillError.value = e instanceof Error ? e.message.slice(0, 120) : "Failed to load skills";
+    } finally {
+      skillLoading.value = false;
+    }
+  }
+
+  function openSkillPanel() {
+    skillPanelOpen.value = true;
+  }
+  function closeSkillPanel() {
+    skillPanelOpen.value = false;
+  }
+
   /** Loads workflow state from server. Returns the new state, or null if not found yet.
    *  Throws on unexpected errors (non-404) so callers can surface them. */
   async function loadState() {
@@ -210,6 +237,8 @@ export const useVfStore = defineStore("vf", () => {
     try {
       const s = await api.projects.state(path);
       if (mode === "resume") {
+        skills.value = [];
+        skillError.value = null;
         state.value = s;
         const pending = s.work_units.some((u) => u.status !== "done" && u.status !== "blocked");
         setStage(pending ? 3 : 2);
@@ -279,5 +308,12 @@ export const useVfStore = defineStore("vf", () => {
     updateComment,
     deleteComment,
     submitComment,
+    skills,
+    skillError,
+    skillPanelOpen,
+    skillLoading,
+    loadSkills,
+    openSkillPanel,
+    closeSkillPanel,
   };
 });
