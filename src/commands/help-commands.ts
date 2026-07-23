@@ -195,7 +195,7 @@ ${c.bold("Examples:")}
   vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import | init <name> | draft <name> | crystallize <run-id> | registry <add|list|update>]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import | init <name> | draft <name> | crystallize <run-id> | registry <add|list|update|install>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
 import external skills, capture new skills from real work, and manage remote
 skill registries via git-backed lock files.
@@ -211,7 +211,7 @@ ${c.bold("Subcommands:")}
   init <name>                scaffold an empty SKILL.md stub
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
   crystallize <run-id>       mechanically draft a skill from a run's recurring patterns
-  registry <add|list|update> manage remote skill registries (git-backed) — see below
+  registry <add|list|update|install> manage remote skill registries (git-backed) — see below
 
 ${c.bold("Registry subcommands:")}
   registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]
@@ -220,9 +220,19 @@ ${c.bold("Registry subcommands:")}
   registry update [<id>] [--yes]
                              re-fetch and re-pin every registry (or a single one);
                              on failure the prior commit is preserved in the lock
+  registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--yes]
+                             install a verified skill from a cached registry into the shared catalog
 
 ${c.bold("Registry options:")}
   --yes                      approve the network call (git clone/fetch) — dry-run without it
+  --on-collision skip|replace|rename
+                             collision policy when skill already installed (default: skip)
+
+${c.bold("Registry install options:")}
+  --version <v>              require a specific marketplace version (error on mismatch)
+  --on-collision skip        leave existing skill untouched (default)
+  --on-collision replace     backup existing to .backup/<ts>/, then overwrite
+  --on-collision rename      copy with a new slug, rewrite SKILL.md name: frontmatter
 
 ${c.bold("Examples:")}
   vf skills list
@@ -236,7 +246,9 @@ ${c.bold("Examples:")}
   vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0 --yes
   vf skills registry list
   vf skills registry update --yes
-  vf skills registry update platform --yes`,
+  vf skills registry update platform --yes
+  vf skills registry install platform/my-skill
+  vf skills registry install platform/my-skill --version 1.0.0 --on-collision replace --yes`,
 
   tools:
     () => `${c.bold("vf tools")} ${c.dim("[status | enable <tool> | disable <tool> | install <tool> [--yes]]")}

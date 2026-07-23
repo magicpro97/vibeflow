@@ -192,7 +192,13 @@ vf skills registry list                # show pinned registries with commit OID
 vf skills registry update              # re-fetch and re-pin all registries (dry-run)
 vf skills registry update --yes        # re-fetch and re-pin all registries
 vf skills registry update <id> --yes   # re-fetch and re-pin a single registry
+vf skills registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--yes]
+                                       # install a verified skill from a cached registry
 ```
+# Collision policies:
+#   skip    — leave existing untouched (default)
+#   replace — backup existing to .backup/<ts>/, then overwrite
+#   rename  — copy with a new slug, rewrite SKILL.md name: frontmatter
 
 Registries are remote git repos containing skill definitions. The lock file
 (`.vibeflow/SKILL_REGISTRY.lock.json`) records each pinned commit so updates are
