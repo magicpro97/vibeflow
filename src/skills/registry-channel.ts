@@ -14,55 +14,30 @@ import { basename, dirname, join } from "node:path";
 import { c, writeFileSafe } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
+import type {
+  GitOp,
+  InstalledSkill,
+  MarketplaceSkill,
+  RegistryEntry,
+  RegistryLock,
+  SpawnFn,
+} from "./registry-types.js";
 import { validateSkillDir } from "./validator.js";
-// ponytail: sharedCatalogDir lazy so tests inject homedir; no import-time mkdir
 export function sharedCatalog(inject?: { homedir?: () => string }): string {
   const home = inject?.homedir ? inject.homedir() : (process.env.VF_SKILLS_HOME ?? homedir());
   return join(home, ".vibeflow", "skills");
 }
 
-interface SpawnResult {
-  status: number | null;
-  stdout: string | Buffer;
-  stderr: string | Buffer;
-}
-export type SpawnFn = (
-  command: string,
-  args: readonly string[],
-  options: Record<string, unknown>,
-) => SpawnResult;
 const defaultSpawn: SpawnFn = spawnSync as SpawnFn;
-export interface MarketplaceSkill {
-  name: string;
-  version: string;
-  description?: string;
-  status: string;
-  path?: string;
-}
-
-export interface InstalledSkill {
-  name: string;
-  version: string;
-  commitOID: string;
-}
-
-export interface RegistryEntry {
-  name: string;
-  url: string;
-  ref: string;
-  commitOID: string;
-  installed?: InstalledSkill[];
-}
-
-export interface RegistryLock {
-  schemaVersion: 1;
-  registries: RegistryEntry[];
-}
-
-export interface GitOp {
-  cmd: string;
-  args: string[];
-}
+export type {
+  GitOp,
+  InstalledSkill,
+  MarketplaceSkill,
+  RegistryEntry,
+  RegistryLock,
+  ScanSummary,
+  SpawnFn,
+} from "./registry-types.js";
 
 const LOCK_REL = join(".vibeflow", "SKILL_REGISTRY.lock.json");
 

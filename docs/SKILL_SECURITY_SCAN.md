@@ -1,8 +1,10 @@
 # Skill Security Scan (optional)
 
-Static security scan gate that runs before a local skill is promoted to
-`verified` via `vf skills verify <name>` (issue #632). Wraps
-[NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) as an **optional**
+Static security scan gate that runs:
+1. Before a local skill is promoted to `verified` via `vf skills verify <name>` (issue #632)
+2. Before a registry skill is copied into the shared catalog via `vf skills registry install` (issue #651)
+
+Wraps [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) as an **optional**
 external tool.
 
 ## Why
@@ -48,6 +50,22 @@ skillspector scan <dir> --no-llm --format json --baseline <path>
   | LOW / NONE / not-scanned | passes                                    |
 
 - **Demotion (`--undo`) is never gated.**
+
+### Registry install gate
+
+`vf skills registry install <reg>/<name> --yes` runs the same scan after
+frontmatter/path validation but before catalog copy and lock update:
+
+- **Absent scanner** → install proceeds, `scan_summary: {scanned:false}` recorded
+  in lock under the skill's entry.
+- **HIGH/CRITICAL** → install **blocked** before catalog copy, lock unchanged.
+  Finding `rule_id`/`message` printed.
+- **MEDIUM** → warns, install continues.
+- **LOW/NONE/not-scanned** → passes.
+- Dry-run (`--yes` omitted) prints `security scan: skillspector scan <dir> --no-llm`
+  as a planned action.
+- Scan summary persisted in `SKILL_REGISTRY.lock.json` as `InstalledSkill.scan_summary`
+  only after successful install.
 
 ## Baseline workflow
 

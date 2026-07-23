@@ -234,6 +234,12 @@ ${c.bold("Registry install options:")}
   --on-collision replace     backup existing to .backup/<ts>/, then overwrite
   --on-collision rename      copy with a new slug, rewrite SKILL.md name: frontmatter
 
+${c.bold("Security scan:")}
+  Before catalog copy runs an optional SkillSpector scan (static, --no-llm).
+  Absent scanner → proceed (scan_summary: {scanned:false} in lock);
+  HIGH/CRITICAL → blocked before copy, lock unchanged;
+  MEDIUM → warn, install continues. See docs/SKILL_SECURITY_SCAN.md.
+
 ${c.bold("Examples:")}
   vf skills list
   vf skills search "read a pdf"
