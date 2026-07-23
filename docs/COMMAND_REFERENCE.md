@@ -183,6 +183,21 @@ vf skills import <dir>     # import a local skill dir into .vibeflow/skills/
 vf skills import context7:<query>  # import a Context7 skill (approval-gated) into the canonical store
 ```
 
+### Skill registries (git-backed)
+
+```bash
+vf skills registry add <git-url> --name <id> --ref <tag-or-commit>   # dry-run: show plan, no network
+vf skills registry add <git-url> --name <id> --ref <tag-or-commit> --yes  # clone + checkout + pin commit
+vf skills registry list                # show pinned registries with commit OID
+vf skills registry update              # re-fetch and re-pin all registries (dry-run)
+vf skills registry update --yes        # re-fetch and re-pin all registries
+vf skills registry update <id> --yes   # re-fetch and re-pin a single registry
+```
+
+Registries are remote git repos containing skill definitions. The lock file
+(`.vibeflow/SKILL_REGISTRY.lock.json`) records each pinned commit so updates are
+deterministic. On update failure, the prior valid commit is preserved in the lock.
+
 VibeFlow does not pre-install skills. Needs are reported with a suggested on-demand
 acquisition command. Imported skills start `experimental` and must be validated +
 approved before promotion to `verified`.

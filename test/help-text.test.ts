@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { printHelp } from "../src/commands.js";
 import { hasCommandHelp, printCommandHelp } from "../src/commands/help.js";
 
-const SKILL_SUBS = ["list", "search", "resolve", "validate", "sync", "verify-sync", "import"];
+const SKILL_SUBS = [
+  "list",
+  "search",
+  "resolve",
+  "validate",
+  "sync",
+  "verify-sync",
+  "import",
+  "registry",
+];
 
 describe("help text", () => {
   test("printHelp() returns 0 (smoke check that the function runs)", () => {

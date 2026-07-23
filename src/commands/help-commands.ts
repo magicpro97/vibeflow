@@ -195,9 +195,10 @@ ${c.bold("Examples:")}
   vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import | init <name> | draft <name> | crystallize <run-id>]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import | init <name> | draft <name> | crystallize <run-id> | registry <add|list|update>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
-import external skills, and capture new skills from real work.
+import external skills, capture new skills from real work, and manage remote
+skill registries via git-backed lock files.
 
 ${c.bold("Subcommands:")}
   list                       list discovered skills (default)
@@ -210,6 +211,18 @@ ${c.bold("Subcommands:")}
   init <name>                scaffold an empty SKILL.md stub
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
   crystallize <run-id>       mechanically draft a skill from a run's recurring patterns
+  registry <add|list|update> manage remote skill registries (git-backed) — see below
+
+${c.bold("Registry subcommands:")}
+  registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]
+                             clone a remote skill registry and pin to a commit
+  registry list              list pinned skill registries from the lock file
+  registry update [<id>] [--yes]
+                             re-fetch and re-pin every registry (or a single one);
+                             on failure the prior commit is preserved in the lock
+
+${c.bold("Registry options:")}
+  --yes                      approve the network call (git clone/fetch) — dry-run without it
 
 ${c.bold("Examples:")}
   vf skills list
@@ -218,7 +231,12 @@ ${c.bold("Examples:")}
   vf skills sync --mode pointer
   vf skills draft fix-flaky-db-test
   vf skills import .vibeflow/skills/external-skill
-  vf skills import context7:react-hooks`,
+  vf skills import context7:react-hooks
+  vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0
+  vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0 --yes
+  vf skills registry list
+  vf skills registry update --yes
+  vf skills registry update platform --yes`,
 
   tools:
     () => `${c.bold("vf tools")} ${c.dim("[status | enable <tool> | disable <tool> | install <tool> [--yes]]")}

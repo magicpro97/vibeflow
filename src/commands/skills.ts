@@ -19,7 +19,9 @@ import {
   cwd,
   discoverSkills,
   draftSkillName,
+  draftSkillTemplate,
   existsSync,
+  handleRegistrySubcommand,
   importSkillFromDir,
   importSkillsFromParent,
   join,
@@ -32,6 +34,7 @@ import {
   renderSkillNeeds,
   resolveSkillNeeds,
   scanRepo,
+  skillTemplate,
   syncSkillMirrors,
   validateSkillRoots,
   verifySkillCommand,
@@ -319,77 +322,9 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     }
     return result.errors.length ? 1 : 0;
   }
-  out(
-    "vf",
-    c.dim(`vf skills ${sub} — registry operations are configured via providers (see docs).`),
-  );
+  if (sub === "registry") {
+    return handleRegistrySubcommand(repo, rest);
+  }
+  out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));
   return 0;
-}
-
-/** A starter SKILL.md: valid frontmatter (so discoverSkills/parseSkill accept it) + a steps stub. */
-function skillTemplate(name: string): string {
-  return [
-    "---",
-    `name: ${name}`,
-    "description: One-line summary of what this skill does and when to apply it.",
-    "status: draft",
-    "capabilities:",
-    "  - capability-keyword",
-    "triggers:",
-    "  - trigger-keyword",
-    "requires:",
-    "  filesystem: read",
-    "  network: false",
-    "  shell: false",
-    "---",
-    "",
-    `# ${name}`,
-    "",
-    "## When to use",
-    "Describe the task shape that should invoke this skill.",
-    "",
-    "## Steps",
-    "1. First concrete step.",
-    "2. Next step.",
-    "",
-    "## Verification",
-    "How to prove the skill was applied correctly (command output, file check, test).",
-    "",
-  ].join("\n");
-}
-
-/** A DRAFT SKILL.md captured from a real task (issue #335). status:draft + a
- *  Why/Evidence skeleton so the agent records WHY the skill exists and the
- *  evidence behind it. Never auto-installed — review-then-promote. */
-function draftSkillTemplate(name: string): string {
-  return [
-    "---",
-    `name: ${name}`,
-    "description: One-line summary of the reusable procedure this skill captures.",
-    "status: draft",
-    "triggers:",
-    "  - trigger-keyword",
-    "---",
-    "",
-    `# ${name}`,
-    "",
-    "## Why this exists",
-    "What recurring task, mistake, or workaround prompted capturing this? (1-2 lines)",
-    "",
-    "## Evidence",
-    "- Concrete proof this approach worked (command output, file path, test result).",
-    "",
-    "## When to use",
-    "The task shape that should invoke this skill.",
-    "",
-    "## Steps",
-    "1. First concrete step.",
-    "2. Next step.",
-    "",
-    "## Verification",
-    "How to prove the skill was applied correctly.",
-    "",
-    "> DRAFT — captured from a real task. Review and refine before relying on it.",
-    "",
-  ].join("\n");
 }
