@@ -1463,6 +1463,19 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("search", ["trigger-keyword"])).toBe(0);
   });
 
+  test("skills: init rejects empty name (returns 2)", () => {
+    expect(skills("init", [])).toBe(2);
+  });
+
+  test("skills: init rejects bad name (returns 2)", () => {
+    expect(skills("init", ["Bad_Name"])).toBe(2);
+  });
+
+  test("skills: init refuses to overwrite existing skill (returns 1)", () => {
+    expect(skills("init", ["dup-init"])).toBe(0);
+    expect(skills("init", ["dup-init"])).toBe(1);
+  });
+
   test("skills: draft scaffolds a status:draft skill (#335)", () => {
     expect(skills("draft", ["fix-flaky-db-test"])).toBe(0);
     const md = join(dir, CTX_DIR, "skills", "fix-flaky-db-test", "SKILL.md");
@@ -1771,6 +1784,16 @@ describe("commands.skills subcommand branches", () => {
 
   test("skills: unknown sub returns 0 (line 1832-1836)", () => {
     expect(skills("some-other-sub", [])).toBe(0);
+  });
+
+  test("skills: registry add dry-run returns 0 (cover skills.ts registry branch)", () => {
+    expect(skills("registry", ["add", "https://x.com/s.git", "--name", "x", "--ref", "v1"])).toBe(
+      0,
+    );
+  });
+
+  test("skills: registry unknown sub returns 2 (cover handleRegistrySubcommand usage)", () => {
+    expect(skills("registry", ["bogus"])).toBe(2);
   });
 });
 
