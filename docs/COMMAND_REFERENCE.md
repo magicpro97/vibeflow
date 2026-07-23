@@ -204,6 +204,22 @@ Registries are remote git repos containing skill definitions. The lock file
 (`.vibeflow/SKILL_REGISTRY.lock.json`) records each pinned commit so updates are
 deterministic. On update failure, the prior valid commit is preserved in the lock.
 
+### Security scan on registry install
+
+`vf skills registry install` runs an optional static security scan (NVIDIA
+SkillSpector) after frontmatter/path validation, before catalog copy and lock
+update:
+
+| scanner status    | gate action                                           |
+| ----------------- | ----------------------------------------------------- |
+| absent            | install proceeds, `scan_summary: {scanned:false}` in lock |
+| HIGH / CRITICAL   | **blocked** — exit 1, finding `rule_id`/`message` shown, no catalog/lock mutation |
+| MEDIUM            | warns, install continues                              |
+| LOW / NONE        | passes                                                |
+
+`--no-llm` is hard-coded: static analysis only, no network egress. See
+`docs/SKILL_SECURITY_SCAN.md` for details.
+
 VibeFlow does not pre-install skills. Needs are reported with a suggested on-demand
 acquisition command. Imported skills start `experimental` and must be validated +
 approved before promotion to `verified`.

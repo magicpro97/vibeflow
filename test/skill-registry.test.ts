@@ -7,6 +7,7 @@ import {
   type MarketplaceSkill,
   type RegistryEntry,
   type RegistryLock,
+  type SpawnFn,
   handleRegistrySubcommand,
   parseMarketplace,
   parseRegistryLock,
@@ -978,95 +979,334 @@ describe("registryInstall", () => {
   });
 });
 
-describe("handleRegistrySubcommand install routing", () => {
-  test("install with valid args calls registryInstall", () => {
+describe("registryInstall security scan gate (#651)", () => {
+  function setup(): {
+    repo: string;
+    registryId: string;
+    skillName: string;
+    catalogHome: string;
+  } {
     const repo = tmpRepo();
+    const registryId = "test-reg";
+    const skillName = "safe-skill";
+    const fmName = "safe-skill";
+    const fmVersion = "1.0.0";
+    const body = "Enough body content to pass validation threshold.\n".repeat(5);
+
     mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    const url = "https://github.com/x/scanned.git";
     writeRegistryLock(repo, {
       schemaVersion: 1,
-      registries: [
-        { name: "reg", url: "https://x.com/r.git", ref: "v1", commitOID: "a".repeat(40) },
-      ],
+      registries: [{ name: registryId, url, ref: "v1", commitOID: "a".repeat(40) }],
     });
-    const url = "https://x.com/r.git";
-    const cacheDir = registryCacheDir(url);
-    mkdirSync(join(cacheDir, "skills", "alpha"), { recursive: true });
+
+    const catalogHome = mkdtempSync(join(tmpdir(), "vf-scan-651-"));
+    dirs.push(catalogHome);
+
+    const cacheDir = registryCacheDir(url, { homedir: () => catalogHome });
+    mkdirSync(cacheDir, { recursive: true });
     writeFileSync(
       join(cacheDir, "marketplace.json"),
       JSON.stringify({
         schemaVersion: 1,
-        skills: [{ name: "alpha", version: "1.0", status: "verified" }],
+        skills: [{ name: skillName, version: "1.0.0", status: "verified" }],
       }),
     );
+    const subPath = `skills/${skillName}`;
+    mkdirSync(join(cacheDir, subPath), { recursive: true });
     writeFileSync(
-      join(cacheDir, "skills", "alpha", "SKILL.md"),
+      join(cacheDir, subPath, "SKILL.md"),
       [
         "---",
-        "name: alpha",
-        "version: 1.0",
-        "description: test",
+        `name: ${fmName}`,
+        `version: ${fmVersion}`,
+        "description: Test skill for scan gate.",
         "---",
         "",
-        "# alpha",
+        `# ${fmName}`,
         "",
-        "Enough body for validation threshold requirement.",
+        body,
       ].join("\n"),
     );
 
-    const code = handleRegistrySubcommand(repo, ["install", "reg/alpha"]);
-    // Dry-run → 0
+    return { repo, registryId, skillName, catalogHome };
+  }
+
+  function fakeSpawn(result: {
+    stdout: string;
+    status?: number;
+    stderr?: string;
+  }): SpawnFn {
+    return (() => ({
+      status: result.status ?? 0,
+      stdout: result.stdout,
+      stderr: result.stderr ?? "",
+    })) as unknown as SpawnFn;
+  }
+
+  test("absent scanner → install succeeds, scan_summary.scanned:false in lock", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+    });
     expect(code).toBe(0);
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed?.[0]?.scan_summary).toEqual({
+      scanned: false,
+      risk_severity: undefined,
+      finding_count: 0,
+      reason: "skillspector not installed",
+    });
   });
 
-  test("install missing registry-id/skill-name → exit 2", () => {
-    expect(handleRegistrySubcommand(tmpRepo(), ["install"])).toBe(2);
-    expect(handleRegistrySubcommand(tmpRepo(), ["install", "no-slash"])).toBe(2);
-    expect(handleRegistrySubcommand(tmpRepo(), ["install", "/only-slash"])).toBe(2);
-    expect(handleRegistrySubcommand(tmpRepo(), ["install", "only-slash/"])).toBe(2);
+  test("HIGH severity → blocked before catalog copy, lock unchanged", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+      hasCommand: () => true,
+      spawnSync: fakeSpawn({
+        stdout: JSON.stringify({
+          risk_severity: "HIGH",
+          filtered_findings: [{ rule_id: "R1", message: "dangerous exec" }],
+        }),
+        status: 1,
+      }),
+    });
+    expect(code).toBe(1);
+    // Catalog must NOT have the skill
+    expect(existsSync(join(catalogHome, ".vibeflow", "skills", "safe-skill"))).toBe(false);
+    // Lock must NOT have it installed
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed).toBeUndefined();
   });
 
-  test("install with --on-collision invalid value → exit 2", () => {
-    expect(
-      handleRegistrySubcommand(tmpRepo(), ["install", "r/s", "--on-collision", "destroy"]),
-    ).toBe(2);
-    expect(handleRegistrySubcommand(tmpRepo(), ["install", "r/s", "--on-collision=delete"])).toBe(
-      2,
+  test("CRITICAL severity → blocked, no catalog/lock mutation", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+      hasCommand: () => true,
+      spawnSync: fakeSpawn({
+        stdout: JSON.stringify({
+          risk_severity: "CRITICAL",
+          filtered_findings: [{ rule_id: "EXFIL", message: "sends env" }],
+        }),
+        status: 1,
+      }),
+    });
+    expect(code).toBe(1);
+    expect(existsSync(join(catalogHome, ".vibeflow", "skills", "safe-skill"))).toBe(false);
+  });
+
+  test("MEDIUM severity → warns but install proceeds, scan_summary in lock", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+      hasCommand: () => true,
+      spawnSync: fakeSpawn({
+        stdout: JSON.stringify({
+          risk_severity: "MEDIUM",
+          filtered_findings: [{ rule_id: "M1", message: "suspicious pattern" }],
+        }),
+        status: 1,
+      }),
+    });
+    expect(code).toBe(0);
+    // Catalog must have the skill
+    expect(existsSync(join(catalogHome, ".vibeflow", "skills", "safe-skill", "SKILL.md"))).toBe(
+      true,
     );
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed?.[0]?.scan_summary).toEqual({
+      scanned: true,
+      risk_severity: "MEDIUM",
+      finding_count: 1,
+    });
   });
 
-  test("install with --version passes filter", () => {
-    const repo = tmpRepo();
-    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
-    writeRegistryLock(repo, { schemaVersion: 1, registries: [] });
-    const code = handleRegistrySubcommand(repo, ["install", "r/s", "--version", "1.0.0"]);
-    // Registry not found → exits 1 (not 2) — confirms version was parsed
-    expect(code).toBe(1);
+  test("LOW severity → passes, scan_summary in lock", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+      hasCommand: () => true,
+      spawnSync: fakeSpawn({
+        stdout: JSON.stringify({ risk_severity: "LOW", filtered_findings: [] }),
+      }),
+    });
+    expect(code).toBe(0);
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed?.[0]?.scan_summary).toEqual({
+      scanned: true,
+      risk_severity: "LOW",
+      finding_count: 0,
+    });
   });
 
-  test("install with --yes and --on-collision replace passes flags", () => {
-    const repo = tmpRepo();
-    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
-    writeRegistryLock(repo, { schemaVersion: 1, registries: [] });
-    const code = handleRegistrySubcommand(repo, [
-      "install",
-      "r/s",
-      "--on-collision",
-      "replace",
-      "--yes",
-    ]);
-    // Registry not found → exits 1 (not 2) — confirms flags parsed
-    expect(code).toBe(1);
+  test("scan failure (empty stdout) → treated as not-scanned, install proceeds", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+      hasCommand: () => true,
+      spawnSync: fakeSpawn({ stdout: "", status: 2, stderr: "skillspector crashed" }),
+    });
+    expect(code).toBe(0);
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed?.[0]?.scan_summary?.scanned).toBe(false);
   });
 
-  test("update rejects duplicate id and unknown flag", () => {
-    const repo = tmpRepo();
-    expect(handleRegistrySubcommand(repo, ["update", "one", "two"])).toBe(2);
-    expect(handleRegistrySubcommand(repo, ["update", "--bogus"])).toBe(2);
+  test("scan spawn throws → treated as not-scanned, install proceeds", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+      spawnSync: (() => {
+        throw new Error("ENOMEM");
+      }) as unknown as SpawnFn,
+    });
+    expect(code).toBe(0);
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed?.[0]?.scan_summary?.scanned).toBe(false);
   });
 
-  test("install rejects duplicate target and unknown flag", () => {
-    const repo = tmpRepo();
-    expect(handleRegistrySubcommand(repo, ["install", "r/s", "other"])).toBe(2);
-    expect(handleRegistrySubcommand(repo, ["install", "r/s", "--bogus"])).toBe(2);
+  test("scan_summary is non-secret (includes severity/count, not raw findings)", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+      hasCommand: () => true,
+      spawnSync: fakeSpawn({
+        stdout: JSON.stringify({
+          risk_severity: "MEDIUM",
+          risk_score: 42,
+          filtered_findings: [
+            { rule_id: "SECRET", message: "api key in body", severity: "MEDIUM" },
+          ],
+        }),
+        status: 1,
+      }),
+    });
+    const lock = parseRegistryLock(repo);
+    const summary = lock.registries[0]?.installed?.[0]?.scan_summary;
+    // Summary has severity and count, NOT raw rule_id/message
+    expect(summary?.risk_severity).toBe("MEDIUM");
+    expect(summary?.finding_count).toBe(1);
+    expect((summary as unknown as Record<string, unknown>)?.rule_id).toBeUndefined();
+    expect((summary as unknown as Record<string, unknown>)?.message).toBeUndefined();
+  });
+
+  test("dry-run with --yes omitted prints security scan planned action", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    // No catalog or lock mutation in dry-run
+    expect(existsSync(join(catalogHome, ".vibeflow", "skills", "safe-skill"))).toBe(false);
+    const lock = parseRegistryLock(repo);
+    expect(lock.registries[0]?.installed).toBeUndefined();
+  });
+
+  describe("handleRegistrySubcommand install routing", () => {
+    test("install with valid args calls registryInstall", () => {
+      const repo = tmpRepo();
+      mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+      writeRegistryLock(repo, {
+        schemaVersion: 1,
+        registries: [
+          { name: "reg", url: "https://x.com/r.git", ref: "v1", commitOID: "a".repeat(40) },
+        ],
+      });
+      const url = "https://x.com/r.git";
+      const cacheDir = registryCacheDir(url);
+      mkdirSync(join(cacheDir, "skills", "alpha"), { recursive: true });
+      writeFileSync(
+        join(cacheDir, "marketplace.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          skills: [{ name: "alpha", version: "1.0", status: "verified" }],
+        }),
+      );
+      writeFileSync(
+        join(cacheDir, "skills", "alpha", "SKILL.md"),
+        [
+          "---",
+          "name: alpha",
+          "version: 1.0",
+          "description: test",
+          "---",
+          "",
+          "# alpha",
+          "",
+          "Enough body for validation threshold requirement.",
+        ].join("\n"),
+      );
+
+      const code = handleRegistrySubcommand(repo, ["install", "reg/alpha"]);
+      // Dry-run → 0
+      expect(code).toBe(0);
+    });
+
+    test("install missing registry-id/skill-name → exit 2", () => {
+      expect(handleRegistrySubcommand(tmpRepo(), ["install"])).toBe(2);
+      expect(handleRegistrySubcommand(tmpRepo(), ["install", "no-slash"])).toBe(2);
+      expect(handleRegistrySubcommand(tmpRepo(), ["install", "/only-slash"])).toBe(2);
+      expect(handleRegistrySubcommand(tmpRepo(), ["install", "only-slash/"])).toBe(2);
+    });
+
+    test("install with --on-collision invalid value → exit 2", () => {
+      expect(
+        handleRegistrySubcommand(tmpRepo(), ["install", "r/s", "--on-collision", "destroy"]),
+      ).toBe(2);
+      expect(handleRegistrySubcommand(tmpRepo(), ["install", "r/s", "--on-collision=delete"])).toBe(
+        2,
+      );
+    });
+
+    test("install with --version passes filter", () => {
+      const repo = tmpRepo();
+      mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+      writeRegistryLock(repo, { schemaVersion: 1, registries: [] });
+      const code = handleRegistrySubcommand(repo, ["install", "r/s", "--version", "1.0.0"]);
+      // Registry not found → exits 1 (not 2) — confirms version was parsed
+      expect(code).toBe(1);
+    });
+
+    test("install with --yes and --on-collision replace passes flags", () => {
+      const repo = tmpRepo();
+      mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+      writeRegistryLock(repo, { schemaVersion: 1, registries: [] });
+      const code = handleRegistrySubcommand(repo, [
+        "install",
+        "r/s",
+        "--on-collision",
+        "replace",
+        "--yes",
+      ]);
+      // Registry not found → exits 1 (not 2) — confirms flags parsed
+      expect(code).toBe(1);
+    });
+
+    test("update rejects duplicate id and unknown flag", () => {
+      const repo = tmpRepo();
+      expect(handleRegistrySubcommand(repo, ["update", "one", "two"])).toBe(2);
+      expect(handleRegistrySubcommand(repo, ["update", "--bogus"])).toBe(2);
+    });
+
+    test("install rejects duplicate target and unknown flag", () => {
+      const repo = tmpRepo();
+      expect(handleRegistrySubcommand(repo, ["install", "r/s", "other"])).toBe(2);
+      expect(handleRegistrySubcommand(repo, ["install", "r/s", "--bogus"])).toBe(2);
+    });
   });
 });

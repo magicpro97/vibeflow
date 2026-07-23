@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -11,7 +12,6 @@ import { dirname, join, resolve } from "node:path";
 import { c, writeFileSafe } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
-import type { InstalledSkill, RegistryEntry, RegistryLock, SpawnFn } from "./registry-channel.js";
 import {
   isHexOID,
   parseMarketplace,
@@ -24,6 +24,8 @@ import {
   sharedCatalog,
   writeRegistryLock,
 } from "./registry-channel.js";
+import type { InstalledSkill, RegistryEntry, RegistryLock, SpawnFn } from "./registry-types.js";
+import { type ScanDeps, scanBlocksPromotion, scanSkillDir } from "./security-scan.js";
 import { validateSkillDir } from "./validator.js";
 
 // ponytail: rename collision uses simple numeric suffix. Upgrade to semantic
@@ -58,6 +60,7 @@ export function registryInstall(
     writeFileSync?: typeof writeFileSync;
     writeFileSafe?: typeof writeFileSafe;
     spawnSync?: SpawnFn;
+    hasCommand?: NonNullable<ScanDeps["hasCommand"]>;
   } = {},
 ): number {
   const _cpSync = opts.cpSync ?? cpSync;
@@ -170,13 +173,55 @@ export function registryInstall(
     );
     return 1;
   }
+  const validatedSkillDir: string = skillDir ?? "";
+
+  // Security scan gate (#651): run after path/frontmatter validation, before
+  // catalog copy. HIGH/CRITICAL blocks; MEDIUM warns; absent scanner proceeds.
+  function runScan(): {
+    blocked: boolean;
+    scan_summary?: InstalledSkill["scan_summary"];
+  } {
+    const scan = scanSkillDir(validatedSkillDir, {
+      hasCommand: opts.hasCommand,
+      spawnSync: opts.spawnSync as never,
+      homedir: opts.homedir,
+    });
+    if (!scan.scanned) {
+      out(
+        "vf",
+        c.yellow(`! ${skillName}: security scan skipped (${scan.reason ?? "not-scanned"})`),
+      );
+      return {
+        blocked: false,
+        scan_summary: {
+          scanned: false,
+          risk_severity: undefined,
+          finding_count: 0,
+          reason: scan.reason,
+        },
+      };
+    }
+    const gate = scanBlocksPromotion(scan);
+    if (gate.blocked) {
+      out("vf", c.red(`✗ Cannot install "${skillName}": ${gate.reason}`), { level: "error" });
+      return { blocked: true };
+    }
+    if (gate.warn) out("vf", c.yellow(`⚠ ${skillName}: ${gate.reason}`));
+    return {
+      blocked: false,
+      scan_summary: {
+        scanned: true,
+        risk_severity: scan.risk_severity,
+        finding_count: scan.findings.length,
+      },
+    };
+  }
 
   const catalog = sharedCatalog({ homedir: opts.homedir });
   const dstDir = join(catalog, fmName);
   const existing = _exists(dstDir);
 
   if (existing && onCollision === "skip") {
-    // ponytail: uses out(). Extract to theme helper when output needs terminal-agnostic rendering.
     out(
       "vf",
       c.yellow(
@@ -192,11 +237,16 @@ export function registryInstall(
       actions.push(`backup existing "${fmName}" → .backup/<ts>/`);
     if (existing && onCollision === "rename") actions.push("copy as renamed slug");
     actions.push(`copy "${fmName}" to catalog ${dstDir}`);
+    actions.push(`security scan: skillspector scan ${skillDir} --no-llm`);
     actions.push("update SKILL_REGISTRY.lock.json");
     out("vf", c.yellow("Dry-run (no --yes):"));
     for (const a of actions) out("vf", c.dim(`  ${a}`));
     return 0;
   }
+
+  // -- Security scan (real run) --
+  const { blocked, scan_summary } = runScan();
+  if (blocked) return 1;
 
   // --- Real run ---
   mkdirSync(catalog, { recursive: true });
@@ -245,6 +295,7 @@ export function registryInstall(
     name: finalName,
     version: mpEntry.version,
     commitOID: entry.commitOID,
+    scan_summary,
   };
   const updatedEntries: RegistryEntry[] = lock.registries.map((r) => {
     if (r.name !== registryId) return r;
