@@ -1,29 +1,57 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { c, writeFileSafe } from "../core.js";
+import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
+import { validateSkillDir } from "./validator.js";
+// ponytail: sharedCatalogDir lazy so tests inject homedir; no import-time mkdir
+export function sharedCatalog(inject?: { homedir?: () => string }): string {
+  const home = inject?.homedir ? inject.homedir() : (process.env.VF_SKILLS_HOME ?? homedir());
+  return join(home, ".vibeflow", "skills");
+}
 
 interface SpawnResult {
   status: number | null;
   stdout: string | Buffer;
   stderr: string | Buffer;
 }
-// Lightweight spawn type compatible with both real spawnSync and test fakes
-type SpawnFn = (
+export type SpawnFn = (
   command: string,
   args: readonly string[],
   options: Record<string, unknown>,
 ) => SpawnResult;
 const defaultSpawn: SpawnFn = spawnSync as SpawnFn;
+export interface MarketplaceSkill {
+  name: string;
+  version: string;
+  description?: string;
+  status: string;
+  path?: string;
+}
+
+export interface InstalledSkill {
+  name: string;
+  version: string;
+  commitOID: string;
+}
 
 export interface RegistryEntry {
   name: string;
   url: string;
   ref: string;
   commitOID: string;
+  installed?: InstalledSkill[];
 }
 
 export interface RegistryLock {
@@ -62,7 +90,23 @@ export function parseRegistryLock(repo: string): RegistryLock {
           typeof r.ref === "string" &&
           typeof r.commitOID === "string"
         ) {
-          registries.push({ name: r.name, url: r.url, ref: r.ref, commitOID: r.commitOID });
+          registries.push({
+            name: r.name,
+            url: r.url,
+            ref: r.ref,
+            commitOID: r.commitOID,
+            installed: Array.isArray(r.installed)
+              ? (r.installed.filter((s: unknown): s is InstalledSkill => {
+                  if (!s || typeof s !== "object") return false;
+                  const skill = s as Record<string, unknown>;
+                  return (
+                    typeof skill.name === "string" &&
+                    typeof skill.version === "string" &&
+                    typeof skill.commitOID === "string"
+                  );
+                }) as InstalledSkill[])
+              : undefined,
+          });
         }
       }
       return { schemaVersion: 1, registries };
@@ -82,12 +126,68 @@ export function writeRegistryLock(
   _write(registryLockPath(repo), JSON.stringify(lock, null, 2));
 }
 
-export function registryCacheDir(url: string): string {
+export function registryCacheDir(url: string, inject?: { homedir?: () => string }): string {
   const hash = createHash("sha256").update(url).digest("hex").slice(0, 16);
-  return join(homedir(), ".vibeflow", "skill-registries", hash);
+  const home = inject?.homedir ? inject.homedir() : homedir();
+  return join(home, ".vibeflow", "skill-registries", hash);
 }
 
-function isHexOID(s: string): boolean {
+export function parseMarketplace(
+  cacheDir: string,
+  inject: { existsSync?: typeof existsSync; readFileSync?: typeof readFileSync } = {},
+): { skills: MarketplaceSkill[]; errors: string[] } {
+  const _exists = inject.existsSync ?? existsSync;
+  const _read = inject.readFileSync ?? readFileSync;
+  const mp = join(cacheDir, "marketplace.json");
+  if (!_exists(mp)) return { skills: [], errors: ["marketplace.json not found"] };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(_read(mp, "utf8"));
+  } catch {
+    return { skills: [], errors: ["marketplace.json malformed JSON"] };
+  }
+  if (!raw || typeof raw !== "object")
+    return { skills: [], errors: ["marketplace.json not an object"] };
+  const doc = raw as Record<string, unknown>;
+  if (doc.schemaVersion !== 1)
+    return {
+      skills: [],
+      errors: [`marketplace.json unsupported schemaVersion: ${doc.schemaVersion}`],
+    };
+  if (!Array.isArray(doc.skills))
+    return { skills: [], errors: ["marketplace.json missing skills array"] };
+  const skills: MarketplaceSkill[] = [];
+  const errors: string[] = [];
+  for (const s of doc.skills) {
+    if (!s || typeof s !== "object") {
+      errors.push("marketplace.json: invalid skill entry");
+      continue;
+    }
+    const e = s as Record<string, unknown>;
+    if (typeof e.name !== "string" || !e.name) {
+      errors.push("marketplace.json: skill missing name");
+      continue;
+    }
+    if (typeof e.version !== "string" || !e.version) {
+      errors.push(`marketplace.json: skill "${e.name}" missing version`);
+      continue;
+    }
+    if (typeof e.status !== "string" || !e.status) {
+      errors.push(`marketplace.json: skill "${e.name}" missing status`);
+      continue;
+    }
+    skills.push({
+      name: e.name,
+      version: e.version,
+      description: typeof e.description === "string" ? e.description : undefined,
+      status: e.status,
+      path: typeof e.path === "string" ? e.path : undefined,
+    });
+  }
+  return { skills, errors };
+}
+
+export function isHexOID(s: string): boolean {
   return /^[0-9a-f]{1,64}$/.test(s);
 }
 
@@ -295,85 +395,6 @@ export function registryUpdate(
     }
     out("vf", c.green(`✔ "${r.name}" → ${shortOID} (was ${r.commitOID.slice(0, 12)})`));
   }
-
   writeRegistryLock(repo, { ...lock, registries: updated }, { writeFileSafe: opts.writeFileSafe });
   return exitCode;
-}
-
-export function handleRegistrySubcommand(repo: string, args: string[]): number {
-  const cmd = args[0];
-  const rest = args.slice(1);
-  if (cmd === "add") {
-    let url = "";
-    let name = "";
-    let ref = "";
-    let yes = false;
-    for (let i = 0; i < rest.length; i++) {
-      const tok: string | undefined = rest[i];
-      if (tok === "--name") {
-        name = rest[++i] ?? "";
-      } else if (tok?.startsWith("--name=")) {
-        name = tok.slice("--name=".length);
-      } else if (tok === "--ref") {
-        ref = rest[++i] ?? "";
-      } else if (tok?.startsWith("--ref=")) {
-        ref = tok.slice("--ref=".length);
-      } else if (tok === "--yes") {
-        yes = true;
-      } else if (tok?.startsWith("--")) {
-        out(
-          "vf",
-          c.red(
-            `Unknown flag: ${tok}. Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]`,
-          ),
-          { level: "error" },
-        );
-        return 2;
-      } else if (url) {
-        out(
-          "vf",
-          c.red(
-            `Duplicate positional argument: ${tok}. Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]`,
-          ),
-          { level: "error" },
-        );
-        return 2;
-      } else if (tok !== undefined) {
-        url = tok;
-      }
-    }
-    if (!url || !name || !ref) {
-      out(
-        "vf",
-        c.red("Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]"),
-        { level: "error" },
-      );
-      return 2;
-    }
-    return registryAdd(repo, url, name, ref, { yes });
-  }
-  if (cmd === "list") {
-    if (rest.length > 0) {
-      out("vf", c.red("Usage: vf skills registry list — no arguments or flags supported."), {
-        level: "error",
-      });
-      return 2;
-    }
-    return registryList(repo);
-  }
-  if (cmd === "update") {
-    let id: string | undefined;
-    let yes = false;
-    for (let i = 0; i < rest.length; i++) {
-      const tok = rest[i];
-      if (tok === "--yes") {
-        yes = true;
-      } else if (!tok?.startsWith("--")) {
-        id = tok;
-      }
-    }
-    return registryUpdate(repo, id, { yes });
-  }
-  out("vf", c.red("Usage: vf skills registry <add|list|update> [args]"), { level: "error" });
-  return 2;
 }

@@ -3,17 +3,21 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type InstalledSkill,
+  type MarketplaceSkill,
   type RegistryEntry,
   type RegistryLock,
   handleRegistrySubcommand,
+  parseMarketplace,
   parseRegistryLock,
   registryAdd,
   registryCacheDir,
+  registryInstall,
   registryList,
   registryLockPath,
   registryUpdate,
   writeRegistryLock,
-} from "../src/skills/registry-channel.js";
+} from "../src/commands/_shared.js";
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -604,5 +608,465 @@ describe("handleRegistrySubcommand error validation (#649)", () => {
   test("args to 'list' → exit 2", () => {
     const code = handleRegistrySubcommand(tmpRepo(), ["list", "extra"]);
     expect(code).toBe(2);
+  });
+});
+
+describe("parseMarketplace", () => {
+  function withMarketplace(data: string): string {
+    const d = mkdtempSync(join(tmpdir(), "vf-mp-"));
+    dirs.push(d);
+    writeFileSync(join(d, "marketplace.json"), data);
+    return d;
+  }
+
+  test("valid marketplace → parsed skills", () => {
+    const dir = withMarketplace(
+      JSON.stringify({
+        schemaVersion: 1,
+        skills: [
+          { name: "alpha", version: "1.0.0", status: "verified" },
+          { name: "beta", version: "2.0.0", status: "verified", path: "skills/beta" },
+        ],
+      }),
+    );
+    const { skills, errors } = parseMarketplace(dir);
+    expect(errors).toEqual([]);
+    expect(skills).toHaveLength(2);
+    expect(skills[0]?.name).toBe("alpha");
+    expect(skills[0]?.version).toBe("1.0.0");
+    expect(skills[1]?.path).toBe("skills/beta");
+  });
+
+  test("missing file → errors", () => {
+    const d = mkdtempSync(join(tmpdir(), "vf-mp-nope-"));
+    dirs.push(d);
+    const { skills, errors } = parseMarketplace(d);
+    expect(skills).toEqual([]);
+    expect(errors).toContain("marketplace.json not found");
+  });
+
+  test("malformed JSON → errors", () => {
+    const dir = withMarketplace("not-json");
+    const { skills, errors } = parseMarketplace(dir);
+    expect(skills).toEqual([]);
+    expect(errors).toContain("marketplace.json malformed JSON");
+  });
+
+  test("wrong schemaVersion → errors", () => {
+    const dir = withMarketplace(JSON.stringify({ schemaVersion: 2, skills: [] }));
+    const { skills, errors } = parseMarketplace(dir);
+    expect(skills).toEqual([]);
+    expect(errors[0]).toContain("unsupported schemaVersion");
+  });
+
+  test("missing skills array → errors", () => {
+    const dir = withMarketplace(JSON.stringify({ schemaVersion: 1 }));
+    const { skills, errors } = parseMarketplace(dir);
+    expect(skills).toEqual([]);
+    expect(errors[0]).toContain("missing skills array");
+  });
+
+  test("skips malformed entries", () => {
+    const dir = withMarketplace(
+      JSON.stringify({
+        schemaVersion: 1,
+        skills: [
+          { name: "good", version: "1.0", status: "verified" },
+          { name: "", version: "1.0", status: "verified" },
+          { version: "1.0", status: "verified" },
+          { name: "no-version", status: "verified" },
+          { name: "no-status", version: "1.0" },
+        ],
+      }),
+    );
+    const { skills, errors } = parseMarketplace(dir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.name).toBe("good");
+    expect(errors.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test("rejects a primitive marketplace entry", () => {
+    const dir = withMarketplace(JSON.stringify({ schemaVersion: 1, skills: ["bad"] }));
+    expect(parseMarketplace(dir).errors).toContain("marketplace.json: invalid skill entry");
+  });
+});
+
+describe("registryInstall", () => {
+  function setup(
+    opts: {
+      marketplace?: string;
+      lockRegistries?: RegistryEntry[];
+      skillName?: string;
+      skillBody?: string;
+      fmName?: string;
+      fmVersion?: string;
+    } = {},
+  ): {
+    repo: string;
+    registryId: string;
+    skillName: string;
+    catalogHome: string;
+  } {
+    const repo = tmpRepo();
+    const registryId = "test-reg";
+    const skillName = opts.skillName ?? "my-skill";
+    const fmName = opts.fmName ?? "my-skill";
+    const fmVersion = opts.fmVersion ?? "1.0.0";
+    const mpSkills =
+      opts.marketplace ??
+      JSON.stringify({
+        schemaVersion: 1,
+        skills: [{ name: skillName, version: "1.0.0", status: "verified" }],
+      });
+    const body = opts.skillBody ?? "Enough body content to pass validation threshold.\n".repeat(5);
+
+    // Build registry in lock
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    const url = "https://github.com/x/test-skills.git";
+    const entry: RegistryEntry = opts.lockRegistries?.[0] ?? {
+      name: registryId,
+      url,
+      ref: "v1",
+      commitOID: "a".repeat(40),
+    };
+    writeRegistryLock(repo, { schemaVersion: 1, registries: [entry] });
+
+    const catalogHome = mkdtempSync(join(tmpdir(), "vf-install-cat-"));
+    dirs.push(catalogHome);
+
+    // Build cache dir with marketplace
+    const cacheDir = registryCacheDir(url, { homedir: () => catalogHome });
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(join(cacheDir, "marketplace.json"), mpSkills);
+
+    // Build skill dir in cache
+    const subPath = `skills/${skillName}`;
+    mkdirSync(join(cacheDir, subPath), { recursive: true });
+    const skillMd = [
+      "---",
+      `name: ${fmName}`,
+      `version: ${fmVersion}`,
+      "description: Test skill for registry install.",
+      "---",
+      "",
+      `# ${fmName}`,
+      "",
+      body,
+    ].join("\n");
+    writeFileSync(join(cacheDir, subPath, "SKILL.md"), skillMd);
+
+    return { repo, registryId, skillName, catalogHome };
+  }
+
+  function catDir(home: string): string {
+    return join(home, ".vibeflow", "skills");
+  }
+
+  test("dry-run: prints planned actions, no writes", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      onCollision: "replace",
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    expect(existsSync(join(catDir(catalogHome), "my-skill"))).toBe(false);
+  });
+
+  test("registry not in lock → error", () => {
+    const repo = tmpRepo();
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeRegistryLock(repo, { schemaVersion: 1, registries: [] });
+    const code = registryInstall(repo, "missing-reg", "any-skill");
+    expect(code).toBe(1);
+  });
+
+  test("cache dir missing → error", () => {
+    const repo = tmpRepo();
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    const url = "https://github.com/x/test.git";
+    writeRegistryLock(repo, {
+      schemaVersion: 1,
+      registries: [{ name: "reg", url, ref: "v1", commitOID: "a".repeat(40) }],
+    });
+    // No cache dir created
+    const code = registryInstall(repo, "reg", "any");
+    expect(code).toBe(1);
+  });
+
+  test("marketplace parse errors → error", () => {
+    const { repo, registryId, skillName, catalogHome } = setup({
+      marketplace: JSON.stringify({ schemaVersion: 1, skills: ["bad"] }),
+    });
+    expect(registryInstall(repo, registryId, skillName, { homedir: () => catalogHome })).toBe(1);
+  });
+
+  test("marketplace path with no SKILL.md → error", () => {
+    const { repo, registryId, skillName, catalogHome } = setup({
+      marketplace: JSON.stringify({
+        schemaVersion: 1,
+        skills: [
+          { name: "my-skill", version: "1.0.0", status: "verified", path: "skills/missing" },
+        ],
+      }),
+    });
+    expect(registryInstall(repo, registryId, skillName, { homedir: () => catalogHome })).toBe(1);
+  });
+
+  test("source skill validation errors → error", () => {
+    const { repo, registryId, skillName, catalogHome } = setup({ skillBody: "short" });
+    expect(registryInstall(repo, registryId, skillName, { homedir: () => catalogHome })).toBe(1);
+  });
+
+  test("skill not in marketplace → error", () => {
+    const { repo, registryId, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, "nonexistent-skill", {
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(1);
+  });
+
+  test("skill not verified in marketplace → error", () => {
+    const { repo, registryId, skillName, catalogHome } = setup({
+      marketplace: JSON.stringify({
+        schemaVersion: 1,
+        skills: [{ name: "my-skill", version: "1.0.0", status: "experimental" }],
+      }),
+    });
+    const code = registryInstall(repo, registryId, skillName, {
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(1);
+  });
+
+  test("version mismatch → error", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      version: "2.0.0",
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(1);
+  });
+
+  test("frontmatter name mismatch marketplace → error", () => {
+    const { repo, registryId, skillName, catalogHome } = setup({ fmName: "wrong-name" });
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(1);
+  });
+
+  test("frontmatter version mismatch marketplace → error", () => {
+    const { repo, registryId, skillName, catalogHome } = setup({ fmVersion: "9.9.9" });
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(1);
+  });
+
+  test("marketplace path traversal → rejects before copying", () => {
+    const { repo, registryId, skillName, catalogHome } = setup({
+      marketplace: JSON.stringify({
+        schemaVersion: 1,
+        skills: [{ name: "my-skill", version: "1.0.0", status: "verified", path: "../escape" }],
+      }),
+    });
+    expect(
+      registryInstall(repo, registryId, skillName, { yes: true, homedir: () => catalogHome }),
+    ).toBe(1);
+    expect(existsSync(join(catDir(catalogHome), "my-skill"))).toBe(false);
+  });
+
+  test("successful install with --yes → copies skill, writes lock", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    expect(existsSync(join(catDir(catalogHome), "my-skill", "SKILL.md"))).toBe(true);
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed).toBeDefined();
+    expect(reg?.installed?.some((s: InstalledSkill) => s.name === "my-skill")).toBe(true);
+  });
+
+  test("skip collision: existing skill left untouched", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const d = join(catDir(catalogHome), "my-skill");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "EXISTING.txt"), "I was here first");
+
+    const code = registryInstall(repo, registryId, skillName, {
+      onCollision: "skip",
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    expect(readFileSync(join(d, "EXISTING.txt"), "utf8")).toBe("I was here first");
+  });
+
+  test("replace collision: backs up existing then overwrites", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const d = join(catDir(catalogHome), "my-skill");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "ORIGINAL.txt"), "original");
+
+    const code = registryInstall(repo, registryId, skillName, {
+      onCollision: "replace",
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    expect(existsSync(join(d, "SKILL.md"))).toBe(true);
+    expect(existsSync(join(d, "ORIGINAL.txt"))).toBe(false);
+    expect(existsSync(join(catDir(catalogHome), ".backup"))).toBe(true);
+  });
+
+  test("rename collision: copies to new slug, rewrites frontmatter name", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const d = join(catDir(catalogHome), "my-skill");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "ORIGINAL.txt"), "original");
+
+    const code = registryInstall(repo, registryId, skillName, {
+      onCollision: "rename",
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    expect(existsSync(join(d, "ORIGINAL.txt"))).toBe(true);
+    expect(existsSync(join(catDir(catalogHome), "my-skill-1", "SKILL.md"))).toBe(true);
+    const renamedFm = readFileSync(join(catDir(catalogHome), "my-skill-1", "SKILL.md"), "utf8");
+    expect(renamedFm).toContain("name: my-skill-1");
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed?.some((s: InstalledSkill) => s.name === "my-skill-1")).toBe(true);
+  });
+
+  test("rename collision: re-validates and rolls back on failure", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const d = join(catDir(catalogHome), "my-skill");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "KEEP.txt"), "keep");
+
+    const code = registryInstall(repo, registryId, skillName, {
+      onCollision: "rename",
+      yes: true,
+      homedir: () => catalogHome,
+      writeFileSync: (path, _content) => writeFileSync(path, "invalid"),
+    });
+    expect(code).toBe(1);
+    expect(existsSync(join(catDir(catalogHome), "my-skill-1"))).toBe(false);
+    expect(existsSync(join(d, "KEEP.txt"))).toBe(true);
+  });
+
+  test("installed skill recorded in lock only after successful copy", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    const lock = parseRegistryLock(repo);
+    const reg = lock.registries.find((r) => r.name === registryId);
+    expect(reg?.installed).toHaveLength(1);
+    expect(reg?.installed?.[0]?.name).toBe("my-skill");
+    expect(reg?.installed?.[0]?.version).toBe("1.0.0");
+    expect(reg?.installed?.[0]?.commitOID).toBe("a".repeat(40));
+  });
+});
+
+describe("handleRegistrySubcommand install routing", () => {
+  test("install with valid args calls registryInstall", () => {
+    const repo = tmpRepo();
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeRegistryLock(repo, {
+      schemaVersion: 1,
+      registries: [
+        { name: "reg", url: "https://x.com/r.git", ref: "v1", commitOID: "a".repeat(40) },
+      ],
+    });
+    const url = "https://x.com/r.git";
+    const cacheDir = registryCacheDir(url);
+    mkdirSync(join(cacheDir, "skills", "alpha"), { recursive: true });
+    writeFileSync(
+      join(cacheDir, "marketplace.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        skills: [{ name: "alpha", version: "1.0", status: "verified" }],
+      }),
+    );
+    writeFileSync(
+      join(cacheDir, "skills", "alpha", "SKILL.md"),
+      [
+        "---",
+        "name: alpha",
+        "version: 1.0",
+        "description: test",
+        "---",
+        "",
+        "# alpha",
+        "",
+        "Enough body for validation threshold requirement.",
+      ].join("\n"),
+    );
+
+    const code = handleRegistrySubcommand(repo, ["install", "reg/alpha"]);
+    // Dry-run → 0
+    expect(code).toBe(0);
+  });
+
+  test("install missing registry-id/skill-name → exit 2", () => {
+    expect(handleRegistrySubcommand(tmpRepo(), ["install"])).toBe(2);
+    expect(handleRegistrySubcommand(tmpRepo(), ["install", "no-slash"])).toBe(2);
+    expect(handleRegistrySubcommand(tmpRepo(), ["install", "/only-slash"])).toBe(2);
+    expect(handleRegistrySubcommand(tmpRepo(), ["install", "only-slash/"])).toBe(2);
+  });
+
+  test("install with --on-collision invalid value → exit 2", () => {
+    expect(
+      handleRegistrySubcommand(tmpRepo(), ["install", "r/s", "--on-collision", "destroy"]),
+    ).toBe(2);
+    expect(handleRegistrySubcommand(tmpRepo(), ["install", "r/s", "--on-collision=delete"])).toBe(
+      2,
+    );
+  });
+
+  test("install with --version passes filter", () => {
+    const repo = tmpRepo();
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeRegistryLock(repo, { schemaVersion: 1, registries: [] });
+    const code = handleRegistrySubcommand(repo, ["install", "r/s", "--version", "1.0.0"]);
+    // Registry not found → exits 1 (not 2) — confirms version was parsed
+    expect(code).toBe(1);
+  });
+
+  test("install with --yes and --on-collision replace passes flags", () => {
+    const repo = tmpRepo();
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeRegistryLock(repo, { schemaVersion: 1, registries: [] });
+    const code = handleRegistrySubcommand(repo, [
+      "install",
+      "r/s",
+      "--on-collision",
+      "replace",
+      "--yes",
+    ]);
+    // Registry not found → exits 1 (not 2) — confirms flags parsed
+    expect(code).toBe(1);
+  });
+
+  test("update rejects duplicate id and unknown flag", () => {
+    const repo = tmpRepo();
+    expect(handleRegistrySubcommand(repo, ["update", "one", "two"])).toBe(2);
+    expect(handleRegistrySubcommand(repo, ["update", "--bogus"])).toBe(2);
+  });
+
+  test("install rejects duplicate target and unknown flag", () => {
+    const repo = tmpRepo();
+    expect(handleRegistrySubcommand(repo, ["install", "r/s", "other"])).toBe(2);
+    expect(handleRegistrySubcommand(repo, ["install", "r/s", "--bogus"])).toBe(2);
   });
 });
