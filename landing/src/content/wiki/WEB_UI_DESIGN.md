@@ -109,7 +109,9 @@ sets `skillPanelOpen = false` and returns keyboard focus to the Skills launcher
 button in the TopBar (matching the Settings panel pattern). Short error messages
 from the store (`skillError`) are displayed inline in the panel and cleared before
 each fetch. Skills loaded from the server are rendered with security-scan dots,
-origin, version, and deprecated styling. The panel auto-loads skills on mount when
+origin, version, and deprecated styling. Installed pinned registry skills additionally
+show a read-only badge with registry ID, version, and "pinned" label. Local/unpinned
+skills display origin only. The panel auto-loads skills on mount when
 the list is empty.
 
 **Attachment skill badges.** In Stage1Describe, each uploaded attachment shows its

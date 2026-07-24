@@ -66,6 +66,9 @@
             <span>Status: {{ skill.status }}</span>
             <span>Origin: {{ skill.origin }}</span>
             <span v-if="skill.version">v{{ skill.version }}</span>
+            <span v-if="skill.registry" class="text-neutral-400">
+              Registry: {{ skill.registry.id }} · v{{ skill.registry.version }} · pinned
+            </span>
           </div>
         </div>
       </div>

@@ -2581,6 +2581,7 @@ test("GET /api/skills returns browser-safe skill objects", async () => {
   process.chdir(dir);
   try {
     mkdirSync(join(dir, ".vibeflow", "skills", "test-skill"), { recursive: true });
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
     writeFileSync(
       join(dir, ".vibeflow", "skills", "test-skill", "SKILL.md"),
       [
@@ -2594,6 +2595,34 @@ test("GET /api/skills returns browser-safe skill objects", async () => {
         "# Test Skill",
         "Does stuff.",
       ].join("\n"),
+    );
+
+    // Create lock with a registry entry that has this skill installed
+    writeFileSync(
+      join(dir, ".vibeflow", "SKILL_REGISTRY.lock.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "platform",
+            url: "https://github.com/example/platform-skills.git",
+            ref: "v1.0.0",
+            commitOID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            installed: [
+              {
+                name: "test-skill",
+                version: "1.0.0",
+                commitOID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              },
+              {
+                name: "other-skill",
+                version: "2.0.0",
+                commitOID: "cccccccccccccccccccccccccccccccccccccccc",
+              },
+            ],
+          },
+        ],
+      }),
     );
 
     const { server, url } = await startServer(0);
@@ -2622,11 +2651,105 @@ test("GET /api/skills returns browser-safe skill objects", async () => {
       expect(s.capabilities).toBeUndefined();
       expect(s.triggers).toBeUndefined();
 
+      // Registry metadata exposed for installed pinned skills
+      const reg = s.registry as Record<string, unknown> | undefined;
+      expect(reg).toBeDefined();
+      expect(reg?.id).toBe("platform");
+      expect(reg?.version).toBe("1.0.0");
+      expect(reg?.pinned).toBe(true);
+
       expect(Array.isArray(body.needs)).toBe(true);
       expect(body.validation).toBeDefined();
       const v = body.validation as Record<string, unknown>;
       expect(Array.isArray(v.errors)).toBe(true);
       expect(Array.isArray(v.warnings)).toBe(true);
+    } finally {
+      server.stop();
+    }
+  } finally {
+    process.chdir(orig);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("GET /api/skills omits registry for uninstalled skills", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-skills-no-reg-"));
+  const orig = process.cwd();
+  process.chdir(dir);
+  try {
+    mkdirSync(join(dir, ".vibeflow", "skills", "local-skill"), { recursive: true });
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "local-skill", "SKILL.md"),
+      [
+        "---",
+        "name: local-skill",
+        "description: a local-only skill",
+        "version: 0.0.1",
+        "status: draft",
+        "---",
+      ].join("\n"),
+    );
+
+    // Lock exists but skill is not installed from it
+    writeFileSync(
+      join(dir, ".vibeflow", "SKILL_REGISTRY.lock.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "platform",
+            url: "https://github.com/example/platform-skills.git",
+            ref: "v1.0.0",
+            commitOID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            installed: [
+              {
+                name: "other-skill",
+                version: "2.0.0",
+                commitOID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const { server, url } = await startServer(0);
+    try {
+      const res = await fetch(`${url}/api/skills`);
+      const body = (await res.json()) as Record<string, unknown>;
+      const skills = body.skills as Record<string, unknown>[];
+      const s = skills.find((sk) => sk.name === "local-skill") as Record<string, unknown>;
+      expect(s).toBeDefined();
+      expect(s.registry).toBeUndefined();
+    } finally {
+      server.stop();
+    }
+  } finally {
+    process.chdir(orig);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("GET /api/skills omits registry when no lock file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-skills-no-lock-"));
+  const orig = process.cwd();
+  process.chdir(dir);
+  try {
+    mkdirSync(join(dir, ".vibeflow", "skills", "free-skill"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "free-skill", "SKILL.md"),
+      ["---", "name: free-skill", "description: no lock", "---"].join("\n"),
+    );
+
+    const { server, url } = await startServer(0);
+    try {
+      const res = await fetch(`${url}/api/skills`);
+      const body = (await res.json()) as Record<string, unknown>;
+      const skills = body.skills as Record<string, unknown>[];
+      const s = skills.find((sk) => sk.name === "free-skill") as Record<string, unknown>;
+      expect(s).toBeDefined();
+      expect(s.registry).toBeUndefined();
     } finally {
       server.stop();
     }
