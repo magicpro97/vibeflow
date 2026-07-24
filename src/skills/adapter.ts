@@ -27,8 +27,9 @@ const EXTENDS_RE = /^([a-z0-9]+(?:-[a-z0-9]+)*)(?:@(\d+\.\d+\.\d+))?$/;
 
 function parseExtends(v: string): { baseName: string; version?: string } | null {
   const m = EXTENDS_RE.exec(v.trim());
-  if (!m) return null;
-  return { baseName: m[1], version: m[2] ?? undefined };
+  const baseName = m?.[1];
+  if (!baseName) return null;
+  return { baseName, version: m[2] ?? undefined };
 }
 
 /**
@@ -58,24 +59,22 @@ export function mergeBodies(baseBody: string, adapterBody: string): string {
   const out: string[] = [];
   const replaced = new Set<number>();
 
-  for (let i = 0; i < baseSections.length; i++) {
-    const bs = baseSections[i];
+  for (const bs of baseSections) {
     const key = normalizeHeading(bs.heading);
     const override = adapterByHeading.get(key);
     if (override !== undefined) {
       out.push(`${bs.heading}\n${override}`);
-      replaced.add(i);
+      replaced.add(baseSections.indexOf(bs));
     } else {
       out.push(`${bs.heading}\n${bs.body}`);
     }
   }
 
   // Append adapter sections that didn't replace anything
-  for (let i = 0; i < adapterSections.length; i++) {
-    const a = adapterSections[i];
+  for (const a of adapterSections) {
     const key = normalizeHeading(a.heading);
     const alreadyReplaced = baseSections.some(
-      (_, j) => replaced.has(j) && normalizeHeading(baseSections[j].heading) === key,
+      (bs, j) => replaced.has(j) && normalizeHeading(bs.heading) === key,
     );
     if (!alreadyReplaced) {
       // Check if any base section has this heading (not through replaced)
