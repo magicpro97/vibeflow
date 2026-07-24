@@ -126,6 +126,32 @@ describe("registry provenance (never auto-verify external skills)", () => {
     }
   });
 
+  test("discoverSkills logs unresolved adapter warnings", () => {
+    const dir = tmpRepo();
+    const original = console.error;
+    const messages: string[] = [];
+    console.error = (message: string) => messages.push(message);
+    try {
+      const skillDir = join(dir, CTX_DIR, "skills", "orphan-adapter");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: orphan-adapter",
+          "description: an adapter without its pinned base",
+          "extends: [missing-base@1.0.0]",
+          "---",
+        ].join("\n"),
+      );
+      discoverSkills(dir);
+      expect(messages.some((message) => message.startsWith("[skills]"))).toBe(true);
+    } finally {
+      console.error = original;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("discoverSkills scans the shared catalog and skips dotfiles/non-dirs/missing-SKILL.md/unparseable (line 202-223)", () => {
     const dir = tmpRepo();
     const shared = mkdtempSync(join(tmpdir(), "vf-shared-cat-"));

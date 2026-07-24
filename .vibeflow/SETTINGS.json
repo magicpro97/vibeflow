@@ -16,7 +16,7 @@
   },
   "memory": "builtin",
   "notifications": true,
-  "updatedAt": "2026-07-16T09:46:10.029Z",
+  "updatedAt": "2026-07-24T10:49:51.160Z",
   "hooks": {
     "templates": [
       "block-destructive",

@@ -45,7 +45,7 @@ At the end of `vf orchestrate` (and `vf verify --journal`), recurring patterns a
 
 **Iterating on one fix.** `vf verify` runs the full suite. While iterating, run a single test (`bun test test/<file>.test.ts`) or a single-file lint, then `vf verify` once before you call it done.
 
-**Hook enforcement is engine-specific.** The live PreToolUse gate (armed via `vf hooks emit --yes`) BLOCKS on Claude. Codex and Copilot hook configs are detection-only (they observe + log, they do not block) — `vf doctor` reports per-engine status. Do not assume a destructive command is blocked when driving Codex/Copilot.
+**Hook enforcement is engine-specific.** The live PreToolUse gate (armed via `vf hooks emit --yes`) blocks on Claude, Copilot, and opencode. Codex blocks Bash/shell tool calls only; Edit/Write/apply_patch/MCP calls remain unguarded by its hook. Codex hook config is global at `~/.codex/`, affecting every local Codex repo — `vf doctor` reports per-engine status.
 
 ## Incremental File Authoring
 - Never write a large file in a single operation — it causes request timeouts. Create the file with a small first part, then append/edit the remaining parts in separate steps.
