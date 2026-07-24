@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { skills } from "../src/commands/skills.js";
 import { setSkillStatus, setStatusInText } from "../src/skills/verify.js";
+import type { LockVerifyResult } from "../src/skills/verify-lock.js";
 
 const CTX_DIR = ".vibeflow";
 
@@ -207,5 +208,66 @@ describe("skills verify command", () => {
   test("malformed SKILL.md (no frontmatter) → exit 1", () => {
     scaffold("bad", ["no frontmatter at all"]);
     expect(run(["bad"])).toBe(1);
+  });
+});
+
+// ── vf skills verify-lock (CLI handler) ─────────────────────────────────
+
+describe("skills verify-lock command", () => {
+  function run(rest: string[]): number {
+    const orig = process.cwd();
+    const origHome = process.env.VF_SKILLS_HOME;
+    process.env.VF_SKILLS_HOME = base;
+    process.chdir(base);
+    try {
+      return skills("verify-lock", rest);
+    } finally {
+      process.chdir(orig);
+      if (origHome === undefined) delete process.env.VF_SKILLS_HOME;
+      else process.env.VF_SKILLS_HOME = origHome;
+    }
+  }
+
+  function mkLock(data: unknown) {
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    writeFileSync(join(base, ".vibeflow", "SKILL_REGISTRY.lock.json"), JSON.stringify(data));
+  }
+
+  test("passes when no lock file exists", () => {
+    expect(run([])).toBe(0);
+  });
+
+  test("passes on valid lock with empty registries", () => {
+    mkLock({ schemaVersion: 1, registries: [] });
+    expect(run([])).toBe(0);
+  });
+
+
+  test("fails on malformed lock file", () => {
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    writeFileSync(join(base, ".vibeflow", "SKILL_REGISTRY.lock.json"), "bad json");
+    expect(run([])).toBe(1);
+  });
+
+  test("fails on root not an object", () => {
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    writeFileSync(join(base, ".vibeflow", "SKILL_REGISTRY.lock.json"), '"string"');
+    expect(run([])).toBe(1);
+  });
+
+  test("fails on missing registry from catalog", () => {
+    mkLock({
+      schemaVersion: 1,
+      registries: [
+        {
+          name: "r",
+          url: "https://x",
+          ref: "v1",
+          commitOID: "a".repeat(40),
+          installed: [{ name: "missing-skill", version: "1.0.0", commitOID: "b".repeat(40) }],
+        },
+      ],
+    });
+    expect(run([])).toBe(1);
   });
 });
