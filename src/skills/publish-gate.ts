@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SkillScope } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
+import { REQUIRED_SECTIONS, checkQualityContract } from "./validator.js";
 
 const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
 
@@ -20,22 +21,25 @@ export interface PublishGateResult {
  * Trust boundary: prevents project-scoped skills from reaching common registries
  * and flags hardcoded local paths in common content.
  */
+/** Narrow I/O seam so test lambdas returning string compile without overload fights. */
+type ReadFileFn = (path: string, encoding: "utf8") => string;
+
 export function checkPublishGate(
   skillDir: string,
   targetChannel: "common" | "organization" | "project" | "adapter",
-  inject: { readFileSync?: typeof readFileSync } = {},
+  inject: { existsSync?: (path: string) => boolean; readFileSync?: ReadFileFn } = {},
 ): PublishGateResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   const skillMd = join(skillDir, "SKILL.md");
-  if (!existsSync(skillMd)) {
+  if (!(inject.existsSync ?? existsSync)(skillMd)) {
     return { ok: false, errors: [`${skillDir}: missing SKILL.md`], warnings };
   }
 
   let text: string;
   try {
-    text = (inject.readFileSync ?? readFileSync)(skillMd, "utf8");
+    text = (inject.readFileSync ?? ((p, enc) => readFileSync(p, enc)))(skillMd, "utf8");
   } catch (err) {
     return {
       ok: false,
@@ -84,6 +88,23 @@ export function checkPublishGate(
         `hardcoded local path(s) in skill content: ${pathMatches.slice(0, 3).join(", ")} — common channel skills must not embed repo-specific absolute paths`,
       );
       return { ok: false, errors, warnings, scope };
+    }
+  }
+
+  // #657: skill-creator quality contract gate — blocks promotion to verified
+  // when quality contract errors exist, warns on quality contract warnings.
+  // Uses the `body` from parseFrontmatter (already available above) stripping
+  // any leading/trailing whitespace for deterministic line-count.
+  if (targetChannel === "common" && body) {
+    const qc = checkQualityContract(body);
+    for (const e of qc.errors) {
+      errors.push(`quality: ${e}`);
+    }
+    for (const w of qc.warnings) {
+      const missingSection = REQUIRED_SECTIONS.some(
+        (section) => w === `missing required section: ${section}`,
+      );
+      (missingSection ? errors : warnings).push(`quality: ${w}`);
     }
   }
 

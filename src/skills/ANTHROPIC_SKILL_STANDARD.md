@@ -47,6 +47,21 @@ entries are NOT flagged.
 - body without markdown heading → warning
 - empty `scripts/`, `references/`, `assets/` → warning
 
+## Quality contract (`vf skills verify` / publish gate, #657)
+Skills proposed for `verified` status must meet the Anthropic skill-creator quality
+contract. These checks run during `vf skills validate` (as warnings) and escalate
+to blocking errors during `vf skills verify` and `checkPublishGate`:
+
+- **Body length**: > 500 lines → error; > 200 lines → warning to trim.
+  Keeps SKILL.md focused per the progressive-disclosure principle (<500 lines ideal).
+- **Required sections (H2/H3, case-insensitive)**: `When to use`, `When NOT to use`,
+  `Steps`, `Verification`. Missing sections warn at validation time and block
+  promotion to `verified`. Existing skills with missing sections get warnings
+  (not hard errors) during validation but must be fixed before promotion.
+- **ALL-CAPS instruction blocks**: Lines with ALL-CAPS directives (ALWAYS/NEVER/MUST)
+  are flagged. The skill-creator standard prefers reasoning-based instructions
+  explaining *why* over imperative edicts. Warns at all gates (non-blocking).
+
 ## Canonical source of truth
 `.vibeflow/skills/<name>/` is canonical. Engine dirs (`.claude/skills/`,
 `.agents/skills/`, `.github/skills/`) are generated views.

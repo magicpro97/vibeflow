@@ -6,6 +6,14 @@ import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 
 const ALLOWED_DIRS = new Set(["scripts", "references", "assets"]);
 
+// #657: skill-creator quality contract — required H2/H3 sections (case-insensitive match)
+export const REQUIRED_SECTIONS = ["when to use", "when not to use", "steps", "verification"];
+
+// #657: ALL-CAPS instruction anti-pattern — matches lines with 3+ ALL-CAPS words
+// meant to catch "ALWAYS", "NEVER", "MUST" directive blocks
+const ALL_CAPS_PAT =
+  /\b(?:ALWAYS|NEVER|MUST|MUST\s+NOT|SHOULD|SHOULD\s+NOT|REQUIRED|MANDATORY)\b.{0,40}\b(?:ALWAYS|NEVER|MUST|MUST\s+NOT|SHOULD|SHOULD\s+NOT|REQUIRED|MANDATORY)\b/;
+
 // Standard SKILL.md frontmatter fields per the Agent Skills spec
 // (https://agentskills.io/specification). Anthropic's own reference
 // validator (skills/skill-creator/scripts/quick_validate.py) uses the
@@ -43,7 +51,60 @@ export interface SkillValidationResult {
   warnings: string[];
 }
 
-function bodyAfterFrontmatter(text: string): string {
+/** #657: quality-contract result — separate from structural validation so the
+ * promotion gate can enforce it independently. Returns errors (block promotion)
+ * and warnings (flagged for curation review). */
+export interface QualityGateResult {
+  errors: string[];
+  warnings: string[];
+}
+
+export function checkQualityContract(body: string): QualityGateResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const lines = body.split("\n");
+  const lineCount = lines.length;
+
+  // Body lines check: > 500 error, > 200 warn
+  if (lineCount > 500) {
+    errors.push(`SKILL.md body is ${lineCount} lines (max 500)`);
+  } else if (lineCount > 200) {
+    warnings.push(`SKILL.md body is ${lineCount} lines (consider trimming to <= 200)`);
+  }
+
+  // Required sections check — warn by default (errors promoted by publish gate)
+  const headingLines = body
+    .split("\n")
+    .filter((l) => /^#{1,3}\s+/i.test(l))
+    .map((l) =>
+      l
+        .replace(/^#{1,3}\s+/i, "")
+        .trim()
+        .toLowerCase(),
+    );
+
+  for (const section of REQUIRED_SECTIONS) {
+    if (
+      !headingLines.some(
+        (h) => h === section || h.startsWith(`${section}:`) || h.startsWith(`${section} `),
+      )
+    ) {
+      warnings.push(`missing required section: ${section}`);
+    }
+  }
+
+  // ALL-CAPS instruction anti-pattern
+  if (ALL_CAPS_PAT.test(body)) {
+    warnings.push(
+      "ALL-CAPS instruction blocks detected (e.g. ALWAYS/NEVER/MUST). Prefer reasoning-based instructions explaining why.",
+    );
+  }
+
+  return { errors, warnings };
+}
+
+export function bodyAfterFrontmatter(text: string): string {
   if (!text.startsWith("---")) return text.trim();
   const end = text.indexOf("\n---", 3);
   if (end === -1) return "";
@@ -185,6 +246,13 @@ export function validateSkillDir(
   }
   if (body && !/^#{1,3}\s+/m.test(body)) {
     warnings.push("SKILL.md body should contain markdown headings");
+  }
+
+  // #657: skill-creator quality contract — body length, required sections, ALL-CAPS anti-pattern
+  if (body) {
+    const qc = checkQualityContract(body);
+    errors.push(...qc.errors);
+    warnings.push(...qc.warnings);
   }
 
   // Anti-pattern: task-specific content leak. A reusable skill must NOT
