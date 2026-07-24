@@ -120,7 +120,7 @@ function parseBlock(lines: string[]): Record<string, unknown> {
       i++;
       continue;
     }
-    const m = trimmed.match(/^([A-Za-z0-9_-]+):(.*)$/);
+    const m = trimmed.match(/^([A-Za-z0-9_.-]+):(.*)$/);
     if (!m || m[1] === undefined) {
       i++;
       continue;

@@ -1,7 +1,9 @@
-export function skillTemplate(name: string): string {
+export function skillTemplate(name: string, opts?: { scope?: string }): string {
+  const scopeLine = opts?.scope ? `scope: ${opts.scope}` : "scope: common";
   return [
     "---",
     `name: ${name}`,
+    scopeLine,
     "description: One-line summary of what this skill does and when to apply it.",
     "status: draft",
     "capabilities:",
@@ -29,10 +31,12 @@ export function skillTemplate(name: string): string {
   ].join("\n");
 }
 
-export function draftSkillTemplate(name: string): string {
+export function draftSkillTemplate(name: string, opts?: { scope?: string }): string {
+  const scopeLine = opts?.scope ? `scope: ${opts.scope}` : "scope: common";
   return [
     "---",
     `name: ${name}`,
+    scopeLine,
     "description: One-line summary of the reusable procedure this skill captures.",
     "status: draft",
     "triggers:",

@@ -1,5 +1,5 @@
 export type Engine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
-
+/**
 /**
  * Canonical engine priority. Single source of truth for "which engine
  * wins when more than one is ready?" — also used as the default-arg
@@ -136,6 +136,8 @@ export interface WorkflowState {
 }
 
 // --- Skills (Anthropic skill-creator standard: SKILL.md folder) ---
+export type SkillScope = "common" | "organization" | "project" | "adapter";
+
 export type SkillStatus =
   | "verified"
   | "enriched"
@@ -157,6 +159,12 @@ export interface Skill {
   description: string;
   version?: string;
   status: SkillStatus;
+  /** #655: scope classifies how reusable this skill is. */
+  scope?: SkillScope;
+  /** #655: for project-scoped skills, the repo/project identifier. */
+  projectId?: string;
+  /** #655: names of skills this skill extends/inherits from. */
+  extends?: string[];
   capabilities?: string[];
   triggers?: string[];
   /** #543: repo = always-on project law (injected every dispatch); knowledge (default) = keyword-gated. */

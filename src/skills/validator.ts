@@ -22,7 +22,14 @@ const STANDARD_FRONTMATTER = new Set([
   "compatibility",
   "type",
   "mcp",
+  "scope",
+  "project.id",
+  "extends",
 ]);
+
+const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
+
+const HARDCODED_PATH_PAT = /\/Users\/\w+|C:\\Users\\\w+|\/home\/\w+/;
 
 const NAME_MAX = 64;
 const DESCRIPTION_MAX = 1024;
@@ -138,6 +145,26 @@ export function validateSkillDir(
     }
   }
 
+  // #655: scope validation — warn on unrecognized scope values.
+  if (data.scope !== undefined) {
+    const raw = typeof data.scope === "string" ? data.scope.trim().toLowerCase() : "";
+    if (!VALID_SCOPES.has(raw)) {
+      warnings.push(
+        `frontmatter.scope must be one of: common, organization, project, adapter (got "${raw}")`,
+      );
+    }
+  }
+
+  // #655: project.id is valid only when scope=project or scope=adapter.
+  if (data["project.id"] !== undefined) {
+    const rawScope = typeof data.scope === "string" ? data.scope.trim().toLowerCase() : "";
+    if (rawScope !== "project" && rawScope !== "adapter") {
+      warnings.push(
+        "frontmatter.project.id is only meaningful with scope=project or scope=adapter",
+      );
+    }
+  }
+
   // Warn (not error) on frontmatter keys outside the spec's standard set,
   // so typos surface without breaking existing skills that carry legacy
   // keys (status/version/triggers/requires/when_to_load).
@@ -177,6 +204,16 @@ export function validateSkillDir(
     if (taskLeaks && taskLeaks.length > 0) {
       warnings.push(
         `task-specific content leak: skill body contains ${taskLeaks.length} concrete requirement ID(s) (e.g. ${taskLeaks.slice(0, 3).join(", ")}). A reusable skill should use placeholders like {{task.requirement_ids}} instead of embedded IDs from a sample task.`,
+      );
+    }
+  }
+
+  // #655: hardcoded path detection for common-scoped skills at trust boundary.
+  if (data.scope === "common" && body) {
+    const matches = body.match(HARDCODED_PATH_PAT);
+    if (matches && matches.length > 0) {
+      warnings.push(
+        `hardcoded local path in common skill body: ${matches.slice(0, 3).join(", ")} — common skills must not embed repo-specific paths`,
       );
     }
   }

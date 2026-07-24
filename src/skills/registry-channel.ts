@@ -157,6 +157,9 @@ export function parseMarketplace(
       description: typeof e.description === "string" ? e.description : undefined,
       status: e.status,
       path: typeof e.path === "string" ? e.path : undefined,
+      scope: typeof e.scope === "string" ? e.scope : undefined,
+      projectId: typeof e["project.id"] === "string" ? e["project.id"] : undefined,
+      extends: Array.isArray(e.extends) ? e.extends.map(String) : undefined,
     });
   }
   return { skills, errors };
