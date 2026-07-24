@@ -41,6 +41,7 @@ export const SKILL_MIRRORS: string[] = [
   ENGINE_CONFIGS.claude.skillRoot,
   ENGINE_CONFIGS.codex.skillRoot,
   ENGINE_CONFIGS.copilot.skillRoot,
+  ENGINE_CONFIGS.opencode.skillRoot,
 ];
 
 // ── Public options ─────────────────────────────────────────────────────────

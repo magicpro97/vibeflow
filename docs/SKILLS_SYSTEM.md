@@ -37,6 +37,7 @@ Mirrors (regenerated from the canonical store by `vf skills sync`, see
 .claude/skills/          # Claude mirror (reads SKILL.md directly)
 .agents/skills/          # Codex / cross-tool mirror
 .github/skills/          # Copilot mirror
+.opencode/skills/        # OpenCode mirror
 ```
 
 `SKILL.md` must contain YAML frontmatter and follow the Anthropic `skill-creator`
