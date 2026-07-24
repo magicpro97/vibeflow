@@ -141,6 +141,47 @@ const badOrigin: SafeSkill = {
 };
 assert("project-local origin valid", validateSkill(badOrigin).length === 0);
 
+// ── 4b. Registry badge display helpers ──
+
+function registryBadge(registry?: { id: string; version: string; pinned: boolean }): string {
+  if (!registry) return "";
+  return `Registry: ${registry.id} · v${registry.version} · pinned`;
+}
+
+assert(
+  "registry badge rendered",
+  registryBadge({ id: "platform", version: "1.2.0", pinned: true }) ===
+    "Registry: platform · v1.2.0 · pinned",
+);
+assert("no registry returns empty", registryBadge(undefined) === "");
+assert(
+  "registry badge with different id",
+  registryBadge({ id: "data", version: "0.5.0", pinned: true }).startsWith("Registry: data"),
+);
+
+// ── 4c. SafeSkill with registry passes validation ──
+
+function validateSkillWithRegistry(
+  s: SafeSkill & { registry?: { id: string; version: string; pinned: boolean } },
+): string[] {
+  const errs = validateSkill(s);
+  if (s.registry) {
+    if (!s.registry.id) errs.push("registry.id required");
+    if (!s.registry.version) errs.push("registry.version required");
+  }
+  return errs;
+}
+
+const registrySkill: SafeSkill & { registry: { id: string; version: string; pinned: boolean } } = {
+  name: "registry-skill",
+  description: "from registry",
+  origin: "shared",
+  status: "verified",
+  securityScan: "pass",
+  registry: { id: "platform", version: "1.0.0", pinned: true },
+};
+assert("registry skill passes validation", validateSkillWithRegistry(registrySkill).length === 0);
+
 const badScan: SafeSkill = {
   name: "x",
   description: "x",

@@ -246,4 +246,5 @@ export interface SafeSkill {
   status: SkillStatus;
   origin: "project-local" | "shared";
   securityScan: ScanStatus;
+  registry?: { id: string; version: string; pinned: boolean };
 }

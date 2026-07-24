@@ -26,6 +26,7 @@ import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { toSafeSkills } from "./skills/api-types.js";
 import { sharedCatalogDir } from "./skills/catalog.js";
+import { parseRegistryLock } from "./skills/registry-channel.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
 import { validateSkillRoots } from "./skills/validator.js";
@@ -177,9 +178,10 @@ export function startServer(
         });
         const validation = validateSkillRoots(activeRepo);
         const skills = discoverSkills(activeRepo);
+        const lock = parseRegistryLock(activeRepo);
         return Response.json({
           ok: true,
-          skills: toSafeSkills(skills, sharedCatalogDir()),
+          skills: toSafeSkills(skills, sharedCatalogDir(), lock),
           needs,
           validation: { errors: validation.errors, warnings: validation.warnings },
         });
