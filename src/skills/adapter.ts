@@ -50,6 +50,7 @@ export function mergeBodies(baseBody: string, adapterBody: string): string {
 
   const baseSections = splitSections(baseBody);
   if (!baseSections.length) return adapterBody.trim();
+  if (baseSections.every((section) => !section.heading)) return adapterBody.trim();
 
   const adapterByHeading = new Map<string, string>();
   for (const s of adapterSections) {
@@ -59,12 +60,12 @@ export function mergeBodies(baseBody: string, adapterBody: string): string {
   const out: string[] = [];
   const replaced = new Set<number>();
 
-  for (const bs of baseSections) {
+  for (const [i, bs] of baseSections.entries()) {
     const key = normalizeHeading(bs.heading);
     const override = adapterByHeading.get(key);
     if (override !== undefined) {
       out.push(`${bs.heading}\n${override}`);
-      replaced.add(baseSections.indexOf(bs));
+      replaced.add(i);
     } else {
       out.push(`${bs.heading}\n${bs.body}`);
     }
@@ -94,39 +95,27 @@ interface Section {
 }
 
 function splitSections(body: string): Section[] {
-  const lines = body.split("\n");
+  if (!body.trim()) return [];
   const sections: Section[] = [];
   let currentHeading = "";
   let currentBody: string[] = [];
-  let inHeading = false;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const headingMatch = trimmed.match(/^(#{1,2})\s+(.+)$/);
+  for (const line of body.split("\n")) {
+    const headingMatch = line.trim().match(/^(#{1,2})\s+(.+)$/);
     if (headingMatch) {
-      if (currentHeading) {
-        sections.push({
-          heading: currentHeading,
-          body: currentBody.join("\n").trim(),
-        });
+      if (currentHeading || currentBody.length) {
+        sections.push({ heading: currentHeading, body: currentBody.join("\n").trim() });
       }
       currentHeading = line;
       currentBody = [];
-      inHeading = true;
-    } else if (inHeading) {
-      currentBody.push(line);
     } else {
-      // Content before any heading — attach to first heading or discard
+      currentBody.push(line);
     }
   }
 
-  if (currentHeading) {
-    sections.push({
-      heading: currentHeading,
-      body: currentBody.join("\n").trim(),
-    });
+  if (currentHeading || currentBody.length) {
+    sections.push({ heading: currentHeading, body: currentBody.join("\n").trim() });
   }
-
   return sections;
 }
 
@@ -211,7 +200,7 @@ export function resolveAdapter(
       if (!_existsSync(base.path)) throw new Error("SKILL.md not found");
       const raw = _readFileSync(base.path, "utf8");
       const parsedBase = parseFrontmatter(raw);
-      baseBody = parsedBase.body;
+      baseBody = base.resolvedBody ?? parsedBase.body;
       baseFm = parsedBase.data;
     } catch {
       warnings.push(
