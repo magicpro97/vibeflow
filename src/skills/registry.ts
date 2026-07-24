@@ -14,6 +14,7 @@ import { parseFrontmatter } from "../frontmatter.js";
 import type { UserMcpServer } from "../tools/index.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { sharedCatalogDir } from "./catalog.js";
+import { resolveAllAdapters } from "./adapter.js";
 
 /**
  * Directories that may contain `<name>/SKILL.md` folders.
@@ -237,7 +238,17 @@ export function discoverSkills(
     // shared catalog inaccessible — continue with local-only
   }
 
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const collected = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // #656: resolve adapter skills (extends) — load base, merge body
+  const resolved = resolveAllAdapters(collected);
+
+  // Log adapter warnings to stderr so they surface during discovery
+  for (const w of resolved.warnings) {
+    console.error(`[skills] ${w}`);
+  }
+
+  return resolved.skills;
 }
 
 /** #552: collect every non-deprecated skill's mcp block into a {name → UserMcpServer} map,

@@ -120,6 +120,35 @@ project.id: my-org/my-repo
 extends: [common-test-runner]
 ```
 
+### Adapter pattern (`extends:` — #656)
+
+Adapter-scoped skills can declare `extends: [<common-skill>@<version>]` to
+inherit and override a base skill without duplicating its content.
+
+**Resolution** (runs in `discoverSkills`):
+
+1. Base skill loaded first from the same pool.
+2. Frontmatter: adapter fields shallow-merge on top of base (adapter wins).
+3. Body: H1/H2 sections from the adapter replace matching sections in the base.
+   Sections not present in the base are appended. Non-heading content (text
+   before the first heading) is replaced entirely.
+4. Adapter's `dir`/`path` remain unchanged → base skill source is never
+   modified.
+5. `resolvedBody` is set on the Skill object with the merged result.
+
+**Version pinning:**
+
+- `extends: [common-test-runner@1.2.3]` — pins exact version. Warnings fire
+  when installed base version differs.
+- `extends: [common-test-runner]` — no pin. A nudge warning suggests adding
+  `@<version>` when the base declares one.
+
+**Missing base:** produces an actionable warning; adapter body is used as-is.
+**Invalid extends format:** produces a warning and the entry is skipped.
+
+Adapters are transparent to consumers: the merged body is what agents see,
+but the adapter file (`SKILL.md`) still holds only the delta.
+
 ### `type: repo | knowledge` (always-on project law)
 
 The optional `type` frontmatter field sets how a skill reaches the engine:

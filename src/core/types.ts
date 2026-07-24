@@ -183,6 +183,12 @@ export interface Skill {
   dir: string;
   /** Absolute path to the skill's SKILL.md. */
   path: string;
+  /**
+   * #656: resolved merged body when this skill extends a base skill.
+   * Set by adapter resolution after discoverSkills. Undefined for
+   * skills without extends, or when the base is missing/unresolvable.
+   */
+  resolvedBody?: string;
 }
 
 export interface SkillMatch {
