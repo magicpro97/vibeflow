@@ -1,6 +1,6 @@
 // size-waiver: #656 — adapter resolution: load base, merge frontmatter + body
 
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Skill } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
@@ -56,7 +56,7 @@ export function mergeBodies(baseBody: string, adapterBody: string): string {
   }
 
   const out: string[] = [];
-  let replaced = new Set<number>();
+  const replaced = new Set<number>();
 
   for (let i = 0; i < baseSections.length; i++) {
     const bs = baseSections[i];
