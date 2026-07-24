@@ -16,6 +16,10 @@ export interface MarketplaceSkill {
   description?: string;
   status: string;
   path?: string;
+  /** #655: declared scope in the published marketplace entry. */
+  scope?: string;
+  projectId?: string;
+  extends?: string[];
 }
 
 export interface ScanSummary {

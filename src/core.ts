@@ -63,6 +63,7 @@ export type {
   Attachment,
   WorkflowState,
   SkillStatus,
+  SkillScope,
   SkillRequires,
   Skill,
   SkillMatch,

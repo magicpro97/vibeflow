@@ -1,5 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { SkillScope } from "../core.js";
+
+// Deep-imports kept below to avoid circular re-exports.
 import {
   CTX_DIR,
   type Skill,
@@ -110,6 +113,15 @@ function asRequires(v: unknown): SkillRequires | undefined {
   return Object.keys(requires).length ? requires : undefined;
 }
 
+const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
+
+function parseScope(data: Record<string, unknown>): SkillScope | undefined {
+  const raw = data.scope;
+  if (typeof raw !== "string") return undefined;
+  const s = raw.trim().toLowerCase() as SkillScope;
+  return VALID_SCOPES.has(s) ? s : undefined;
+}
+
 /**
  * Parse one SKILL.md into a Skill. Returns null when the required `name` or
  * `description` frontmatter fields are missing or malformed (skill-creator standard).
@@ -163,6 +175,9 @@ export function parseSkill(
     description,
     version: typeof data.version === "string" ? data.version : undefined,
     status,
+    scope: parseScope(data),
+    projectId: typeof data["project.id"] === "string" ? data["project.id"].trim() : undefined,
+    extends: asStringArray(data.extends),
     capabilities: asStringArray(data.capabilities),
     triggers: asStringArray(data.triggers),
     type: data.type === "repo" ? "repo" : data.type === "knowledge" ? "knowledge" : undefined,

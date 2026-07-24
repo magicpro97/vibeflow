@@ -6,6 +6,9 @@ export interface SafeSkill {
   description: string;
   version?: string;
   status: string;
+  scope?: string;
+  projectId?: string;
+  extends?: string[];
   origin: "project-local" | "shared";
   securityScan: "not-scanned" | "pass" | "warn" | "blocked";
   /** Only set for installed pinned registry skills. */
@@ -37,6 +40,9 @@ export function toSafeSkills(skills: Skill[], sharedDir: string, lock?: Registry
     description: s.description,
     version: s.version,
     status: s.status,
+    scope: s.scope,
+    projectId: s.projectId,
+    extends: s.extends?.length ? s.extends : undefined,
     origin: s.dir.startsWith(prefix) ? "shared" : "project-local",
     securityScan: "not-scanned" as const,
     registry: registryMap.get(s.name) ?? undefined,

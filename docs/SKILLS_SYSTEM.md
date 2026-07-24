@@ -97,6 +97,29 @@ status: verified
 Instructions...
 ```
 
+### `scope: common | organization | project | adapter` (#655)
+
+The optional `scope` field classifies how reusable a skill is:
+
+- `common` (default when absent) — generic, applies to any project (e.g. "xlsx reader").
+- `organization` — team/org conventions (e.g. "deploy to our staging env").
+- `project` — repo-specific conventions. Contains hardcoded paths, branch names, or project IDs.
+  MUST set `project.id` (e.g. `project.id: my-org/my-repo`).
+- `adapter` — tool-specific shim (e.g. a MCP wrapper for a CLI).
+
+`project.id` is required when `scope: project | adapter`. `extends` declares
+skill names this skill inherits from (a flat list).
+
+Security boundary: `vf skills publish` rejects `scope: project` skills targeting
+a `common` registry channel, and detects hardcoded absolute paths (`/Users/…`,
+`C:\Users\…`) in common-scoped content.
+
+```yaml
+scope: project
+project.id: my-org/my-repo
+extends: [common-test-runner]
+```
+
 ### `type: repo | knowledge` (always-on project law)
 
 The optional `type` frontmatter field sets how a skill reaches the engine:
