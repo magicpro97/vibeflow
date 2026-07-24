@@ -271,6 +271,53 @@ describe("resolveAdapter", () => {
     });
     expect(warnings.some((w) => w.includes("cannot read"))).toBe(true);
   });
+
+  test("uses adapter body when base body is unavailable", () => {
+    const base: Skill = { ...baseSkill("no-body-base"), path: "/tmp/nobase/SKILL.md" };
+    const adapter: Skill = {
+      ...skill({ name: "own-body-adapter", extends: ["no-body-base"] }),
+      path: "/tmp/own-body-adapter/SKILL.md",
+    };
+    const { resolved } = resolveAdapter(adapter, [base, adapter], {
+      existsSync: (p: string) => p.includes("own-body-adapter"),
+      readFileSync: () => "---\n---\n\n## Steps\nAdapter only.",
+    });
+    expect(resolved.resolvedBody).toContain("Adapter only.");
+  });
+
+  test("adapter file read throws -> warning", () => {
+    const base: Skill = { ...baseSkill("err-base"), path: "/tmp/eb/SKILL.md" };
+    const adapter: Skill = {
+      ...skill({ name: "err-adapter", extends: ["err-base"] }),
+      path: "/tmp/err-adapter/SKILL.md",
+    };
+    const { warnings } = resolveAdapter(adapter, [base, adapter], {
+      existsSync: () => true,
+      readFileSync: (p: string) => {
+        if (p.includes("err-adapter")) throw new Error("permission denied");
+        return "---\ncapabilities: [read-cmd]\ntriggers: [trig-cmd]\n---\n";
+      },
+    });
+    expect(warnings.some((w) => w.includes("cannot read adapter body"))).toBe(true);
+  });
+
+  test("capabilities and triggers merged from frontmatter when skill object has none", () => {
+    const base: Skill = { ...baseSkill("fm-base"), path: "/tmp/fb/SKILL.md" };
+    const adapter: Skill = {
+      ...skill({ name: "fm-adapter", extends: ["fm-base"] }),
+      path: "/tmp/fm-adapter/SKILL.md",
+    };
+    const { resolved } = resolveAdapter(adapter, [base, adapter], {
+      existsSync: () => true,
+      readFileSync: (p: string) => {
+        if (p.includes("fm-adapter"))
+          return "---\ncapabilities:\n  - cap-a\ntriggers:\n  - trig-a\n---\n\n## Section\nAdapter.";
+        return "---\n---\n";
+      },
+    });
+    expect(resolved.capabilities).toEqual(["cap-a"]);
+    expect(resolved.triggers).toEqual(["trig-a"]);
+  });
 });
 
 describe("resolveAllAdapters", () => {
