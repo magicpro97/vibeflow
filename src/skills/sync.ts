@@ -2,6 +2,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -10,6 +11,7 @@ import {
 import { join, relative } from "node:path";
 import { ENGINES, type Engine, c } from "../core.js";
 import { sharedCatalogDir } from "./catalog.js";
+import { parseRegistryLock } from "./registry-channel.js";
 import { validateSkillDir } from "./validator.js";
 
 // Project-local canonical dir. Kept as an override/shadow layer on top of the
@@ -42,6 +44,8 @@ export type SyncMode = "pointer" | "full";
 export interface SyncSkillOptions {
   mode?: SyncMode;
   engines?: Engine[];
+  /** When true, also mirror every skill pinned in the project's registry lock. */
+  fromRegistry?: boolean;
 }
 
 export interface SkillSyncResult {
@@ -79,6 +83,42 @@ export function skillNames(
   const local = listDir(join(repo, CANONICAL));
   const shared = listDir(inject.catalogDir ?? sharedCatalogDir());
   return [...new Set([...local, ...shared])];
+}
+
+/** Extract skill names pinned/required from the project's registry lock.
+ *  Returns only names whose installed entry has a matching directory in the
+ *  shared catalog (~/.vibeflow/skills/). Missing entries produce actionable
+ *  errors.
+ *  ponytail: resolves from the shared catalog only. Extend to project-local
+ *  .vibeflow/skills/ when registry install writes there too. */
+export function requiredSkillNames(
+  repo: string,
+  inject: {
+    existsSync?: (path: string) => boolean;
+    readdirSync?: (path: string) => string[];
+    statSync?: (path: string) => { isDirectory(): boolean };
+    catalogDir?: string;
+  } = {},
+): { names: string[]; errors: string[] } {
+  const _exists = inject.existsSync ?? existsSync;
+  const lock = parseRegistryLock(repo);
+  const names: string[] = [];
+  const errors: string[] = [];
+  const catalog = inject.catalogDir ?? sharedCatalogDir();
+  for (const reg of lock.registries) {
+    for (const sk of reg.installed ?? []) {
+      if (names.includes(sk.name)) continue;
+      const catDir = join(catalog, sk.name);
+      if (_exists(catDir)) {
+        names.push(sk.name);
+      } else {
+        errors.push(
+          `"${sk.name}" (from registry "${reg.name}") pinned in lock but missing from catalog — run \`vf skills registry install ${reg.name}/${sk.name} --yes\``,
+        );
+      }
+    }
+  }
+  return { names, errors };
 }
 
 /** Resolve the source dir + its display path (project-local shadows the shared catalog). */
@@ -133,7 +173,16 @@ export function syncSkillMirrors(
   const warnings: string[] = [];
   const catalog = opts.catalogDir ?? sharedCatalogDir();
 
-  for (const name of skillNames(repo, { ...opts, catalogDir: catalog })) {
+  let names = skillNames(repo, { ...opts, catalogDir: catalog });
+  if (opts.fromRegistry) {
+    const reg = requiredSkillNames(repo, { ...opts, catalogDir: catalog });
+    if (reg.names.length) {
+      names = [...new Set([...names, ...reg.names])];
+    }
+    warnings.push(...reg.errors.map((e) => `registry-pinned: ${e}`));
+  }
+
+  for (const name of names) {
     const { dir: src, displayPath } = skillSrcDir(repo, name, catalog);
     const validation = validateSkillDir(src);
     if (!validation.ok) {
@@ -164,12 +213,26 @@ export function syncSkillMirrors(
 export function verifySkillSync(
   repo: string,
   engines?: Engine[],
-  opts: { catalogDir?: string } = {},
+  opts: { catalogDir?: string; fromRegistry?: boolean } = {},
 ): SkillSyncResult {
-  const mirrors = mirrorsFor(engines);
+  // When --from-registry is set and no explicit engine, verify ALL mirrors
+  const resolvedEngines: Engine[] | undefined =
+    opts.fromRegistry && (!engines || engines.length === 0)
+      ? (ENGINES as unknown as Engine[])
+      : engines;
+  const mirrors = mirrorsFor(resolvedEngines);
   const errors: string[] = [];
   const synced: string[] = [];
-  for (const name of skillNames(repo, { catalogDir: opts.catalogDir })) {
+  let names = skillNames(repo, { catalogDir: opts.catalogDir });
+  if (opts.fromRegistry) {
+    const reg = requiredSkillNames(repo, { catalogDir: opts.catalogDir });
+    if (reg.names.length) {
+      names = [...new Set([...names, ...reg.names])];
+    }
+    // Missing registry-pinned skills ARE errors, not just warnings
+    errors.push(...reg.errors.map((e) => `registry-pinned: ${e}`));
+  }
+  for (const name of names) {
     for (const mirror of mirrors) {
       const dst = join(repo, mirror, name, "SKILL.md");
       if (!existsSync(dst)) {

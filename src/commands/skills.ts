@@ -114,6 +114,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     // Default mode is "pointer". When --engine is omitted, sync only to the
     // copilot mirror (the default engine). Use --engine <name> for other engines.
     let mode: "pointer" | "full" = "pointer";
+    let fromRegistry = false;
     for (let i = 0; i < rest.length; i++) {
       const tok = rest[i];
       if (tok === "--mode") {
@@ -136,8 +137,9 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
         }
         mode = v;
       }
+      if (tok === "--from-registry") fromRegistry = true;
     }
-    const result = syncSkillMirrors(repo, { mode });
+    const result = syncSkillMirrors(repo, { mode, fromRegistry });
     for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
     for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
     if (result.ok) {
@@ -154,7 +156,22 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   }
   if (sub === "verify-sync") {
     // Parse --engine flag to filter which mirror to verify (defaults to copilot).
-    const result = verifySkillSync(repo);
+    // --from-registry also checks registry-pinned skills against ALL engine mirrors.
+    let fromRegistry = false;
+    const engines: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const tok = rest[i];
+      if (tok === "--from-registry") fromRegistry = true;
+      if (tok === "--engine") {
+        const v = rest[i + 1];
+        if (v) {
+          engines.push(v);
+        }
+      }
+    }
+    const result = verifySkillSync(repo, engines.length ? (engines as any) : undefined, {
+      fromRegistry,
+    });
     for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
     if (result.ok) {
       out("vf", c.green(`✔ all ${result.synced.length} mirror(s) in sync`));

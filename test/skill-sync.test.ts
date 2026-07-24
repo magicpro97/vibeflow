@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { syncSkillMirrors, verifySkillSync } from "../src/skills/sync";
+import { requiredSkillNames, syncSkillMirrors, verifySkillSync } from "../src/skills/sync";
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -214,3 +214,187 @@ describe("verifySkillSync", () => {
 // be exercised in unit tests without mocking node:fs. The branch
 // fires only on race conditions (file deleted between readdirSync and
 // statSync) or symlink loops, neither of which we can reliably trigger.
+
+describe("requiredSkillNames from registry lock", () => {
+  test("returns empty when no registries in lock", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-reg-empty-"));
+    dirs.push(repo);
+    const result = requiredSkillNames(repo);
+    expect(result.names).toEqual([]);
+    expect(result.errors).toEqual([]);
+  });
+
+  test("returns names from lock with matching catalog dirs", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-reg-ok-"));
+    dirs.push(repo);
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-reg-cat-"));
+    dirs.push(catalogDir);
+
+    // Write a lock file with an installed skill
+    const lockDir = join(repo, ".vibeflow");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      join(lockDir, "SKILL_REGISTRY.lock.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "test-reg",
+            url: "https://example.com/repo.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [{ name: "installed-skill", version: "1.0.0", commitOID: "a".repeat(40) }],
+          },
+        ],
+      }),
+    );
+    // Create matching catalog dir
+    mkdirSync(join(catalogDir, "installed-skill"), { recursive: true });
+
+    const result = requiredSkillNames(repo, { catalogDir });
+    expect(result.names).toEqual(["installed-skill"]);
+    expect(result.errors).toEqual([]);
+  });
+
+  test("reports errors when lock has installed skills missing from catalog", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-reg-miss-"));
+    dirs.push(repo);
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-reg-cat-miss-"));
+    dirs.push(catalogDir);
+
+    const lockDir = join(repo, ".vibeflow");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      join(lockDir, "SKILL_REGISTRY.lock.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "test-reg",
+            url: "https://example.com/repo.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [{ name: "missing-skill", version: "1.0.0", commitOID: "b".repeat(40) }],
+          },
+        ],
+      }),
+    );
+
+    const result = requiredSkillNames(repo, { catalogDir });
+    expect(result.names).toEqual([]);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toContain("missing-skill");
+    expect(result.errors[0]).toContain("registry install");
+  });
+});
+
+describe("syncSkillMirrors --from-registry", () => {
+  test("also mirrors registry-pinned skills alongside canonical ones", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-sync-reg-"));
+    dirs.push(repo);
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-sync-reg-cat-"));
+    dirs.push(catalogDir);
+
+    // A canonical skill in catalog
+    mkdirSync(join(catalogDir, "canonical-skill"), { recursive: true });
+    writeFileSync(
+      join(catalogDir, "canonical-skill", "SKILL.md"),
+      "---\nname: canonical-skill\ndescription: Canonical skill.\n---\n\n# Canonical\n\nActionable body content for validation. This is more than fifty characters long.\n",
+    );
+
+    // A registry-pinned skill in catalog
+    mkdirSync(join(catalogDir, "reg-pinned-skill"), { recursive: true });
+    writeFileSync(
+      join(catalogDir, "reg-pinned-skill", "SKILL.md"),
+      "---\nname: reg-pinned-skill\ndescription: Registry-pinned skill.\n---\n\n# Reg Pinned\n\nActionable body content for validation. This is more than fifty characters long.\n",
+    );
+
+    // Write lock file with reg-pinned-skill installed
+    const lockDir = join(repo, ".vibeflow");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      join(lockDir, "SKILL_REGISTRY.lock.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "my-reg",
+            url: "https://example.com/repo.git",
+            ref: "v1",
+            commitOID: "c".repeat(40),
+            installed: [{ name: "reg-pinned-skill", version: "1.0.0", commitOID: "c".repeat(40) }],
+          },
+        ],
+      }),
+    );
+
+    // Sync with --from-registry to claude + opencode mirrors
+    const result = syncSkillMirrors(repo, {
+      mode: "pointer",
+      engines: ["claude", "opencode"],
+      fromRegistry: true,
+      catalogDir,
+    });
+    expect(result.ok).toBe(true);
+    // Both canonical and registry-pinned should be mirrored
+    expect(existsSync(join(repo, ".claude", "skills", "canonical-skill", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(repo, ".claude", "skills", "reg-pinned-skill", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(repo, ".opencode", "skills", "canonical-skill", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(repo, ".opencode", "skills", "reg-pinned-skill", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+});
+
+describe("verifySkillSync --from-registry", () => {
+  test("fails when registry-pinned skill has no mirror stub", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-verify-reg-"));
+    dirs.push(repo);
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-verify-reg-cat-"));
+    dirs.push(catalogDir);
+
+    // Canonical skill
+    mkdirSync(join(catalogDir, "my-skill"), { recursive: true });
+    writeFileSync(
+      join(catalogDir, "my-skill", "SKILL.md"),
+      "---\nname: my-skill\ndescription: Test skill.\n---\n\n# My Skill\n\nActionable body content that is long enough for validation purposes.\n",
+    );
+    // Mirror it to claude only
+    syncSkillMirrors(repo, { mode: "pointer", engines: ["claude"], catalogDir });
+
+    // Write lock with a DIFFERENT reg-pinned skill that has NO mirror
+    const lockDir = join(repo, ".vibeflow");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      join(lockDir, "SKILL_REGISTRY.lock.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "other-reg",
+            url: "https://example.com/repo.git",
+            ref: "v1",
+            commitOID: "d".repeat(40),
+            installed: [{ name: "orphan-skill", version: "1.0.0", commitOID: "d".repeat(40) }],
+          },
+        ],
+      }),
+    );
+    // Create catalog dir for orphan skill so it's not a "missing from catalog" error
+    mkdirSync(join(catalogDir, "orphan-skill"), { recursive: true });
+    writeFileSync(
+      join(catalogDir, "orphan-skill", "SKILL.md"),
+      "---\nname: orphan-skill\ndescription: Orphan test.\n---\n\n# Orphan\n\nActionable body content for validation. This is more than fifty characters long.\n",
+    );
+
+    const result = verifySkillSync(repo, ["claude", "opencode"], {
+      fromRegistry: true,
+      catalogDir,
+    });
+    // Should have errors for orphan-skill missing from opencode mirror
+    expect(result.ok).toBe(false);
+    expect(
+      result.errors.some((e) => e.includes("orphan-skill") && e.includes("SKILL.md missing")),
+    ).toBe(true);
+  });
+});

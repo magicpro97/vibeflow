@@ -37,16 +37,21 @@ describe("skill-mirror cross-file invariant (C2)", () => {
     SKILL_MIRRORS: readonly string[];
   };
 
-  test("SKILL_MIRRORS is exported and has three entries (one per engine)", () => {
+  test("SKILL_MIRRORS is exported and has four entries (one per engine)", () => {
     expect(Array.isArray(SKILL_MIRRORS)).toBe(true);
-    expect(SKILL_MIRRORS.length).toBe(3);
+    expect(SKILL_MIRRORS.length).toBe(4);
   });
 
-  test("SKILL_MIRRORS covers the three supported engines", () => {
+  test("SKILL_MIRRORS covers the four supported engines", () => {
     // The engine roots are derived from `ENGINE_CONFIGS[*].skillRoot` in
     // workflow-artifacts.ts. Pin the list of expected values here so a
     // refactor that drops an engine is caught immediately.
-    const expected = new Set([".claude/skills", ".agents/skills", ".github/skills"]);
+    const expected = new Set([
+      ".claude/skills",
+      ".agents/skills",
+      ".github/skills",
+      ".opencode/skills",
+    ]);
     const actual = new Set(SKILL_MIRRORS as string[]);
     expect(actual).toEqual(expected);
   });

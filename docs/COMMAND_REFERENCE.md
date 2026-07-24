@@ -178,7 +178,9 @@ vf skills resolve          # derive NEEDS from scan + intake; satisfied vs must-
 vf skills validate         # validate every canonical skill against the Anthropic standard
 vf skills sync             # sync .vibeflow/skills → engine mirrors (default mode: pointer)
 vf skills sync --mode pointer|full   # pointer = stub SKILL.md pointing at canonical; full = copy
-vf skills verify-sync      # verify each mirror has a SKILL.md for every canonical skill
+vf skills sync --from-registry       # also mirror registry-pinned skills from the lock file
+vf skills verify-sync                # verify each mirror has a SKILL.md for every canonical skill
+vf skills verify-sync --from-registry # also verify registry-pinned skills have mirrors
 vf skills import <dir>     # import a local skill dir into .vibeflow/skills/
 vf skills import context7:<query>  # import a Context7 skill (approval-gated) into the canonical store
 ```
@@ -225,12 +227,13 @@ acquisition command. Imported skills start `experimental` and must be validated 
 approved before promotion to `verified`.
 
 The canonical store is `.vibeflow/skills/<name>/` (one `SKILL.md` plus optional
-`scripts/`, `references/`, `assets/`). The three engine mirrors
-(`.claude/skills/`, `.agents/skills/`, `.github/skills/`) are kept in sync by
+`scripts/`, `references/`, `assets/`). The four engine mirrors
+(`.claude/skills/`, `.agents/skills/`, `.github/skills/`, `.opencode/skills/`) are kept in sync by
 `src/skills/sync.ts`: `pointer` mode writes a stub `SKILL.md` that points at the
 canonical file (default; cheap, no duplication); `full` mode copies the whole skill
 tree. `vf skills verify-sync` checks every canonical skill has a matching
-`SKILL.md` in every mirror.
+`SKILL.md` in every mirror. `--from-registry` extends both commands to also
+include skills pinned in the registry lock file (`SKILL_REGISTRY.lock.json`).
 
 ## Optional tools (code navigation)
 
