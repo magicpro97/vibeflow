@@ -4,8 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mergeBodies, resolveAdapter, resolveAllAdapters } from "../src/skills/adapter.js";
 import type { Skill } from "../src/core.js";
+import { mergeBodies, resolveAdapter, resolveAllAdapters } from "../src/skills/adapter.js";
 
 function tmpDir(): string {
   const d = mkdtempSync(join(tmpdir(), "vf-adapter-"));
@@ -40,10 +40,7 @@ function baseSkill(name: string, version?: string): Skill {
   return skill({ name, version });
 }
 
-function box(
-  b: string,
-  sep = "",
-): { body?: string; bodyLines?: string[] } {
+function box(b: string, sep = ""): { body?: string; bodyLines?: string[] } {
   const lines = b.split("\n");
   return {
     body: b,
@@ -86,8 +83,7 @@ describe("mergeBodies", () => {
   });
 
   test("adapter replaces one section and appends another", () => {
-    const adapterBody =
-      "## Steps\n1. Step A.\n\n## Config\nkey=value.\n";
+    const adapterBody = "## Steps\n1. Step A.\n\n## Config\nkey=value.\n";
     const result = mergeBodies(baseBody, adapterBody);
     expect(result).toContain("1. Step A.");
     expect(result).not.toContain("1. Do X.");
@@ -149,8 +145,10 @@ describe("resolveAdapter", () => {
     const { resolved, warnings } = resolveAdapter(adapter, [base, adapter], {
       existsSync: () => true,
       readFileSync: (p: string) => {
-        if (p.includes("base-tool")) return "---\nname: base-tool\ndescription: base\n---\n\n# Base Tool\n\nBase steps.\n\n## Steps\nDo base.\n";
-        if (p.includes("my-adapter")) return "---\nname: my-adapter\ndescription: adapter\nextends: [base-tool]\n---\n\n## Steps\nDo adapter.\n";
+        if (p.includes("base-tool"))
+          return "---\nname: base-tool\ndescription: base\n---\n\n# Base Tool\n\nBase steps.\n\n## Steps\nDo base.\n";
+        if (p.includes("my-adapter"))
+          return "---\nname: my-adapter\ndescription: adapter\nextends: [base-tool]\n---\n\n## Steps\nDo adapter.\n";
         return "";
       },
     });
@@ -277,10 +275,7 @@ describe("resolveAdapter", () => {
 
 describe("resolveAllAdapters", () => {
   test("passes through skills without extends", () => {
-    const pool = [
-      skill({ name: "a" }),
-      skill({ name: "b" }),
-    ];
+    const pool = [skill({ name: "a" }), skill({ name: "b" })];
     const { skills, warnings } = resolveAllAdapters(pool);
     expect(warnings).toEqual([]);
     expect(skills).toHaveLength(2);
@@ -376,10 +371,7 @@ describe("resolveAllAdapters", () => {
   });
 
   test("output sorted by name", () => {
-    const pool = [
-      skill({ name: "z-skill" }),
-      skill({ name: "a-skill" }),
-    ];
+    const pool = [skill({ name: "z-skill" }), skill({ name: "a-skill" })];
     const { skills } = resolveAllAdapters(pool);
     expect(skills[0]?.name).toBe("a-skill");
     expect(skills[1]?.name).toBe("z-skill");
