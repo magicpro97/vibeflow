@@ -281,6 +281,7 @@ export function verify(
     journal?: boolean;
     coverage?: boolean;
     allowUnverifiedEvidence?: boolean;
+    catalogDir?: string;
   } = {},
 ): number {
   let failed = 0;
@@ -356,7 +357,7 @@ export function verify(
 
   // Registry lock integrity + mirror completeness (issue #654).
   // Normal repos without a lock file pass silently.
-  failed += verifyLockGate(base).failed;
+  failed += verifyLockGate(base, { catalogDir: inject.catalogDir }).failed;
 
   if (failed > 0) {
     out("vf");

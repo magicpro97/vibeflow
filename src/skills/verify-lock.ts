@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { c } from "../core.js";
 import { out } from "../logbus.js";
 import { sharedCatalogDir } from "./catalog.js";
@@ -181,8 +181,9 @@ export function verifyLockMirrorCompleteness(
       if (!s || typeof s !== "object") continue;
       const skill = s as Record<string, unknown>;
       const skillName = typeof skill.name === "string" ? skill.name : "(unnamed)";
-      const catDir = join(catalog, skillName);
-      if (!existsSync(catDir)) {
+      const catDir = resolve(catalog, skillName);
+      const rootDir = resolve(catalog);
+      if (!catDir.startsWith(`${rootDir}/`) || !existsSync(catDir)) {
         errors.push(
           `"${skillName}" (from registry "${regName}") pinned in lock but missing from catalog — run \`vf skills registry install ${regName}/${skillName} --yes\``,
         );
