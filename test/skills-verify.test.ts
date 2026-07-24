@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { skills } from "../src/commands/skills.js";
-import { setSkillStatus, setStatusInText } from "../src/skills/verify.js";
 import type { LockVerifyResult } from "../src/skills/verify-lock.js";
+import { setSkillStatus, setStatusInText } from "../src/skills/verify.js";
 
 const CTX_DIR = ".vibeflow";
 
@@ -223,7 +223,7 @@ describe("skills verify-lock command", () => {
       return skills("verify-lock", rest);
     } finally {
       process.chdir(orig);
-      if (origHome === undefined) delete process.env.VF_SKILLS_HOME;
+      if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
       else process.env.VF_SKILLS_HOME = origHome;
     }
   }
@@ -241,7 +241,6 @@ describe("skills verify-lock command", () => {
     mkLock({ schemaVersion: 1, registries: [] });
     expect(run([])).toBe(0);
   });
-
 
   test("fails on malformed lock file", () => {
     mkdirSync(join(base, ".vibeflow"), { recursive: true });

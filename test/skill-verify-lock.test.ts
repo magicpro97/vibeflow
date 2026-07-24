@@ -1,8 +1,8 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
 import {
   verifyLockGate,
   verifyLockMarketplaceSchemas,
@@ -501,10 +501,20 @@ describe("verifyLockMarketplaceSchemas", () => {
       join(repo, ".vibeflow", "SKILL_REGISTRY.lock.json"),
       JSON.stringify({
         schemaVersion: 1,
-        registries: [{ name: "my-reg", url: "https://example.com/r.git", ref: "v1", commitOID: "a".repeat(40) }],
+        registries: [
+          {
+            name: "my-reg",
+            url: "https://example.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+          },
+        ],
       }),
     );
-    const hash = createHash("sha256").update("https://example.com/r.git").digest("hex").slice(0, 16);
+    const hash = createHash("sha256")
+      .update("https://example.com/r.git")
+      .digest("hex")
+      .slice(0, 16);
     const cacheDir = join(cacheHome, ".vibeflow", "skill-registries", hash);
     mkdirSync(cacheDir, { recursive: true });
     const r = verifyLockMarketplaceSchemas(repo, { homedir: () => cacheHome });
@@ -522,10 +532,20 @@ describe("verifyLockMarketplaceSchemas", () => {
       join(repo, ".vibeflow", "SKILL_REGISTRY.lock.json"),
       JSON.stringify({
         schemaVersion: 1,
-        registries: [{ name: "my-reg", url: "https://example.com/r.git", ref: "v1", commitOID: "a".repeat(40) }],
+        registries: [
+          {
+            name: "my-reg",
+            url: "https://example.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+          },
+        ],
       }),
     );
-    const hash = createHash("sha256").update("https://example.com/r.git").digest("hex").slice(0, 16);
+    const hash = createHash("sha256")
+      .update("https://example.com/r.git")
+      .digest("hex")
+      .slice(0, 16);
     const cacheDir = join(cacheHome, ".vibeflow", "skill-registries", hash);
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(join(cacheDir, "marketplace.json"), "not json");
@@ -544,10 +564,20 @@ describe("verifyLockMarketplaceSchemas", () => {
       join(repo, ".vibeflow", "SKILL_REGISTRY.lock.json"),
       JSON.stringify({
         schemaVersion: 1,
-        registries: [{ name: "my-reg", url: "https://example.com/r.git", ref: "v1", commitOID: "a".repeat(40) }],
+        registries: [
+          {
+            name: "my-reg",
+            url: "https://example.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+          },
+        ],
       }),
     );
-    const hash = createHash("sha256").update("https://example.com/r.git").digest("hex").slice(0, 16);
+    const hash = createHash("sha256")
+      .update("https://example.com/r.git")
+      .digest("hex")
+      .slice(0, 16);
     const cacheDir = join(cacheHome, ".vibeflow", "skill-registries", hash);
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(
@@ -572,10 +602,20 @@ describe("verifyLockMarketplaceSchemas", () => {
       join(repo, ".vibeflow", "SKILL_REGISTRY.lock.json"),
       JSON.stringify({
         schemaVersion: 1,
-        registries: [{ name: "my-reg", url: "https://example.com/r.git", ref: "v1", commitOID: "a".repeat(40) }],
+        registries: [
+          {
+            name: "my-reg",
+            url: "https://example.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+          },
+        ],
       }),
     );
-    const hash = createHash("sha256").update("https://example.com/r.git").digest("hex").slice(0, 16);
+    const hash = createHash("sha256")
+      .update("https://example.com/r.git")
+      .digest("hex")
+      .slice(0, 16);
     const cacheDir = join(cacheHome, ".vibeflow", "skill-registries", hash);
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(join(cacheDir, "marketplace.json"), JSON.stringify({ schemaVersion: 1 }));
@@ -594,10 +634,20 @@ describe("verifyLockMarketplaceSchemas", () => {
       join(repo, ".vibeflow", "SKILL_REGISTRY.lock.json"),
       JSON.stringify({
         schemaVersion: 1,
-        registries: [{ name: "my-reg", url: "https://example.com/r.git", ref: "v1", commitOID: "a".repeat(40) }],
+        registries: [
+          {
+            name: "my-reg",
+            url: "https://example.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+          },
+        ],
       }),
     );
-    const hash = createHash("sha256").update("https://example.com/r.git").digest("hex").slice(0, 16);
+    const hash = createHash("sha256")
+      .update("https://example.com/r.git")
+      .digest("hex")
+      .slice(0, 16);
     const cacheDir = join(cacheHome, ".vibeflow", "skill-registries", hash);
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(join(cacheDir, "marketplace.json"), '"string"');
@@ -616,13 +666,26 @@ describe("verifyLockMarketplaceSchemas", () => {
       join(repo, ".vibeflow", "SKILL_REGISTRY.lock.json"),
       JSON.stringify({
         schemaVersion: 1,
-        registries: [{ name: "my-reg", url: "https://example.com/r.git", ref: "v1", commitOID: "a".repeat(40) }],
+        registries: [
+          {
+            name: "my-reg",
+            url: "https://example.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+          },
+        ],
       }),
     );
-    const hash = createHash("sha256").update("https://example.com/r.git").digest("hex").slice(0, 16);
+    const hash = createHash("sha256")
+      .update("https://example.com/r.git")
+      .digest("hex")
+      .slice(0, 16);
     const cacheDir = join(cacheHome, ".vibeflow", "skill-registries", hash);
     mkdirSync(cacheDir, { recursive: true });
-    writeFileSync(join(cacheDir, "marketplace.json"), JSON.stringify({ schemaVersion: 99, skills: [] }));
+    writeFileSync(
+      join(cacheDir, "marketplace.json"),
+      JSON.stringify({ schemaVersion: 99, skills: [] }),
+    );
     const r = verifyLockMarketplaceSchemas(repo, { homedir: () => cacheHome });
     expect(r.ok).toBe(false);
     expect(r.errors.some((e) => e.includes("unsupported schemaVersion"))).toBe(true);

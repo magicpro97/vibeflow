@@ -199,7 +199,10 @@ export interface LockVerifyGateResult {
   failed: number;
 }
 
-export function verifyLockGate(base: string, opts: { catalogDir?: string } = {}): LockVerifyGateResult {
+export function verifyLockGate(
+  base: string,
+  opts: { catalogDir?: string } = {},
+): LockVerifyGateResult {
   const lockP = join(base, ".vibeflow", "SKILL_REGISTRY.lock.json");
   let failed = 0;
   let lockOk = true;
