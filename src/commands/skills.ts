@@ -22,7 +22,9 @@ import {
   draftSkillName,
   draftSkillTemplate,
   existsSync,
+  handleDomainSubcommand,
   handleRegistrySubcommand,
+  handleTelemetrySubcommand,
   importSkillFromDir,
   importSkillsFromParent,
   join,
@@ -31,11 +33,9 @@ import {
   out,
   readFileSync,
   readState,
-  readTelemetry,
   recordSkillResolution,
   renderSkillIndex,
   renderSkillNeeds,
-  renderTelemetry,
   resolveSkillNeeds,
   scanRepo,
   skillTemplate,
@@ -105,21 +105,18 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     // Demand-driven: derive skill NEEDS from the repo scan + saved intake, then report
     // which are satisfied locally and which must be acquired on demand (never pre-installed).
     const state = readState(repo);
-    const profile = scanRepo(repo);
-    const attachments = (state?.attachments ?? []).map((a) => a.name);
     const needs = resolveSkillNeeds({
       repo,
-      attachments,
+      attachments: (state?.attachments ?? []).map((a) => a.name),
       task: state?.goal,
-      profile,
+      profile: scanRepo(repo),
     });
     recordSkillResolution("resolve", needs);
     process.stdout.write(renderSkillNeeds(needs));
     return 0;
   }
   if (sub === "telemetry") {
-    for (const line of renderTelemetry(readTelemetry(), c)) out("vf", line);
-    return 0;
+    return handleTelemetrySubcommand();
   }
   if (sub === "sync") {
     // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
@@ -351,6 +348,9 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       );
     }
     return result.errors.length ? 1 : 0;
+  }
+  if (sub === "domain") {
+    return handleDomainSubcommand(repo, rest);
   }
   if (sub === "registry") {
     return handleRegistrySubcommand(repo, rest);

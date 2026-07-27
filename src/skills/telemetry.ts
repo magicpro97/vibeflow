@@ -1,5 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { c } from "../core.js";
+import { out } from "../logbus.js";
 import type { SkillNeed } from "./resolver.js";
 
 export interface SkillTelemetryEvent {
@@ -119,6 +121,11 @@ export function renderTelemetry(
     }
   }
   return lines;
+}
+
+export function handleTelemetrySubcommand(opts?: { dir?: string }): number {
+  for (const line of renderTelemetry(readTelemetry(opts), c)) out("vf", line);
+  return 0;
 }
 
 export function recordSkillResolution(

@@ -179,6 +179,15 @@ export interface Skill {
     url?: string;
     headers?: Record<string, string>;
   };
+  /** #665: domain ownership metadata. */
+  domain?: {
+    id?: string;
+    role?: "canonical" | "child";
+  };
+  /** #665: fact IDs this skill owns. */
+  owns?: string[];
+  /** #665: skill refs this skill depends on. */
+  dependsOn?: string[];
   /** Absolute path to the skill folder. */
   dir: string;
   /** Absolute path to the skill's SKILL.md. */
