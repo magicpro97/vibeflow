@@ -14,6 +14,7 @@
 
 import {
   CTX_DIR,
+  ENGINES,
   c,
   crystallize,
   cwd,
@@ -37,6 +38,9 @@ import {
   skillTemplate,
   syncSkillMirrors,
   validateSkillRoots,
+  verifyLockMarketplaceSchemas,
+  verifyLockMirrorCompleteness,
+  verifyRegistryLockIntegrity,
   verifySkillCommand,
   verifySkillSync,
   writeFileSafe,
@@ -341,6 +345,43 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   }
   if (sub === "registry") {
     return handleRegistrySubcommand(repo, rest);
+  }
+  if (sub === "verify-lock") {
+    const allErrors: string[] = [];
+    const allWarnings: string[] = [];
+    let ok = true;
+
+    const lock = verifyRegistryLockIntegrity(repo);
+    if (!lock.ok) {
+      for (const e of lock.errors) out("vf", c.red(`[lock integrity] ${e}`));
+      allErrors.push(...lock.errors);
+      ok = false;
+    }
+    allWarnings.push(...lock.warnings.map((w) => `[lock integrity] ${w}`));
+
+    const schema = verifyLockMarketplaceSchemas(repo);
+    if (!schema.ok) {
+      for (const e of schema.errors) out("vf", c.red(`[marketplace] ${e}`));
+      allErrors.push(...schema.errors);
+      ok = false;
+    }
+    allWarnings.push(...schema.warnings.map((w) => `[marketplace] ${w}`));
+
+    const mirror = verifyLockMirrorCompleteness(repo);
+    if (!mirror.ok) {
+      for (const e of mirror.errors) out("vf", c.red(`[mirror] ${e}`));
+      allErrors.push(...mirror.errors);
+      ok = false;
+    }
+    allWarnings.push(...mirror.warnings.map((w) => `[mirror] ${w}`));
+
+    for (const w of allWarnings) out("vf", c.yellow(`! ${w}`));
+    if (ok) {
+      out("vf", c.green("✔ lock file integrity + marketplace schema + mirror completeness OK"));
+      return 0;
+    }
+    out("vf", c.red(`✗ ${allErrors.length} lock verification error(s)`), { level: "error" });
+    return 1;
   }
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));
   return 0;

@@ -21,6 +21,7 @@ import {
   readState,
   spawn,
   spawnSync,
+  verifyLockGate,
   writeFileSafe,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
@@ -280,14 +281,11 @@ export function verify(
     journal?: boolean;
     coverage?: boolean;
     allowUnverifiedEvidence?: boolean;
+    catalogDir?: string;
   } = {},
 ): number {
   let failed = 0;
   const base = cwd();
-  // `vf verify` is a READ-ONLY gate by default (issue #154): it must not
-  // mutate the tree it audits. The journal append is opt-in via
-  // `journal: true` (wired to a `--journal` flag) so the default invocation
-  // an agent is told to run before "claiming done" leaves git status clean.
   const writeJournal = inject.journal === true;
   const runGate = (label: string, cmd: string, args: string[], dir = base) => {
     out("vf", c.cyan(`▶ ${label}`));
@@ -357,6 +355,10 @@ export function verify(
   for (const w of e2eUnicodeSelectorWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
   for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
 
+  // Registry lock integrity + mirror completeness (issue #654).
+  // Normal repos without a lock file pass silently.
+  failed += verifyLockGate(base, { catalogDir: inject.catalogDir }).failed;
+
   if (failed > 0) {
     out("vf");
     out("vf", c.red(`${failed} gate(s) failed.`), { level: "error" });
@@ -383,9 +385,7 @@ export function verify(
   return 0;
 }
 
-/** Auto-crystallize this verify run's patterns into a DRAFT skill and report
- *  it (issue #335). Only called on the `--journal` path so the default
- *  read-only `vf verify` stays side-effect-free (issue #154). */
+/** Auto-crystallize verify run patterns into a DRAFT skill */
 function autoCrystallizeAndReport(base: string): void {
   const cz = autoCrystallizeRun(base, `verify-${new Date().toISOString().slice(0, 10)}`);
   if (cz.drafted) {

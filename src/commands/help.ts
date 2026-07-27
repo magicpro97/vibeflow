@@ -34,7 +34,7 @@ export function printHelp(): number {
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
     ${c.cyan("status")}             crash-recovery view of per-unit markers after a crash (--timeline <unit> | --json)
     ${c.cyan("config [sub]")}      memory <builtin|claude-mem|off|status> — read/toggle per-repo settings
-    ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | import | registry <add|list|update>
+    ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | verify-lock | import | registry <add|list|update>
     ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
     ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)
