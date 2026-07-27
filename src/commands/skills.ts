@@ -1,7 +1,5 @@
 // `vf skills` subcommand extracted from src/commands.ts (issue #80, phase 7/14).
-// Pure byte-equivalent move: body preserved verbatim, only the import
-// path changed from `./commands/_shared.js` to `../commands/_shared.js`
-// (sibling module now consumes the barrel from one level up).
+// Pure byte-equivalent move: body preserved verbatim.
 //
 // Subcommands: list, validate, search, resolve, sync, verify-sync,
 // import, init. Each is a small dispatch on the `sub` argument; the
@@ -9,8 +7,7 @@
 // writeFileSafe under .vibeflow/skills/<name>/SKILL.md).
 //
 // Fail-closed posture preserved: every error path returns 1 (failure)
-// or 2 (usage error); success returns 0. The `init` subcommand
-// refuses to overwrite an existing SKILL.md (line 776).
+// or 2 (usage error); success returns 0.
 
 import {
   CTX_DIR,
@@ -24,6 +21,7 @@ import {
   existsSync,
   handleDomainSubcommand,
   handleFactsSubcommand,
+  handleOptimizeDescription,
   handleRegistrySubcommand,
   handleTelemetrySubcommand,
   importSkillFromDir,
@@ -395,6 +393,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     out("vf", c.red(`✗ ${allErrors.length} lock verification error(s)`), { level: "error" });
     return 1;
   }
+  if (sub === "optimize-description") return handleOptimizeDescription(repo, rest);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));
   return 0;
 }
