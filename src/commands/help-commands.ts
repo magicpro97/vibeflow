@@ -198,7 +198,7 @@ ${c.bold("Examples:")}
     `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | eval <skill-dir> | registry <add|list|update|install>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
 import external skills, capture new skills from real work, manage remote
-skill registries via git-backed lock files, and run deterministic trigger evals.
+skill registries via git-backed lock files, and run skill trigger/task evals.
 
 ${c.bold("Subcommands:")}
   list                       list discovered skills (default)
@@ -212,7 +212,7 @@ ${c.bold("Subcommands:")}
   init <name>                scaffold an empty SKILL.md stub
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
   crystallize <run-id>       mechanically draft a skill from a run's recurring patterns
-  eval <skill-dir>           run deterministic trigger eval from evals.json (--json, --out, --previous)
+  eval <skill-dir>           eval {id,type,prompt,expected?,matcher?} cases (--engine, --json, --out, --previous)
   registry <add|list|update|install> manage remote skill registries (git-backed) — see below
 
 ${c.bold("Registry subcommands:")}
@@ -251,7 +251,7 @@ ${c.bold("Examples:")}
   vf skills import .vibeflow/skills/external-skill
   vf skills import context7:react-hooks
   vf skills eval .vibeflow/skills/pdf-reader
-  vf skills eval .vibeflow/skills/pdf-reader --json --out eval-result.json
+  vf skills eval .vibeflow/skills/pdf-reader --engine opencode --json --out eval-result.json
   vf skills eval .vibeflow/skills/pdf-reader --previous eval-result.json
   vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0
   vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0 --yes

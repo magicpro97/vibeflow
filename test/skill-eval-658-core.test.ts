@@ -10,6 +10,7 @@ import {
   findEvalFile,
   loadEvalFile,
   runSkillEval,
+  runTaskEval,
   validateEvalFile,
   writeEvalResult,
 } from "../src/skills/eval";
@@ -125,6 +126,21 @@ describe("validateEvalFile", () => {
       }),
     ).toThrow("case[0].prompt is required");
   });
+
+  test("rejects invalid objective fields", () => {
+    const file = (entry: Record<string, unknown>) => ({
+      schemaVersion: 1,
+      skill: "test-skill",
+      cases: [{ id: "c1", type: "positive", prompt: "hello", ...entry }],
+    });
+    expect(() => validateEvalFile(file({ expected: "" }))).toThrow("expected is required");
+    expect(() => validateEvalFile(file({ expected: "ok", matcher: "regex" }))).toThrow(
+      "matcher must be equals|contains",
+    );
+    expect(() => validateEvalFile(file({ matcher: "equals" }))).toThrow(
+      "matcher requires expected",
+    );
+  });
 });
 
 describe("runSkillEval", () => {
@@ -204,16 +220,16 @@ describe("runSkillEval", () => {
     expect(result.summary.baseline.total).toBe(1);
   });
 
-  test("regression when pass rate drops", () => {
+  test("regression when trigger accuracy drops", () => {
     const skill = makeSkill({ triggers: ["pdf"], capabilities: [] });
     const evals: EvalFile = {
       schemaVersion: 1,
       skill: "test-skill",
       cases: [{ id: "p1", type: "positive", prompt: "write a rust compiler" }],
     };
-    const result = runSkillEval(skill, evals, { taskPassRate: 1 });
+    const result = runSkillEval(skill, evals, { triggerAccuracy: 1 });
     expect(result.summary.regression).toBe(true);
-    expect(result.previousSummary).toEqual({ taskPassRate: 1 });
+    expect(result.previousSummary).toEqual({ triggerAccuracy: 1 });
   });
 
   test("no regression when pass rate equal or higher", () => {
@@ -223,7 +239,7 @@ describe("runSkillEval", () => {
       skill: "test-skill",
       cases: [{ id: "p1", type: "positive", prompt: "compile this" }],
     };
-    const result = runSkillEval(skill, evals, { taskPassRate: 0.5 });
+    const result = runSkillEval(skill, evals, { triggerAccuracy: 0.5 });
     expect(result.summary.regression).toBe(false);
   });
 
@@ -236,6 +252,27 @@ describe("runSkillEval", () => {
     const result = runSkillEval(makeSkill(), evals);
     expect(result.summary.regression).toBe(false);
     expect(result.previousSummary).toBeUndefined();
+  });
+
+  test("objective task runs baseline then skill context", () => {
+    const evals = validateEvalFile({
+      schemaVersion: 1,
+      skill: "test-skill",
+      cases: [{ id: "task", type: "positive", prompt: "answer", expected: "correct" }],
+    });
+    const calls: Array<string | undefined> = [];
+    const result = runTaskEval(evals, "skill body", (_prompt, context) => {
+      calls.push(context);
+      return context ? "correct" : "wrong";
+    });
+    expect(calls).toEqual([undefined, "skill body"]);
+    expect(result).toMatchObject({
+      baselinePassRate: 0,
+      skillPassRate: 1,
+      delta: 1,
+      taskPassRate: 1,
+    });
+    expect(runTaskEval(evals, "skill body", () => "wrong", 1)?.regression).toBe(true);
   });
 
   test("includes ISO timestamp", () => {
@@ -327,7 +364,7 @@ describe("writeEvalResult", () => {
         positive: { total: 0, passed: 0, triggerAccuracy: 1 },
         negative: { total: 0, passed: 0, triggerAccuracy: 1 },
         baseline: { total: 0, passed: 0, triggerAccuracy: 1 },
-        taskPassRate: 1,
+        triggerAccuracy: 1,
         regression: false,
       },
     };
@@ -352,7 +389,7 @@ describe("writeEvalResult", () => {
         positive: { total: 0, passed: 0, triggerAccuracy: 1 },
         negative: { total: 0, passed: 0, triggerAccuracy: 1 },
         baseline: { total: 0, passed: 0, triggerAccuracy: 1 },
-        taskPassRate: 1,
+        triggerAccuracy: 1,
         regression: false,
       },
     };

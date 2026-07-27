@@ -1,8 +1,7 @@
 // src/skills/eval.ts — #658
 //
-// Deterministic skill trigger eval: load evals.json cases, run
-// matchSkillsForTask against one skill, check expected vs actual trigger,
-// aggregate scores, flag regression. No LLM, no network, no fixtures.
+// Skill eval: deterministic trigger checks plus objective task-output checks
+// through an injected runner. Core stays engine-agnostic and network-free.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -17,6 +16,8 @@ export interface EvalCase {
   id: string;
   type: EvalCaseType;
   prompt: string;
+  expected?: string;
+  matcher?: "equals" | "contains";
 }
 
 export interface EvalFile {
@@ -43,6 +44,23 @@ export interface EvalSummary {
   positive: CategoryScore;
   negative: CategoryScore;
   baseline: CategoryScore;
+  triggerAccuracy: number;
+  regression: boolean;
+}
+
+export interface TaskCaseResult {
+  id: string;
+  baselineOutput: string;
+  skillOutput: string;
+  baselinePass: boolean;
+  skillPass: boolean;
+}
+
+export interface TaskSummary {
+  cases: TaskCaseResult[];
+  baselinePassRate: number;
+  skillPassRate: number;
+  delta: number;
   taskPassRate: number;
   regression: boolean;
 }
@@ -53,7 +71,8 @@ export interface EvalResult {
   timestamp: string;
   cases: EvalCaseResult[];
   summary: EvalSummary;
-  previousSummary?: { taskPassRate: number };
+  task?: TaskSummary;
+  previousSummary?: { triggerAccuracy?: number; taskPassRate?: number };
 }
 
 // ── Schema validation ───────────────────────────────────────────────
@@ -77,7 +96,14 @@ function validateEvalCase(v: unknown, idx: number): EvalCase {
     throw new Error(`case[${idx}].type must be positive|negative|baseline, got "${type}"`);
   if (!id) throw new Error(`case[${idx}].id is required`);
   if (!prompt) throw new Error(`case[${idx}].prompt is required`);
-  return { id, type, prompt };
+  const expected = r.expected === undefined ? undefined : asStr(r.expected);
+  const matcher = r.matcher === undefined ? undefined : asStr(r.matcher);
+  if (expected !== undefined && !expected) throw new Error(`case[${idx}].expected is required`);
+  if (matcher !== undefined && matcher !== "equals" && matcher !== "contains")
+    throw new Error(`case[${idx}].matcher must be equals|contains`);
+  if (matcher !== undefined && expected === undefined)
+    throw new Error(`case[${idx}].matcher requires expected`);
+  return { id, type, prompt, expected, matcher: matcher as EvalCase["matcher"] };
 }
 
 export function validateEvalFile(data: unknown): EvalFile {
@@ -86,10 +112,13 @@ export function validateEvalFile(data: unknown): EvalFile {
   if (sv !== 1) throw new Error(`schemaVersion must be 1, got ${JSON.stringify(sv)}`);
   const skill = asStr(r.skill);
   if (!skill) throw new Error("skill is required");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill)) throw new Error("skill must be kebab-case");
   const raw = r.cases;
   if (!Array.isArray(raw)) throw new Error("cases must be an array");
   const cases = raw.map((c, i) => validateEvalCase(c, i));
   if (!cases.length) throw new Error("cases must not be empty");
+  if (new Set(cases.map((c) => c.id)).size !== cases.length)
+    throw new Error("case ids must be unique");
   return { schemaVersion: sv, skill, cases };
 }
 
@@ -101,7 +130,7 @@ function catScore(cases: EvalCaseResult[]): CategoryScore {
   return { total, passed, triggerAccuracy: total === 0 ? 1 : passed / total };
 }
 
-function taskPassRate(cases: EvalCaseResult[]): number {
+function triggerAccuracy(cases: EvalCaseResult[]): number {
   const all = cases.length;
   if (all === 0) return 1;
   const passed = cases.filter((c) => c.pass).length;
@@ -114,7 +143,7 @@ function taskPassRate(cases: EvalCaseResult[]): number {
 export function runSkillEval(
   skill: Skill,
   evals: EvalFile,
-  prev?: { taskPassRate: number },
+  prev?: { triggerAccuracy: number },
 ): EvalResult {
   const results: EvalCaseResult[] = [];
   for (const c of evals.cases) {
@@ -135,20 +164,56 @@ export function runSkillEval(
   const negative = catScore(results.filter((r) => r.type === "negative"));
   const baseline = catScore(results.filter((r) => r.type === "baseline"));
 
-  const tpr = taskPassRate(results);
-  const regression = prev !== undefined && tpr < prev.taskPassRate;
+  const accuracy = triggerAccuracy(results);
+  const regression = prev !== undefined && accuracy < prev.triggerAccuracy;
 
   const result: EvalResult = {
     schemaVersion: 1,
     skill: evals.skill,
     timestamp: new Date().toISOString(),
     cases: results,
-    summary: { positive, negative, baseline, taskPassRate: tpr, regression },
+    summary: { positive, negative, baseline, triggerAccuracy: accuracy, regression },
   };
 
   if (prev) result.previousSummary = prev;
 
   return result;
+}
+
+export function runTaskEval(
+  evals: EvalFile,
+  skillContext: string,
+  runner: (prompt: string, skillContext?: string) => string,
+  previousTaskPassRate?: number,
+): TaskSummary | undefined {
+  const objectiveCases = evals.cases.filter((c) => c.expected !== undefined);
+  if (!objectiveCases.length) return undefined;
+  const cases = objectiveCases.map((c) => {
+    const baselineOutput = runner(c.prompt);
+    const skillOutput = runner(c.prompt, skillContext);
+    const expected = c.expected as string;
+    const check = (output: string) =>
+      c.matcher === "equals" ? output.trim() === expected : output.includes(expected);
+    return {
+      id: c.id,
+      baselineOutput,
+      skillOutput,
+      baselinePass: check(baselineOutput),
+      skillPass: check(skillOutput),
+    };
+  });
+  const rate = (key: "baselinePass" | "skillPass") =>
+    cases.filter((c) => c[key]).length / cases.length;
+  const baselinePassRate = rate("baselinePass");
+  const skillPassRate = rate("skillPass");
+  return {
+    cases,
+    baselinePassRate,
+    skillPassRate,
+    delta: skillPassRate - baselinePassRate,
+    taskPassRate: skillPassRate,
+    regression: previousTaskPassRate !== undefined && skillPassRate < previousTaskPassRate,
+  };
 }
 
 // ── I/O helpers ─────────────────────────────────────────────────────

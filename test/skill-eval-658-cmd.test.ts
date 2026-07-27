@@ -65,11 +65,35 @@ describe("skillsEvalCmd", () => {
       JSON.stringify({
         schemaVersion: 1,
         skill: "my-skill",
-        cases: [{ id: "p1", type: "positive", prompt: "parse this pdf" }],
+        cases: [
+          {
+            id: "p1",
+            type: "positive",
+            prompt: "parse this pdf",
+            expected: "parsed",
+          },
+        ],
       }),
     );
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill"])).toBe(0);
+    const prompts: string[] = [];
+    expect(
+      mod.skillsEvalCmd(d, ["my-skill", "--engine", "opencode"], {
+        spawner: (_cmd, _args, input) => {
+          prompts.push(input);
+          const text = input.includes("# Skill body") ? "parsed" : "wrong";
+          return { status: 0, stdout: JSON.stringify({ type: "text", part: { text } }) };
+        },
+      }),
+    ).toBe(0);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toBe("parse this pdf");
+    expect(prompts[1]).toContain("# Skill body");
+  });
+
+  test("rejects invalid --engine", async () => {
+    const mod = await loadCmd();
+    expect(mod.skillsEvalCmd(tmpDir(), ["my-skill", "--engine", "invalid"])).toBe(2);
   });
 
   test("returns 1 on regression with --previous", async () => {

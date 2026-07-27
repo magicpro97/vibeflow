@@ -1,23 +1,27 @@
 // src/commands/skills-eval.ts — #658
 //
 // `vf skills eval <skill-path>` subcommand. Reads evals.json from the
-// skill directory, runs deterministic trigger matching, scores, flags
-// regression. Reuses matchSkillsForTask from registry.
-//
-// ponytail: no live LLM eval — deterministic trigger-accuracy + schema
-// validation only. Add task-completion LLM eval when needed.
+// skill directory, measures trigger matching, and compares objective task
+// output with and without the skill through the existing dispatch runner.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { c, writeFileSafe } from "../core.js";
-import type { Skill } from "../core/types.js";
+import { ENGINES, type Engine, type Skill } from "../core/types.js";
+import { type Spawner, runDispatch } from "../dispatch.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
-import { type EvalResult, findEvalFile, loadEvalFile, runSkillEval } from "../skills/eval.js";
+import {
+  type EvalResult,
+  findEvalFile,
+  loadEvalFile,
+  runSkillEval,
+  runTaskEval,
+} from "../skills/eval.js";
 
 // ── Skill loading ───────────────────────────────────────────────────
 
-function loadSingleSkill(skillDir: string): Skill {
+function loadSingleSkill(skillDir: string): { skill: Skill; text: string } {
   const skillMd = join(skillDir, "SKILL.md");
   if (!existsSync(skillMd)) {
     throw new Error(`no SKILL.md found in ${skillDir}`);
@@ -32,16 +36,19 @@ function loadSingleSkill(skillDir: string): Skill {
   if (!description) throw new Error("skill has no description");
 
   return {
-    name,
-    description,
-    version: typeof data.version === "string" ? data.version : undefined,
-    status: "unverified",
-    capabilities: asStrArr(data.capabilities),
-    triggers: asStrArr(data.triggers),
-    type: data.type === "repo" ? "repo" : undefined,
-    dir: skillDir,
-    path: skillMd,
-  } as Skill;
+    text,
+    skill: {
+      name,
+      description,
+      version: typeof data.version === "string" ? data.version : undefined,
+      status: "unverified",
+      capabilities: asStrArr(data.capabilities),
+      triggers: asStrArr(data.triggers),
+      type: data.type === "repo" ? "repo" : undefined,
+      dir: skillDir,
+      path: skillMd,
+    } as Skill,
+  };
 }
 
 function asStrArr(v: unknown): string[] | undefined {
@@ -54,6 +61,30 @@ function asStrArr(v: unknown): string[] | undefined {
 
 function pct(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
+}
+
+function engineText(raw: string): string {
+  const texts: string[] = [];
+  for (const chunk of [raw.trim(), ...raw.split(/\r?\n/)]) {
+    try {
+      const event = JSON.parse(chunk) as {
+        result?: unknown;
+        type?: string;
+        item?: Record<string, unknown>;
+        part?: Record<string, unknown>;
+      };
+      if (typeof event.result === "string") return event.result;
+      if (event.type === "item.completed" && event.item?.type === "agent_message") {
+        if (typeof event.item.text === "string") return event.item.text;
+      }
+      if (event.type === "text" && typeof event.part?.text === "string") {
+        texts.push(event.part.text);
+      }
+    } catch {
+      // Plain output and incomplete JSONL chunks fall back below.
+    }
+  }
+  return texts.length ? texts.join("\n") : raw;
 }
 
 function formatSummary(result: EvalResult): string {
@@ -72,15 +103,33 @@ function formatSummary(result: EvalResult): string {
   }
   const allPassed = s.positive.passed + s.negative.passed + s.baseline.passed;
   const allTotal = s.positive.total + s.negative.total + s.baseline.total;
-  lines.push(`  task pass rate:             ${pct(s.taskPassRate)}  (${allPassed}/${allTotal})`);
+  lines.push(`  trigger accuracy:           ${pct(s.triggerAccuracy)}  (${allPassed}/${allTotal})`);
+
+  if (result.task) {
+    lines.push(`  baseline task pass rate:    ${pct(result.task.baselinePassRate)}`);
+    lines.push(`  with-skill task pass rate:  ${pct(result.task.skillPassRate)}`);
+    lines.push(`  task delta:                 ${pct(result.task.delta)}`);
+  }
 
   if (result.previousSummary !== undefined) {
     const prev = result.previousSummary;
-    const delta = s.taskPassRate - prev.taskPassRate;
-    const deltaStr = delta >= 0 ? `+${pct(delta)}` : `-${pct(Math.abs(delta))}`;
-    lines.push(`  vs previous:                ${deltaStr}`);
-    if (s.regression) {
-      lines.push(c.red(`  regression: ${pct(s.taskPassRate)} < ${pct(prev.taskPassRate)}`));
+    if (prev.triggerAccuracy !== undefined) {
+      const delta = s.triggerAccuracy - prev.triggerAccuracy;
+      lines.push(`  trigger vs previous:        ${delta >= 0 ? "+" : "-"}${pct(Math.abs(delta))}`);
+      if (s.regression) {
+        lines.push(
+          c.red(`  trigger regression: ${pct(s.triggerAccuracy)} < ${pct(prev.triggerAccuracy)}`),
+        );
+      }
+    }
+    if (result.task && prev.taskPassRate !== undefined) {
+      const delta = result.task.taskPassRate - prev.taskPassRate;
+      lines.push(`  task vs previous:           ${delta >= 0 ? "+" : "-"}${pct(Math.abs(delta))}`);
+      if (result.task.regression) {
+        lines.push(
+          c.red(`  task regression: ${pct(result.task.taskPassRate)} < ${pct(prev.taskPassRate)}`),
+        );
+      }
     }
   }
 
@@ -92,10 +141,15 @@ function formatSummary(result: EvalResult): string {
 // Signature matches skills.ts pattern: (repo, rest) → number
 // where rest includes the skill dir and optional flags.
 
-export function skillsEvalCmd(_repo: string, rest: string[] = []): number {
+export function skillsEvalCmd(
+  _repo: string,
+  rest: string[] = [],
+  inject: { runner?: (prompt: string, skillContext?: string) => string; spawner?: Spawner } = {},
+): number {
   let jsonFlag = false;
   let outFile = "";
   let previousFile = "";
+  let engine: Engine = "opencode";
   const clean: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const tok = rest[i] as string;
@@ -104,11 +158,28 @@ export function skillsEvalCmd(_repo: string, rest: string[] = []): number {
       continue;
     }
     if (tok === "--out") {
-      outFile = (rest[++i] as string) ?? "";
+      outFile = rest[++i] ?? "";
+      if (!outFile) {
+        out("vf", c.red("--out requires a file"), { level: "error" });
+        return 2;
+      }
       continue;
     }
     if (tok === "--previous") {
-      previousFile = (rest[++i] as string) ?? "";
+      previousFile = rest[++i] ?? "";
+      if (!previousFile) {
+        out("vf", c.red("--previous requires a file"), { level: "error" });
+        return 2;
+      }
+      continue;
+    }
+    if (tok === "--engine") {
+      const value = rest[++i] ?? "";
+      if (!(ENGINES as string[]).includes(value)) {
+        out("vf", c.red(`invalid --engine: ${value}`), { level: "error" });
+        return 2;
+      }
+      engine = value as Engine;
       continue;
     }
     clean.push(tok);
@@ -123,10 +194,10 @@ export function skillsEvalCmd(_repo: string, rest: string[] = []): number {
     return 2;
   }
 
-  const absDir = join(_repo, skillDir);
+  const absDir = resolve(_repo, skillDir);
 
   try {
-    const skill = loadSingleSkill(absDir);
+    const { skill, text } = loadSingleSkill(absDir);
 
     const evalPath = findEvalFile(absDir);
     if (!evalPath) {
@@ -144,17 +215,45 @@ export function skillsEvalCmd(_repo: string, rest: string[] = []): number {
       );
     }
 
-    let previous: { taskPassRate: number } | undefined;
+    let previous: { triggerAccuracy?: number; taskPassRate?: number } | undefined;
     if (previousFile) {
-      if (existsSync(previousFile)) {
-        const prev = JSON.parse(readFileSync(previousFile, "utf8")) as EvalResult;
-        if (typeof prev.summary?.taskPassRate === "number") {
-          previous = { taskPassRate: prev.summary.taskPassRate };
-        }
-      }
+      if (!existsSync(previousFile)) throw new Error(`previous result not found: ${previousFile}`);
+      const prev = JSON.parse(readFileSync(previousFile, "utf8")) as EvalResult & {
+        summary: EvalResult["summary"] & { taskPassRate?: number };
+      };
+      previous = {
+        triggerAccuracy: prev.summary?.triggerAccuracy ?? prev.summary?.taskPassRate,
+        taskPassRate: prev.task?.taskPassRate,
+      };
+      for (const value of Object.values(previous))
+        if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 1))
+          throw new Error("previous rates must be finite numbers from 0 to 1");
     }
 
-    const result = runSkillEval(skill, evalsFile, previous);
+    const result = runSkillEval(
+      skill,
+      evalsFile,
+      previous?.triggerAccuracy === undefined
+        ? undefined
+        : { triggerAccuracy: previous.triggerAccuracy },
+    );
+    const runner =
+      inject.runner ??
+      ((prompt: string, skillContext?: string) => {
+        const fullPrompt = skillContext
+          ? `${prompt}\n\nFollow this skill for the task:\n${skillContext}`
+          : prompt;
+        const dispatched = runDispatch({
+          engine,
+          prompt: fullPrompt,
+          mode: "cli",
+          spawner: inject.spawner,
+        });
+        if (!dispatched.ok) throw new Error(dispatched.reason ?? `${engine} eval failed`);
+        return engineText(dispatched.raw);
+      });
+    result.task = runTaskEval(evalsFile, text, runner, previous?.taskPassRate);
+    if (previous) result.previousSummary = previous;
 
     if (jsonFlag) {
       out("vf", JSON.stringify(result, null, 2));
@@ -178,7 +277,7 @@ export function skillsEvalCmd(_repo: string, rest: string[] = []): number {
       out("vf", c.dim(`  result written to ${outFile}`));
     }
 
-    return result.summary.regression ? 1 : 0;
+    return result.summary.regression || result.task?.regression ? 1 : 0;
   } catch (err) {
     out("vf", c.red(`eval error: ${(err as Error).message}`), { level: "error" });
     return 1;
