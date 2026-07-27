@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { skills } from "../src/commands/skills.js";
 import type { LockVerifyResult } from "../src/skills/verify-lock.js";
-import { setSkillStatus, setStatusInText } from "../src/skills/verify.js";
+import { setSkillStatus, setStatusInText, verifySkillCommand } from "../src/skills/verify.js";
 
 const CTX_DIR = ".vibeflow";
 
@@ -26,9 +26,14 @@ function scaffold(name: string, lines: string[]): string {
 
 const VALID_BODY = [
   "",
-  "# Skill",
-  "",
-  "Use when x. Body at least fifty chars long to satisfy the validator checks here.",
+  "## When to use",
+  "Use when x.",
+  "## When NOT to use",
+  "Do not use when y.",
+  "## Steps",
+  "1. Do the task.",
+  "## Verification",
+  "Check output.",
   "",
 ];
 
@@ -208,6 +213,49 @@ describe("skills verify command", () => {
   test("malformed SKILL.md (no frontmatter) → exit 1", () => {
     scaffold("bad", ["no frontmatter at all"]);
     expect(run(["bad"])).toBe(1);
+  });
+
+  test("quality errors block promotion", () => {
+    scaffold("huge", [
+      "---",
+      "name: huge",
+      "description: d",
+      "---",
+      "## When to use",
+      "Use.",
+      "## When NOT to use",
+      "Dont.",
+      "## Steps",
+      "Steps.",
+      "## Verification",
+      "Verify.",
+      ...Array.from({ length: 510 }, (_, i) => `line ${i}`),
+    ]);
+    expect(run(["huge"])).toBe(1);
+  });
+
+  test("quality warnings allow promotion", () => {
+    scaffold("warn", [
+      "---",
+      "name: warn",
+      "description: d",
+      "---",
+      "## When to use",
+      "ALWAYS use this and NEVER skip it.",
+      "## When NOT to use",
+      "Dont.",
+      "## Steps",
+      "Steps.",
+      "## Verification",
+      "Verify.",
+    ]);
+    expect(run(["warn"])).toBe(0);
+  });
+
+  test("set status failure after quality checks → exit 1", () => {
+    scaffold("race", ["---", "name: race", "description: d", "---", ...VALID_BODY]);
+    const skillMd = join(base, CTX_DIR, "skills", "race", "SKILL.md");
+    expect(verifySkillCommand(base, ["race"], {}, { existsSync: (p) => p !== skillMd })).toBe(1);
   });
 });
 

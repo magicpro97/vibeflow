@@ -15,8 +15,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CTX_DIR, c, writeFileSafe } from "../core.js";
+import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import { type ScanDeps, scanBlocksPromotion, scanSkillDir } from "./security-scan.js";
+import { REQUIRED_SECTIONS, checkQualityContract } from "./validator.js";
 
 export type VerifyStatus = "verified" | "unverified";
 
@@ -106,7 +108,12 @@ export function setSkillStatus(
  * `vf skills verify <name> [--undo]` command arm. Extracted from skills.ts so
  * that file stays under the 400-line cap (#80). Returns the process exit code.
  */
-export function verifySkillCommand(repo: string, rest: string[], scanDeps: ScanDeps = {}): number {
+export function verifySkillCommand(
+  repo: string,
+  rest: string[],
+  scanDeps: ScanDeps = {},
+  ioDeps: Partial<SetSkillStatusDeps> = {},
+): number {
   const name = rest[0]?.trim();
   const undo = rest.includes("--undo");
   if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
@@ -140,9 +147,45 @@ export function verifySkillCommand(repo: string, rest: string[], scanDeps: ScanD
       }
       if (gate.warn) out("vf", c.yellow(`⚠ ${name}: ${gate.reason}`));
     }
+
+    // #657: skill-creator quality contract gate — block promotion on quality errors.
+    // Missing required sections are escalated from warning to error at promotion time.
+    const text = (ioDeps.readFileSync ?? readFileSync)(skillMd, "utf8");
+    const { body } = parseFrontmatter(text);
+    if (body) {
+      const qc = checkQualityContract(body);
+      const blockErrors: string[] = [];
+      for (const e of qc.errors) {
+        blockErrors.push(e);
+      }
+      // Escalate missing-section warnings to errors for promotion
+      for (const w of qc.warnings) {
+        const isMissingSection = REQUIRED_SECTIONS.some(
+          (s) => w === `missing required section: ${s}`,
+        );
+        if (isMissingSection) {
+          blockErrors.push(w);
+        } else {
+          out("vf", c.yellow(`⚠ quality: ${w}`));
+        }
+      }
+      if (blockErrors.length > 0) {
+        for (const e of blockErrors) {
+          out("vf", c.red(`✗ quality: ${e}`), { level: "error" });
+        }
+        out("vf", c.red(`Cannot verify "${name}": fix quality contract errors first`), {
+          level: "error",
+        });
+        return 1;
+      }
+    }
   }
 
-  const result = setSkillStatus(skillMd, target, { existsSync, readFileSync, writeFileSafe });
+  const result = setSkillStatus(skillMd, target, {
+    existsSync: ioDeps.existsSync ?? existsSync,
+    readFileSync: ioDeps.readFileSync ?? readFileSync,
+    writeFileSafe: ioDeps.writeFileSafe ?? writeFileSafe,
+  });
   if (!result.ok) {
     out("vf", c.red(`Cannot ${undo ? "unverify" : "verify"} "${name}": ${result.reason}`), {
       level: "error",

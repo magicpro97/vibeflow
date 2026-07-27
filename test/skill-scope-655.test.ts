@@ -195,7 +195,11 @@ describe("checkPublishGate", () => {
 
   test("warns on organization-scoped skill → common channel", () => {
     const d = tmpDir();
-    writeSkill(d, "name: org-skill\ndescription: test\nscope: organization\n");
+    writeSkill(
+      d,
+      "name: org-skill\ndescription: test\nscope: organization\n",
+      "## When to use\nUse.\n## When NOT to use\nDont.\n## Steps\nSteps.\n## Verification\nVerify.",
+    );
     const r = checkPublishGate(d, "common");
     expect(r.ok).toBe(true);
     expect(r.warnings.some((w) => w.includes("organization"))).toBe(true);
@@ -216,7 +220,7 @@ describe("checkPublishGate", () => {
     writeSkill(
       d,
       "name: clean\ndescription: test\nscope: common\n",
-      "Reads xlsx files using the standard library.",
+      "## When to use\nUse.\n## When NOT to use\nDont.\n## Steps\nRead xlsx.\n## Verification\nVerify.",
     );
     const r = checkPublishGate(d, "common");
     expect(r.ok).toBe(true);

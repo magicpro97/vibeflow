@@ -20,7 +20,14 @@ const VALID_BODY = [
   "",
   "# Skill",
   "",
-  "Use when x. Body at least fifty chars long to satisfy the validator checks here.",
+  "## When to use",
+  "Use for X.",
+  "## When NOT to use",
+  "Not for Y.",
+  "## Steps",
+  "1. Do thing.",
+  "## Verification",
+  "Check output.",
   "",
 ];
 
