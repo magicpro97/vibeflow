@@ -15,6 +15,7 @@ import type { UserMcpServer } from "../tools/index.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { resolveAllAdapters } from "./adapter.js";
 import { sharedCatalogDir } from "./catalog.js";
+import { parseDomainMeta } from "./domain.js";
 
 /**
  * Directories that may contain `<name>/SKILL.md` folders.
@@ -171,6 +172,8 @@ export function parseSkill(
     status = "experimental";
   }
 
+  const { domain, owns, dependsOn } = parseDomainMeta(data as Record<string, unknown>);
+
   return {
     name,
     description,
@@ -184,6 +187,9 @@ export function parseSkill(
     type: data.type === "repo" ? "repo" : data.type === "knowledge" ? "knowledge" : undefined,
     requires: asRequires(data.requires),
     mcp: asMcp(data.mcp, name),
+    domain,
+    owns,
+    dependsOn,
     dir,
     path: skillMdPath,
   };
