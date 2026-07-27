@@ -31,8 +31,11 @@ import {
   out,
   readFileSync,
   readState,
+  readTelemetry,
+  recordSkillResolution,
   renderSkillIndex,
   renderSkillNeeds,
+  renderTelemetry,
   resolveSkillNeeds,
   scanRepo,
   skillTemplate,
@@ -110,7 +113,12 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       task: state?.goal,
       profile,
     });
+    recordSkillResolution("resolve", needs);
     process.stdout.write(renderSkillNeeds(needs));
+    return 0;
+  }
+  if (sub === "telemetry") {
+    for (const line of renderTelemetry(readTelemetry(), c)) out("vf", line);
     return 0;
   }
   if (sub === "sync") {

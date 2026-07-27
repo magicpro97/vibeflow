@@ -29,6 +29,7 @@ import { sharedCatalogDir } from "./skills/catalog.js";
 import { parseRegistryLock } from "./skills/registry-channel.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
+import { recordSkillResolution } from "./skills/telemetry.js";
 import { validateSkillRoots } from "./skills/validator.js";
 
 // Re-export the 4 test seams so the 5 importers don't change
@@ -176,6 +177,7 @@ export function startServer(
           task: state?.goal,
           profile: scanRepo(activeRepo),
         });
+        recordSkillResolution("api/skills", needs);
         const validation = validateSkillRoots(activeRepo);
         const skills = discoverSkills(activeRepo);
         const lock = parseRegistryLock(activeRepo);
