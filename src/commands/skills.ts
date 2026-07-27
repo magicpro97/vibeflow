@@ -36,6 +36,7 @@ import {
   resolveSkillNeeds,
   scanRepo,
   skillTemplate,
+  skillsEvalCmd,
   syncSkillMirrors,
   validateSkillRoots,
   verifyLockMarketplaceSchemas,
@@ -345,6 +346,9 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   }
   if (sub === "registry") {
     return handleRegistrySubcommand(repo, rest);
+  }
+  if (sub === "eval") {
+    return skillsEvalCmd(repo, rest);
   }
   if (sub === "verify-lock") {
     const allErrors: string[] = [];
