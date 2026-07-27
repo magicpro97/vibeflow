@@ -69,6 +69,7 @@ export * from "../skills/verify-lock.js";
 export * from "../skills/sync.js";
 export * from "../skills/validator.js";
 export * from "../skills/verify.js";
+export { skillsEvalCmd } from "./skills-eval.js";
 export * from "../tools/index.js";
 export * from "./worktree.js";
 export * from "../ui.js";

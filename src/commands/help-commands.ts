@@ -195,10 +195,10 @@ ${c.bold("Examples:")}
   vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | registry <add|list|update|install>]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | eval <skill-dir> | registry <add|list|update|install>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
-import external skills, capture new skills from real work, and manage remote
-skill registries via git-backed lock files.
+import external skills, capture new skills from real work, manage remote
+skill registries via git-backed lock files, and run skill trigger/task evals.
 
 ${c.bold("Subcommands:")}
   list                       list discovered skills (default)
@@ -212,6 +212,7 @@ ${c.bold("Subcommands:")}
   init <name>                scaffold an empty SKILL.md stub
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
   crystallize <run-id>       mechanically draft a skill from a run's recurring patterns
+  eval <skill-dir>           eval {id,type,prompt,expected?,matcher?} cases (--engine, --json, --out, --previous)
   registry <add|list|update|install> manage remote skill registries (git-backed) — see below
 
 ${c.bold("Registry subcommands:")}
@@ -249,6 +250,9 @@ ${c.bold("Examples:")}
   vf skills draft fix-flaky-db-test
   vf skills import .vibeflow/skills/external-skill
   vf skills import context7:react-hooks
+  vf skills eval .vibeflow/skills/pdf-reader
+  vf skills eval .vibeflow/skills/pdf-reader --engine opencode --json --out eval-result.json
+  vf skills eval .vibeflow/skills/pdf-reader --previous eval-result.json
   vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0
   vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0 --yes
   vf skills registry list
