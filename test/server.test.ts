@@ -1,10 +1,20 @@
-import { describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { startServer } from "../src/server";
+
+const workflowStatePath = join(process.cwd(), ".vibeflow", "WORKFLOW_STATE.json");
+const previousWorkflowState = existsSync(workflowStatePath)
+  ? readFileSync(workflowStatePath)
+  : null;
+
+afterAll(() => {
+  if (previousWorkflowState) writeFileSync(workflowStatePath, previousWorkflowState);
+  else rmSync(workflowStatePath, { force: true });
+});
 
 /** Fetch the CSRF token from the HTML page served at `/`. */
 async function csrfToken(url: string): Promise<string> {
@@ -334,11 +344,6 @@ describe("server HTTP API handlers", () => {
         recursive: true,
         force: true,
       });
-      // Remove the u1 fixture state written by this test so subsequent
-      // /api/verify calls don't report wrong unit names.
-      const { join: j2 } = await import("node:path");
-      const { rmSync: rm2 } = await import("node:fs");
-      rm2(j2(process.cwd(), ".vibeflow", "WORKFLOW_STATE.json"), { force: true });
     }
   });
 
@@ -1360,7 +1365,6 @@ describe("server HTTP API handlers", () => {
   });
 });
 
-import { readFileSync } from "node:fs";
 describe("server split (#186 PR11 sentinel)", () => {
   const facade = readFileSync("src/server.ts", "utf8");
   test("handlers extracted", () => {
@@ -2171,11 +2175,6 @@ test("POST /api/units rejects when 200 units exist (line 193)", async () => {
     expect(body.error).toContain("too many");
   } finally {
     server.stop();
-    // Cleanup: this test writes "cap test" goal + 200 units to cwd/.vibeflow/WORKFLOW_STATE.json
-    // If not cleaned, subsequent /api/verify calls report 200 confidence failures.
-    const { join: j3 } = await import("node:path");
-    const { rmSync: rm3 } = await import("node:fs");
-    rm3(j3(process.cwd(), ".vibeflow", "WORKFLOW_STATE.json"), { force: true });
   }
 });
 
