@@ -204,6 +204,94 @@ describe("skillsEvalCmd", () => {
     expect(mod.skillsEvalCmd(d, ["bad-skill"])).toBe(1);
   });
 
+  test("--out without value returns error code 2", async () => {
+    const d = tmpDir();
+    const mod = await loadCmd();
+    expect(mod.skillsEvalCmd(d, ["my-skill", "--out"])).toBe(2);
+  });
+
+  test("--previous without value returns error code 2", async () => {
+    const d = tmpDir();
+    const mod = await loadCmd();
+    expect(mod.skillsEvalCmd(d, ["my-skill", "--previous"])).toBe(2);
+  });
+
+  test("engineText handles item.completed agent_message format", async () => {
+    const d = tmpDir();
+    const skillDir = join(d, "my-skill");
+    mkdirSync(join(skillDir, "evals"), { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      "---\nname: my-skill\ndescription: test skill\n---\nbody",
+    );
+    writeFileSync(
+      join(skillDir, "evals", "evals.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        skill: "my-skill",
+        cases: [{ id: "p1", type: "positive", prompt: "hello", expected: "parsed" }],
+      }),
+    );
+    const mod = await loadCmd();
+    expect(
+      mod.skillsEvalCmd(d, ["my-skill"], {
+        spawner: () => ({
+          status: 0,
+          stdout: JSON.stringify({
+            type: "item.completed",
+            item: { type: "agent_message", text: "parsed" },
+          }),
+        }),
+      }),
+    ).toBe(0);
+  });
+
+  test("task vs previous comparison in human output", async () => {
+    const d = tmpDir();
+    const skillDir = join(d, "my-skill");
+    mkdirSync(join(skillDir, "evals"), { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      "---\nname: my-skill\ndescription: test skill\n---\nbody",
+    );
+    writeFileSync(
+      join(skillDir, "evals", "evals.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        skill: "my-skill",
+        cases: [{ id: "p1", type: "positive", prompt: "hello", expected: "parsed" }],
+      }),
+    );
+    const prevPath = join(d, "prev.json");
+    writeFileSync(
+      prevPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        skill: "my-skill",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cases: [],
+        summary: {
+          positive: { total: 0, passed: 0, triggerAccuracy: 1 },
+          negative: { total: 0, passed: 0, triggerAccuracy: 1 },
+          baseline: { total: 0, passed: 0, triggerAccuracy: 1 },
+          triggerAccuracy: 1,
+          regression: false,
+        },
+        task: {
+          cases: [],
+          baselinePassRate: 1,
+          skillPassRate: 1,
+          delta: 0,
+          taskPassRate: 1,
+          regression: false,
+        },
+      }),
+    );
+    const mod = await loadCmd();
+    const runner = (prompt: string, skillContext?: string) => (skillContext ? "wrong" : "parsed");
+    expect(mod.skillsEvalCmd(d, ["my-skill", "--previous", prevPath], { runner })).toBe(1);
+  });
+
   test("displays baseline cases in human output", async () => {
     const d = tmpDir();
     const skillDir = join(d, "my-skill");
