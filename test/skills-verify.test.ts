@@ -26,9 +26,14 @@ function scaffold(name: string, lines: string[]): string {
 
 const VALID_BODY = [
   "",
-  "# Skill",
-  "",
-  "Use when x. Body at least fifty chars long to satisfy the validator checks here.",
+  "## When to use",
+  "Use when x.",
+  "## When NOT to use",
+  "Do not use when y.",
+  "## Steps",
+  "1. Do the task.",
+  "## Verification",
+  "Check output.",
   "",
 ];
 
