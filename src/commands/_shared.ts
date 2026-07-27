@@ -58,6 +58,7 @@ export * from "../skills/crystallize.js";
 export * from "../skills/auto-crystallize.js";
 export * from "../skills/catalog.js";
 export * from "../skills/importer.js";
+export * from "../skills/optimize-description.js";
 export * from "../skills/domain.js";
 export * from "../skills/facts.js";
 export * from "../skills/registry.js";
