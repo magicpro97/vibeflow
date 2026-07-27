@@ -23,6 +23,7 @@ import {
   draftSkillTemplate,
   existsSync,
   handleDomainSubcommand,
+  handleFactsSubcommand,
   handleRegistrySubcommand,
   handleTelemetrySubcommand,
   importSkillFromDir,
@@ -352,9 +353,8 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "domain") {
     return handleDomainSubcommand(repo, rest);
   }
-  if (sub === "registry") {
-    return handleRegistrySubcommand(repo, rest);
-  }
+  if (sub === "registry") return handleRegistrySubcommand(repo, rest);
+  if (sub === "facts") return handleFactsSubcommand(repo, rest);
   if (sub === "eval") {
     return skillsEvalCmd(repo, rest);
   }
