@@ -150,7 +150,7 @@ export function verifySkillCommand(
 
     // #657: skill-creator quality contract gate — block promotion on quality errors.
     // Missing required sections are escalated from warning to error at promotion time.
-    const text = readFileSync(skillMd, "utf8");
+    const text = (ioDeps.readFileSync ?? readFileSync)(skillMd, "utf8");
     const { body } = parseFrontmatter(text);
     if (body) {
       const qc = checkQualityContract(body);

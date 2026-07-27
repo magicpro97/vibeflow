@@ -11,8 +11,7 @@ export const REQUIRED_SECTIONS = ["when to use", "when not to use", "steps", "ve
 
 // #657: ALL-CAPS instruction anti-pattern — matches lines with 3+ ALL-CAPS words
 // meant to catch "ALWAYS", "NEVER", "MUST" directive blocks
-const ALL_CAPS_PAT =
-  /\b(?:ALWAYS|NEVER|MUST|MUST\s+NOT|SHOULD|SHOULD\s+NOT|REQUIRED|MANDATORY)\b.{0,40}\b(?:ALWAYS|NEVER|MUST|MUST\s+NOT|SHOULD|SHOULD\s+NOT|REQUIRED|MANDATORY)\b/;
+const ALL_CAPS_PAT = /\b(?:ALWAYS|NEVER|MUST|REQUIRED|MANDATORY)\b/;
 
 // Standard SKILL.md frontmatter fields per the Agent Skills spec
 // (https://agentskills.io/specification). Anthropic's own reference

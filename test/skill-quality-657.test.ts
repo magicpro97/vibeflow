@@ -89,7 +89,7 @@ describe("checkQualityContract", () => {
       "## When NOT to use",
       "Not for y.",
       "## Steps",
-      "1. Do thing. ALWAYS use this order. NEVER skip validation.",
+      "1. ALWAYS follow this order.",
       "## Verification",
       "Check output.",
     ].join("\n");
