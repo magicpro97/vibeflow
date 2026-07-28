@@ -21,6 +21,7 @@ import {
   existsSync,
   handleDomainSubcommand,
   handleFactsSubcommand,
+  handleImpactSubcommand,
   handleOptimizeDescription,
   handleRegistrySubcommand,
   handleTelemetrySubcommand,
@@ -114,9 +115,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     process.stdout.write(renderSkillNeeds(needs));
     return 0;
   }
-  if (sub === "telemetry") {
-    return handleTelemetrySubcommand();
-  }
+  if (sub === "telemetry") return handleTelemetrySubcommand();
   if (sub === "sync") {
     // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
     // `--engine claude|codex|copilot` from `rest`.
@@ -353,6 +352,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   }
   if (sub === "registry") return handleRegistrySubcommand(repo, rest);
   if (sub === "facts") return handleFactsSubcommand(repo, rest);
+  if (sub === "impact") return handleImpactSubcommand(repo, rest);
   if (sub === "eval") {
     return skillsEvalCmd(repo, rest);
   }

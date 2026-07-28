@@ -61,6 +61,7 @@ export * from "../skills/importer.js";
 export * from "../skills/optimize-description.js";
 export * from "../skills/domain.js";
 export * from "../skills/facts.js";
+export * from "../skills/impact.js";
 export * from "../skills/registry.js";
 export * from "../skills/registry-channel.js";
 export * from "../skills/registry-cli.js";
