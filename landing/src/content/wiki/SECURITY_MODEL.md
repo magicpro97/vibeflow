@@ -106,6 +106,39 @@ Old or unsafe skill → deprecated
 
 Skills requiring shell, network, write access, or credentials must be explicitly approved.
 
+## Vendor registry cache (read-only)
+
+Installed vendor registries live at `~/.vibeflow/skill-registries/<url-hash>/` and are
+identity-pinned by a detached commit OID plus a deterministic SHA-256 bundle hash over
+all regular files in the installed skill directory. The bundle hash is computed during
+`vf skills registry install` and stored in the lock file.
+
+The vendor registry cache is **read-only for agent file writes**. VibeFlow's PreToolUse
+hooks block `Write`/`Edit`/`patch` events targeting paths inside this cache. Agent
+writes through the cache are blocked with a `critical` risk verdict.
+
+### Escape hatch
+
+To update or reinstall a registry skill:
+```
+vf skills registry update <id> --yes
+vf skills registry install <id>/<skill> --on-collision=replace --yes
+```
+
+### verify-sync bundle hash check
+
+`vf skills verify-sync --from-registry` compares each installed skill's bundle hash
+against the lock entry. On mismatch, it reports an error stating the skill was modified
+and prints the exact reinstall command. No automatic overwrite or restore is performed
+in V1 — explicit reinstall is the only recovery path.
+
+### V1 limitation: no shell-command mutation detection
+
+Detecting shell commands that write into the vendor cache (e.g. `cp`, `echo >`, `tee`)
+is deliberately excluded in V1. Shell-command mutation detection is bypass- and
+false-positive-prone. Existing workspace/outside warnings remain unchanged. This
+boundary is documented in `src/hooks/risk.ts`.
+
 ## Shared catalog trust boundary
 
 The shared skill catalog at `~/.vibeflow/skills/` is machine-wide: a skill promoted

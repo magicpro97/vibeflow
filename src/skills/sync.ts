@@ -12,6 +12,7 @@ import { join, relative } from "node:path";
 import { ENGINES, type Engine, c } from "../core.js";
 import { sharedCatalogDir } from "./catalog.js";
 import { parseRegistryLock } from "./registry-channel.js";
+import { skillBundleHash } from "./registry-install.js";
 import { validateSkillDir } from "./validator.js";
 
 // Project-local canonical dir. Kept as an override/shadow layer on top of the
@@ -222,6 +223,7 @@ export function verifySkillSync(
       : engines;
   const mirrors = mirrorsFor(resolvedEngines);
   const errors: string[] = [];
+  const warnings: string[] = [];
   const synced: string[] = [];
   let names = skillNames(repo, { catalogDir: opts.catalogDir });
   if (opts.fromRegistry) {
@@ -231,6 +233,30 @@ export function verifySkillSync(
     }
     // Missing registry-pinned skills ARE errors, not just warnings
     errors.push(...reg.errors.map((e) => `registry-pinned: ${e}`));
+
+    // Bundle hash verification for each installed skill
+    const catalog = opts.catalogDir ?? sharedCatalogDir();
+    const lock = parseRegistryLock(repo);
+    for (const reg of lock.registries) {
+      for (const sk of reg.installed ?? []) {
+        if (!sk.bundleHash) {
+          warnings.push(
+            `"${sk.name}" (registry "${reg.name}"): no bundleHash in lock — reinstall to pin`,
+          );
+          continue;
+        }
+        const catDir = join(catalog, sk.name);
+        if (!existsSync(catDir)) continue; // already reported by requiredSkillNames
+        const actual = skillBundleHash(catDir);
+        if (actual !== sk.bundleHash) {
+          errors.push(
+            `"${sk.name}" (registry "${reg.name}"): bundle hash mismatch ` +
+              `(expected ${sk.bundleHash.slice(0, 12)}, got ${actual.slice(0, 12)}). ` +
+              `Modified outside lock. Restore via: \`vf skills registry install ${reg.name}/${sk.name} --on-collision=replace --yes\``,
+          );
+        }
+      }
+    }
   }
   for (const name of names) {
     for (const mirror of mirrors) {
@@ -242,5 +268,5 @@ export function verifySkillSync(
       }
     }
   }
-  return { ok: errors.length === 0, mode: "pointer", synced, errors, warnings: [] };
+  return { ok: errors.length === 0, mode: "pointer", synced, errors, warnings };
 }

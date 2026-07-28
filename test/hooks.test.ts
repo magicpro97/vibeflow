@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { hookSelftest, liveGuardrailArmed } from "../src/commands.js";
 import { emitHookFiles } from "../src/commands/hooks.js";
 import type { HookInput } from "../src/core.js";
@@ -21,7 +21,7 @@ import {
   opencodePluginStale,
   perCommandWarning,
 } from "../src/hooks/adapters.js";
-import { scoreRisk } from "../src/hooks/risk.js";
+import { isVendorRegistryPath, scoreRisk } from "../src/hooks/risk.js";
 import {
   evaluateHook,
   exitCodeFor,
@@ -1605,4 +1605,77 @@ describe("hook(): web UI approval path", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   }, 15000);
+});
+
+describe("isVendorRegistryPath (#694)", () => {
+  const { homedir: osHomedir } = require("node:os");
+  const dirs2: string[] = [];
+  afterEach(() => {
+    for (const d of dirs2) {
+      try {
+        rmSync(d, { recursive: true, force: true });
+      } catch {}
+    }
+  });
+
+  test("path under vendor cache root → true", () => {
+    const root = join(osHomedir(), ".vibeflow", "skill-registries");
+    const p = join(root, "abc123", "skills", "my-skill", "SKILL.md");
+    expect(isVendorRegistryPath(p)).toBe(true);
+  });
+
+  test("symlink escape into root → false (uses realpath)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "vf-vendor-test-"));
+    dirs2.push(tmp);
+    const root = join(tmp, "skill-registries");
+    mkdirSync(root, { recursive: true });
+    const inside = join(root, "abc", "f.txt");
+    mkdirSync(dirname(inside), { recursive: true });
+    writeFileSync(inside, "data");
+    const { symlinkSync, realpathSync } = require("node:fs");
+    const symRoot = join(root, "abc", "link-to-root");
+    try {
+      rmSync(symRoot, { force: true });
+    } catch {}
+    symlinkSync(root, symRoot);
+    expect(isVendorRegistryPath(symRoot, { root, realpathSync })).toBe(false);
+  });
+
+  test("root itself → false", () => {
+    const root = join(osHomedir(), ".vibeflow", "skill-registries");
+    expect(isVendorRegistryPath(root)).toBe(false);
+  });
+
+  test("non-existing root falls back to normalized root", () => {
+    const root = join(mkdtempSync(join(tmpdir(), "vf-vendor-missing-")), "registry-root");
+    dirs2.push(dirname(root));
+    expect(isVendorRegistryPath(join(root, "future", "SKILL.md"), { root })).toBe(true);
+  });
+
+  test("unrelated path → false", () => {
+    expect(isVendorRegistryPath("/etc/passwd")).toBe(false);
+    expect(isVendorRegistryPath(join(osHomedir(), ".vibeflow", "skills", "x"))).toBe(false);
+  });
+});
+
+describe("scoreFiles vendor cache block (#694)", () => {
+  test("vendor cache file target → critical", () => {
+    const root = homedir();
+    const r = scoreRisk({
+      event: "pre-write",
+      files: [join(root, ".vibeflow", "skill-registries", "abc", "SKILL.md")],
+    });
+    expect(r.risk).toBe("critical");
+    expect(r.reasons.some((s) => s.includes("vendor registry cache is read-only"))).toBe(true);
+  });
+
+  test("normal file inside .vibeflow/skills/ (not vendor cache) → not critical", () => {
+    const root = homedir();
+    const r = scoreRisk({
+      event: "pre-write",
+      files: [join(root, ".vibeflow", "skills", "my-skill", "SKILL.md")],
+    });
+    expect(r.reasons.some((s) => s.includes("vendor registry cache"))).toBe(false);
+    expect(["none", "low"]).toContain(r.risk);
+  });
 });

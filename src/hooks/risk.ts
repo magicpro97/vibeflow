@@ -1,4 +1,6 @@
-import { resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join, resolve, sep } from "node:path";
 import type { HookInput, RiskLevel } from "../core.js";
 import { type SemanticJudge, shouldConsultSemantic } from "./risk-semantic.js";
 import {
@@ -72,6 +74,62 @@ export const RISK_ORDER: RiskLevel[] = ["none", "low", "medium", "high", "critic
 /** Placeholder reason pushed when a scored input has NO risk signal. Exported so callers
  *  (e.g. the apply-gate hunk classifier) can filter it out without hard-coding the string. */
 export const NO_SIGNALS = "no risk signals detected";
+
+/**
+ * V1 boundary: shell command mutation detection is deliberately omitted.
+ * Bash/Shell mutation is bypass/false-positive prone. Existing workspace/outside
+ * warnings remain untouched.
+ */
+
+export const VENDOR_CACHE_ROOT = join(homedir(), ".vibeflow", "skill-registries");
+
+/**
+ * Check if a file path is inside the vendor registry cache (read-only zone).
+ * Resolves existing paths via realpathSync; for non-existing leaves, resolves
+ * the nearest existing parent then appends basename. Blocks symlink escape and
+ * path normalization bypass.
+ * V1: shell command mutation not detected — see V1 boundary comment above.
+ */
+export function isVendorRegistryPath(
+  filePath: string,
+  opts?: { root?: string; realpathSync?: (p: string) => string },
+): boolean {
+  const root = opts?.root ?? VENDOR_CACHE_ROOT;
+  const _realpath = opts?.realpathSync ?? realpathSync;
+  const normalized = resolve(filePath);
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = _realpath(root);
+  } catch {
+    canonicalRoot = resolve(root);
+  }
+  let candidate: string;
+  try {
+    candidate = _realpath(normalized);
+  } catch {
+    // Non-existing leaf: resolve nearest existing parent, then append the
+    // remaining relative suffix. If root itself is not created yet, use its
+    // normalized path as the safe canonical boundary.
+    let parent = normalized;
+    for (;;) {
+      if (parent === resolve(root)) {
+        candidate = normalized;
+        break;
+      }
+      const resolved = resolve(parent, "..");
+      if (resolved === parent) return false; // hit filesystem root, nothing exists
+      try {
+        const realParent = _realpath(resolved);
+        candidate = join(realParent, normalized.slice(resolved.length + 1) || basename(normalized));
+        break;
+      } catch {
+        parent = resolved;
+      }
+    }
+  }
+  const rootSlash = canonicalRoot.endsWith(sep) ? canonicalRoot : `${canonicalRoot}${sep}`;
+  return candidate.startsWith(rootSlash) && candidate !== canonicalRoot;
+}
 
 /** True when a path argument resolves outside the workspace root. */
 function escapesWorkspace(filePath: string, workspace: string): boolean {
@@ -250,6 +308,13 @@ function scoreFiles(
   if (files?.some((f) => /\.spec-first\./.test(f))) {
     bump("critical");
     reasons.push("spec-first test file is an oracle — implementer must not modify it (ADR-002)");
+  }
+
+  // Vendor registry cache is read-only — block any file write inside it.
+  const vendorFiles = files.filter((f) => isVendorRegistryPath(f));
+  if (vendorFiles.length) {
+    bump("critical");
+    reasons.push(`vendor registry cache is read-only: ${vendorFiles.join(", ")}`);
   }
 
   if (enabled.has("workspace-guard")) {
