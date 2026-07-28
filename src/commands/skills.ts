@@ -24,6 +24,7 @@ import {
   handleImpactSubcommand,
   handleOptimizeDescription,
   handleRegistrySubcommand,
+  handleSkillCiGate,
   handleTelemetrySubcommand,
   importSkillFromDir,
   importSkillsFromParent,
@@ -353,9 +354,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "registry") return handleRegistrySubcommand(repo, rest);
   if (sub === "facts") return handleFactsSubcommand(repo, rest);
   if (sub === "impact") return handleImpactSubcommand(repo, rest);
-  if (sub === "eval") {
-    return skillsEvalCmd(repo, rest);
-  }
+  if (sub === "eval") return skillsEvalCmd(repo, rest);
   if (sub === "verify-lock") {
     const allErrors: string[] = [];
     const allWarnings: string[] = [];
@@ -394,6 +393,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 1;
   }
   if (sub === "optimize-description") return handleOptimizeDescription(repo, rest);
+  if (sub === "ci-gate") return handleSkillCiGate(repo, rest);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));
   return 0;
 }
