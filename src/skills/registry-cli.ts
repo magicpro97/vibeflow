@@ -5,7 +5,7 @@ import { registryInstall } from "./registry-install.js";
 
 const COLLISION_OPTIONS = new Set(["skip", "replace", "rename"]);
 const INSTALL_USAGE =
-  "Usage: vf skills registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--yes]";
+  "Usage: vf skills registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--record-review] [--yes]";
 
 export function handleRegistrySubcommand(repo: string, args: string[]): number {
   const cmd = args[0];
@@ -69,6 +69,7 @@ export function handleRegistrySubcommand(repo: string, args: string[]): number {
     let version: string | undefined;
     let onCollision: "skip" | "replace" | "rename" = "skip";
     let yes = false;
+    let recordReview = false;
     for (let i = 0; i < rest.length; i++) {
       const tok = rest[i];
       if (tok === "--version") version = rest[++i] ?? "";
@@ -83,6 +84,7 @@ export function handleRegistrySubcommand(repo: string, args: string[]): number {
         }
         onCollision = value as "skip" | "replace" | "rename";
       } else if (tok === "--yes") yes = true;
+      else if (tok === "--record-review") recordReview = true;
       else if (tok?.startsWith("--") || target) {
         out("vf", c.red(INSTALL_USAGE), { level: "error" });
         return 2;
@@ -97,6 +99,7 @@ export function handleRegistrySubcommand(repo: string, args: string[]): number {
       version,
       onCollision,
       yes,
+      recordReview,
     });
   }
   out("vf", c.red("Usage: vf skills registry <add|list|update|install> [args]"), {

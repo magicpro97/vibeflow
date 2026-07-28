@@ -10,9 +10,9 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { ENGINES, type Engine, c } from "../core.js";
+import { skillBundleHash } from "./bundle-hash.js";
 import { sharedCatalogDir } from "./catalog.js";
 import { parseRegistryLock } from "./registry-channel.js";
-import { skillBundleHash } from "./registry-install.js";
 import { validateSkillDir } from "./validator.js";
 
 // Project-local canonical dir. Kept as an override/shadow layer on top of the

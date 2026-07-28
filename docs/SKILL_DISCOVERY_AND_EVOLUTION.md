@@ -221,6 +221,17 @@ Promotion to `verified` requires:
 - review approval if elevated permissions are needed
 ```
 
+Registry-installed external skills also require a local review proof. Run:
+
+```bash
+vf skills registry install <registry>/<skill> --record-review --yes
+```
+
+This writes a non-trusting stub under `~/.vibeflow/skill-review-proofs/`. A reviewer must set
+`reviewer` and retain matching registry ID, commit, skill path, and bundle hash. The proof is
+invalid when catalog content changes. Publisher frontmatter and remote `status: verified` claims
+never promote a skill on their own; no publisher signature/PKI is trusted in V1.
+
 ---
 
 **Related:** [Skill Providers](./SKILL_PROVIDERS.md) · [Skills System](./SKILLS_SYSTEM.md)

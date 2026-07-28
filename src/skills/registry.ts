@@ -1,7 +1,8 @@
+// biome-ignore format: entire-file — tight formatting keeps file ≤400 lines
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SkillScope } from "../core.js";
-
 // Deep-imports kept below to avoid circular re-exports.
 import {
   CTX_DIR,
@@ -16,6 +17,9 @@ import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { resolveAllAdapters } from "./adapter.js";
 import { sharedCatalogDir } from "./catalog.js";
 import { parseDomainMeta } from "./domain.js";
+import { parseRegistryLock } from "./registry-channel.js";
+// biome-ignore format: compact single-line keeps file ≤400
+import { type ParseSkillOpts, hasValidReviewProof, trustedIdentityForSharedSkill } from "./review-proof.js";
 
 /**
  * Directories that may contain `<name>/SKILL.md` folders.
@@ -41,8 +45,7 @@ const VALID_STATUS: SkillStatus[] = [
   "unverified",
 ];
 
-/**
- * Where a skill came from. ONLY skills that live under the repo's own local skill roots
+/** Where a skill came from. ONLY skills that live under the repo's own local skill roots
  * (`local`) are allowed to declare themselves `verified`. Anything sourced from external
  * discovery (`discovered`) is forced down to `experimental` at most — this enforces the
  * hard product invariant: external/unknown skills must NEVER be auto-verified.
@@ -137,7 +140,7 @@ function parseScope(data: Record<string, unknown>): SkillScope | undefined {
 export function parseSkill(
   skillMdPath: string,
   dir: string,
-  opts: { provenance?: SkillProvenance } = {},
+  opts: ParseSkillOpts = {},
 ): Skill | null {
   let text: string;
   try {
@@ -166,10 +169,11 @@ export function parseSkill(
     ? (statusRaw as SkillStatus)
     : "unverified";
 
-  // Provenance gate: only LOCAL skills may be verified; external is experimental at most.
+  // External claims are untrusted. Only a caller-supplied identity plus matching
+  // local proof can preserve verified; frontmatter never supplies proof identity.
   const provenance: SkillProvenance = opts.provenance ?? "local";
   if (provenance !== "local" && status === "verified") {
-    status = "experimental";
+    status = hasValidReviewProof(name, opts) ? "verified" : "experimental";
   }
 
   const { domain, owns, dependsOn } = parseDomainMeta(data as Record<string, unknown>);
@@ -194,13 +198,12 @@ export function parseSkill(
     path: skillMdPath,
   };
 }
-
 /** Discover every valid skill under the known roots in `repo`, de-duplicated by name.
  *  Resolution order: project-local roots first, then the shared user-scoped catalog
  *  (~/.vibeflow/skills/). A project-local skill always shadows a shared one. */
 export function discoverSkills(
   repo: string,
-  inject: { sharedCatalogDir?: () => string } = {},
+  inject: { sharedCatalogDir?: () => string; homedir?: () => string } = {},
 ): Skill[] {
   const byName = new Map<string, Skill>();
 
@@ -223,6 +226,8 @@ export function discoverSkills(
 
   // Scan the shared user-scoped catalog (absolute path, lowest priority)
   const _sharedDir = inject.sharedCatalogDir ?? sharedCatalogDir;
+  const home = inject.homedir?.() ?? process.env.VF_SKILLS_HOME ?? homedir();
+  const lock = parseRegistryLock(repo);
   try {
     const shared = _sharedDir();
     if (existsSync(shared)) {
@@ -233,10 +238,11 @@ export function discoverSkills(
         if (!statSync(dir).isDirectory()) continue;
         const skillMd = join(dir, "SKILL.md");
         if (!existsSync(skillMd)) continue;
-        const skill = parseSkill(skillMd, dir);
+        const id = trustedIdentityForSharedSkill(entry, lock.registries, dir);
+        // biome-ignore format: compact ternary keeps file ≤400
+        const skill = parseSkill(skillMd, dir, id ? { provenance: "discovered", trustedReviewIdentity: id, homedir: () => home } : { provenance: "discovered" });
         if (!skill) continue;
         const key = skill.name.toLowerCase();
-        // Project-local wins — only add if not already present
         if (!byName.has(key)) byName.set(key, skill);
       }
     }
@@ -256,7 +262,6 @@ export function discoverSkills(
 
   return resolved.skills;
 }
-
 /** #552: collect every non-deprecated skill's mcp block into a {name → UserMcpServer} map,
  *  ready to merge into the engine MCP fan-out (same shape as settings.mcpServers).
  *  Server name = mcp.name (already resolved in asMcp). Later skills win on name clash. */

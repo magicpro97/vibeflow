@@ -45,6 +45,37 @@ export function registryLockPath(repo: string): string {
   return join(repo, LOCK_REL);
 }
 
+export function parseInstalledSkill(raw: unknown): InstalledSkill | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Record<string, unknown>;
+  if (
+    typeof s.name !== "string" ||
+    typeof s.version !== "string" ||
+    typeof s.commitOID !== "string"
+  )
+    return null;
+  const bundleHash = typeof s.bundleHash === "string" ? s.bundleHash : undefined;
+  if (bundleHash !== undefined && !/^[0-9a-f]{64}$/.test(bundleHash)) return null;
+  const skillPath = typeof s.skillPath === "string" ? s.skillPath : undefined;
+  if (
+    skillPath !== undefined &&
+    (!skillPath || skillPath.includes("..") || skillPath.includes("\\") || skillPath.includes("\0"))
+  )
+    return null;
+  const scan_summary =
+    s.scan_summary && typeof s.scan_summary === "object"
+      ? (s.scan_summary as InstalledSkill["scan_summary"])
+      : undefined;
+  return {
+    name: s.name,
+    version: s.version,
+    commitOID: s.commitOID,
+    bundleHash,
+    skillPath,
+    scan_summary,
+  };
+}
+
 export function parseRegistryLock(repo: string): RegistryLock {
   const p = registryLockPath(repo);
   if (!existsSync(p)) return { schemaVersion: 1, registries: [] };
@@ -65,22 +96,17 @@ export function parseRegistryLock(repo: string): RegistryLock {
           typeof r.ref === "string" &&
           typeof r.commitOID === "string"
         ) {
+          const installed = Array.isArray(r.installed)
+            ? r.installed
+                .map(parseInstalledSkill)
+                .filter((s: InstalledSkill | null): s is InstalledSkill => s !== null)
+            : undefined;
           registries.push({
             name: r.name,
             url: r.url,
             ref: r.ref,
             commitOID: r.commitOID,
-            installed: Array.isArray(r.installed)
-              ? (r.installed.filter((s: unknown): s is InstalledSkill => {
-                  if (!s || typeof s !== "object") return false;
-                  const skill = s as Record<string, unknown>;
-                  return (
-                    typeof skill.name === "string" &&
-                    typeof skill.version === "string" &&
-                    typeof skill.commitOID === "string"
-                  );
-                }) as InstalledSkill[])
-              : undefined,
+            installed,
           });
         }
       }
