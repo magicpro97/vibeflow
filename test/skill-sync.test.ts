@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { registryLockPath, writeRegistryLock } from "../src/skills/registry-channel";
+import { skillBundleHash } from "../src/skills/registry-install";
 import { requiredSkillNames, syncSkillMirrors, verifySkillSync } from "../src/skills/sync";
 
 let dirs: string[] = [];
@@ -396,5 +398,90 @@ describe("verifySkillSync --from-registry", () => {
     expect(
       result.errors.some((e) => e.includes("orphan-skill") && e.includes("SKILL.md missing")),
     ).toBe(true);
+  });
+});
+
+describe("verifySkillSync --from-registry bundleHash (#694)", () => {
+  function setup(): { repo: string; catalogDir: string; lockDir: string; skillName: string } {
+    const repo = mkdtempSync(join(tmpdir(), "vf-bhash-verify-"));
+    dirs.push(repo);
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-bhash-cat-"));
+    dirs.push(catalogDir);
+    const skillName = "bhash-skill";
+    mkdirSync(join(catalogDir, skillName), { recursive: true });
+    writeFileSync(
+      join(catalogDir, skillName, "SKILL.md"),
+      "---\nname: bhash-skill\ndescription: test\n---\n\n# BHash\n\nContent for validation purposes. This is more than fifty characters.\n",
+    );
+    const lockDir = join(repo, ".vibeflow");
+    mkdirSync(lockDir, { recursive: true });
+    return { repo, catalogDir, lockDir, skillName };
+  }
+
+  function writeLock(lockDir: string, skillName: string, bundleHash?: string): void {
+    writeFileSync(
+      join(lockDir, "SKILL_REGISTRY.lock.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "test-reg",
+            url: "https://example.com/repo.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [
+              {
+                name: skillName,
+                version: "1.0.0",
+                commitOID: "a".repeat(40),
+                ...(bundleHash !== undefined ? { bundleHash } : {}),
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  }
+
+  test("matching bundleHash → passes", () => {
+    const { repo, catalogDir, lockDir, skillName } = setup();
+    // --from-registry without explicit engines verifies every mirror.
+    syncSkillMirrors(repo, {
+      mode: "pointer",
+      engines: ["claude", "codex", "copilot", "opencode", "antigravity"],
+      catalogDir,
+    });
+    const hash = skillBundleHash(join(catalogDir, skillName));
+    writeLock(lockDir, skillName, hash);
+    const result = verifySkillSync(repo, undefined, { fromRegistry: true, catalogDir });
+    expect(result.ok).toBe(true);
+    expect(result.errors.length).toBe(0);
+  });
+
+  test("mismatched bundleHash → error with reinstall command", () => {
+    const { repo, catalogDir, lockDir, skillName } = setup();
+    syncSkillMirrors(repo, {
+      mode: "pointer",
+      engines: ["claude", "codex", "copilot", "opencode", "antigravity"],
+      catalogDir,
+    });
+    writeLock(lockDir, skillName, "f".repeat(64));
+    const result = verifySkillSync(repo, undefined, { fromRegistry: true, catalogDir });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("bundle hash mismatch"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("--on-collision=replace --yes"))).toBe(true);
+  });
+
+  test("missing bundleHash in lock → warns but passes (backward compat)", () => {
+    const { repo, catalogDir, lockDir, skillName } = setup();
+    syncSkillMirrors(repo, {
+      mode: "pointer",
+      engines: ["claude", "codex", "copilot", "opencode", "antigravity"],
+      catalogDir,
+    });
+    writeLock(lockDir, skillName, undefined);
+    const result = verifySkillSync(repo, undefined, { fromRegistry: true, catalogDir });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("no bundleHash"))).toBe(true);
   });
 });

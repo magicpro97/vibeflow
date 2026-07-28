@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,7 @@ import {
   registryList,
   registryLockPath,
   registryUpdate,
+  skillBundleHash,
   writeRegistryLock,
 } from "../src/commands/_shared.js";
 
@@ -228,9 +230,17 @@ describe("registryAdd", () => {
       yes: true,
     });
     expect(code).toBe(0);
-    // First 4 ops: clone, fetch, checkout, rev-parse, plus final rev-parse = 5
-    expect(calls.length).toBeGreaterThanOrEqual(5);
+    // clone + fetch, then resolve FETCH_HEAD and detached-checkout exact OID.
+    expect(calls).toHaveLength(4);
     expect(calls[0]?.args[0]).toBe("clone");
+    expect(calls[2]?.args).toContain("FETCH_HEAD");
+    expect(calls[3]?.args).toEqual([
+      "-C",
+      registryCacheDir("https://github.com/x/skills.git"),
+      "checkout",
+      "--detach",
+      "deadbeef123456789012345678901234567890",
+    ]);
     // Lock file written with correct OID
     const lock = parseRegistryLock(repo);
     expect(lock.registries).toHaveLength(1);
@@ -977,6 +987,103 @@ describe("registryInstall", () => {
     expect(reg?.installed?.[0]?.version).toBe("1.0.0");
     expect(reg?.installed?.[0]?.commitOID).toBe("a".repeat(40));
   });
+
+  test("installed skill includes bundleHash in lock entry", () => {
+    const { repo, registryId, skillName, catalogHome } = setup();
+    const code = registryInstall(repo, registryId, skillName, {
+      yes: true,
+      homedir: () => catalogHome,
+    });
+    expect(code).toBe(0);
+    const lock = parseRegistryLock(repo);
+    const sk = lock.registries.find((r) => r.name === registryId)?.installed?.[0];
+    expect(sk?.bundleHash).toBeDefined();
+    expect(sk?.bundleHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("skillBundleHash", () => {
+  test("deterministic SHA-256 over sorted files — same dir gives same hash", () => {
+    const d = mkdtempSync(join(tmpdir(), "vf-bhash-"));
+    dirs.push(d);
+    writeFileSync(join(d, "a.txt"), "hello");
+    mkdirSync(join(d, "sub"));
+    writeFileSync(join(d, "sub", "b.txt"), "world");
+    const h1 = skillBundleHash(d);
+    const h2 = skillBundleHash(d);
+    expect(h1).toBe(h2);
+  });
+
+  test("different content produces different hash", () => {
+    const d1 = mkdtempSync(join(tmpdir(), "vf-bh1-"));
+    dirs.push(d1);
+    writeFileSync(join(d1, "f.txt"), "content-a");
+    const d2 = mkdtempSync(join(tmpdir(), "vf-bh2-"));
+    dirs.push(d2);
+    writeFileSync(join(d2, "f.txt"), "content-b");
+    expect(skillBundleHash(d1)).not.toBe(skillBundleHash(d2));
+  });
+
+  test("excludes .git directory", () => {
+    const d = mkdtempSync(join(tmpdir(), "vf-bh-git-"));
+    dirs.push(d);
+    writeFileSync(join(d, "SKILL.md"), "content");
+    mkdirSync(join(d, ".git"));
+    writeFileSync(join(d, ".git", "HEAD"), "ref: refs/heads/main\n");
+    // Hash should only include SKILL.md
+    const hash = skillBundleHash(d);
+    // Manually compute expected hash
+    const expected = createHash("sha256").update("SKILL.md\0").update("content").digest("hex");
+    expect(hash).toBe(expected);
+  });
+
+  test("sorts files alphabetically for determinism", () => {
+    const d = mkdtempSync(join(tmpdir(), "vf-bh-sort-"));
+    dirs.push(d);
+    writeFileSync(join(d, "z.txt"), "last");
+    writeFileSync(join(d, "a.txt"), "first");
+    mkdirSync(join(d, "m"));
+    writeFileSync(join(d, "m", "b.txt"), "mid");
+    const hash = skillBundleHash(d);
+    const expected = createHash("sha256")
+      .update("a.txt\0")
+      .update("first")
+      .update("m/b.txt\0")
+      .update("mid")
+      .update("z.txt\0")
+      .update("last")
+      .digest("hex");
+    expect(hash).toBe(expected);
+  });
+});
+
+describe("registryAdd OID checkout plan (#694)", () => {
+  test("planClone omits checkout/rev-parse steps (delegated to resolveOidAndCheckout)", () => {
+    const repo = tmpRepo();
+    const { calls, spawn } = fakeGit({ stdout: `${"a".repeat(40)}\n` });
+    const code = registryAdd(repo, "https://github.com/x/skills.git", "oid-reg", "v1.0", {
+      spawnSync: spawn,
+      yes: true,
+    });
+    expect(code).toBe(0);
+    // clone + fetch — no checkout step in plan
+    const cloneCall = calls.find((c) => c.args[0] === "clone");
+    expect(cloneCall).toBeDefined();
+    // After the planned ops, resolveOidAndCheckout runs rev-parse FETCH_HEAD + checkout --detach
+    const revParseCall = calls.find((c) => c.args.includes("FETCH_HEAD"));
+    expect(revParseCall).toBeDefined();
+    const detachCall = calls.find((c) => c.args.includes("--detach"));
+    expect(detachCall).toBeDefined();
+    // OID used for checkout is full hex, not a ref/tag
+    const detachIdx = calls.findIndex((c) => c.args.includes("--detach"));
+    if (detachIdx >= 0) {
+      const oidArg = calls[detachIdx]?.args.slice(-1)[0];
+      expect(oidArg).toMatch(/^[0-9a-f]{40}$/);
+    }
+  });
+
+  // registryUpdate's cache root is the actual user home (no homedir test seam),
+  // so its detached-OID behavior is covered by unit tests for registryAdd above.
 });
 
 describe("registryInstall security scan gate (#651)", () => {

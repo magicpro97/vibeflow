@@ -33,6 +33,7 @@ export interface InstalledSkill {
   name: string;
   version: string;
   commitOID: string;
+  bundleHash?: string;
   scan_summary?: ScanSummary;
 }
 

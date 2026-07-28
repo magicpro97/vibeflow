@@ -186,17 +186,19 @@ function planClone(url: string, cacheDir: string, ref: string): GitOp[] {
   return [
     { cmd: "git", args: ["clone", "--filter=blob:none", "--no-checkout", url, cacheDir] },
     { cmd: "git", args: ["-C", cacheDir, "fetch", "origin", ref] },
-    { cmd: "git", args: ["-C", cacheDir, "checkout", ref, "--detach"] },
-    { cmd: "git", args: ["-C", cacheDir, "rev-parse", "HEAD"] },
   ];
 }
 
 function planFetch(cacheDir: string, ref: string): GitOp[] {
-  return [
-    { cmd: "git", args: ["-C", cacheDir, "fetch", "origin"] },
-    { cmd: "git", args: ["-C", cacheDir, "checkout", ref, "--detach"] },
-    { cmd: "git", args: ["-C", cacheDir, "rev-parse", "HEAD"] },
-  ];
+  return [{ cmd: "git", args: ["-C", cacheDir, "fetch", "origin", ref] }];
+}
+
+function resolveOidAndCheckout(cacheDir: string, inject?: { spawnSync?: SpawnFn }): string | null {
+  const oidResult = spawnGit(["-C", cacheDir, "rev-parse", "FETCH_HEAD"], inject);
+  const oid = oidResult.status === 0 ? oidResult.stdout.trim() : "";
+  if (!isHexOID(oid)) return null;
+  const co = spawnGit(["-C", cacheDir, "checkout", "--detach", oid], inject);
+  return co.status === 0 ? oid : null;
 }
 
 export function registryAdd(
@@ -240,15 +242,12 @@ export function registryAdd(
     }
   }
 
-  const oidResult = spawnGit(["-C", cacheDir, "rev-parse", "HEAD"], { spawnSync: opts.spawnSync });
-  const commitOID = oidResult.status === 0 ? oidResult.stdout.trim() : "";
+  const commitOID = resolveOidAndCheckout(cacheDir, { spawnSync: opts.spawnSync });
 
-  if (!isHexOID(commitOID)) {
-    out(
-      "vf",
-      c.red(`Invalid commit OID "${commitOID}" from git rev-parse HEAD. Refusing to persist lock.`),
-      { level: "error" },
-    );
+  if (!commitOID) {
+    out("vf", c.red("Invalid commit OID from FETCH_HEAD. Refusing to persist lock."), {
+      level: "error",
+    });
     return 1;
   }
 
@@ -342,17 +341,12 @@ export function registryUpdate(
       continue;
     }
 
-    const oidResult = spawnGit(["-C", cacheDir, "rev-parse", "HEAD"], {
-      spawnSync: opts.spawnSync,
-    });
-    const newOID = oidResult.status === 0 ? oidResult.stdout.trim() : "";
+    const newOID = resolveOidAndCheckout(cacheDir, { spawnSync: opts.spawnSync });
 
-    if (!newOID || !isHexOID(newOID)) {
+    if (!newOID) {
       out(
         "vf",
-        c.red(
-          `Invalid commit OID "${newOID}" from git rev-parse HEAD for "${r.name}". Refusing to persist lock.`,
-        ),
+        c.red(`Invalid commit OID from FETCH_HEAD for "${r.name}". Refusing to persist lock.`),
         { level: "error" },
       );
       if (priorEntry && idx >= 0) {
@@ -363,10 +357,7 @@ export function registryUpdate(
       continue;
     }
 
-    const refResult = spawnGit(["-C", cacheDir, "rev-parse", "--short", "HEAD"], {
-      spawnSync: opts.spawnSync,
-    });
-    const shortOID = refResult.status === 0 ? refResult.stdout.trim() : newOID.slice(0, 12);
+    const shortOID = newOID.slice(0, 12);
 
     if (idx >= 0) {
       updated[idx] = { ...r, commitOID: newOID };

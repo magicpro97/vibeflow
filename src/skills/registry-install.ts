@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -6,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -38,6 +40,38 @@ function uniqueSlug(base: string, taken: Set<string>): string {
 }
 
 const COLLISION_OPTIONS = new Set(["skip", "replace", "rename"]);
+
+// Det SHA-256 over sorted relative file paths + content. Excludes .git.
+export function skillBundleHash(
+  dir: string,
+  inject: {
+    readdirSync?: (path: string) => string[];
+    statSync?: (path: string) => { isFile(): boolean; isDirectory(): boolean };
+    readFileSync?: (path: string) => string | Buffer;
+  } = {},
+): string {
+  const _readdir = inject.readdirSync ?? readdirSync;
+  const _stat = inject.statSync ?? statSync;
+  const _read = inject.readFileSync ?? readFileSync;
+  const hash = createHash("sha256");
+  const walk = (base: string, prefix: string): void => {
+    const entries = _readdir(base).sort();
+    for (const e of entries) {
+      if (e === ".git") continue;
+      const full = join(base, e);
+      const st = _stat(full);
+      const rel = prefix ? `${prefix}/${e}` : e;
+      if (st.isDirectory()) {
+        walk(full, rel);
+      } else if (st.isFile()) {
+        hash.update(`${rel}\0`);
+        hash.update(_read(full) as string | Uint8Array);
+      }
+    }
+  };
+  walk(dir, "");
+  return hash.digest("hex");
+}
 
 function registrySkillDir(cacheDir: string, path: string): string | null {
   if (!path || path.includes("\0") || path.includes("\\")) return null;
@@ -290,11 +324,15 @@ export function registryInstall(
     _cpSync(skillDir, join(catalog, finalName), { recursive: true });
   }
 
+  const finalDir = join(catalog, finalName);
+  const bundleHash = skillBundleHash(finalDir);
+
   // Update lock — record installed skill only after successful copy
   const installed: InstalledSkill = {
     name: finalName,
     version: mpEntry.version,
     commitOID: entry.commitOID,
+    bundleHash,
     scan_summary,
   };
   const updatedEntries: RegistryEntry[] = lock.registries.map((r) => {
