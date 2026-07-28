@@ -123,6 +123,126 @@ describe("parseRegistryLock", () => {
     expect(lock.registries).toHaveLength(1);
     expect(lock.registries[0]?.name).toBe("good");
   });
+
+  test("rejects installed with malformed bundleHash (non-hex)", () => {
+    const repo = tmpRepo();
+    const p = registryLockPath(repo);
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      p,
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "r",
+            url: "https://x.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [{ name: "a", version: "1", commitOID: "a".repeat(40), bundleHash: "bad" }],
+          },
+        ],
+      }),
+    );
+    const lock = parseRegistryLock(repo);
+    expect(lock.registries[0]?.installed).toHaveLength(0);
+  });
+
+  test("rejects installed with malformed bundleHash (wrong hex length)", () => {
+    const repo = tmpRepo();
+    const p = registryLockPath(repo);
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      p,
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "r",
+            url: "https://x.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [
+              { name: "a", version: "1", commitOID: "a".repeat(40), bundleHash: "a".repeat(63) },
+            ],
+          },
+        ],
+      }),
+    );
+    const lock = parseRegistryLock(repo);
+    expect(lock.registries[0]?.installed).toHaveLength(0);
+  });
+
+  test("rejects installed with malformed skillPath (.. traversal)", () => {
+    const repo = tmpRepo();
+    const p = registryLockPath(repo);
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      p,
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "r",
+            url: "https://x.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [
+              { name: "a", version: "1", commitOID: "a".repeat(40), skillPath: "../etc" },
+            ],
+          },
+        ],
+      }),
+    );
+    const lock = parseRegistryLock(repo);
+    expect(lock.registries[0]?.installed).toHaveLength(0);
+  });
+
+  test("accepts installed with legitimate missing skillPath", () => {
+    const repo = tmpRepo();
+    const p = registryLockPath(repo);
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      p,
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "r",
+            url: "https://x.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [{ name: "a", version: "1", commitOID: "a".repeat(40) }],
+          },
+        ],
+      }),
+    );
+    const lock = parseRegistryLock(repo);
+    expect(lock.registries[0]?.installed).toHaveLength(1);
+  });
+
+  test("accepts installed with legitimate missing bundleHash", () => {
+    const repo = tmpRepo();
+    const p = registryLockPath(repo);
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      p,
+      JSON.stringify({
+        schemaVersion: 1,
+        registries: [
+          {
+            name: "r",
+            url: "https://x.com/r.git",
+            ref: "v1",
+            commitOID: "a".repeat(40),
+            installed: [{ name: "a", version: "1", commitOID: "a".repeat(40) }],
+          },
+        ],
+      }),
+    );
+    const lock = parseRegistryLock(repo);
+    expect(lock.registries[0]?.installed?.[0]?.bundleHash).toBeUndefined();
+    expect(lock.registries[0]?.installed?.[0]?.skillPath).toBeUndefined();
+  });
 });
 
 describe("writeRegistryLock", () => {

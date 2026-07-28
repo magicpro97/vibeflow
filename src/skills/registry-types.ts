@@ -34,6 +34,7 @@ export interface InstalledSkill {
   version: string;
   commitOID: string;
   bundleHash?: string;
+  skillPath?: string;
   scan_summary?: ScanSummary;
 }
 
