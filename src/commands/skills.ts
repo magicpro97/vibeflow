@@ -2,12 +2,9 @@
 // Pure byte-equivalent move: body preserved verbatim.
 //
 // Subcommands: list, validate, search, resolve, sync, verify-sync,
-// import, init. Each is a small dispatch on the `sub` argument; the
-// `init` subcommand is the only one that writes to disk (via
-// writeFileSafe under .vibeflow/skills/<name>/SKILL.md).
-//
-// Fail-closed posture preserved: every error path returns 1 (failure)
-// or 2 (usage error); success returns 0.
+// import, init. Each is a small dispatch on the `sub` argument; the `init`
+// subcommand is the only one that writes to disk (via writeFileSafe under
+// .vibeflow/skills/<name>/SKILL.md). Fail-closed: errors return 1, usage 2.
 
 import {
   CTX_DIR,
@@ -21,6 +18,7 @@ import {
   existsSync,
   handleDomainSubcommand,
   handleFactsSubcommand,
+  handleImpactEvidenceSubcommand,
   handleImpactSubcommand,
   handleOptimizeDescription,
   handlePolicyChecksSubcommand,
@@ -352,6 +350,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "domain") return handleDomainSubcommand(repo, rest);
   if (sub === "registry") return handleRegistrySubcommand(repo, rest);
   if (sub === "facts") return handleFactsSubcommand(repo, rest);
+  if (sub === "impact-evidence") return handleImpactEvidenceSubcommand(repo, rest);
   if (sub === "impact") return handleImpactSubcommand(repo, rest);
   if (sub === "policy-checks") return handlePolicyChecksSubcommand(repo, rest);
   if (sub === "eval") return skillsEvalCmd(repo, rest);

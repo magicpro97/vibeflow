@@ -216,7 +216,7 @@ export function validateSkillPolicy(raw: unknown): PolicyValidationResult {
 /*  Glob matching (stdlib-only, deterministic)                         */
 /* ------------------------------------------------------------------ */
 
-function patternToRegex(pattern: string): RegExp {
+export function patternToRegex(pattern: string): RegExp {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*\*/g, "__DOUBLESTAR__")
