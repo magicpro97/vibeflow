@@ -75,6 +75,13 @@ export * from "../skills/sync.js";
 export * from "../skills/ci-gate.js";
 export * from "../skills/validator.js";
 export * from "../skills/verify.js";
+export {
+  computeRequiredChecks,
+  deriveRiskClass,
+  gitChangedPathReader,
+  handlePolicyChecksSubcommand,
+} from "../skills/policy-checks.js";
+export type { ChangedPathReader, PolicyChecksResult, RiskClass } from "../skills/policy-checks.js";
 export { skillsEvalCmd } from "./skills-eval.js";
 export * from "../tools/index.js";
 export * from "./worktree.js";

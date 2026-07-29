@@ -23,6 +23,7 @@ import {
   handleFactsSubcommand,
   handleImpactSubcommand,
   handleOptimizeDescription,
+  handlePolicyChecksSubcommand,
   handleRegistrySubcommand,
   handleSkillCiGate,
   handleTelemetrySubcommand,
@@ -348,12 +349,11 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     }
     return result.errors.length ? 1 : 0;
   }
-  if (sub === "domain") {
-    return handleDomainSubcommand(repo, rest);
-  }
+  if (sub === "domain") return handleDomainSubcommand(repo, rest);
   if (sub === "registry") return handleRegistrySubcommand(repo, rest);
   if (sub === "facts") return handleFactsSubcommand(repo, rest);
   if (sub === "impact") return handleImpactSubcommand(repo, rest);
+  if (sub === "policy-checks") return handlePolicyChecksSubcommand(repo, rest);
   if (sub === "eval") return skillsEvalCmd(repo, rest);
   if (sub === "verify-lock") {
     const allErrors: string[] = [];
