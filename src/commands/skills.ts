@@ -1,9 +1,8 @@
 // `vf skills` subcommand (issue #80, phase 7/14). Subcommands: list, validate,
-// search, resolve, sync, verify-sync, import, init, ci-*, etc.
+// search, resolve, sync, verify-sync, import, init, audit-log, verify, ci-*, etc.
 
 import {
   CTX_DIR,
-  ENGINES,
   c,
   crystallize,
   cwd,
@@ -21,6 +20,7 @@ import {
   handleOptimizeDescription,
   handlePolicyChecksSubcommand,
   handleRegistrySubcommand,
+  handleSkillAuditLog,
   handleSkillCiGate,
   handleTelemetrySubcommand,
   importSkillFromDir,
@@ -114,6 +114,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 0;
   }
   if (sub === "telemetry") return handleTelemetrySubcommand();
+  if (sub === "audit-log") return handleSkillAuditLog(repo, rest);
   if (sub === "sync") {
     // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
     // `--engine claude|codex|copilot` from `rest`.
