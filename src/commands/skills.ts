@@ -1,10 +1,5 @@
-// `vf skills` subcommand extracted from src/commands.ts (issue #80, phase 7/14).
-// Pure byte-equivalent move: body preserved verbatim.
-//
-// Subcommands: list, validate, search, resolve, sync, verify-sync,
-// import, init. Each is a small dispatch on the `sub` argument; the `init`
-// subcommand is the only one that writes to disk (via writeFileSafe under
-// .vibeflow/skills/<name>/SKILL.md). Fail-closed: errors return 1, usage 2.
+// `vf skills` subcommand (issue #80, phase 7/14). Subcommands: list, validate,
+// search, resolve, sync, verify-sync, import, init, ci-*, etc.
 
 import {
   CTX_DIR,
@@ -16,6 +11,9 @@ import {
   draftSkillName,
   draftSkillTemplate,
   existsSync,
+  handleCiDomainIntegrity,
+  handleCiSecurity,
+  handleCiValidation,
   handleDomainSubcommand,
   handleFactsSubcommand,
   handleImpactEvidenceSubcommand,
@@ -393,6 +391,9 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   }
   if (sub === "optimize-description") return handleOptimizeDescription(repo, rest);
   if (sub === "ci-gate") return handleSkillCiGate(repo, rest);
+  if (sub === "ci-validation") return handleCiValidation(repo, rest);
+  if (sub === "ci-security") return handleCiSecurity(repo, rest);
+  if (sub === "ci-domain-integrity") return handleCiDomainIntegrity(repo, rest);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));
   return 0;
 }

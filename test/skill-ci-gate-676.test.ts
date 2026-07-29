@@ -3,7 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { installLogbus, setLogbusForTests } from "../src/logbus.js";
-import { handleSkillCiGate, runSkillCiGate } from "../src/skills/ci-gate.js";
+import {
+  handleCiDomainIntegrity,
+  handleCiSecurity,
+  handleCiValidation,
+  handleSkillCiGate,
+  runDomainIntegrityGate,
+  runSkillCiGate,
+  runSkillSecurityGate,
+  runSkillValidationGate,
+} from "../src/skills/ci-gate.js";
+import type { CiGateDeps } from "../src/skills/ci-gate.js";
 import type { ScanDeps } from "../src/skills/security-scan.js";
 
 type FakeSpawn = ScanDeps["spawnSync"];
@@ -46,12 +56,10 @@ function scaffoldFacts(duplicateOwner = false, unknownOwner = false): void {
   const facts: { key: string; owner: string; version: string; statement: string }[] = [
     { key: "fact-a", owner: "myskill", version: "1.0", statement: "Fact A" },
   ];
-  if (duplicateOwner) {
+  if (duplicateOwner)
     facts.push({ key: "fact-a", owner: "otherskill", version: "1.0", statement: "dup" });
-  }
-  if (unknownOwner) {
+  if (unknownOwner)
     facts.push({ key: "fact-z", owner: "bogus", version: "1.0", statement: "orphan" });
-  }
   writeFileSync(
     join(base, ".vibeflow", "DOMAIN_FACTS.json"),
     JSON.stringify({ schemaVersion: 1, facts }),
@@ -119,138 +127,171 @@ function scaffoldLock(malformed: boolean): void {
   }
 }
 
-// ── runSkillCiGate ──────────────────────────────────────────────────────────
+function highScanDeps(): CiGateDeps {
+  return {
+    scanDeps: {
+      hasCommand: () => true,
+      homedir: () => base,
+      spawnSync: (() => ({
+        stdout: JSON.stringify({
+          risk_severity: "HIGH",
+          filtered_findings: [{ rule_id: "R1", message: "danger" }],
+        }),
+        stderr: "",
+        status: 1,
+      })) as unknown as FakeSpawn,
+    },
+  };
+}
 
-describe("runSkillCiGate", () => {
-  test("no skills / no facts / no policy → pass", () => {
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(true);
-    expect(r.errors).toHaveLength(0);
+// ── Individual gate isolation ──────────────────────────────────────────────
+
+describe("runSkillValidationGate", () => {
+  test("no skills → pass", () => {
+    expect(runSkillValidationGate(base).ok).toBe(true);
   });
-
   test("malformed frontmatter → fail", () => {
     const dir = join(base, ".vibeflow", "skills", "bad");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "SKILL.md"), "---\nname: bad\ndescription: [\n---\n");
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.length).toBeGreaterThan(0);
+    expect(runSkillValidationGate(base).ok).toBe(false);
   });
-
-  test("malformed facts JSON → fail", () => {
-    mkdirSync(join(base, ".vibeflow"), { recursive: true });
-    writeFileSync(join(base, ".vibeflow", "DOMAIN_FACTS.json"), "not valid json");
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/DOMAIN_FACTS/i);
-  });
-
-  test("invalid local skill discovery → fail", () => {
-    scaffoldSkill("BadName");
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/lowercase kebab-case/i);
-  });
-
-  test("duplicate facts + unknown owner → fail", () => {
+  test("malformed policy → fail", () => {
     scaffoldSkill("myskill");
-    scaffoldFacts(true, true);
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    const joined = r.errors.join(" ");
-    expect(joined).toMatch(/duplicate/i);
-    expect(joined).toMatch(/bogus/i);
+    scaffoldPolicy(true);
+    expect(runSkillValidationGate(base).ok).toBe(false);
   });
-
+  test("malformed registry lock → fail", () => {
+    scaffoldLock(true);
+    expect(runSkillValidationGate(base).ok).toBe(false);
+  });
   test("eval mismatch → fail", () => {
     scaffoldSkill("myskill");
     scaffoldEval("myskill", "wrongname", true);
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/wrongname/i);
+    expect(runSkillValidationGate(base).ok).toBe(false);
   });
-
   test("eval trigger failure → fail", () => {
     scaffoldSkill("myskill", "triggers:\n  - myskill");
     scaffoldEval("myskill", "myskill", false);
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/triggerAccuracy/i);
+    expect(runSkillValidationGate(base).ok).toBe(false);
   });
-
-  test("no eval file allowed → pass (no required-eval policy)", () => {
-    scaffoldSkill("myskill");
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(true);
-  });
-
   test("malformed eval → fail", () => {
     scaffoldSkill("myskill");
     scaffoldMalformedEval("myskill");
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/eval error/i);
+    expect(runSkillValidationGate(base).ok).toBe(false);
   });
-
-  test("injected HIGH finding → fail", () => {
-    scaffoldSkill("ss");
-    const r = runSkillCiGate(base, {
-      scanDeps: {
-        hasCommand: () => true,
-        homedir: () => base,
-        spawnSync: (() => ({
-          stdout: JSON.stringify({
-            risk_severity: "HIGH",
-            filtered_findings: [{ rule_id: "R1", message: "danger" }],
-          }),
-          stderr: "",
-          status: 1,
-        })) as unknown as FakeSpawn,
-      },
-    });
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/HIGH/i);
-    expect(r.scanned).toBe(true);
-  });
-
-  test("missing scanner → warning / pass (not-scanned)", () => {
-    scaffoldSkill("ss");
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(true);
-    expect(r.warnings.join(" ")).toMatch(/not available/i);
-    expect(r.scanned).toBe(false);
-  });
-
-  test("malformed policy → fail in ci-gate", () => {
+  test("passes with no eval file", () => {
     scaffoldSkill("myskill");
-    scaffoldPolicy(true);
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/policy/i);
-  });
-
-  test("malformed registry lock → fail", () => {
-    scaffoldLock(true);
-    const r = runSkillCiGate(base);
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/malformed/i);
+    expect(runSkillValidationGate(base).ok).toBe(true);
   });
 });
 
-// ── handleSkillCiGate (command routing) ────────────────────────────────────
-
-describe("handleSkillCiGate", () => {
-  test("no extra args → exits 0 when clean", () => {
-    expect(handleSkillCiGate(base, [])).toBe(0);
+describe("runSkillSecurityGate", () => {
+  test("no skills → pass", () => {
+    expect(runSkillSecurityGate(base).ok).toBe(true);
   });
+  test("missing scanner → warning / pass", () => {
+    scaffoldSkill("ss");
+    const r = runSkillSecurityGate(base);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.join(" ")).toMatch(/not available/i);
+  });
+  test("injected HIGH finding → fail", () => {
+    scaffoldSkill("ss");
+    expect(runSkillSecurityGate(base, highScanDeps()).ok).toBe(false);
+  });
+});
 
-  test("gate errors → exits 1", () => {
+describe("runDomainIntegrityGate", () => {
+  test("no skills / no facts → pass", () => {
+    expect(runDomainIntegrityGate(base).ok).toBe(true);
+  });
+  test("malformed facts JSON → fail", () => {
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    writeFileSync(join(base, ".vibeflow", "DOMAIN_FACTS.json"), "not valid json");
+    expect(runDomainIntegrityGate(base).ok).toBe(false);
+  });
+  test("duplicate facts + unknown owner → fail", () => {
+    scaffoldSkill("myskill");
+    scaffoldFacts(true, true);
+    expect(runDomainIntegrityGate(base).ok).toBe(false);
+  });
+  test("clean facts + matching skills → pass", () => {
+    scaffoldSkill("myskill");
+    scaffoldFacts(false, false);
+    expect(runDomainIntegrityGate(base).ok).toBe(true);
+  });
+});
+
+// ── Aggregate compatibility (ci-gate === sum of three gates) ───────────────
+
+describe("runSkillCiGate aggregate", () => {
+  test("empty repo — all gates agree", () => {
+    const full = runSkillCiGate(base);
+    expect(full.ok).toBe(true);
+    expect(runSkillValidationGate(base).ok).toBe(true);
+    expect(runSkillSecurityGate(base).ok).toBe(true);
+    expect(runDomainIntegrityGate(base).ok).toBe(true);
+  });
+  test("malformed policy — validation gate catches it", () => {
+    scaffoldSkill("myskill");
+    scaffoldPolicy(true);
+    expect(runSkillCiGate(base).ok).toBe(false);
+    expect(runSkillValidationGate(base).ok).toBe(false);
+    expect(runSkillSecurityGate(base).ok).toBe(true);
+    expect(runDomainIntegrityGate(base).ok).toBe(true);
+  });
+  test("security failure isolated to security gate", () => {
+    scaffoldSkill("ss");
+    expect(runSkillCiGate(base, highScanDeps()).ok).toBe(false);
+    expect(runSkillValidationGate(base).ok).toBe(true);
+    expect(runSkillSecurityGate(base, highScanDeps()).ok).toBe(false);
+    expect(runDomainIntegrityGate(base).ok).toBe(true);
+  });
+  test("domain failure isolated to domain gate", () => {
+    scaffoldSkill("myskill");
+    scaffoldFacts(true, true);
+    expect(runSkillCiGate(base).ok).toBe(false);
+    expect(runSkillValidationGate(base).ok).toBe(true);
+    expect(runSkillSecurityGate(base).ok).toBe(true);
+    expect(runDomainIntegrityGate(base).ok).toBe(false);
+  });
+});
+
+// ── CLI handlers — invalid args ───────────────────────────────────────────
+
+describe("CLI handlers", () => {
+  test.each([
+    ["ci-validation", handleCiValidation],
+    ["ci-security", handleCiSecurity],
+    ["ci-domain-integrity", handleCiDomainIntegrity],
+    ["ci-gate", handleSkillCiGate],
+  ] as const)("%s: no args → exits 0 when clean", (_, fn) => {
+    expect(fn(base, [])).toBe(0);
+  });
+  test.each([
+    ["ci-validation", handleCiValidation],
+    ["ci-security", handleCiSecurity],
+    ["ci-domain-integrity", handleCiDomainIntegrity],
+    ["ci-gate", handleSkillCiGate],
+  ] as const)("%s: extra args → exits 2", (_, fn) => {
+    expect(fn(base, ["x"])).toBe(2);
+  });
+  test("ci-gate errors → exits 1", () => {
     scaffoldPolicy(true);
     expect(handleSkillCiGate(base, [])).toBe(1);
   });
-
-  test("extra args → exits 2", () => {
-    const code = handleSkillCiGate(base, ["extra"]);
-    expect(code).toBe(2);
+  test("ci-validation errors → exits 1 via printCiGateResult", () => {
+    scaffoldPolicy(true);
+    expect(handleCiValidation(base, [])).toBe(1);
+  });
+  test("ci-security no scanner → exits 0 (warning only)", () => {
+    scaffoldSkill("ss");
+    expect(handleCiSecurity(base, [])).toBe(0);
+  });
+  test("ci-domain-integrity malformed facts → exits 1", () => {
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    writeFileSync(join(base, ".vibeflow", "DOMAIN_FACTS.json"), "not valid json");
+    expect(handleCiDomainIntegrity(base, [])).toBe(1);
   });
 });

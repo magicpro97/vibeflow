@@ -92,3 +92,7 @@ behave identically on `win32` and `posix`.
 
 **Related:** [Master Spec](./MASTER_SPEC.md) · [Self-Hosted Runner](./SELF_HOSTED_RUNNER.md)
 [Edit this page on GitHub](https://github.com/magicpro97/vibeflow/edit/main/docs/DEPLOYMENT.md)
+
+## Branch protection
+
+Required checks (Settings > Branches > main): `check`, `skill-validation`, `skill-security`, `domain-integrity`. Checks appear after the first PR is opened against `main`.
