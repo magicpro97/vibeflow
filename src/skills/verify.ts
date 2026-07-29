@@ -17,6 +17,8 @@ import { dirname, join } from "node:path";
 import { CTX_DIR, c, writeFileSafe } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
+import { appendSkillAudit } from "./audit-log.js";
+import type { AppendSkillAuditDeps } from "./audit-log.js";
 import { type ScanDeps, scanBlocksPromotion, scanSkillDir } from "./security-scan.js";
 import { REQUIRED_SECTIONS, checkQualityContract } from "./validator.js";
 
@@ -64,18 +66,35 @@ export function setStatusInText(text: string, status: VerifyStatus): SetStatusRe
   if (STATUS_LINE.test(blockText)) {
     const replaced = blockText.replace(STATUS_LINE, desired);
     if (replaced === blockText) {
-      // Already the desired value — return the ORIGINAL text (not the
-      // CRLF-normalized `norm`) so changed:false ⟺ zero byte change, per the
-      // contract callers rely on (#433 review).
       return { ok: true, changed: false, text };
     }
     const out = ["---", replaced, "---", ...lines.slice(endIdx + 1)].join("\n");
     return { ok: true, changed: true, text: out };
   }
 
-  // No status line — splice one as the last frontmatter line.
   const out = ["---", ...block, desired, "---", ...lines.slice(endIdx + 1)].join("\n");
   return { ok: true, changed: true, text: out };
+}
+
+/**
+ * Parse the `status:` field from SKILL.md frontmatter text. Returns null if
+ * absent or malformed. No YAML dep — targeted regex on the `---`-fenced block.
+ */
+export function parseStatusFromText(text: string): string | null {
+  const norm = text.replace(/\r\n/g, "\n");
+  const lines = norm.split("\n");
+  if (lines[0]?.trim() !== "---") return null;
+  let endIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i]?.trim() === "---") {
+      endIdx = i;
+      break;
+    }
+  }
+  if (endIdx === -1) return null;
+  const block = lines.slice(1, endIdx).join("\n");
+  const m = block.match(/^status:\s*(\S+)$/m);
+  return m?.[1] ?? null;
 }
 
 export interface SetSkillStatusDeps {
@@ -113,6 +132,7 @@ export function verifySkillCommand(
   rest: string[],
   scanDeps: ScanDeps = {},
   ioDeps: Partial<SetSkillStatusDeps> = {},
+  auditDeps?: AppendSkillAuditDeps,
 ): number {
   const name = rest[0]?.trim();
   const undo = rest.includes("--undo");
@@ -181,6 +201,8 @@ export function verifySkillCommand(
     }
   }
 
+  const originalText = (ioDeps.readFileSync ?? readFileSync)(skillMd, "utf8");
+  const oldStatus = parseStatusFromText(originalText);
   const result = setSkillStatus(skillMd, target, {
     existsSync: ioDeps.existsSync ?? existsSync,
     readFileSync: ioDeps.readFileSync ?? readFileSync,
@@ -198,5 +220,31 @@ export function verifySkillCommand(
   }
   out("vf", undo ? c.yellow(`○ ${name} → unverified`) : c.green(`✔ ${name} → verified`));
   out("vf", c.dim(`  ${skillMd}`));
+
+  const evidence: string[] = [];
+  if (undo) {
+    evidence.push("demotion");
+  } else {
+    const scan = scanSkillDir(dirname(skillMd), scanDeps);
+    evidence.push(`security-scan:${scan.scanned ? (scan.reason ?? "scanned") : "not-scanned"}`);
+    evidence.push("quality-contract:pass");
+  }
+  if (
+    !appendSkillAudit(
+      {
+        actor: "local",
+        action: undo ? "unverify" : "verify",
+        skillName: name,
+        oldStatus,
+        newStatus: target,
+        evidence,
+        reason: null,
+      },
+      { repo, ...auditDeps },
+    )
+  ) {
+    out("vf", c.yellow(`! warning: failed to append audit record for ${name}`));
+  }
+
   return 0;
 }

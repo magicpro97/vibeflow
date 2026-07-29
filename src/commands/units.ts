@@ -13,7 +13,7 @@
 // (`import { units } from "../commands.js"`) keeps working.
 
 import type { WorkUnit } from "./_shared.js";
-import { CTX_DIR, c, cwd, mutateUnits, out, readState } from "./_shared.js";
+import { CTX_DIR, appendWaiverAudit, c, cwd, mutateUnits, out, readState } from "./_shared.js";
 
 export function units(
   sub: string | undefined,
@@ -251,6 +251,9 @@ export function units(
         return 1;
       }
       out("vf", c.green(`~ waived skill gate for ${c.bold(name)} (${reason})`));
+      if (!appendWaiverAudit(cwd(), name, reason)) {
+        out("vf", c.yellow(`! warning: failed to append audit record for waiver ${name}`));
+      }
       return 0;
     }
     default:

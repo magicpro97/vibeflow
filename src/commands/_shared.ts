@@ -68,6 +68,7 @@ export * from "../skills/registry-cli.js";
 export * from "../skills/registry-install.js";
 export * from "../skills/security-scan.js";
 export * from "../skills/telemetry.js";
+export * from "../skills/audit-log.js";
 export * from "../skills/templates.js";
 export * from "../skills/resolver.js";
 export * from "../skills/verify-lock.js";
