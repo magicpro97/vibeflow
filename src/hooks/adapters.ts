@@ -343,6 +343,7 @@ export function gitPreCommit(): string {
     '  *\\"decision\\":\\"require_approval\\"*) echo "VibeFlow hook needs approval — blocking commit; review then --no-verify if intended" >&2; exit 1 ;;',
     '  "") echo "vibeflow hook: empty decision — blocking (fail-closed)" >&2; exit 1 ;;',
     "esac",
+    `ie_output=$(node "${cmd}" skills impact-evidence --staged 2>&1) || { echo "$ie_output" >&2; exit 1; }`,
     'echo "vibeflow hook: allowed"',
     "",
   ].join("\n");
