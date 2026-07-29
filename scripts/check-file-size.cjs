@@ -53,8 +53,8 @@ const EXECUTABLE_FIRST_LINE =
 // follow-up. The in-line mechanism is for NEW exemptions; these two
 // predate it.
 const WAIVERS = [
-  { file: "src/commands/tools.ts", cap: 700, issue: "#136" },
-  { file: "src/commands/protection.ts", cap: 600, issue: "#131" },
+  { file: "src/commands/tools.ts", cap: 700, issue: "#136", meta: "waiver: #136 owner:magicpro97 expires:2027-12-31" },
+  { file: "src/commands/protection.ts", cap: 600, issue: "#131", meta: "waiver: #131 owner:magicpro97 expires:2027-12-31" },
 ];
 
 function walk(dir) {

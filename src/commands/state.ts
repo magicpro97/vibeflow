@@ -6,8 +6,8 @@
 // plan changes, merges). A0 ships the surface; A1 (`vf coord` shim) +
 // A2-A14 build on it.
 //
-// size-waiver: #390 — merged from state-frontmatter.ts and state-gate.ts (400-line cap splinters)
-// size-waiver: #392 — merged from atomic-write.ts (400-line cap splinter)
+// size-waiver: #390 — merged from state-frontmatter.ts and state-gate.ts (400-line cap splinters) waiver: #390 owner:magicpro97 expires:2027-12-31
+// size-waiver: #392 — merged from atomic-write.ts (400-line cap splinter) waiver: #392 owner:magicpro97 expires:2027-12-31
 // File: .vibeflow/knowledge/coordinator-brief.md (the canonical example
 // was authored by the coordinator on 2026-06-20 in the
 // orchestrator-first session; see issue #184 for the upstream ACs).

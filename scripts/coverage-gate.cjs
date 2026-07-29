@@ -37,16 +37,8 @@ const perFile = [];
 // tracked follow-up issue. Empty = every source file must hit 100% (the
 // #477/#478/#499 catch-branch waivers were retired once real injected-throw
 // tests covered them).
-const COVERAGE_WAIVERS = new Set([
-  // #640: dashboard routes (api/dashboard/workflows, api/dashboard/logs,
-  // api/dashboard/logs/stream) were added for the visual dashboard feature.
-  // The underlying dashboard.ts and pipeline.ts modules are tested to 100%;
-  // only the route handlers in server.ts that wire them into the HTTP layer
-  // are uncovered. Writing focused HTTP tests would duplicate the existing
-  // server.test.ts infrastructure for these three routes; adding a waiver
-  // avoids blanket-testing unrelated legacy routes. Remove when the routes
-  // have dedicated test coverage (tracked as #640).
-  "src/server.ts",
+const COVERAGE_WAIVERS = new Map([
+  ["src/server.ts", { issue: "#640", meta: "waiver: #640 owner:magicpro97 expires:2027-12-31" }],
 ]);
 
 for (const r of records) {

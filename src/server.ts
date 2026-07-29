@@ -1,4 +1,4 @@
-// size-waiver: #462 — hook pending-hooks plumbing adds ~38 lines above cap
+// size-waiver: #462 — hook pending-hooks plumbing adds ~38 lines above cap waiver: #462 owner:magicpro97 expires:2027-12-31
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

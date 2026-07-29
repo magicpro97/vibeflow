@@ -1,4 +1,4 @@
-// size-waiver: #656 — adapter resolution: load base, merge frontmatter + body
+// size-waiver: #656 — adapter resolution: load base, merge frontmatter + body waiver: #656 owner:magicpro97 expires:2027-12-31
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

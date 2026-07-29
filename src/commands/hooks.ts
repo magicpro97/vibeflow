@@ -21,7 +21,7 @@
 // default and only writes engine configs with explicit --yes
 // (hot-reloads the agent, so consent is mandatory).
 //
-// size-waiver: #462 — web UI approval path adds ~60 lines
+// size-waiver: #462 — web UI approval path adds ~60 lines waiver: #462 owner:magicpro97 expires:2027-12-31
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";

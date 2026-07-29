@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectVerifyReportAsync } from "../src/commands/tools-detect.js";
+import { collectVerifyReportAsync, defaultGoalEvalFn } from "../src/commands/tools-detect.js";
+import { runWaiverGate } from "../src/commands/waiver-gate.js";
+import { CTX_DIR, readState, writeState } from "../src/core.js";
 
 // Async-only: the route uses collectVerifyReportAsync (non-blocking); the old
 // sync collectVerifyReport was removed because spawnSync froze Bun.serve.
@@ -66,9 +68,6 @@ describe("collectVerifyReportAsync", () => {
   // impl_fingerprint + verified_sha must be WRITTEN back to state, else the
   // Type B drift gate is permanently silent.
   test("writes impl_fingerprint on done units when gates pass", async () => {
-    const { mkdirSync } = await import("node:fs");
-    const { writeState, readState } = await import("../src/core.js");
-    const { CTX_DIR } = await import("../src/core.js");
     const dir = tempProject({ typecheck: "exit 0", test: "exit 0" });
     mkdirSync(join(dir, "src"), { recursive: true });
     writeFileSync(join(dir, "src", "x.ts"), "export const x = 1;\n");
@@ -272,8 +271,6 @@ describe("collectVerifyReportAsync", () => {
   });
 });
 
-import { defaultGoalEvalFn } from "../src/commands/tools-detect.js";
-
 test("defaultGoalEvalFn: catch block — git diff throws → still returns covered=true (fail-open)", async () => {
   // Temporarily change cwd to a non-git path so git diff throws internally
   const orig = process.cwd();
@@ -343,4 +340,39 @@ test("defaultGoalEvalFn: returns covered=false when VIBEFLOW_AI returns non-COVE
   expect(result.uncovered.length).toBeGreaterThan(0);
   if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
   else process.env.VIBEFLOW_AI = orig;
+});
+
+test("runWaiverGate returns true when waiver-policy.cjs does not exist (skip-missing #679)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-waiver-none-"));
+  expect(runWaiverGate(dir)).toBe(true);
+});
+
+test("runWaiverGate returns false when spawner exits non-zero", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-waiver-fail-"));
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(1)\n");
+  const spawner = (() => ({
+    status: 1,
+    stdout: "",
+    stderr: "",
+    pid: 0,
+    output: [],
+    signal: null,
+  })) as never;
+  expect(runWaiverGate(dir, { spawner })).toBe(false);
+});
+
+test("runWaiverGate returns true when spawner exits zero", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-waiver-ok-"));
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
+  const spawner = (() => ({
+    status: 0,
+    stdout: "",
+    stderr: "",
+    pid: 0,
+    output: [],
+    signal: null,
+  })) as never;
+  expect(runWaiverGate(dir, { spawner })).toBe(true);
 });
