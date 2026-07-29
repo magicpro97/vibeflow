@@ -1,6 +1,4 @@
-// `vf verify` + `detectToolchain` — engine/toolchain detection extracted from
-// src/commands/tools.ts (issue #136, split-tools). Pure detection logic: no MCP
-// config, no tool installs. All imports through `./_shared.js`.
+// `vf verify` + `detectToolchain` — engine/toolchain detection. Pure detection: no MCP, no installs.
 
 import { spawnSync as _spawnSync } from "node:child_process";
 import { writeState } from "../core.js";
@@ -25,9 +23,8 @@ import {
   writeFileSafe,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
-
-/** The current git HEAD sha for `base`, or "HEAD" when git is unavailable.
- *  Used as the diff base for Type-B drift detection at the next verify. */
+import { runWaiverGate } from "./waiver-gate.js";
+/** Current git HEAD sha for `base`, or "HEAD" when git unavailable. Used as diff base for Type-B drift detection. */
 function readVerifiedSha(base: string): string {
   const r = _spawnSync("git", ["rev-parse", "HEAD"], { cwd: base, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : "HEAD";
@@ -228,6 +225,7 @@ export async function collectVerifyReportAsync(
       await runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   }
 
+  // Coverage gate (only when lcov.info exists)
   if (inject.coverage) {
     const lcovPath = join(base, "coverage", "lcov.info");
     if (existsSync(lcovPath)) {
@@ -351,6 +349,11 @@ export function verify(
     }
   }
 
+  // Waiver policy gate — validate declaration metadata and expiry (issue #679).
+  if (!runWaiverGate(base, { spawner: inject.spawner })) {
+    failed++;
+  }
+
   // e2e advisory gates — non-fatal warnings only.
   for (const w of e2eUnicodeSelectorWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
   for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
@@ -385,15 +388,13 @@ export function verify(
   return 0;
 }
 
-/** Auto-crystallize verify run patterns into a DRAFT skill */
 function autoCrystallizeAndReport(base: string): void {
   const cz = autoCrystallizeRun(base, `verify-${new Date().toISOString().slice(0, 10)}`);
-  if (cz.drafted) {
+  if (cz.drafted)
     out(
       "vf",
       c.green(
         `+ drafted skill ${cz.draftName} (${cz.patternCount} pattern(s)) — DRAFT, review before install`,
       ),
     );
-  }
 }

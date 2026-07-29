@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -2078,6 +2079,8 @@ describe("commands.detectToolchain", () => {
 describe("commands.verify branches", () => {
   test("verify on empty dir reports no toolchain (line 2159-2165)", () => {
     const dir = freshDir("vf-verify-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     const orig = process.cwd();
     process.chdir(dir);
     const lines: string[] = [];
@@ -2119,6 +2122,8 @@ describe("commands.verify branches", () => {
 
   test("verify with a package.json runs gates (line 2148-2152)", () => {
     const dir = freshDir("vf-verify-npm-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     writeState(dir, {
       task_id: "T1",
@@ -2139,6 +2144,8 @@ describe("commands.verify branches", () => {
 
   test("verify with monorepo (web/package.json) runs gates (line 2235-2239)", () => {
     const dir = freshDir("vf-verify-monorepo-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     mkdirSync(join(dir, "web"), { recursive: true });
     writeFileSync(
       join(dir, "web", "package.json"),
@@ -2198,6 +2205,8 @@ describe("commands.verify branches", () => {
 
   test("verify appends a journal entry on pass (line 2263-2268)", () => {
     const dir = freshDir("vf-verify-journal-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     writeState(dir, {
       task_id: "T1",
@@ -2222,6 +2231,8 @@ describe("commands.verify branches", () => {
 
   test("verify --journal auto-crystallizes a DRAFT skill when patterns recur (#335)", () => {
     const dir = freshDir("vf-verify-acz-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     writeState(dir, {
       task_id: "T1",
@@ -2256,6 +2267,8 @@ describe("commands.verify branches", () => {
 
   test("verify is read-only by default: no journal append without journal flag (issue #154)", () => {
     const dir = freshDir("vf-verify-readonly-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     writeState(dir, {
       task_id: "T1",
@@ -2329,6 +2342,7 @@ describe("commands.verify branches", () => {
     writeFileSync(join(dir, "coverage", "lcov.info"), "TN:\nSF:src/x.ts\nend_of_record\n");
     mkdirSync(join(dir, "scripts"), { recursive: true });
     writeFileSync(join(dir, "scripts", "coverage-gate.cjs"), "process.exit(0)\n");
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     writeState(dir, {
       task_id: "T1",
       goal: "g",
@@ -2352,6 +2366,7 @@ describe("commands.verify branches", () => {
     writeFileSync(join(dir, "coverage", "lcov.info"), "TN:\nSF:src/x.ts\nend_of_record\n");
     mkdirSync(join(dir, "scripts"), { recursive: true });
     writeFileSync(join(dir, "scripts", "coverage-gate.cjs"), "process.exit(1)\n");
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     writeState(dir, {
       task_id: "T1",
       goal: "g",
@@ -2372,6 +2387,8 @@ describe("commands.verify branches", () => {
 
   test("verify --coverage warns when lcov.info is missing (line 2285-2286)", () => {
     const dir = freshDir("vf-verify-cov-nolcov-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     // No coverage/lcov.info written → the gate is skipped with a yellow hint.
     writeState(dir, {
       task_id: "T1",
@@ -2392,6 +2409,8 @@ describe("commands.verify branches", () => {
 
   test("verify on workflow with missing evidence appends fail journal (line 2263-2268 fail branch)", () => {
     const dir = freshDir("vf-verify-fail-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     // A done unit with no evidence triggers the policy gate failure
     writeState(dir, {
@@ -2442,6 +2461,74 @@ describe("commands.verify branches", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.cmd).toBe("flutter");
       expect(calls[0]?.args).toEqual(["test"]);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify fails when waiver policy gate exits non-zero (#679)", () => {
+    const dir = freshDir("vf-verify-waiver-fail-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(1)\n");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const calls: Array<{ cmd: string; args: readonly string[]; options?: unknown }> = [];
+      const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "node", status: 1 } });
+      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(1);
+      const waiverCall = calls.find(
+        (c) => c.cmd === "node" && c.args[0] === "scripts/waiver-policy.cjs",
+      );
+      expect(waiverCall).toBeDefined();
+      if (!waiverCall) throw new Error("waiver call not found");
+      expect(waiverCall.cmd).toBe("node");
+      expect(waiverCall.args).toEqual(["scripts/waiver-policy.cjs"]);
+      expect(realpathSync((waiverCall.options as { cwd?: string })?.cwd ?? "")).toBe(
+        realpathSync(dir),
+      );
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify passes when waiver policy gate exits zero (#679)", () => {
+    const dir = freshDir("vf-verify-waiver-pass-");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const calls: Array<{ cmd: string; args: readonly string[]; options?: unknown }> = [];
+      const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "node", status: 0 } });
+      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(0);
+      const waiverCall = calls.find(
+        (c) => c.cmd === "node" && c.args[0] === "scripts/waiver-policy.cjs",
+      );
+      expect(waiverCall).toBeDefined();
+      if (!waiverCall) throw new Error("waiver call not found");
+      expect(waiverCall.cmd).toBe("node");
+      expect(waiverCall.args).toEqual(["scripts/waiver-policy.cjs"]);
+      expect(realpathSync((waiverCall.options as { cwd?: string })?.cwd ?? "")).toBe(
+        realpathSync(dir),
+      );
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
