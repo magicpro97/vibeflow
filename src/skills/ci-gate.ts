@@ -37,32 +37,14 @@ function localSkillDirs(repo: string): { name: string; dir: string }[] {
   }
 }
 
-export function runSkillCiGate(repo: string, deps: CiGateDeps = {}): CiGateResult {
+export function runSkillValidationGate(repo: string, deps: CiGateDeps = {}): CiGateResult {
   const errors: string[] = [];
   const warnings: string[] = [];
-  let anyScanned = false;
   const localSkills = localSkillDirs(repo);
   const validated = localSkills.map(({ dir }) => validateSkillDir(dir));
   errors.push(...validated.flatMap((skill) => skill.errors));
   warnings.push(...validated.flatMap((skill) => skill.warnings));
   const discovered = discoverSkills(repo);
-
-  try {
-    const facts = readDomainFacts(repo, {
-      existsSync: deps.existsSync as ((path: string) => boolean) | undefined,
-      readFileSync: deps.readFileSync as ((path: string, encoding: string) => string) | undefined,
-    });
-    if (facts) {
-      const result = validateDomainFacts(
-        facts,
-        validated.flatMap((skill) => (skill.name ? [skill.name] : [])),
-      );
-      errors.push(...result.errors);
-      warnings.push(...result.warnings);
-    }
-  } catch (error) {
-    errors.push(`DOMAIN_FACTS: ${(error as Error).message}`);
-  }
 
   const localDirs = new Set(localSkills.map((skill) => skill.dir));
   for (const skill of discovered.filter((candidate) => localDirs.has(candidate.dir))) {
@@ -92,6 +74,23 @@ export function runSkillCiGate(repo: string, deps: CiGateDeps = {}): CiGateResul
     }
   }
 
+  const lock = verifyRegistryLockIntegrity(repo);
+  errors.push(...lock.errors);
+  warnings.push(...lock.warnings);
+  const policy = readSkillPolicy(repo, {
+    existsSync: deps.existsSync,
+    readFileSync: deps.readFileSync,
+  });
+  errors.push(...policy.warnings.map((warning) => `policy: ${warning}`));
+  return { ok: errors.length === 0, errors, warnings, scanned: false };
+}
+
+export function runSkillSecurityGate(repo: string, deps: CiGateDeps = {}): CiGateResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  let anyScanned = false;
+  const localSkills = localSkillDirs(repo);
+
   for (const { name, dir } of localSkills) {
     const result = scanSkillDir(dir, deps.scanDeps);
     if (!result.scanned) {
@@ -104,15 +103,82 @@ export function runSkillCiGate(repo: string, deps: CiGateDeps = {}): CiGateResul
     if (gate.warn) warnings.push(`security scan warning for "${name}": ${gate.reason}`);
   }
 
-  const lock = verifyRegistryLockIntegrity(repo);
-  errors.push(...lock.errors);
-  warnings.push(...lock.warnings);
-  const policy = readSkillPolicy(repo, {
-    existsSync: deps.existsSync,
-    readFileSync: deps.readFileSync,
-  });
-  errors.push(...policy.warnings.map((warning) => `policy: ${warning}`));
   return { ok: errors.length === 0, errors, warnings, scanned: anyScanned };
+}
+
+export function runDomainIntegrityGate(repo: string, deps: CiGateDeps = {}): CiGateResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const localSkills = localSkillDirs(repo);
+  const validated = localSkills.map(({ dir }) => validateSkillDir(dir));
+
+  try {
+    const facts = readDomainFacts(repo, {
+      existsSync: deps.existsSync as ((path: string) => boolean) | undefined,
+      readFileSync: deps.readFileSync as ((path: string, encoding: string) => string) | undefined,
+    });
+    if (facts) {
+      const result = validateDomainFacts(
+        facts,
+        validated.flatMap((skill) => (skill.name ? [skill.name] : [])),
+      );
+      errors.push(...result.errors);
+      warnings.push(...result.warnings);
+    }
+  } catch (error) {
+    errors.push(`DOMAIN_FACTS: ${(error as Error).message}`);
+  }
+
+  return { ok: errors.length === 0, errors, warnings, scanned: false };
+}
+
+export function runSkillCiGate(repo: string, deps: CiGateDeps = {}): CiGateResult {
+  const validation = runSkillValidationGate(repo, deps);
+  const domain = runDomainIntegrityGate(repo, deps);
+  const security = runSkillSecurityGate(repo, deps);
+  const errors = [...validation.errors, ...domain.errors, ...security.errors];
+  const warnings = [...validation.warnings, ...domain.warnings, ...security.warnings];
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    scanned: security.scanned,
+  };
+}
+
+function printCiGateResult(result: CiGateResult, label: string): number {
+  for (const warning of result.warnings) out("vf", c.yellow(`! ${warning}`));
+  for (const error of result.errors) out("vf", c.red(`✗ ${error}`));
+  if (result.ok) {
+    out("vf", c.green(`✔ ${label} passed`));
+    return 0;
+  }
+  out("vf", c.red(`✗ ${result.errors.length} ${label} error(s)`), { level: "error" });
+  return 1;
+}
+
+export function handleCiValidation(repo: string, rest: string[] = []): number {
+  if (rest.length) {
+    out("vf", c.red("Usage: vf skills ci-validation"));
+    return 2;
+  }
+  return printCiGateResult(runSkillValidationGate(repo), "ci-validation");
+}
+
+export function handleCiSecurity(repo: string, rest: string[] = []): number {
+  if (rest.length) {
+    out("vf", c.red("Usage: vf skills ci-security"));
+    return 2;
+  }
+  return printCiGateResult(runSkillSecurityGate(repo), "ci-security");
+}
+
+export function handleCiDomainIntegrity(repo: string, rest: string[] = []): number {
+  if (rest.length) {
+    out("vf", c.red("Usage: vf skills ci-domain-integrity"));
+    return 2;
+  }
+  return printCiGateResult(runDomainIntegrityGate(repo), "ci-domain-integrity");
 }
 
 export function handleSkillCiGate(repo: string, rest: string[] = []): number {

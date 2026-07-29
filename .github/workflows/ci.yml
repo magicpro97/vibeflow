@@ -55,8 +55,6 @@ jobs:
       - run: bun run lint
       - run: bun run file-size:check
       - run: bun run build
-      - name: CI Skill Gate
-        run: node dist/cli.js skills ci-gate
       - run: bun run test
       - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version
@@ -68,6 +66,51 @@ jobs:
         run: bunx playwright install --with-deps chromium
       - name: Web UI e2e (real dashboard in Chromium)
         run: rm -f ~/.vibeflow/projects.json && bun run test:e2e
+
+  skill-validation:
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Skill validation gate
+        run: node dist/cli.js skills ci-validation
+
+  skill-security:
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Skill security gate
+        run: node dist/cli.js skills ci-security
+
+  domain-integrity:
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Domain integrity gate
+        run: node dist/cli.js skills ci-domain-integrity
 
   release-please:
     runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
