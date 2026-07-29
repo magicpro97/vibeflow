@@ -55,6 +55,8 @@ jobs:
       - run: bun run lint
       - run: bun run file-size:check
       - run: bun run build
+      - name: CI Skill Gate
+        run: node dist/cli.js skills ci-gate
       - run: bun run test
       - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version

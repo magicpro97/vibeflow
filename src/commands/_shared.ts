@@ -72,6 +72,7 @@ export * from "../skills/templates.js";
 export * from "../skills/resolver.js";
 export * from "../skills/verify-lock.js";
 export * from "../skills/sync.js";
+export * from "../skills/ci-gate.js";
 export * from "../skills/validator.js";
 export * from "../skills/verify.js";
 export { skillsEvalCmd } from "./skills-eval.js";

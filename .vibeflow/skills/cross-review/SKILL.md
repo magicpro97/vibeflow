@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Review a plan, commit, or work unit through 4 lenses — Correctness, Design, Risk, Test — before merge. Trigger on every non-trivial change (> 2 files or any new logic path) as the cross-review gate in the coordinator loop."
+description: "Review a plan, commit, or work unit through 4 lenses — Correctness, Design, Risk, Test — before merge. Trigger on every non-trivial change (more than two files or any new logic path) as the cross-review gate in the coordinator loop."
 ---
 
 # Cross-Review
