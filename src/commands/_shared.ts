@@ -70,6 +70,8 @@ export * from "../skills/security-scan.js";
 export * from "../skills/telemetry.js";
 export * from "../skills/audit-log.js";
 export * from "../skills/audit-duplicates.js";
+export * from "../skills/propose-merge.js";
+export * from "../skills/propose-split.js";
 export * from "../skills/templates.js";
 export * from "../skills/resolver.js";
 export * from "../skills/verify-lock.js";

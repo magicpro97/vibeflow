@@ -19,6 +19,8 @@ import {
   handleImpactSubcommand,
   handleOptimizeDescription,
   handlePolicyChecksSubcommand,
+  handleProposeMergeSubcommand,
+  handleProposeSplitSubcommand,
   handleRegistrySubcommand,
   handleSkillAuditLog,
   handleSkillCiGate,
@@ -118,10 +120,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "audit-log") return handleSkillAuditLog(repo, rest);
   if (sub === "audit-duplicates") return handleAuditDuplicatesSubcommand(repo, rest);
   if (sub === "sync") {
-    // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
-    // `--engine claude|codex|copilot` from `rest`.
-    // Default mode is "pointer". When --engine is omitted, sync only to the
-    // copilot mirror (the default engine). Use --engine <name> for other engines.
+    // Parse sync flags; default pointer mode targets copilot.
     let mode: "pointer" | "full" = "pointer";
     let fromRegistry = false;
     for (let i = 0; i < rest.length; i++) {
@@ -286,8 +285,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       out("vf", c.red("Usage: vf skills crystallize <run-id>"), { level: "error" });
       return 2;
     }
-    // Read the run log + knowledge journal (best-effort — a missing file is an
-    // empty source, not a hard error; crystallize just sees fewer lines).
+    // Missing run/journal files are empty sources, not errors.
     const logPath = join(repo, CTX_DIR, "logs", "current.log");
     const journalPath = join(repo, CTX_DIR, "knowledge", "log.md");
     const readLines = (p: string): string[] =>
@@ -394,6 +392,8 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "ci-security") return handleCiSecurity(repo, rest);
   if (sub === "ci-domain-integrity") return handleCiDomainIntegrity(repo, rest);
   if (sub === "verify-freshness") return verifyFreshnessCommand(found, repo);
+  if (sub === "propose-merge") return handleProposeMergeSubcommand(repo, rest);
+  if (sub === "propose-split") return handleProposeSplitSubcommand(repo, rest);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));
   return 0;
 }
