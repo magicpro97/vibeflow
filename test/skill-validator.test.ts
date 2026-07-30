@@ -183,6 +183,16 @@ describe("validateSkillDir — Anthropic skill format", () => {
     expect(result.warnings.some((w) => w.includes("owners"))).toBe(false);
   });
 
+  test("warns on malformed sourceAnchors", () => {
+    const dir = tmpSkill("bad-anchors");
+    writeSkill(
+      dir,
+      "---\nname: bad-anchors\ndescription: malformed anchors\nsourceAnchors: bad\n---\n\n# Bad\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("sourceAnchors"))).toBe(true);
+  });
+
   test("warns when owners is not an array", () => {
     const dir = tmpSkill("bad-owners");
     writeSkill(

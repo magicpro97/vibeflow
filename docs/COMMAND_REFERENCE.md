@@ -181,8 +181,10 @@ vf skills validate         # validate every canonical skill against the Anthropi
 vf skills sync             # sync .vibeflow/skills → engine mirrors (default mode: pointer)
 vf skills sync --mode pointer|full   # pointer = stub SKILL.md pointing at canonical; full = copy
 vf skills sync --from-registry       # also mirror registry-pinned skills from the lock file
-vf skills verify-sync                # verify each mirror has a SKILL.md for every canonical skill
+vf skills verify             # promote a canonical skill to status:verified (or --undo)
+vf skills verify-sync        # verify each mirror has a SKILL.md for every canonical skill
 vf skills verify-sync --from-registry # also verify registry-pinned skills have mirrors
+vf skills verify-freshness   # check sourceAnchors against current disk content (SHA-256)
 vf skills import <dir>     # import a local skill dir into .vibeflow/skills/
 vf skills import context7:<query>  # import a Context7 skill (approval-gated) into the canonical store
 ```

@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { CTX_DIR } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
+import { validateSourceAnchors } from "./anchor-freshness.js";
 import { validateDomainKeys } from "./domain.js";
 import {
   validateLifecycleChangelog,
@@ -45,6 +46,7 @@ const STANDARD_FRONTMATTER = new Set([
   "owners",
   "changelog",
   "supersedes",
+  "sourceAnchors",
 ]);
 
 const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
@@ -243,6 +245,7 @@ export function validateSkillDir(
   warnings.push(...validateLifecycleOwners(data));
   warnings.push(...validateLifecycleChangelog(data));
   warnings.push(...validateLifecycleSupersedes(data));
+  warnings.push(...validateSourceAnchors(data));
 
   // Warn (not error) on frontmatter keys outside the spec's standard set,
   // so typos surface without breaking existing skills that carry legacy

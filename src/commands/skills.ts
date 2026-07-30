@@ -1,5 +1,4 @@
-// `vf skills` subcommand (issue #80, phase 7/14).
-
+import { enrichFreshness, verifyFreshnessCommand } from "../skills/anchor-freshness.js";
 import { showSkill } from "../skills/lifecycle.js";
 import {
   CTX_DIR,
@@ -58,6 +57,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       );
       return 0;
     }
+    for (const s of found) enrichFreshness(s, repo);
     process.stdout.write(renderSkillIndex(found));
     return 0;
   }
@@ -162,8 +162,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 1;
   }
   if (sub === "verify-sync") {
-    // Parse --engine flag to filter which mirror to verify (defaults to copilot).
-    // --from-registry also checks registry-pinned skills against ALL engine mirrors.
+    // Parse --engine flag; --from-registry checks all engine mirrors.
     let fromRegistry = false;
     const engines: string[] = [];
     for (let i = 0; i < rest.length; i++) {
@@ -395,6 +394,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "ci-validation") return handleCiValidation(repo, rest);
   if (sub === "ci-security") return handleCiSecurity(repo, rest);
   if (sub === "ci-domain-integrity") return handleCiDomainIntegrity(repo, rest);
+  if (sub === "verify-freshness") return verifyFreshnessCommand(found, repo);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));
   return 0;
 }
