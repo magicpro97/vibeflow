@@ -11,6 +11,14 @@ import { discoverSkills } from "./registry.js";
 import type { SkillValidationResult } from "./validator.js";
 import { validateSkillRoots } from "./validator.js";
 
+const ID_SAFE_RE = /^[a-zA-Z0-9_-]+$/;
+const HAS_CONTROL_CHAR = new RegExp(`[${String.fromCharCode(0, 31)}\\x7f]`);
+const HAS_PATH_TRAVERSAL = /(?:^|[/\\])\.\.(?:[/\\]|$)/;
+
+function isUnsafeIdentifier(v: string): boolean {
+  return HAS_CONTROL_CHAR.test(v) || HAS_PATH_TRAVERSAL.test(v) || !ID_SAFE_RE.test(v);
+}
+
 function asStringArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
   const out = v.map((x) => String(x)).filter(Boolean);
@@ -35,11 +43,16 @@ export function validateDomainKeys(data: Record<string, unknown>): string[] {
     if (role !== "canonical" && role !== "child") {
       warnings.push('frontmatter.domain.role must be "canonical" or "child"');
     }
+    if (role === "canonical" && !data["domain.id"]) {
+      warnings.push('frontmatter.domain.role "canonical" requires frontmatter.domain.id');
+    }
   }
 
   if (data.owns !== undefined) {
     if (!Array.isArray(data.owns) || !data.owns.every((x: unknown) => typeof x === "string")) {
       warnings.push("frontmatter.owns must be an array of strings");
+    } else if ((data.owns as string[]).some(isUnsafeIdentifier)) {
+      warnings.push("frontmatter.owns contains unsafe identifier (control char or path traversal)");
     }
   }
 
@@ -49,6 +62,10 @@ export function validateDomainKeys(data: Record<string, unknown>): string[] {
       !data.dependsOn.every((x: unknown) => typeof x === "string")
     ) {
       warnings.push("frontmatter.dependsOn must be an array of strings");
+    } else if ((data.dependsOn as string[]).some(isUnsafeIdentifier)) {
+      warnings.push(
+        "frontmatter.dependsOn contains unsafe identifier (control char or path traversal)",
+      );
     }
   }
 
