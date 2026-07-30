@@ -188,6 +188,12 @@ export interface Skill {
   owns?: string[];
   /** #665: skill refs this skill depends on. */
   dependsOn?: string[];
+  /** #660: lifecycle metadata — owners (nonempty list of names/emails). */
+  owners?: string[];
+  /** #660: changelog entries (compact free-text strings — one per version/change). */
+  changelog?: string[];
+  /** #660: deprecation replacement — name of the successor skill. */
+  supersedes?: string;
   /** Absolute path to the skill folder. */
   dir: string;
   /** Absolute path to the skill's SKILL.md. */

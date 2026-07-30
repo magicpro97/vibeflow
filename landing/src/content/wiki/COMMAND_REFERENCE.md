@@ -173,6 +173,7 @@ It is the switch `dispatchPrompt` and `buildPlanPrompt` honour for recall inject
 
 ```bash
 vf skills list             # skills discovered under .vibeflow/.claude/.agents/.github skills dirs
+vf skills show <name>      # show detailed info for one skill (owners, changelog, deprecation)
 vf skills search <term>    # rank local skills against a task term
 vf skills resolve          # derive NEEDS from scan + intake; satisfied vs must-acquire
 vf skills validate         # validate every canonical skill against the Anthropic standard

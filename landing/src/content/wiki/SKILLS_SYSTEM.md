@@ -65,7 +65,9 @@ VibeFlow validates skills against the official Agent Skills spec
 - `description`: required, <= 1024 chars, no angle brackets `<`/`>` (they
   corrupt XML tool-call parsing).
 - Standard frontmatter fields — `name`, `description`, `license`,
-  `allowed-tools`, `metadata`, `compatibility` (<= 500 chars) — are recognized.
+  `allowed-tools`, `metadata`, `compatibility` (<= 500 chars),
+  `owners` (array of names/emails), `changelog` (block list with version/date/description),
+  `supersedes` (replacement skill name for deprecation) — are recognized.
   Any other key is a **warning** (not an error), so legacy VibeFlow keys
   (`status`/`version`/`triggers`/`requires`) keep validating.
 - Optional dirs `scripts/`, `references/`, `assets/` are emptiness-checked; the

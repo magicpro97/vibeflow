@@ -170,6 +170,132 @@ describe("validateSkillDir — Anthropic skill format", () => {
       true,
     );
   });
+
+  // #660: lifecycle metadata validation
+  test("accepts owners as an array of names", () => {
+    const dir = tmpSkill("owned-skill");
+    writeSkill(
+      dir,
+      "---\nname: owned-skill\ndescription: skill with owners\nowners:\n  - alice\n  - bob@corp.com\n---\n\n# Owned\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("owners"))).toBe(false);
+  });
+
+  test("warns when owners is not an array", () => {
+    const dir = tmpSkill("bad-owners");
+    writeSkill(
+      dir,
+      "---\nname: bad-owners\ndescription: skill with bad owners\nowners: alice\n---\n\n# Bad Owners\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("owners must be an array"))).toBe(true);
+  });
+
+  test("warns when owners entry is invalid", () => {
+    const dir = tmpSkill("invalid-owner");
+    writeSkill(
+      dir,
+      "---\nname: invalid-owner\ndescription: skill with invalid owner\nowners:\n  - invalid name with spaces!\n---\n\n# Invalid\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("owners contains invalid"))).toBe(true);
+  });
+
+  test("warns on organization-scoped skill missing owners", () => {
+    const dir = tmpSkill("org-skill");
+    writeSkill(
+      dir,
+      "---\nname: org-skill\ndescription: org skill without owners\nscope: organization\n---\n\n# Org\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(
+      result.warnings.some((w) => w.includes("organization-scoped skill should declare")),
+    ).toBe(true);
+  });
+
+  test("does not warn on project-scoped skill missing owners", () => {
+    const dir = tmpSkill("proj-skill");
+    writeSkill(
+      dir,
+      "---\nname: proj-skill\ndescription: project skill\nscope: project\n---\n\n# Proj\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(
+      result.warnings.some((w) => w.includes("organization-scoped skill should declare")),
+    ).toBe(false);
+  });
+
+  test("warns on malformed changelog (non-array)", () => {
+    const dir = tmpSkill("bad-cl");
+    writeSkill(
+      dir,
+      "---\nname: bad-cl\ndescription: bad changelog\nchangelog: not-an-array\n---\n\n# Bad CL\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("changelog must be an array"))).toBe(true);
+  });
+
+  test("warns on deprecated skill missing supersedes", () => {
+    const dir = tmpSkill("dep-no-sup");
+    writeSkill(
+      dir,
+      "---\nname: dep-no-sup\ndescription: deprecated without replacement\nstatus: deprecated\n---\n\n# Dep\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("supersedes"))).toBe(true);
+  });
+
+  test("does not warn on deprecated skill with supersedes", () => {
+    const dir = tmpSkill("dep-w-sup");
+    writeSkill(
+      dir,
+      "---\nname: dep-w-sup\ndescription: deprecated with replacement\nstatus: deprecated\nsupersedes: new-hotness\n---\n\n# Dep\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("supersedes"))).toBe(false);
+  });
+
+  test("warns when owners is empty array", () => {
+    const dir = tmpSkill("empty-owners");
+    writeSkill(
+      dir,
+      "---\nname: empty-owners\ndescription: skill with empty owners\nowners: []\n---\n\n# Empty\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("nonempty array"))).toBe(true);
+  });
+
+  test("warns on changelog with non-string entry", () => {
+    const dir = tmpSkill("bad-cl-entry");
+    writeSkill(
+      dir,
+      "---\nname: bad-cl-entry\ndescription: bad changelog entry\nchangelog:\n  - valid entry\n  - 42\n---\n\n# Bad CL\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("changelog contains invalid"))).toBe(true);
+  });
+
+  test("warns on supersedes with invalid name format", () => {
+    const dir = tmpSkill("bad-sup");
+    writeSkill(
+      dir,
+      "---\nname: bad-sup\ndescription: bad supersedes\nsupersedes: Invalid_Name!\n---\n\n# Bad Sup\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("supersedes must match"))).toBe(true);
+  });
+
+  test("warns on supersedes with empty string", () => {
+    const dir = tmpSkill("empty-sup");
+    writeSkill(
+      dir,
+      "---\nname: empty-sup\ndescription: empty supersedes\nsupersedes: ''\n---\n\n# Empty Sup\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.warnings.some((w) => w.includes("nonempty string"))).toBe(true);
+  });
 });
 
 describe("validateSkillRoots", () => {

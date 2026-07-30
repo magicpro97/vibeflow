@@ -1,6 +1,6 @@
-// `vf skills` subcommand (issue #80, phase 7/14). Subcommands: list, validate,
-// search, resolve, sync, verify-sync, import, init, audit-log, verify, ci-*, etc.
+// `vf skills` subcommand (issue #80, phase 7/14).
 
+import { showSkill } from "../skills/lifecycle.js";
 import {
   CTX_DIR,
   c,
@@ -47,7 +47,6 @@ import {
   verifySkillSync,
   writeFileSafe,
 } from "./_shared.js";
-
 export function skills(sub: string | undefined, rest: string[] = []): number {
   const repo = cwd();
   const found = discoverSkills(repo);
@@ -62,6 +61,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     process.stdout.write(renderSkillIndex(found));
     return 0;
   }
+  if (sub === "show") return showSkill(found, rest);
   if (sub === "validate") {
     const result = validateSkillRoots(repo);
     for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));

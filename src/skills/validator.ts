@@ -4,6 +4,11 @@ import { CTX_DIR } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { validateDomainKeys } from "./domain.js";
+import {
+  validateLifecycleChangelog,
+  validateLifecycleOwners,
+  validateLifecycleSupersedes,
+} from "./lifecycle-validation.js";
 
 const ALLOWED_DIRS = new Set(["scripts", "references", "assets"]);
 
@@ -37,6 +42,9 @@ const STANDARD_FRONTMATTER = new Set([
   "domain.role",
   "owns",
   "dependsOn",
+  "owners",
+  "changelog",
+  "supersedes",
 ]);
 
 const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
@@ -232,6 +240,9 @@ export function validateSkillDir(
 
   // #665: domain ownership key validation
   warnings.push(...validateDomainKeys(data));
+  warnings.push(...validateLifecycleOwners(data));
+  warnings.push(...validateLifecycleChangelog(data));
+  warnings.push(...validateLifecycleSupersedes(data));
 
   // Warn (not error) on frontmatter keys outside the spec's standard set,
   // so typos surface without breaking existing skills that carry legacy
