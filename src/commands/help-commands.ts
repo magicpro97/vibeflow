@@ -195,7 +195,7 @@ ${c.bold("Examples:")}
   vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | eval <skill-dir> | registry <add|list|update|install>]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | eval <skill-dir> | registry <add|list|update|install>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
 import external skills, capture new skills from real work, manage remote
 skill registries via git-backed lock files, and run skill trigger/task evals.
@@ -207,6 +207,7 @@ ${c.bold("Subcommands:")}
   validate                   validate skill format per Anthropic standard (errors, warnings)
   sync [--mode pointer|full] [--engine <name>] sync .vibeflow/skills → engine mirror (--engine can repeat; default copilot)
   verify-sync                verify engine mirror has every canonical skill (defaults to selected engine)
+  verify-freshness           check sourceAnchors against current disk content (SHA-256)
   verify-lock                verify registry lock integrity, marketplace schema, and mirror completeness
   import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
   init <name>                scaffold an empty SKILL.md stub

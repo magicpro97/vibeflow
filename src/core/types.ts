@@ -194,10 +194,23 @@ export interface Skill {
   changelog?: string[];
   /** #660: deprecation replacement — name of the successor skill. */
   supersedes?: string;
+  /**
+   * #662: sourceAnchors map file → sha256 for freshness verification.
+   * Paths are repository-relative, must resolve inside repo, no `..`.
+   * Parsed from YAML frontmatter `sourceAnchors:` block list of `file: <sha256>` entries.
+   */
+  sourceAnchors?: Record<string, string>;
   /** Absolute path to the skill folder. */
   dir: string;
   /** Absolute path to the skill's SKILL.md. */
   path: string;
+  /**
+   * #662: computed freshness status for sourceAnchors verification.
+   * Set by enrichFreshness; undefined until then.
+   */
+  freshness?: "fresh" | "stale" | "unknown";
+  /** #662: reason when stale or malformed. */
+  freshnessReason?: string;
   /**
    * #656: resolved merged body when this skill extends a base skill.
    * Set by adapter resolution after discoverSkills. Undefined for

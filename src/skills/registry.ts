@@ -5,6 +5,7 @@ import type { SkillScope } from "../core.js";
 import type { Skill, SkillMatch, SkillRequires, SkillStatus } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import type { UserMcpServer } from "../tools/index.js";
+import { parseSourceAnchors } from "./anchor-freshness.js";
 import { parseDomainMeta } from "./domain.js";
 import {
   parseLifecycleChangelog,
@@ -194,6 +195,7 @@ export function parseSkill(
     owners,
     changelog,
     supersedes,
+    sourceAnchors: parseSourceAnchors(data as Record<string, unknown>),
     dir,
     path: skillMdPath,
   };
@@ -327,10 +329,14 @@ function byScoreThenStatus(a: SkillMatch, b: SkillMatch): number {
 /** Render the discovered registry as the SKILL_INDEX.md table body. */
 export function renderSkillIndex(skills: Skill[]): string {
   const header =
-    "# Skill Index\n\n| skill | status | capabilities |\n|-------|--------|--------------|\n";
+    "# Skill Index\n\n| skill | status | capabilities | freshness |\n|-------|--------|--------------|-----------|\n";
   if (!skills.length) return header;
   const rows = skills
-    .map((s) => `| ${s.name} | ${s.status} | ${(s.capabilities ?? []).join(", ")} |`)
+    .map((s) => {
+      const f = s.freshness ?? "";
+      const r = s.freshnessReason ? ` (${s.freshnessReason})` : "";
+      return `| ${s.name} | ${s.status} | ${(s.capabilities ?? []).join(", ")} | ${f}${r} |`;
+    })
     .join("\n");
   return `${header}${rows}\n`;
 }
