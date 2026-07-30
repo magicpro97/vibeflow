@@ -176,6 +176,7 @@ vf skills list             # skills discovered under .vibeflow/.claude/.agents/.
 vf skills show <name>      # show detailed info for one skill (owners, changelog, deprecation)
 vf skills search <term>    # rank local skills against a task term
 vf skills resolve          # derive NEEDS from scan + intake; satisfied vs must-acquire
+vf skills telemetry        # print aggregate skill-usage summary from local JSONL telemetry
 vf skills validate         # validate every canonical skill against the Anthropic standard
 vf skills sync             # sync .vibeflow/skills → engine mirrors (default mode: pointer)
 vf skills sync --mode pointer|full   # pointer = stub SKILL.md pointing at canonical; full = copy
