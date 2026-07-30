@@ -25,7 +25,7 @@ function scaffold(name: string, lines: string[]): string {
   return dir;
 }
 
-const VALID_BODY = [
+const BODY = [
   "",
   "## When to use",
   "Use when x.",
@@ -39,7 +39,7 @@ const VALID_BODY = [
 ];
 
 function fm(lines: string[]): string[] {
-  return ["---", ...lines, "---", ...VALID_BODY];
+  return ["---", ...lines, "---", ...BODY];
 }
 
 function validate(name: string, lines: string[]) {
@@ -55,7 +55,6 @@ function validate(name: string, lines: string[]) {
   });
 }
 
-// ── validateSkillDir: frontmatter domain validation ─────────────────────
 describe("validateSkillDir domain keys", () => {
   test("domain.id valid kebab-case produces no warning", () => {
     const r = validate("good", fm(["name: good", "description: d", "domain.id: my-domain"]));
@@ -76,7 +75,10 @@ describe("validateSkillDir domain keys", () => {
   });
 
   test("domain.role valid canonical produces no warning", () => {
-    const r = validate("canon", fm(["name: canon", "description: d", "domain.role: canonical"]));
+    const r = validate(
+      "canon",
+      fm(["name: canon", "description: d", "domain.id: my-domain", "domain.role: canonical"]),
+    );
     expect(r.warnings.filter((w) => w.includes("domain.role"))).toHaveLength(0);
   });
 
@@ -92,7 +94,7 @@ describe("validateSkillDir domain keys", () => {
     );
   });
 
-  test("owns valid array produces no warning", () => {
+  test("owns valid array no warning", () => {
     const r = validate(
       "owns-ok",
       fm(["name: owns-ok", "description: d", "owns:", "  - fact-1", "  - fact-2"]),
@@ -100,12 +102,12 @@ describe("validateSkillDir domain keys", () => {
     expect(r.warnings.filter((w) => w.includes("owns"))).toHaveLength(0);
   });
 
-  test("owns non-array produces warning", () => {
+  test("owns non-array warns", () => {
     const r = validate("owns-bad", fm(["name: owns-bad", "description: d", "owns: not-an-array"]));
     expect(r.warnings.some((w) => w.includes("owns must be an array"))).toBe(true);
   });
 
-  test("dependsOn valid array produces no warning", () => {
+  test("dependsOn valid array no warning", () => {
     const r = validate(
       "dep-ok",
       fm(["name: dep-ok", "description: d", "dependsOn:", "  - skill-1"]),
@@ -113,12 +115,12 @@ describe("validateSkillDir domain keys", () => {
     expect(r.warnings.filter((w) => w.includes("dependsOn"))).toHaveLength(0);
   });
 
-  test("dependsOn non-array produces warning", () => {
+  test("dependsOn non-array warns", () => {
     const r = validate("dep-bad", fm(["name: dep-bad", "description: d", "dependsOn: 42"]));
     expect(r.warnings.some((w) => w.includes("dependsOn must be an array"))).toBe(true);
   });
 
-  test("domain keys are not flagged as non-standard frontmatter", () => {
+  test("domain keys not flagged non-standard", () => {
     const r = validate(
       "std",
       fm([
@@ -135,14 +137,28 @@ describe("validateSkillDir domain keys", () => {
     expect(r.warnings.filter((w) => w.includes("non-standard"))).toHaveLength(0);
   });
 
-  test("no domain keys is backward compatible", () => {
-    const r = validate("plain", fm(["name: plain", "description: d"]));
-    expect(r.ok).toBe(true);
-    expect(r.errors).toHaveLength(0);
+  test("domain.role canonical without domain.id warns", () => {
+    const r = validate("orphan", fm(["name: orphan", "description: d", "domain.role: canonical"]));
+    expect(r.warnings.some((w) => w.includes("canonical") && w.includes("requires"))).toBe(true);
+  });
+
+  test("owns path traversal warns", () => {
+    const r = validate(
+      "owns-trav",
+      fm(["name: owns-trav", "description: d", "owns:", "  - ../etc"]),
+    );
+    expect(r.warnings.some((w) => w.includes("owns") && w.includes("unsafe"))).toBe(true);
+  });
+
+  test("dependsOn control char warns", () => {
+    const r = validate(
+      "dep-ctrl",
+      fm(["name: dep-ctrl", "description: d", "dependsOn:", "  - bad\x00ref"]),
+    );
+    expect(r.warnings.some((w) => w.includes("dependsOn") && w.includes("unsafe"))).toBe(true);
   });
 });
 
-// ── checkDomainOwnership ─────────────────────────────────────────────────
 describe("checkDomainOwnership", () => {
   function mkResult(
     name: string,
@@ -165,7 +181,7 @@ describe("checkDomainOwnership", () => {
     return r;
   }
 
-  test("single canonical per domain passes", () => {
+  test("single canonical per domain", () => {
     const s1 = mkResult(
       "canon-a",
       fm(["name: canon-a", "description: d", "domain.id: auth", "domain.role: canonical"]),
@@ -175,7 +191,7 @@ describe("checkDomainOwnership", () => {
     expect(r.warnings).toHaveLength(0);
   });
 
-  test("duplicate canonical for same domain.id errors", () => {
+  test("duplicate canonical errors", () => {
     const s1 = mkResult(
       "canon-a1",
       fm(["name: canon-a1", "description: d", "domain.id: auth", "domain.role: canonical"]),
@@ -190,7 +206,7 @@ describe("checkDomainOwnership", () => {
     expect(r.errors[0]).toContain("2 canonical");
   });
 
-  test("child with dependsOn referencing missing canonical warns", () => {
+  test("child dependsOn missing canonical warns", () => {
     const s1 = mkResult(
       "child-nope",
       fm([
@@ -208,7 +224,7 @@ describe("checkDomainOwnership", () => {
     );
   });
 
-  test("child with dependsOn referencing existing canonical is clean", () => {
+  test("child dependsOn existing canonical is clean", () => {
     const s1 = mkResult(
       "canon-core",
       fm(["name: canon-core", "description: d", "domain.id: core", "domain.role: canonical"]),
@@ -229,7 +245,7 @@ describe("checkDomainOwnership", () => {
     expect(r.warnings.filter((w) => w.includes("no canonical owner"))).toHaveLength(0);
   });
 
-  test("child role with empty dependsOn warns", () => {
+  test("child role empty dependsOn warns", () => {
     const s1 = mkResult(
       "orphan-child",
       fm(["name: orphan-child", "description: d", "domain.id: x", "domain.role: child"]),
@@ -240,7 +256,7 @@ describe("checkDomainOwnership", () => {
     );
   });
 
-  test("child role with dependsOn does not warn about empty", () => {
+  test("child with dependsOn no empty warning", () => {
     const s1 = mkResult(
       "canon-p",
       fm(["name: canon-p", "description: d", "domain.id: parent", "domain.role: canonical"]),
@@ -267,7 +283,7 @@ describe("checkDomainOwnership", () => {
     expect(r.errors).toHaveLength(0);
   });
 
-  test("no domain keys at all passes cleanly", () => {
+  test("no domain keys backward compatible", () => {
     const s1 = mkResult("plain", fm(["name: plain", "description: d"]));
     const r = checkDomainOwnership([s1]);
     expect(r.errors).toHaveLength(0);
@@ -275,7 +291,7 @@ describe("checkDomainOwnership", () => {
   });
 });
 
-// ── vf skills domain list (CLI) ──────────────────────────────────────────
+// ── CLI ──
 describe("vf skills domain list", () => {
   function run(rest: string[]): number {
     const orig = process.cwd();
@@ -361,27 +377,26 @@ describe("vf skills domain list", () => {
   });
 });
 
-// ── parseDomainMeta (nested object form) ─────────────────────────────────
 describe("parseDomainMeta", () => {
-  test("nested domain object with id + role", () => {
+  test("nested object id + role", () => {
     const r = parseDomainMeta({ domain: { id: "auth", role: "canonical" } });
     expect(r.domain?.id).toBe("auth");
     expect(r.domain?.role).toBe("canonical");
   });
 
-  test("nested domain object with invalid role coerces role to undefined", () => {
+  test("invalid role coerces undefined", () => {
     const r = parseDomainMeta({ domain: { id: "auth", role: "master" } });
     expect(r.domain?.id).toBe("auth");
     expect(r.domain?.role).toBeUndefined();
   });
 
-  test("nested domain object with non-string id coerces id to undefined", () => {
+  test("non-string id coerces undefined", () => {
     const r = parseDomainMeta({ domain: { id: 123, role: "child" } });
     expect(r.domain?.id).toBeUndefined();
     expect(r.domain?.role).toBe("child");
   });
 
-  test("dot-notation fallback when domain is not an object", () => {
+  test("dot-notation fallback", () => {
     const r = parseDomainMeta({ "domain.id": "ui", "domain.role": "child" });
     expect(r.domain?.id).toBe("ui");
     expect(r.domain?.role).toBe("child");
@@ -393,7 +408,7 @@ describe("parseDomainMeta", () => {
     expect(r.dependsOn).toEqual(["s1"]);
   });
 
-  test("no domain metadata yields undefined domain", () => {
+  test("no domain metadata yields undefined", () => {
     const r = parseDomainMeta({ name: "x" });
     expect(r.domain).toBeUndefined();
   });
