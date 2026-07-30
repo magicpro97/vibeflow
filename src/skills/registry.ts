@@ -1,25 +1,18 @@
 // biome-ignore format: entire-file — tight formatting keeps file ≤400 lines
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SkillScope } from "../core.js";
-// Deep-imports kept below to avoid circular re-exports.
-import {
-  CTX_DIR,
-  type Skill,
-  type SkillMatch,
-  type SkillRequires,
-  type SkillStatus,
-} from "../core.js";
+import type { Skill, SkillMatch, SkillRequires, SkillStatus } from "../core.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import type { UserMcpServer } from "../tools/index.js";
-import { SKILL_MIRRORS } from "../workflow-artifacts.js";
-import { resolveAllAdapters } from "./adapter.js";
-import { sharedCatalogDir } from "./catalog.js";
 import { parseDomainMeta } from "./domain.js";
-import { parseRegistryLock } from "./registry-channel.js";
+import {
+  parseLifecycleChangelog,
+  parseLifecycleOwners,
+  parseLifecycleSupersedes,
+} from "./lifecycle.js";
 // biome-ignore format: compact single-line keeps file ≤400
-import { type ParseSkillOpts, hasValidReviewProof, trustedIdentityForSharedSkill } from "./review-proof.js";
+import { type ParseSkillOpts, hasValidReviewProof } from "./review-proof.js";
 
 /**
  * Directories that may contain `<name>/SKILL.md` folders.
@@ -31,8 +24,9 @@ import { type ParseSkillOpts, hasValidReviewProof, trustedIdentityForSharedSkill
  *
  * `discoverSkills` also scans the SHARED catalog (~/.vibeflow/skills/) AFTER
  * project-local roots, so a project-local skill always shadows the shared one.
- */
-const SKILL_ROOTS: string[] = [join(CTX_DIR, "skills"), join(".kiro", "skills"), ...SKILL_MIRRORS];
+ *
+ * Extracted to `./discovery.js` to keep this file ≤400 lines. */
+export { discoverSkills } from "./discovery.js";
 
 const VALID_STATUS: SkillStatus[] = [
   "verified",
@@ -177,6 +171,9 @@ export function parseSkill(
   }
 
   const { domain, owns, dependsOn } = parseDomainMeta(data as Record<string, unknown>);
+  const owners = parseLifecycleOwners(data as Record<string, unknown>);
+  const changelog = parseLifecycleChangelog(data as Record<string, unknown>);
+  const supersedes = parseLifecycleSupersedes(data as Record<string, unknown>);
 
   return {
     name,
@@ -194,73 +191,12 @@ export function parseSkill(
     domain,
     owns,
     dependsOn,
+    owners,
+    changelog,
+    supersedes,
     dir,
     path: skillMdPath,
   };
-}
-/** Discover every valid skill under the known roots in `repo`, de-duplicated by name.
- *  Resolution order: project-local roots first, then the shared user-scoped catalog
- *  (~/.vibeflow/skills/). A project-local skill always shadows a shared one. */
-export function discoverSkills(
-  repo: string,
-  inject: { sharedCatalogDir?: () => string; homedir?: () => string } = {},
-): Skill[] {
-  const byName = new Map<string, Skill>();
-
-  // Scan project-local roots (relative to repo)
-  for (const root of SKILL_ROOTS) {
-    const base = join(repo, root);
-    if (!existsSync(base)) continue;
-    const entries = readdirSync(base);
-    for (const entry of entries) {
-      const dir = join(base, entry);
-      if (!statSync(dir).isDirectory()) continue;
-      const skillMd = join(dir, "SKILL.md");
-      if (!existsSync(skillMd)) continue;
-      const skill = parseSkill(skillMd, dir);
-      if (!skill) continue;
-      const key = skill.name.toLowerCase();
-      if (!byName.has(key)) byName.set(key, skill);
-    }
-  }
-
-  // Scan the shared user-scoped catalog (absolute path, lowest priority)
-  const _sharedDir = inject.sharedCatalogDir ?? sharedCatalogDir;
-  const home = inject.homedir?.() ?? process.env.VF_SKILLS_HOME ?? homedir();
-  const lock = parseRegistryLock(repo);
-  try {
-    const shared = _sharedDir();
-    if (existsSync(shared)) {
-      const entries = readdirSync(shared);
-      for (const entry of entries) {
-        if (entry.startsWith(".")) continue;
-        const dir = join(shared, entry);
-        if (!statSync(dir).isDirectory()) continue;
-        const skillMd = join(dir, "SKILL.md");
-        if (!existsSync(skillMd)) continue;
-        const id = trustedIdentityForSharedSkill(entry, lock.registries, dir);
-        // biome-ignore format: compact ternary keeps file ≤400
-        const skill = parseSkill(skillMd, dir, id ? { provenance: "discovered", trustedReviewIdentity: id, homedir: () => home } : { provenance: "discovered" });
-        if (!skill) continue;
-        const key = skill.name.toLowerCase();
-        if (!byName.has(key)) byName.set(key, skill);
-      }
-    }
-  } catch {
-    // shared catalog inaccessible — continue with local-only
-  }
-
-  const collected = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
-
-  // #656: resolve adapter skills (extends) — load base, merge body
-  const resolved = resolveAllAdapters(collected);
-
-  // Log adapter warnings to stderr so they surface during discovery
-  for (const w of resolved.warnings) {
-    console.error(`[skills] ${w}`);
-  }
-
-  return resolved.skills;
 }
 /** #552: collect every non-deprecated skill's mcp block into a {name → UserMcpServer} map,
  *  ready to merge into the engine MCP fan-out (same shape as settings.mcpServers).

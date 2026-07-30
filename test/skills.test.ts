@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CTX_DIR, type Skill } from "../src/core.js";
+import { renderSkillDetail, showSkill } from "../src/skills/lifecycle.js";
 import {
   discoverSkills,
   matchSkillsForFile,
@@ -404,7 +405,132 @@ describe("parseSkill: edge cases", () => {
   });
 });
 
-// Line 121 (readdirSync catch) and line 128 (statSync catch) in
+describe("parseSkill: lifecycle metadata (#660)", () => {
+  test("parses owners, changelog, supersedes from frontmatter", () => {
+    const dir = tmpRepo();
+    try {
+      const sk = join(dir, "SKILL.md");
+      writeFileSync(
+        sk,
+        [
+          "---",
+          "name: lifecycle-test",
+          "description: lifecycle metadata",
+          "owners:",
+          "  - alice",
+          "  - bob@corp.com",
+          "changelog:",
+          '  - "2024-01-01: initial"',
+          '  - "2024-06-01: updated"',
+          "supersedes: old-skill",
+          "status: deprecated",
+          "---",
+        ].join("\n"),
+      );
+      const parsed = parseSkill(sk, dir);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.owners).toEqual(["alice", "bob@corp.com"]);
+      expect(parsed?.changelog).toEqual(["2024-01-01: initial", "2024-06-01: updated"]);
+      expect(parsed?.supersedes).toBe("old-skill");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("renderSkillDetail outputs deprecation + supersedes", () => {
+    const s: Skill = {
+      name: "old",
+      description: "old skill",
+      status: "deprecated",
+      supersedes: "new-hotness",
+      owners: ["alice"],
+      dir: "/tmp/old",
+      path: "/tmp/old/SKILL.md",
+    };
+    const out = renderSkillDetail(s);
+    expect(out).toContain("DEPRECATED");
+    expect(out).toContain("new-hotness");
+    expect(out).toContain("alice");
+  });
+
+  test("renderSkillDetail renders changelog rows and overflow", () => {
+    const out = renderSkillDetail({
+      name: "logged",
+      description: "has log",
+      status: "verified",
+      changelog: ["one", "two", "three", "four"],
+      dir: "/tmp/logged",
+      path: "/tmp/logged/SKILL.md",
+    });
+    expect(out).toContain("    - one");
+    expect(out).toContain("1 more entries");
+  });
+
+  test("showSkill handles missing, unknown, and found names", () => {
+    const originalWrite = process.stdout.write;
+    const writes: string[] = [];
+    process.stdout.write = ((text: string) => {
+      writes.push(text);
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      expect(showSkill([], [])).toBe(2);
+      expect(showSkill([], ["missing"])).toBe(0);
+      expect(
+        showSkill(
+          [
+            {
+              name: "found",
+              description: "detail",
+              status: "verified",
+              dir: "/tmp",
+              path: "/tmp/SKILL.md",
+            },
+          ],
+          ["FOUND"],
+        ),
+      ).toBe(0);
+      expect(writes.at(-1)).toContain("name: found");
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+  });
+
+  test("parseSkill ignores invalid supersedes name", () => {
+    const dir = tmpRepo();
+    try {
+      const sk = join(dir, "SKILL.md");
+      writeFileSync(
+        sk,
+        ["---", "name: safe-skill", "description: safe", "supersedes: Invalid_Name!", "---"].join(
+          "\n",
+        ),
+      );
+      const parsed = parseSkill(sk, dir);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.supersedes).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("parseSkill ignores empty owners array", () => {
+    const dir = tmpRepo();
+    try {
+      const sk = join(dir, "SKILL.md");
+      writeFileSync(
+        sk,
+        ["---", "name: empty-owners", "description: empty owners", "owners: []", "---"].join("\n"),
+      );
+      const parsed = parseSkill(sk, dir);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.owners).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // discoverSkills are essentially unreachable from a normal filesystem
 // — they only fire when readdirSync/statSync throw, which doesn't
 // happen on a healthy POSIX FS. The functions are wrapped in

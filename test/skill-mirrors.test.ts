@@ -71,8 +71,8 @@ describe("skill-mirror cross-file invariant (C2)", () => {
     );
   });
 
-  test("registry.ts SKILL_ROOTS is a superset of SKILL_MIRRORS (audit C2)", () => {
-    const src = readFileSync(join(REPO_ROOT, "src", "skills", "registry.ts"), "utf8");
+  test("registry.ts SR -> discovery.ts SKILL_ROOTS is a superset of SKILL_MIRRORS (audit C2)", () => {
+    const src = readFileSync(join(REPO_ROOT, "src", "skills", "discovery.ts"), "utf8");
     expect(src).toMatch(
       /import\s*\{[^}]*SKILL_MIRRORS[^}]*\}\s*from\s*["']\.\.\/workflow-artifacts\.js["']/,
     );
@@ -89,7 +89,7 @@ describe("skill-mirror cross-file invariant (C2)", () => {
 
   test("no .ts file under src/skills/ redeclares a skill-root literal", () => {
     // The audit (C2) found hand-rolled lists. Guard against re-introduction.
-    const files = ["sync.ts", "registry.ts", "validator.ts"];
+    const files = ["sync.ts", "registry.ts", "discovery.ts", "validator.ts"];
     const offenders: { file: string; line: number; text: string }[] = [];
     for (const file of files) {
       const text = readFileSync(join(REPO_ROOT, "src", "skills", file), "utf8");
