@@ -185,6 +185,7 @@ vf skills verify             # promote a canonical skill to status:verified (or 
 vf skills verify-sync        # verify each mirror has a SKILL.md for every canonical skill
 vf skills verify-sync --from-registry # also verify registry-pinned skills have mirrors
 vf skills verify-freshness   # check sourceAnchors against current disk content (SHA-256)
+vf skills impact <fact-or-path> # list affected skills and required evals from domain facts
 vf skills import <dir>     # import a local skill dir into .vibeflow/skills/
 vf skills import context7:<query>  # import a Context7 skill (approval-gated) into the canonical store
 ```

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { skills } from "../src/commands/skills.js";
 import { analyzeSkillImpact, handleImpactSubcommand } from "../src/skills/impact.js";
+import { matchPolicyPaths, readSkillPolicy } from "../src/skills/policy.js";
 
 let base: string;
 
@@ -30,6 +31,12 @@ function facts(raw: string): void {
   writeFileSync(join(dir, "DOMAIN_FACTS.json"), raw);
 }
 
+function policy(raw: string): void {
+  const dir = join(base, ".vibeflow");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "SKILL_POLICY.json"), raw);
+}
+
 function run(rest: string[]): number {
   const cwd = process.cwd();
   const oldHome = process.env.VF_SKILLS_HOME;
@@ -43,115 +50,278 @@ function run(rest: string[]): number {
   }
 }
 
-const FACTS = JSON.stringify({
+const BASE_FACTS = {
   schemaVersion: 1,
   facts: [
     {
-      key: "src/domain/ctc/",
+      key: "ctc-domain",
       owner: "neomatch-ctc-convention",
       version: "1",
-      statement: "CTC domain source files",
-      dependents: ["ctc-child-1", "ctc-child-2", "ctc-child-3", "ctc-child-4"],
+      statement: "CTC domain ownership",
+      dependents: ["ctc-child-1"],
+    },
+    {
+      key: "auth-domain",
+      owner: "auth-skill",
+      version: "1",
+      statement: "Authentication domain",
+      paths: ["src/auth/"],
+    },
+    {
+      key: "ui-domain",
+      owner: "ui-skill",
+      version: "1",
+      statement: "UI component domain",
+      paths: ["src/ui/"],
     },
   ],
-});
+};
+
+const BASE_FACTS_RAW = JSON.stringify(BASE_FACTS);
 
 function fixture(): void {
-  facts(FACTS);
+  facts(BASE_FACTS_RAW);
   skill("neomatch-ctc-convention");
   skill("ctc-child-1", "dependsOn:\n  - neomatch-ctc-convention\n");
-  skill("ctc-child-2");
-  skill("ctc-child-3");
-  skill("ctc-child-4");
+  skill("auth-skill");
+  skill("ui-skill");
 }
 
-describe("analyzeSkillImpact", () => {
-  test("exact fact lists owner and all children", () => {
+// ── analyzeSkillImpact ──────────────────────────────────────────────────
+
+describe("analyzeSkillImpact — exact fact key", () => {
+  test("matches fact key exactly", () => {
     fixture();
-    const result = analyzeSkillImpact(base, "src/domain/ctc/");
-    expect(result.facts).toEqual(["src/domain/ctc/"]);
-    expect(result.skills).toEqual([
-      "ctc-child-1",
-      "ctc-child-2",
-      "ctc-child-3",
-      "ctc-child-4",
-      "neomatch-ctc-convention",
-    ]);
+    const r = analyzeSkillImpact(base, "ctc-domain");
+    expect(r.facts).toEqual(["ctc-domain"]);
+    expect(r.skills).toContain("neomatch-ctc-convention");
   });
 
-  test("path substring matches fact", () => {
+  test("no substring match on fact key", () => {
     fixture();
-    expect(analyzeSkillImpact(base, "src/domain/ctc").facts).toEqual(["src/domain/ctc/"]);
-  });
-
-  test("statement substring matches fact", () => {
-    fixture();
-    expect(analyzeSkillImpact(base, "source files").facts).toEqual(["src/domain/ctc/"]);
-  });
-
-  test("reports required eval command per affected skill", () => {
-    fixture();
-    expect(analyzeSkillImpact(base, "ctc").evalCommands).toContain(
-      "vf skills eval neomatch-ctc-convention",
-    );
-  });
-
-  test("adds skills whose owns overlap matching fact", () => {
-    facts(FACTS);
-    skill("neomatch-ctc-convention");
-    skill("fact-owner", "owns:\n  - src/domain/ctc/\n");
-    const result = analyzeSkillImpact(base, "ctc");
-    expect(result.skills).toContain("fact-owner");
-  });
-
-  test("recursively adds skills depending on an affected owner", () => {
-    facts(FACTS);
-    skill("neomatch-ctc-convention");
-    skill("dependent", "dependsOn:\n  - neomatch-ctc-convention\n");
-    const result = analyzeSkillImpact(base, "ctc");
-    expect(result.skills).toContain("dependent");
-  });
-
-  test("missing facts file returns empty result", () => {
-    expect(analyzeSkillImpact(base, "anything")).toEqual({
-      facts: [],
-      skills: [],
-      evalCommands: [],
-    });
-  });
-
-  test("malformed facts file returns empty result", () => {
-    facts("{");
-    expect(analyzeSkillImpact(base, "anything")).toEqual({
-      facts: [],
-      skills: [],
-      evalCommands: [],
-    });
-  });
-
-  test("no fact match returns empty result", () => {
-    fixture();
-    expect(analyzeSkillImpact(base, "other")).toEqual({ facts: [], skills: [], evalCommands: [] });
+    const r = analyzeSkillImpact(base, "ctc");
+    expect(r.facts).toEqual([]);
   });
 });
 
-describe("vf skills impact", () => {
-  test("missing query returns usage error", () => {
+describe("analyzeSkillImpact — path prefix", () => {
+  test("matches via fact key path prefix", () => {
+    facts(BASE_FACTS_RAW);
+    skill("auth-skill");
+    const r = analyzeSkillImpact(base, "src/auth/login.ts");
+    expect(r.facts).toEqual(["auth-domain"]);
+  });
+
+  test("matches via declared paths[] prefix", () => {
+    facts(
+      JSON.stringify({
+        schemaVersion: 1,
+        facts: [
+          {
+            key: "db-domain",
+            owner: "db-skill",
+            version: "1",
+            statement: "Database domain",
+            paths: ["src/db/"],
+          },
+        ],
+      }),
+    );
+    skill("db-skill");
+    const r = analyzeSkillImpact(base, "src/db/migrations/001.sql");
+    expect(r.facts).toEqual(["db-domain"]);
+  });
+
+  test("path with dot treated as path", () => {
+    fixture();
+    const r = analyzeSkillImpact(base, "src/auth/login.ts");
+    expect(r.facts).toEqual(["auth-domain"]);
+  });
+
+  test("forward slash treated as path", () => {
+    fixture();
+    const r = analyzeSkillImpact(base, "src/ui/components/Button.tsx");
+    expect(r.facts).toEqual(["ui-domain"]);
+  });
+});
+
+describe("analyzeSkillImpact — domain match", () => {
+  test("matches by owner name", () => {
+    fixture();
+    const r = analyzeSkillImpact(base, "neomatch-ctc-convention");
+    expect(r.facts).toEqual(["ctc-domain"]);
+  });
+
+  test("falls back to key match on domain query", () => {
+    fixture();
+    const r = analyzeSkillImpact(base, "ctc-domain");
+    expect(r.facts).toEqual(["ctc-domain"]);
+  });
+});
+
+describe("analyzeSkillImpact — dependents and owns graph", () => {
+  test("includes dependent skills", () => {
+    facts(BASE_FACTS_RAW);
+    skill("neomatch-ctc-convention");
+    skill("ctc-child-1", "dependsOn:\n  - neomatch-ctc-convention\n");
+    const r = analyzeSkillImpact(base, "ctc-domain");
+    expect(r.skills).toContain("ctc-child-1");
+    expect(r.skills).toContain("neomatch-ctc-convention");
+  });
+
+  test("includes skills whose owns overlaps matched fact", () => {
+    facts(BASE_FACTS_RAW);
+    skill("neomatch-ctc-convention");
+    skill("extra-owner", "owns:\n  - ctc-domain\n");
+    const r = analyzeSkillImpact(base, "ctc-domain");
+    expect(r.skills).toContain("extra-owner");
+  });
+
+  test("recursive dependents", () => {
+    facts(BASE_FACTS_RAW);
+    skill("neomatch-ctc-convention");
+    skill("middle", "dependsOn:\n  - neomatch-ctc-convention\n");
+    skill("leaf", "dependsOn:\n  - middle\n");
+    const r = analyzeSkillImpact(base, "ctc-domain");
+    expect(r.skills).toContain("middle");
+    expect(r.skills).toContain("leaf");
+  });
+});
+
+describe("analyzeSkillImpact — edge cases", () => {
+  test("missing facts file returns empty", () => {
+    expect(analyzeSkillImpact(base, "anything")).toEqual({
+      facts: [],
+      skills: [],
+      evalCommands: [],
+    });
+  });
+
+  test("malformed facts returns empty", () => {
+    facts("{");
+    expect(analyzeSkillImpact(base, "x")).toEqual({ facts: [], skills: [], evalCommands: [] });
+  });
+
+  test("no match returns empty", () => {
+    fixture();
+    expect(analyzeSkillImpact(base, "no-such-thing")).toEqual({
+      facts: [],
+      skills: [],
+      evalCommands: [],
+    });
+  });
+
+  test("unsafe path input returns empty (absolute)", () => {
+    fixture();
+    expect(analyzeSkillImpact(base, "/etc/passwd")).toEqual({
+      facts: [],
+      skills: [],
+      evalCommands: [],
+    });
+  });
+
+  test("unsafe path input returns empty (traversal)", () => {
+    fixture();
+    expect(analyzeSkillImpact(base, "../../etc/passwd")).toEqual({
+      facts: [],
+      skills: [],
+      evalCommands: [],
+    });
+  });
+
+  test("unsafe path input returns empty (backslash)", () => {
+    fixture();
+    expect(analyzeSkillImpact(base, "src\\auth\\login.ts")).toEqual({
+      facts: [],
+      skills: [],
+      evalCommands: [],
+    });
+  });
+});
+
+describe("analyzeSkillImpact — policy domain fallback", () => {
+  test("matches fact via policy protected path domain", () => {
+    facts(BASE_FACTS_RAW);
+    skill("neomatch-ctc-convention");
+    skill("ctc-child-1", "dependsOn:\n  - neomatch-ctc-convention\n");
+    policy(
+      JSON.stringify({
+        schemaVersion: 1,
+        enforcementLevel: "warn",
+        domains: { "neomatch-ctc-convention": { requiredChecks: ["ctc-impact"] } },
+        protectedPaths: [{ pattern: "**/*", domain: "neomatch-ctc-convention" }],
+      }),
+    );
+    const r = analyzeSkillImpact(base, "src/domain/ctc/x.ts", {
+      readSkillPolicy,
+      matchPolicyPaths,
+    });
+    expect(r.facts).toEqual(["ctc-domain"]);
+  });
+});
+
+describe("analyzeSkillImpact — eval commands", () => {
+  test("produces sorted eval commands per affected skill", () => {
+    facts(BASE_FACTS_RAW);
+    skill("auth-skill");
+    skill("auth-child", "dependsOn:\n  - auth-skill\n");
+    const r = analyzeSkillImpact(base, "auth-domain");
+    expect(r.evalCommands).toEqual(["vf skills eval auth-child", "vf skills eval auth-skill"]);
+  });
+});
+
+// ── handleImpactSubcommand ──────────────────────────────────────────────
+
+describe("handleImpactSubcommand", () => {
+  test("missing query returns 2", () => {
+    expect(handleImpactSubcommand(base, [])).toBe(2);
+  });
+
+  test("no match returns 3 (nonzero)", () => {
+    fixture();
+    expect(handleImpactSubcommand(base, ["no-such-thing"])).toBe(3);
+  });
+
+  test("matched fact returns 0", () => {
+    fixture();
+    expect(handleImpactSubcommand(base, ["ctc-domain"])).toBe(0);
+  });
+
+  test("matched path returns 0", () => {
+    fixture();
+    expect(handleImpactSubcommand(base, ["src/auth/login.ts"])).toBe(0);
+  });
+
+  test("matched domain returns 0", () => {
+    fixture();
+    expect(handleImpactSubcommand(base, ["neomatch-ctc-convention"])).toBe(0);
+  });
+
+  test("unsafe path input returns 3", () => {
+    fixture();
+    expect(handleImpactSubcommand(base, ["/etc/passwd"])).toBe(3);
+  });
+});
+
+// ── CLI integration ─────────────────────────────────────────────────────
+
+describe("vf skills impact CLI", () => {
+  test("missing query returns 2", () => {
     expect(run([])).toBe(2);
   });
 
-  test("no match returns success", () => {
+  test("no match returns 3", () => {
     fixture();
-    expect(run(["other"])).toBe(0);
+    expect(run(["no-such-thing"])).toBe(3);
   });
 
-  test("matched path returns success", () => {
+  test("matched fact key returns 0", () => {
     fixture();
-    expect(run(["src/domain/ctc/"])).toBe(0);
+    expect(run(["ctc-domain"])).toBe(0);
   });
 
-  test("direct handler returns success", () => {
+  test("matched path returns 0", () => {
     fixture();
-    expect(handleImpactSubcommand(base, ["ctc"])).toBe(0);
+    expect(run(["src/auth/login.ts"])).toBe(0);
   });
 });
