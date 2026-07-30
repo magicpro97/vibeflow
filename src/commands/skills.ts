@@ -9,6 +9,7 @@ import {
   draftSkillName,
   draftSkillTemplate,
   existsSync,
+  handleAuditDuplicatesSubcommand,
   handleCiDomainIntegrity,
   handleCiSecurity,
   handleCiValidation,
@@ -115,6 +116,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   }
   if (sub === "telemetry") return handleTelemetrySubcommand();
   if (sub === "audit-log") return handleSkillAuditLog(repo, rest);
+  if (sub === "audit-duplicates") return handleAuditDuplicatesSubcommand(repo, rest);
   if (sub === "sync") {
     // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
     // `--engine claude|codex|copilot` from `rest`.
@@ -194,10 +196,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       });
       return 2;
     }
-    // Heuristic: if target is an existing directory with a SKILL.md child,
-    // treat as a single-skill import; otherwise treat as a parent dir of
-    // multiple skills. `context7:<query>` is a network lookup and is not
-    // auto-executed — surface a hint to the user.
+    // Existing SKILL.md dir imports one skill; context7 stays a non-executing hint.
     if (target.startsWith("context7:")) {
       out(
         "vf",
