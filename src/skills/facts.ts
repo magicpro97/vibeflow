@@ -22,6 +22,8 @@ export interface DomainFact {
   version: string;
   statement: string;
   dependents?: string[];
+  /** #667: repo-relative path prefixes this fact covers. Each must be safe (no traversal, no absolute). */
+  paths?: string[];
 }
 
 export interface DomainFactsFile {
@@ -112,7 +114,28 @@ function validateFactEntry(
     }
   }
 
+  if (f.paths !== undefined) {
+    if (!Array.isArray(f.paths)) {
+      warnings.push(`Fact"${f.key}": paths must be an array`);
+    } else {
+      for (let pi = 0; pi < f.paths.length; pi++) {
+        const p = f.paths[pi];
+        if (typeof p !== "string") {
+          warnings.push(`Fact"${f.key}": paths[${pi}] is not a string`);
+        } else if (isUnsafePath(p)) {
+          warnings.push(
+            `Fact"${f.key}": paths[${pi}] "${p}" is unsafe (absolute, traversal, backslash, or NUL)`,
+          );
+        }
+      }
+    }
+  }
+
   return { errors, warnings };
+}
+
+function isUnsafePath(p: string): boolean {
+  return p.startsWith("/") || p.includes("..") || p.includes("\\") || p.includes("\0");
 }
 
 export function validateDomainFacts(
@@ -218,9 +241,7 @@ export function handleFactsSubcommand(repo: string, rest: string[]): number {
       out("vf", c.dim("No DOMAIN_FACTS.json found."));
       return 0;
     }
-    for (const fact of file.facts) {
-      out("vf", `${fact.key} → ${fact.owner} (v${fact.version})`);
-    }
+    for (const fact of file.facts) out("vf", `${fact.key} → ${fact.owner} (v${fact.version})`);
     return 0;
   }
 

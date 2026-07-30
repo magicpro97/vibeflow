@@ -357,6 +357,24 @@ describe("validateDomainFacts schema validation", () => {
     expect(r.errors.some((e) => e.includes("non-string owner"))).toBe(true);
   });
 
+  test("paths validation warns for unsafe values", () => {
+    const file = {
+      schemaVersion: 1,
+      facts: [
+        { key: "k1", owner: "s1", version: "1", statement: "f", paths: "src" },
+        {
+          key: "k2",
+          owner: "s1",
+          version: "1",
+          statement: "f",
+          paths: [42, "/etc", "a\\\\b", "src/a/"],
+        },
+      ],
+    } as unknown as DomainFactsFile;
+    const r = validateDomainFacts(file, catalog);
+    expect(r.warnings.filter((w) => w.includes("paths")).length).toBeGreaterThan(2);
+  });
+
   test("dependents non-array warns", () => {
     const file = {
       schemaVersion: 1,
