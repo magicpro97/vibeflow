@@ -32,6 +32,7 @@ function append(overrides: Partial<SkillTelemetryEvent> = {}): boolean {
       command: "t",
       skillsConsidered: [],
       skillsUsed: [],
+      skillsAvailableUnverified: [],
       skillsMissing: [],
       failures: [],
       ...overrides,
@@ -42,6 +43,19 @@ function append(overrides: Partial<SkillTelemetryEvent> = {}): boolean {
 
 function read(): SkillTelemetryEvent[] {
   return readTelemetry({ dir: base });
+}
+
+function makeEvent(overrides: Partial<SkillTelemetryEvent> = {}): SkillTelemetryEvent {
+  return {
+    ts: "2025-01-01T00:00:00.000Z",
+    command: "t",
+    skillsConsidered: [],
+    skillsUsed: [],
+    skillsAvailableUnverified: [],
+    skillsMissing: [],
+    failures: [],
+    ...overrides,
+  };
 }
 
 describe("appendTelemetry", () => {
@@ -69,6 +83,7 @@ describe("appendTelemetry", () => {
           command: "x",
           skillsConsidered: [],
           skillsUsed: [],
+          skillsAvailableUnverified: [],
           skillsMissing: [],
           failures: [],
         },
@@ -87,18 +102,7 @@ describe("readTelemetry", () => {
     mkdirSync(logDir, { recursive: true });
     writeFileSync(
       join(logDir, "skills-telemetry.jsonl"),
-      [
-        JSON.stringify({
-          ts: "a",
-          command: "x",
-          skillsConsidered: [],
-          skillsUsed: [],
-          skillsMissing: [],
-          failures: [],
-        }),
-        "not-json",
-        "",
-      ].join("\n"),
+      [JSON.stringify(makeEvent({ command: "x" })), "not-json", ""].join("\n"),
       "utf8",
     );
     const events = read();
@@ -129,39 +133,55 @@ describe("readTelemetry", () => {
   });
 });
 
+describe("backward compat: old events without skillsAvailableUnverified", () => {
+  test("loads old-format events, pads skillsAvailableUnverified to []", () => {
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(
+      join(logDir, "skills-telemetry.jsonl"),
+      `${JSON.stringify({
+        ts: "2025-01-01T00:00:00.000Z",
+        command: "old",
+        skillsConsidered: [],
+        skillsUsed: [],
+        skillsMissing: [],
+        failures: [],
+      })}\n`,
+      "utf8",
+    );
+    const events = read();
+    expect(events).toHaveLength(1);
+    expect(events[0]?.skillsAvailableUnverified).toEqual([]);
+  });
+});
+
 describe("summarizeTelemetry", () => {
   test("empty events returns empty summaries", () => {
     const s = summarizeTelemetry([]);
     expect(s.topUsed).toEqual([]);
     expect(s.topMissing).toEqual([]);
+    expect(s.topAvailableUnverified).toEqual([]);
   });
 
-  test("counts and sorts descending", () => {
+  test("counts and sorts descending including available-unverified", () => {
     const s = summarizeTelemetry([
-      {
-        ts: "a",
+      makeEvent({
         command: "x",
-        skillsConsidered: [],
         skillsUsed: ["s1", "s2"],
         skillsMissing: ["m1"],
-        failures: [],
-      },
-      {
-        ts: "b",
+        skillsAvailableUnverified: ["u1"],
+      }),
+      makeEvent({
         command: "y",
-        skillsConsidered: [],
         skillsUsed: ["s1"],
         skillsMissing: ["m2", "m1"],
-        failures: [],
-      },
-      {
-        ts: "c",
+        skillsAvailableUnverified: ["u2", "u1"],
+      }),
+      makeEvent({
         command: "z",
-        skillsConsidered: [],
         skillsUsed: ["s3"],
         skillsMissing: [],
-        failures: [],
-      },
+        skillsAvailableUnverified: [],
+      }),
     ]);
     expect(s.topUsed).toEqual([
       ["s1", 2],
@@ -172,18 +192,20 @@ describe("summarizeTelemetry", () => {
       ["m1", 2],
       ["m2", 1],
     ]);
+    expect(s.topAvailableUnverified).toEqual([
+      ["u1", 2],
+      ["u2", 1],
+    ]);
   });
 
   test("stable sort on equal count", () => {
     const s = summarizeTelemetry([
-      {
-        ts: "a",
+      makeEvent({
         command: "x",
-        skillsConsidered: [],
         skillsUsed: ["b", "a"],
         skillsMissing: ["z", "y"],
-        failures: [],
-      },
+        skillsAvailableUnverified: ["c", "d"],
+      }),
     ]);
     expect(s.topUsed).toEqual([
       ["a", 1],
@@ -193,6 +215,10 @@ describe("summarizeTelemetry", () => {
       ["y", 1],
       ["z", 1],
     ]);
+    expect(s.topAvailableUnverified).toEqual([
+      ["c", 1],
+      ["d", 1],
+    ]);
   });
 });
 
@@ -201,21 +227,40 @@ describe("recordSkillResolution", () => {
     return { need: "n", reason: "r", status: "missing", ...overrides };
   }
 
-  test("maps satisfied/missing correctly", () => {
+  test("maps satisfied/missing/unverified correctly", () => {
     const needs: SkillNeed[] = [
       need({ need: "xlsx-reader", status: "satisfied", satisfiedBy: "xlsx-reader" }),
       need({ need: "pdf-reader", status: "missing" }),
       need({ need: "markdown-reader", status: "satisfied", satisfiedBy: "md-reader" }),
+      need({ need: "csv-reader", status: "available-unverified", promote: "csv-reader" }),
     ];
     expect(recordSkillResolution("test", needs, { dir: base })).toBe(true);
     const events = read();
     expect(events).toHaveLength(1);
     const e = events[0];
     expect(e?.command).toBe("test");
-    expect(e?.skillsConsidered).toEqual(["xlsx-reader", "pdf-reader", "markdown-reader"]);
+    expect(e?.skillsConsidered).toEqual([
+      "xlsx-reader",
+      "pdf-reader",
+      "markdown-reader",
+      "csv-reader",
+    ]);
     expect(e?.skillsUsed).toEqual(["xlsx-reader", "md-reader"]);
     expect(e?.skillsMissing).toEqual(["pdf-reader"]);
+    expect(e?.skillsAvailableUnverified).toEqual(["csv-reader"]);
     expect(e?.failures).toEqual([]);
+  });
+});
+
+describe("bounded retention", () => {
+  test("trims to MAX_TELEMETRY_LINES (1000)", () => {
+    for (let i = 0; i < 1005; i++) {
+      append({ command: `cmd${i}` });
+    }
+    const events = read();
+    expect(events.length).toBeLessThanOrEqual(1000);
+    // Should retain the last entries
+    expect(events[events.length - 1]?.command).toBe("cmd1004");
   });
 });
 
@@ -234,8 +279,13 @@ describe("skills telemetry command", () => {
     expect(run([])).toBe(0);
   });
 
-  test("with data prints summary, exit 0", () => {
-    append({ command: "cmd1", skillsUsed: ["s1", "s2"], skillsMissing: ["m1"] });
+  test("with data prints summary including available-unverified, exit 0", () => {
+    append({
+      command: "cmd1",
+      skillsUsed: ["s1", "s2"],
+      skillsMissing: ["m1"],
+      skillsAvailableUnverified: ["u1"],
+    });
     append({ command: "cmd2", skillsUsed: ["s1"], skillsMissing: ["m2"] });
     expect(run([])).toBe(0);
   });
