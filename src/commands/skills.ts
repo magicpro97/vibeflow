@@ -36,6 +36,7 @@ import {
   recordSkillResolution,
   renderSkillIndex,
   renderSkillNeeds,
+  resolveDraftDomain,
   resolveSkillNeeds,
   scanRepo,
   skillTemplate,
@@ -49,6 +50,7 @@ import {
   verifySkillSync,
   writeFileSafe,
 } from "./_shared.js";
+import { handleDraftSkill } from "./skills-draft.js";
 export function skills(sub: string | undefined, rest: string[] = []): number {
   const repo = cwd();
   const found = discoverSkills(repo);
@@ -103,8 +105,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 0;
   }
   if (sub === "resolve") {
-    // Demand-driven: derive skill NEEDS from the repo scan + saved intake, then report
-    // which are satisfied locally and which must be acquired on demand (never pre-installed).
+    // Derive needs from repo scan and intake; report local versus on-demand skills.
     const state = readState(repo);
     const needs = resolveSkillNeeds({
       repo,
@@ -195,7 +196,6 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       });
       return 2;
     }
-    // Existing SKILL.md dir imports one skill; context7 stays a non-executing hint.
     if (target.startsWith("context7:")) {
       out(
         "vf",
@@ -248,34 +248,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     );
     return 0;
   }
-  if (sub === "draft") {
-    const name = rest[0]?.trim();
-    if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
-      out(
-        "vf",
-        c.red("Usage: vf skills draft <name>  (lowercase-hyphen, e.g. fix-flaky-db-test)"),
-        {
-          level: "error",
-        },
-      );
-      return 2;
-    }
-    const dir = join(repo, CTX_DIR, "skills", name);
-    const skillMd = join(dir, "SKILL.md");
-    if (existsSync(skillMd)) {
-      out("vf", c.red(`Skill "${name}" already exists at ${skillMd}.`), { level: "error" });
-      return 1;
-    }
-    writeFileSafe(skillMd, draftSkillTemplate(name));
-    out("vf", c.green(`+ drafted skill ${c.bold(name)} → ${skillMd}`));
-    out(
-      "vf",
-      c.dim(
-        "status: draft — captured from a real task. Fill in Why/Evidence/Steps, then it stays a DRAFT for review (never auto-installed).",
-      ),
-    );
-    return 0;
-  }
+  if (sub === "draft") return handleDraftSkill(repo, rest);
   if (sub === "verify") {
     return verifySkillCommand(repo, rest);
   }

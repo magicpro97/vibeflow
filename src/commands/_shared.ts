@@ -74,6 +74,7 @@ export * from "../skills/propose-merge.js";
 export * from "../skills/propose-split.js";
 export * from "../skills/templates.js";
 export * from "../skills/resolver.js";
+export * from "../skills/resolve-draft.js";
 export * from "../skills/verify-lock.js";
 export * from "../skills/sync.js";
 export * from "../skills/ci-gate.js";
