@@ -1,6 +1,3 @@
-// COMMAND_HELP registry extracted from help.ts to keep help.ts under the 400-line cap (#549/#80).
-// Per-subcommand usage/description/flags blocks. Imports via ./_shared.js per the ESM cycle rule.
-
 import { c } from "./_shared.js";
 
 export const COMMAND_HELP: Record<string, () => string> = {
@@ -224,7 +221,11 @@ ${c.bold("Registry subcommands:")}
                              re-fetch and re-pin every registry (or a single one);
                              on failure the prior commit is preserved in the lock
   registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--yes]
-                             install a verified skill from a cached registry into the shared catalog
+                              install a verified skill from a cached registry into the shared catalog
+  propose-merge <skill-a> <skill-b>
+                              produce a non-destructive merge proposal (stdout, no files written)
+  propose-split <skill-name>
+                              produce a non-destructive split proposal (stdout, no files written)
 
 ${c.bold("Registry options:")}
   --yes                      approve the network call (git clone/fetch) — dry-run without it
@@ -392,8 +393,7 @@ ${c.bold("Examples:")}
 
   "update-check": () => `${c.bold("vf update-check")}
 Check the npm registry for a newer VibeFlow release and print how to upgrade.
-VibeFlow also nudges you automatically (once a day) when a command runs in an
-interactive shell; set ${c.cyan("VIBEFLOW_NO_UPDATE_CHECK=1")} to silence that.
+Set ${c.cyan("VIBEFLOW_NO_UPDATE_CHECK=1")} to silence daily interactive-shell nudges.
 
 ${c.bold("Examples:")}
   vf update-check`,
