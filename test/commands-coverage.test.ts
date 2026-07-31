@@ -1789,6 +1789,10 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("some-other-sub", [])).toBe(0);
   });
 
+  test("skills: curator scan returns 0 when no issues (cover curator dispatch)", () => {
+    expect(skills("curator", ["scan"])).toBe(0);
+  });
+
   test("skills: registry add dry-run returns 0 (cover skills.ts registry branch)", () => {
     expect(skills("registry", ["add", "https://x.com/s.git", "--name", "x", "--ref", "v1"])).toBe(
       0,
