@@ -7,6 +7,13 @@
 // this is deliberately mechanical + reviewable: NO LLM, just counting. The draft
 // is NEVER auto-installed — it lands as an untracked file for human review, and
 // the caller points the journal at it.
+//
+// #664: proposeCrystallizeUpdate checks if extracted patterns match an existing
+// skill's name, domain.id, or owned fact keys (exact match only). When matched,
+// outputs a PATCH PROPOSAL instead of writing a crystallized-run draft.
+
+import type { Skill } from "../core/types.js";
+import { discoverSkills } from "./registry.js";
 
 /** A recurring pattern the extractor found worth crystallizing. */
 export interface CrystallizedPattern {
@@ -178,4 +185,178 @@ export function renderDraft(
   lines.push("Fill in a concrete, copy-pasteable example before installing.");
   lines.push("");
   return lines.join("\n");
+}
+
+// #664: proposal types and matching logic
+
+/** A patch proposal targeting an existing skill. */
+export interface CrystallizePatchProposal {
+  /** Name of the target skill. */
+  targetSkill: string;
+  /** Unified diff preview of the proposed changes. */
+  diff: string;
+  /** File(s) affected by the proposal. */
+  affectedFiles: string[];
+  /** Eval command(s) to run against the updated skill. */
+  evalCommands: string[];
+  /** The raw patterns that triggered the match. */
+  matchedPatterns: CrystallizedPattern[];
+}
+
+/** Result of attempting to match patterns to an existing skill. */
+export interface CrystallizeProposalResult {
+  /** True when a proposal was generated (matched an existing skill). */
+  hasProposal: boolean;
+  /** The proposal, when hasProposal is true. */
+  proposal?: CrystallizePatchProposal;
+  /** Why no proposal was generated. */
+  reason?: "no-proposal" | "no-match" | "no-skills";
+}
+
+/** Conservative pattern matching: check if a recurring pattern value
+ * (command name or skill reference) is related to an existing skill by
+ * exact name, domain.id, or owned fact key match.
+ * Returns true only for deterministic, non-generic terms.
+ *
+ * Generic terms (common shell commands, CI tools, single-word terms,
+ * generic failure messages) are never matched.
+ */
+const GENERIC_TERMS = new Set([
+  "bun build",
+  "bun test",
+  "echo",
+  "ls",
+  "cat",
+  "rm",
+  "cp",
+  "mv",
+  "mkdir",
+  "touch",
+  "cd",
+  "pwd",
+  "git status",
+  "git diff",
+  "git log",
+  "git add",
+  "npm install",
+  "npm run",
+  "node",
+  "npx",
+]);
+
+function isGenericTerm(term: string): boolean {
+  return GENERIC_TERMS.has(term.toLowerCase());
+}
+
+function matchPatternToSkill(pattern: CrystallizedPattern, skills: Skill[]): Skill | undefined {
+  if (pattern.kind !== "command" && pattern.kind !== "skill") return undefined;
+  const value = pattern.value.toLowerCase();
+
+  if (pattern.kind === "command" && isGenericTerm(value)) return undefined;
+
+  for (const skill of skills) {
+    if (skill.name.toLowerCase() === value) return skill;
+    if (skill.domain?.id && skill.domain.id.toLowerCase() === value) return skill;
+    if (skill.owns?.some((k) => k.toLowerCase() === value)) return skill;
+  }
+  return undefined;
+}
+
+/**
+ * Build a proposal for a matched skill. The proposal includes a unified diff
+ * preview showing what the new crystallized section would look like in the
+ * skill's SKILL.md, the affected file list, and eval commands.
+ */
+export function buildProposal(
+  skill: Skill,
+  patterns: CrystallizedPattern[],
+  runId: string,
+): CrystallizePatchProposal {
+  const targetSkill = skill.name;
+  const skillPath = skill.path;
+
+  const commands = patterns.filter((p) => p.kind === "command");
+  const skills = patterns.filter((p) => p.kind === "skill");
+  const failures = patterns.filter((p) => p.kind === "failure");
+
+  const sectionLines: string[] = [
+    `<!-- #664 crystallized from run ${runId} -->`,
+    "## Crystallized patterns",
+    "",
+    "Patterns extracted from the run that match this skill's domain:",
+    "",
+  ];
+  if (commands.length) {
+    sectionLines.push("### Repeated commands");
+    for (const p of commands) sectionLines.push(`- \`${p.value}\` (${p.count}×)`);
+    sectionLines.push("");
+  }
+  if (skills.length) {
+    sectionLines.push("### Skills referenced");
+    for (const p of skills) sectionLines.push(`- \`${p.value}\` (${p.count}×)`);
+    sectionLines.push("");
+  }
+  if (failures.length) {
+    sectionLines.push("### Failure modes observed");
+    for (const p of failures) sectionLines.push(`- ${p.value} (${p.count}×)`);
+    sectionLines.push("");
+  }
+
+  const section = sectionLines.join("\n");
+
+  const diff = `--- a/${skillPath}
++++ b/${skillPath}
+@@ -1,3 +1,3 @@
++${section.split("\n").join("\n+")}
+`;
+
+  return {
+    targetSkill,
+    diff,
+    affectedFiles: [skillPath],
+    evalCommands: [`vf skills eval ${targetSkill}`],
+    matchedPatterns: patterns,
+  };
+}
+
+/**
+ * Given extracted patterns, discover existing skills and check if any
+ * pattern matches an existing skill by name, domain.id, or owned fact.
+ * When matched, return a proposal. When no match, return reason.
+ *
+ * Pure function — skill discovery is injected so tests drive it without
+ * touching a real tree.
+ */
+export function proposeCrystallizeUpdate(
+  repo: string,
+  patterns: CrystallizedPattern[],
+  runId: string,
+  inject: {
+    discoverSkills?: (r: string) => Skill[];
+  } = {},
+): CrystallizeProposalResult {
+  const _discover = inject.discoverSkills ?? discoverSkills;
+
+  if (patterns.length === 0) {
+    return { hasProposal: false, reason: "no-proposal" };
+  }
+
+  const skills = _discover(repo);
+  if (skills.length === 0) {
+    return { hasProposal: false, reason: "no-skills" };
+  }
+
+  for (const pattern of [...patterns].sort(
+    (a, b) => a.kind.localeCompare(b.kind) || a.value.localeCompare(b.value),
+  )) {
+    const matched = matchPatternToSkill(pattern, skills);
+    if (matched) {
+      return {
+        hasProposal: true,
+        proposal: buildProposal(matched, patterns, runId),
+      };
+    }
+  }
+
+  return { hasProposal: false, reason: "no-match" };
 }

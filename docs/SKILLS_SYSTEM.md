@@ -287,7 +287,7 @@ the loop, covering **mistake / learn / knowledge / decision**:
 
 | Dimension | Mechanism | Trigger |
 |-----------|-----------|---------|
-| mistake / learn | **auto-crystallize** | Automatic at the end of `vf orchestrate` (and `vf verify --journal`). Reads the run log + `knowledge/log.md`, counts recurring commands / skills / failures, and writes a DRAFT skill when a pattern crosses threshold. |
+| mistake / learn | **auto-crystallize** | Automatic at the end of `vf orchestrate` (and `vf verify --journal`). Reads the run log + `knowledge/log.md`, counts recurring commands / skills / failures. If patterns match an existing skill by name/domain/fact, prints a PATCH PROPOSAL (stdout only). Otherwise writes a DRAFT skill when threshold crossed. |
 | learn (agent-driven) | **`vf skills draft <name>`** | An agent (or you) captures a reusable procedure or worked-around mistake on the spot. Scaffolds a `status: draft` SKILL.md with a Why/Evidence skeleton. |
 | knowledge | **`knowledge/log.md`** | Append-only work journal (`## [YYYY-MM-DD] note | <title>`). Read before, append after. |
 | decision | **`vf decision add`** | Records a durable architecture/process decision in `knowledge/decisions.md` (ADR-lite), separate from the noisy journal. |

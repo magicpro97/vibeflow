@@ -55,7 +55,7 @@ export * from "../safety/quota.js";
 export * from "../scanner.js";
 export * from "../settings.js";
 export * from "../skills/crystallize.js";
-export * from "../skills/auto-crystallize.js";
+export { autoCrystallizeRun } from "../skills/auto-crystallize.js";
 export * from "../skills/catalog.js";
 export * from "../skills/importer.js";
 export * from "../skills/optimize-description.js";

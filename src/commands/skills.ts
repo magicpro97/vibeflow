@@ -31,6 +31,7 @@ import {
   matchSkillsForTask,
   migrateToSharedCatalog,
   out,
+  proposeCrystallizeUpdate,
   readFileSync,
   readState,
   recordSkillResolution,
@@ -277,6 +278,22 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       );
       return 0;
     }
+    // #664: check if patterns match an existing skill — propose a patch instead of a draft.
+    const proposal = proposeCrystallizeUpdate(repo, result.patterns, runId);
+    if (proposal.hasProposal && proposal.proposal) {
+      const p = proposal.proposal;
+      out("vf", c.bold(`PATCH PROPOSAL for skill "${p.targetSkill}"`));
+      out("vf", c.dim("─".repeat(60)));
+      out("vf", `Affected files: ${p.affectedFiles.join(", ")}`);
+      out("vf", `Eval: ${p.evalCommands.join("; ")}`);
+      out("vf", "");
+      out("vf", c.dim("Proposed diff:"));
+      out("vf", p.diff);
+      out("vf", c.dim("─".repeat(60)));
+      out("vf", c.dim("No draft written. Review the proposal above and apply manually."));
+      return 0;
+    }
+    // No match — fall through to existing draft behavior.
     const draftDir = join(repo, CTX_DIR, "skills", result.draftName);
     const draftMd = join(draftDir, "SKILL.md");
     if (existsSync(draftMd)) {
