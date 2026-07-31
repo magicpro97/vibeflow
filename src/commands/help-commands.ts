@@ -192,7 +192,7 @@ ${c.bold("Examples:")}
   vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | eval <skill-dir> | registry <add|list|update|install>]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | eval <skill-dir> | update-dependent <canonical-skill> | registry <add|list|update|install>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
 import external skills, capture new skills from real work, manage remote
 skill registries via git-backed lock files, and run skill trigger/task evals.
@@ -209,8 +209,8 @@ ${c.bold("Subcommands:")}
   import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
   init <name>                scaffold an empty SKILL.md stub
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
-  crystallize <run-id>       mechanically draft a skill from a run's recurring patterns
   eval <skill-dir>           eval {id,type,prompt,expected?,matcher?} cases (--engine, --json, --out, --previous)
+  update-dependent <name>    detect version changes, mark transitive dependents needs-review, run evals
   registry <add|list|update|install> manage remote skill registries (git-backed) — see below
 
 ${c.bold("Registry subcommands:")}
