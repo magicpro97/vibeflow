@@ -184,6 +184,7 @@ vf skills verify-sync      # verify each mirror has a SKILL.md for every canonic
 vf skills verify-freshness # check sourceAnchors against current disk content (SHA-256)
 vf skills impact <fact-or-path> # list affected skills and required evals from domain facts
 vf skills audit-duplicates # find duplicate fact ownership, triggers, and procedures
+vf skills semantic-filter [--max-reviews N] [--reviewer ID]  # find overlapping trigger/fact skill pairs (Jaccard > 0.7 or duplicate owns); reviewer is opt-in, makes no network calls on its own
 vf skills draft [--new] <name> # resolve existing domain before creating a draft
 vf skills propose-merge <a> <b> # print non-destructive merged skill proposal
 vf skills propose-split <skill> # print non-destructive section split proposal

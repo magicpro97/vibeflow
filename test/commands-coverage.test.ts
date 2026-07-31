@@ -1802,6 +1802,10 @@ describe("commands.skills subcommand branches", () => {
   test("skills: registry unknown sub returns 2 (cover handleRegistrySubcommand usage)", () => {
     expect(skills("registry", ["bogus"])).toBe(2);
   });
+
+  test("skills: semantic-filter dispatch with no candidates returns 0 (cover skills.ts semantic-filter branch)", () => {
+    expect(skills("semantic-filter", [])).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
