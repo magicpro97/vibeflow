@@ -187,6 +187,7 @@ vf skills audit-duplicates # find duplicate fact ownership, triggers, and proced
 vf skills draft [--new] <name> # resolve existing domain before creating a draft
 vf skills propose-merge <a> <b> # print non-destructive merged skill proposal
 vf skills propose-split <skill> # print non-destructive section split proposal
+vf skills crystallize <run-id>  # extract recurring patterns; matching existing skills print a PATCH PROPOSAL, otherwise write a draft
 vf skills import <dir>     # import a local skill dir into .vibeflow/skills/
 vf skills import context7:<query>  # import a Context7 skill (approval-gated) into the canonical store
 ```
