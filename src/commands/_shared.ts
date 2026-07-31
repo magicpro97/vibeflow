@@ -88,6 +88,7 @@ export {
 } from "../skills/policy-checks.js";
 export type { ChangedPathReader, PolicyChecksResult, RiskClass } from "../skills/policy-checks.js";
 export { skillsEvalCmd } from "./skills-eval.js";
+export { skillsUpdateDependentCmd } from "./skills-update-dependent.js";
 export * from "../hooks/impact-evidence.js";
 export * from "../tools/index.js";
 export * from "./worktree.js";

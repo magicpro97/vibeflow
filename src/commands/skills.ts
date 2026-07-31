@@ -42,6 +42,7 @@ import {
   scanRepo,
   skillTemplate,
   skillsEvalCmd,
+  skillsUpdateDependentCmd,
   syncSkillMirrors,
   validateSkillRoots,
   verifyLockMarketplaceSchemas,
@@ -339,6 +340,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "impact") return handleImpactSubcommand(repo, rest);
   if (sub === "policy-checks") return handlePolicyChecksSubcommand(repo, rest);
   if (sub === "eval") return skillsEvalCmd(repo, rest);
+  if (sub === "update-dependent") return skillsUpdateDependentCmd(repo, rest);
   if (sub === "verify-lock") {
     const allErrors: string[] = [];
     const allWarnings: string[] = [];
