@@ -13,6 +13,7 @@ const SKILL_SUBS = [
   "verify-sync",
   "import",
   "registry",
+  "semantic-filter",
 ];
 
 describe("help text", () => {

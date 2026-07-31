@@ -1,6 +1,7 @@
 import { enrichFreshness, verifyFreshnessCommand } from "../skills/anchor-freshness.js";
 import { handleCuratorSubcommand } from "../skills/curator-scan.js";
 import { showSkill } from "../skills/lifecycle.js";
+import { handleSemanticFilterSubcommand } from "../skills/semantic-filter.js";
 import {
   CTX_DIR,
   c,
@@ -386,6 +387,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "ci-domain-integrity") return handleCiDomainIntegrity(repo, rest);
   if (sub === "verify-freshness") return verifyFreshnessCommand(found, repo);
   if (sub === "curator") return handleCuratorSubcommand(repo, rest);
+  if (sub === "semantic-filter") return handleSemanticFilterSubcommand(repo, rest);
   if (sub === "propose-merge") return handleProposeMergeSubcommand(repo, rest);
   if (sub === "propose-split") return handleProposeSplitSubcommand(repo, rest);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));

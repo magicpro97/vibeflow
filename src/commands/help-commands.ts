@@ -192,7 +192,7 @@ ${c.bold("Examples:")}
   vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | curator scan | eval <skill-dir> | update-dependent <canonical-skill> | registry <add|list|update|install>]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | curator scan | eval <skill-dir> | update-dependent <canonical-skill> | semantic-filter [--max-reviews N] [--reviewer ID] | registry <add|list|update|install>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
 import external skills, capture new skills from real work, manage remote
 skill registries via git-backed lock files, and run skill trigger/task evals.
@@ -210,7 +210,7 @@ ${c.bold("Subcommands:")}
   init <name>                scaffold an empty SKILL.md stub
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
   curator scan               scan skill findings; writes .vibeflow/curator/findings.json
-  eval <skill-dir>           eval cases; update-dependent <name> runs dependent evals
+  eval <skill-dir>           eval cases; semantic-filter [--max-reviews N] [--reviewer ID] finds pairs (reviews execute only when BOTH flags set, N>0; opt-in/no network)
   registry <add|list|update|install> manage remote skill registries (git-backed) — see below
 
 ${c.bold("Registry subcommands:")}

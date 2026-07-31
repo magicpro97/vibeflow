@@ -187,6 +187,7 @@ vf skills verify-sync --from-registry # also verify registry-pinned skills have 
 vf skills verify-freshness   # check sourceAnchors against current disk content (SHA-256)
 vf skills impact <fact-or-path> # list affected skills and required evals from domain facts
 vf skills audit-duplicates # find duplicate fact ownership, triggers, and procedures
+vf skills semantic-filter [--max-reviews N] [--reviewer ID]  # find overlapping trigger/fact skill pairs (Jaccard > 0.7 or duplicate owns); reviews execute only when BOTH --reviewer ID and --max-reviews N with N>0 are explicit
 vf skills draft [--new] <name> # resolve existing domain before creating a draft
 vf skills propose-merge <a> <b> # print non-destructive merged skill proposal
 vf skills propose-split <skill> # print non-destructive section split proposal
