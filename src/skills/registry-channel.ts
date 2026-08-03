@@ -195,6 +195,11 @@ export function isHexOID(s: string): boolean {
   return /^[0-9a-f]{1,64}$/.test(s);
 }
 
+/** Canonical registry-name validator (lowercase-hyphen/dot syntax). */
+export function isValidRegistryName(name: string): boolean {
+  return /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(name);
+}
+
 function spawnGit(
   args: string[],
   inject?: { spawnSync?: SpawnFn },
@@ -234,7 +239,7 @@ export function registryAdd(
   ref: string,
   opts: { yes?: boolean; spawnSync?: SpawnFn; writeFileSafe?: typeof writeFileSafe } = {},
 ): number {
-  if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(name)) {
+  if (!isValidRegistryName(name)) {
     out("vf", c.red(`Invalid registry name "${name}". Use lowercase-hyphen/dot syntax.`), {
       level: "error",
     });

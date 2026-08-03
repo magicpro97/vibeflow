@@ -8,6 +8,8 @@ import type {
   PlanComment,
   PlanRevision,
   ProjectEntry,
+  RegistryPreview,
+  RegistryViewEntry,
   SafeSkill,
   VibeSettings,
   WorkflowDashboardItem,
@@ -40,6 +42,11 @@ export const useVfStore = defineStore("vf", () => {
   const skillPanelOpen = ref(false);
   const skillLoading = ref(false);
   const skillError = ref<string | null>(null);
+  // #688: registry view state (read-model, no execution).
+  const registries = ref<RegistryViewEntry[]>([]);
+  const registryLoading = ref(false);
+  const registryError = ref<string | null>(null);
+  const registryPreview = ref<RegistryPreview | null>(null);
   const askOpen = ref(false);
   const askPrefill = ref<AskPrefill | null>(null);
   const selectedWorkflowKey = ref<string | null>(null);
@@ -199,6 +206,38 @@ export const useVfStore = defineStore("vf", () => {
     skillPanelOpen.value = false;
   }
 
+  // #688: load registries (read-only) and preview an update (inert dry-run).
+  async function loadRegistries() {
+    registryLoading.value = true;
+    registryError.value = null;
+    try {
+      registries.value = await api.registries.list();
+    } catch (e) {
+      registries.value = [];
+      registryError.value =
+        e instanceof Error ? e.message.slice(0, 120) : "Failed to load registries";
+    } finally {
+      registryLoading.value = false;
+    }
+  }
+
+  async function previewRegistryUpdate(id: string) {
+    registryError.value = null;
+    try {
+      registryPreview.value = await api.registries.preview(id);
+      return true;
+    } catch (e) {
+      registryPreview.value = null;
+      registryError.value =
+        e instanceof Error ? e.message.slice(0, 120) : "Failed to preview update";
+      return false;
+    }
+  }
+
+  function closeRegistryPreview() {
+    registryPreview.value = null;
+  }
+
   /** Loads workflow state from server. Returns the new state, or null if not found yet.
    *  Throws on unexpected errors (non-404) so callers can surface them. */
   async function loadState() {
@@ -315,5 +354,12 @@ export const useVfStore = defineStore("vf", () => {
     loadSkills,
     openSkillPanel,
     closeSkillPanel,
+    registries,
+    registryLoading,
+    registryError,
+    registryPreview,
+    loadRegistries,
+    previewRegistryUpdate,
+    closeRegistryPreview,
   };
 });

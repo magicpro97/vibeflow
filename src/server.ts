@@ -23,6 +23,7 @@ import {
   registerPending,
 } from "./server/pending-hooks.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
+import { handleRegistryView } from "./server/registry-route.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { toSafeSkills } from "./skills/api-types.js";
 import { sharedCatalogDir } from "./skills/catalog.js";
@@ -188,6 +189,12 @@ export function startServer(
           needs,
           validation: { errors: validation.errors, warnings: validation.warnings },
         });
+      }
+
+      // --- GET /api/skills/registries (#688: guarded, read-only) ---
+      if (method === "GET" && path === "/api/skills/registries") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleRegistryView(activeRepo);
       }
 
       // --- GET /api/settings (#561: guarded) ---
@@ -649,7 +656,8 @@ export function startServer(
             path.startsWith("/api/guidance/") ||
             path === "/api/upload" ||
             path === "/api/plan-review/revisions" ||
-            path.startsWith("/api/plan-review/comments"))) ||
+            path.startsWith("/api/plan-review/comments") ||
+            path === "/api/skills/registries/preview")) ||
         (method === "DELETE" &&
           (path === "/api/upload" ||
             path === "/api/state" ||

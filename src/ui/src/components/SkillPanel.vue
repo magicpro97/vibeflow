@@ -22,64 +22,107 @@
         >×</button>
       </div>
 
-      <div v-if="store.skillError" class="py-4 text-center text-red-400 text-xs">
-        {{ store.skillError }}
+      <div class="flex gap-1 mb-4 border-b border-neutral-800" role="tablist" aria-label="Skills panel sections">
+        <button
+          id="tab-skills"
+          role="tab"
+          :aria-selected="tab === 'skills'"
+          :aria-controls="'panel-skills'"
+          :tabindex="tab === 'skills' ? 0 : -1"
+          class="px-3 py-1.5 text-xs rounded-t transition-colors"
+          :class="tab === 'skills' ? 'text-neutral-100 border-b-2 border-neutral-200' : 'text-neutral-500 hover:text-neutral-300'"
+          @click="selectTab('skills')"
+          @keydown="onTabKeydown"
+        >Skills</button>
+        <button
+          id="tab-registries"
+          role="tab"
+          :aria-selected="tab === 'registries'"
+          :aria-controls="'panel-registries'"
+          :tabindex="tab === 'registries' ? 0 : -1"
+          class="px-3 py-1.5 text-xs rounded-t transition-colors"
+          :class="tab === 'registries' ? 'text-neutral-100 border-b-2 border-neutral-200' : 'text-neutral-500 hover:text-neutral-300'"
+          @click="selectTab('registries')"
+          @keydown="onTabKeydown"
+        >Registries</button>
       </div>
 
-      <div v-else-if="store.skillLoading" class="py-4 space-y-3">
-        <div v-for="i in 3" :key="i" class="h-4 rounded bg-neutral-800/60 animate-pulse" :style="{width: ['70%','85%','60%'][i-1]}" />
-      </div>
+      <div
+        id="panel-skills"
+        role="tabpanel"
+        aria-labelledby="tab-skills"
+        tabindex="0"
+        :hidden="tab !== 'skills'"
+      >
+        <div v-if="store.skillError" class="py-4 text-center text-red-400 text-xs">
+          {{ store.skillError }}
+        </div>
 
-      <div v-else-if="store.skills.length === 0" class="py-8 text-center text-neutral-600 text-sm">
-        No skills found.
-      </div>
+        <div v-else-if="store.skillLoading" class="py-4 space-y-3">
+          <div v-for="i in 3" :key="i" class="h-4 rounded bg-neutral-800/60 animate-pulse" :style="{width: ['70%','85%','60%'][i-1]}" />
+        </div>
 
-      <div v-else class="space-y-3">
-        <div
-          v-for="skill in store.skills"
-          :key="skill.name"
-          class="rounded border border-neutral-800 p-3"
-          :class="skill.status === 'deprecated' ? 'opacity-50' : ''"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <h3
-                class="text-sm font-medium text-neutral-100 truncate"
-                :class="skill.status === 'deprecated' ? 'line-through' : ''"
-              >{{ skill.name }}</h3>
-              <p
-                class="text-xs text-neutral-400 mt-0.5 line-clamp-2"
-                :class="skill.status === 'deprecated' ? 'line-through' : ''"
-              >{{ skill.description }}</p>
+        <div v-else-if="store.skills.length === 0" class="py-8 text-center text-neutral-600 text-sm">
+          No skills found.
+        </div>
+
+        <div v-else class="space-y-3">
+          <div
+            v-for="skill in store.skills"
+            :key="skill.name"
+            class="rounded border border-neutral-800 p-3"
+            :class="skill.status === 'deprecated' ? 'opacity-50' : ''"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h3
+                  class="text-sm font-medium text-neutral-100 truncate"
+                  :class="skill.status === 'deprecated' ? 'line-through' : ''"
+                >{{ skill.name }}</h3>
+                <p
+                  class="text-xs text-neutral-400 mt-0.5 line-clamp-2"
+                  :class="skill.status === 'deprecated' ? 'line-through' : ''"
+                >{{ skill.description }}</p>
+              </div>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <span
+                  class="w-1.5 h-1.5 rounded-full"
+                  :class="scanDisplay(skill.securityScan).dot"
+                />
+                <span class="text-[10px]" :class="scanDisplay(skill.securityScan).color">
+                  {{ scanDisplay(skill.securityScan).label }}
+                </span>
+              </div>
             </div>
-            <div class="flex items-center gap-1.5 shrink-0">
-              <span
-                class="w-1.5 h-1.5 rounded-full"
-                :class="scanDisplay(skill.securityScan).dot"
-              />
-              <span class="text-[10px]" :class="scanDisplay(skill.securityScan).color">
-                {{ scanDisplay(skill.securityScan).label }}
+            <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] text-neutral-500">
+              <span>Status: {{ skill.status }}</span>
+              <span>Origin: {{ skill.origin }}</span>
+              <span v-if="skill.version">v{{ skill.version }}</span>
+              <span v-if="skill.registry" class="text-neutral-400">
+                Registry: {{ skill.registry.id }} · v{{ skill.registry.version }} · pinned
+              </span>
+              <span v-if="skill.scope" class="inline-flex items-center gap-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium text-neutral-300">
+                {{ skill.scope }}
+              </span>
+              <span v-if="skill.owners?.length" class="text-neutral-500">
+                Owner: {{ skill.owners[0] }}<span v-if="skill.owners.length > 1"> +{{ skill.owners.length - 1 }}</span>
+              </span>
+              <span v-if="skill.stale" class="text-yellow-500" :title="skill.staleReason || 'Source anchors are stale'">
+                ⚠ stale
               </span>
             </div>
           </div>
-          <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] text-neutral-500">
-            <span>Status: {{ skill.status }}</span>
-            <span>Origin: {{ skill.origin }}</span>
-            <span v-if="skill.version">v{{ skill.version }}</span>
-            <span v-if="skill.registry" class="text-neutral-400">
-              Registry: {{ skill.registry.id }} · v{{ skill.registry.version }} · pinned
-            </span>
-            <span v-if="skill.scope" class="inline-flex items-center gap-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium text-neutral-300">
-              {{ skill.scope }}
-            </span>
-            <span v-if="skill.owners?.length" class="text-neutral-500">
-              Owner: {{ skill.owners[0] }}<span v-if="skill.owners.length > 1"> +{{ skill.owners.length - 1 }}</span>
-            </span>
-            <span v-if="skill.stale" class="text-yellow-500" :title="skill.staleReason || 'Source anchors are stale'">
-              ⚠ stale
-            </span>
-          </div>
         </div>
+      </div>
+
+      <div
+        id="panel-registries"
+        role="tabpanel"
+        aria-labelledby="tab-registries"
+        tabindex="0"
+        :hidden="tab !== 'registries'"
+      >
+        <RegistryView />
       </div>
     </div>
   </div>
@@ -89,10 +132,46 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { scanDisplay } from "../lib/scan-helper.js";
 import { useVfStore } from "../store.js";
+import RegistryView from "./RegistryView.vue";
 
 const emit = defineEmits<{ close: [] }>();
 const store = useVfStore();
 const dialogEl = ref<HTMLElement | null>(null);
+const tab = ref<"skills" | "registries">("skills");
+
+function selectTab(next: "skills" | "registries") {
+  if (tab.value === "registries" && next !== "registries") {
+    store.closeRegistryPreview();
+  }
+  tab.value = next;
+  const id = next === "skills" ? "tab-skills" : "tab-registries";
+  document.getElementById(id)?.focus();
+}
+
+const TABS: ("skills" | "registries")[] = ["skills", "registries"];
+
+function moveTab(dir: -1 | 1) {
+  const idx = TABS.indexOf(tab.value);
+  const next = TABS[(idx + dir + TABS.length) % TABS.length] ?? "skills";
+  selectTab(next);
+}
+
+function onTabKeydown(e: KeyboardEvent) {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    moveTab(-1);
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    moveTab(1);
+  } else if (e.key === "Home") {
+    e.preventDefault();
+    selectTab("skills");
+  } else if (e.key === "End") {
+    e.preventDefault();
+    selectTab("registries");
+  }
+}
 
 onMounted(() => {
   dialogEl.value?.focus();

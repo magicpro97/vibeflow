@@ -286,3 +286,21 @@ export interface SafeSkill {
   stale?: boolean;
   staleReason?: string;
 }
+
+// ── #688: Registry view types ────────────────────────────────────────────
+export interface RegistryViewEntry {
+  id: string;
+  url: string;
+  ref: string;
+  commitOID: string;
+  entryCount: number;
+  installedCount: number;
+  valid: boolean;
+}
+
+export interface RegistryPreview {
+  ok: true;
+  executable: false;
+  registry: string;
+  plan: string;
+}

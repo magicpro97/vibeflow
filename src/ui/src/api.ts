@@ -1,6 +1,8 @@
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
 import type {
   DashboardSelection,
+  RegistryPreview,
+  RegistryViewEntry,
   SafeSkill,
   TimelineEntry,
   VibeSettings,
@@ -74,6 +76,18 @@ export const api = {
       counts: r.counts,
       total: r.total,
     })),
+  // #688: registry read + inert preview (read-only, never executes).
+  registries: {
+    list: () =>
+      req<{ registries: RegistryViewEntry[] }>("GET", "/api/skills/registries").then(
+        (r) => r.registries,
+      ),
+    preview: (registry: string) =>
+      req<RegistryPreview>("POST", "/api/skills/registries/preview", {
+        action: "update",
+        registry,
+      }),
+  },
   attachments: () =>
     req<{ attachments: unknown[] }>("GET", "/api/attachments").then((r) => r.attachments),
   logsRecent: (since = 0, limit = 200) =>
