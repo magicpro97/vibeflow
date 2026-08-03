@@ -31,6 +31,7 @@ import {
   handlePlanReviewCommentsPost,
   handlePlanReviewPost,
 } from "./plan-review.js";
+import { handleRegistryPreview } from "./registry-route.js";
 
 export interface RouteCtx {
   getActiveRepo: () => string;
@@ -355,6 +356,12 @@ export async function handleMutationRoute(
 
   if (path === "/api/plan-review/revisions") {
     return handlePlanReviewPost(ctx.getActiveRepo(), payload);
+  }
+
+  // #688: inert dry-run preview — read-only, never executes. CSRF-guarded
+  // because it is a POST, but the body is validated to `update` only.
+  if (path === "/api/skills/registries/preview") {
+    return handleRegistryPreview(ctx.getActiveRepo(), payload);
   }
 
   if (path === "/api/plan-review/comments" || path.startsWith("/api/plan-review/comments/")) {

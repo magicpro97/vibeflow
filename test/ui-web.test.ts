@@ -516,3 +516,25 @@ describe("spec-drift advisory badge (PR-B, Task 7-B)", () => {
     expect(src).toContain("text-amber-400");
   });
 });
+
+describe("#688 registry tab: read-only, no execute", () => {
+  const readAny = (p: string) =>
+    readFileSync(new URL(`../src/ui/src/${p}`, import.meta.url), "utf8");
+
+  test("SkillPanel hosts a registries tab that renders RegistryView", () => {
+    const panel = readAny("components/SkillPanel.vue");
+    expect(panel).toContain(">Registries<");
+    expect(panel).toContain("RegistryView");
+  });
+  test("RegistryView presents only an inert preview, no execute", () => {
+    const view = readAny("components/RegistryView.vue");
+    expect(view).toContain("Preview update");
+    expect(view).not.toContain("Execute");
+    expect(view).not.toContain('@click="execute');
+  });
+  test("registry preview is explicitly non-executable in the store", () => {
+    const store = readAny("store.ts");
+    expect(store).toContain("api.registries.preview");
+    expect(store).not.toContain("executable: true");
+  });
+});

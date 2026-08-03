@@ -22,6 +22,40 @@
         >×</button>
       </div>
 
+      <div class="flex gap-1 mb-4 border-b border-neutral-800" role="tablist" aria-label="Skills panel sections">
+        <button
+          id="tab-skills"
+          role="tab"
+          :aria-selected="tab === 'skills'"
+          :aria-controls="'panel-skills'"
+          :tabindex="tab === 'skills' ? 0 : -1"
+          class="px-3 py-1.5 text-xs rounded-t transition-colors"
+          :class="tab === 'skills' ? 'text-neutral-100 border-b-2 border-neutral-200' : 'text-neutral-500 hover:text-neutral-300'"
+          @click="tab = 'skills'"
+          @keydown="onTabKeydown"
+        >Skills</button>
+        <button
+          id="tab-registries"
+          role="tab"
+          :aria-selected="tab === 'registries'"
+          :aria-controls="'panel-registries'"
+          :tabindex="tab === 'registries' ? 0 : -1"
+          class="px-3 py-1.5 text-xs rounded-t transition-colors"
+          :class="tab === 'registries' ? 'text-neutral-100 border-b-2 border-neutral-200' : 'text-neutral-500 hover:text-neutral-300'"
+          @click="tab = 'registries'"
+          @keydown="onTabKeydown"
+        >Registries</button>
+      </div>
+
+      <div
+        :id="tab === 'skills' ? 'panel-skills' : 'panel-registries'"
+        role="tabpanel"
+        :aria-labelledby="tab === 'skills' ? 'tab-skills' : 'tab-registries'"
+        tabindex="0"
+      >
+        <RegistryView v-if="tab === 'registries'" />
+
+        <template v-else>
       <div v-if="store.skillError" class="py-4 text-center text-red-400 text-xs">
         {{ store.skillError }}
       </div>
@@ -81,6 +115,8 @@
           </div>
         </div>
       </div>
+      </template>
+      </div>
     </div>
   </div>
 </template>
@@ -89,10 +125,43 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { scanDisplay } from "../lib/scan-helper.js";
 import { useVfStore } from "../store.js";
+import RegistryView from "./RegistryView.vue";
 
 const emit = defineEmits<{ close: [] }>();
 const store = useVfStore();
 const dialogEl = ref<HTMLElement | null>(null);
+const tab = ref<"skills" | "registries">("skills");
+
+function goToTab(next: "skills" | "registries") {
+  tab.value = next;
+  const id = next === "skills" ? "tab-skills" : "tab-registries";
+  document.getElementById(id)?.focus();
+}
+
+const TABS: ("skills" | "registries")[] = ["skills", "registries"];
+
+function moveTab(dir: -1 | 1) {
+  const idx = TABS.indexOf(tab.value);
+  const next = TABS[(idx + dir + TABS.length) % TABS.length] ?? "skills";
+  goToTab(next);
+}
+
+function onTabKeydown(e: KeyboardEvent) {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    moveTab(-1);
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    moveTab(1);
+  } else if (e.key === "Home") {
+    e.preventDefault();
+    goToTab("skills");
+  } else if (e.key === "End") {
+    e.preventDefault();
+    goToTab("registries");
+  }
+}
 
 onMounted(() => {
   dialogEl.value?.focus();
