@@ -247,4 +247,9 @@ export interface SafeSkill {
   origin: "project-local" | "shared";
   securityScan: ScanStatus;
   registry?: { id: string; version: string; pinned: boolean };
+  scope?: "common" | "project" | "adapter" | "organization";
+  domain?: { id?: string; role?: "canonical" | "child" };
+  owners?: string[];
+  stale?: boolean;
+  staleReason?: string;
 }

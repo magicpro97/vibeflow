@@ -69,6 +69,15 @@
             <span v-if="skill.registry" class="text-neutral-400">
               Registry: {{ skill.registry.id }} · v{{ skill.registry.version }} · pinned
             </span>
+            <span v-if="skill.scope" class="inline-flex items-center gap-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium text-neutral-300">
+              {{ skill.scope }}
+            </span>
+            <span v-if="skill.owners?.length" class="text-neutral-500">
+              Owner: {{ skill.owners[0] }}<span v-if="skill.owners.length > 1"> +{{ skill.owners.length - 1 }}</span>
+            </span>
+            <span v-if="skill.stale" class="text-yellow-500" :title="skill.staleReason || 'Source anchors are stale'">
+              ⚠ stale
+            </span>
           </div>
         </div>
       </div>
