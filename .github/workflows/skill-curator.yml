@@ -1,0 +1,120 @@
+name: Skill Curator Weekly Report
+
+# Runs deterministic curator scan weekly, posts aggregate health report as
+# a single issue. Re-runs update the same issue (no duplicates).
+# Deduplication is by exact title match only — no label dependency.
+# Read-only except for the issue write step.
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: skill-curator-report
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+      - run: |
+          set -euo pipefail
+          bun run build
+
+      - name: Run curator scan
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          node dist/cli.js skills curator scan --scope=local
+
+      - name: Build issue body
+        id: body
+        run: |
+          set -euo pipefail
+          FILE=".vibeflow/curator/findings.json"
+          BODY="/tmp/curator-body.md"
+          echo "## Weekly Skill Health Report" > "$BODY"
+          echo "" >> "$BODY"
+          echo "**Scan Date:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$BODY"
+          echo "" >> "$BODY"
+
+          if [ ! -f "$FILE" ]; then
+            TOTAL=0
+          else
+            TOTAL=$(jq '.findings | length' "$FILE")
+          fi
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "**Status:** No issues found" >> "$BODY"
+          else
+            echo "**Status:** $TOTAL issue(s) found" >> "$BODY"
+            echo "" >> "$BODY"
+            echo "### Summary" >> "$BODY"
+            echo "" >> "$BODY"
+            echo "| Type | Count |" >> "$BODY"
+            echo "|------|-------|" >> "$BODY"
+
+            for type in stale-anchor duplicate-owner unpinned-registry; do
+              COUNT=$(jq --arg t "$type" '[.findings[] | select(.type == $t)] | length' "$FILE")
+              if [ "$COUNT" -gt 0 ]; then
+                echo "| $type | $COUNT |" >> "$BODY"
+              fi
+            done
+          fi
+
+      - name: Find existing report issue
+        id: find
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          EXISTING=$(gh issue list \
+            --state all \
+            --limit 500 \
+            --json number,title \
+            --jq '[.[] | select(.title == "[skill-curator] Weekly Skill Health Report") | .number][0] // empty' \
+          )
+          echo "number=$EXISTING" >> "$GITHUB_OUTPUT"
+          if [ -n "$EXISTING" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Issue #$EXISTING exists - will update."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No existing issue - will create."
+          fi
+
+      - name: Create report issue
+        if: steps.find.outputs.found == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh issue create \
+            --title "[skill-curator] Weekly Skill Health Report" \
+            --body-file /tmp/curator-body.md
+
+      - name: Update existing report issue
+        if: steps.find.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${{ steps.find.outputs.number }}" \
+            --title "[skill-curator] Weekly Skill Health Report" \
+            --body-file /tmp/curator-body.md \
+            --state open
