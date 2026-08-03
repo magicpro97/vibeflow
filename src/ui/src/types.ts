@@ -129,6 +129,37 @@ export interface FailureProtection {
   requireGit: boolean;
 }
 
+export type CuratorSeverity = "low" | "medium" | "high";
+
+export type FindingType = "stale-anchor" | "duplicate-owner" | "unpinned-registry";
+
+export interface CuratorSettings {
+  enabled: boolean;
+  observeMode: boolean;
+  schedule: string;
+  severityThreshold: CuratorSeverity;
+}
+
+export interface CuratorFindingView {
+  id: string;
+  type: FindingType;
+  severity: CuratorSeverity;
+  summary: string;
+}
+
+/** Fixed counts object — all three keys always present, initialized 0. */
+export interface CuratorCounts {
+  "stale-anchor": number;
+  "duplicate-owner": number;
+  "unpinned-registry": number;
+}
+
+export interface CuratorView {
+  findings: CuratorFindingView[];
+  counts: CuratorCounts;
+  total: number;
+}
+
 export interface VibeSettings {
   tools: { codegraph: boolean; lsp: boolean };
   toolPriority: ToolTier[];
@@ -139,6 +170,8 @@ export interface VibeSettings {
   hooks?: HookConfig;
   /** #556: env-scrub policy for spawned engine subprocesses (read-only in the UI). */
   envPolicy?: { deny?: string[]; allow?: string[] };
+  /** #689: curator scheduling + severity prefs. */
+  curator?: CuratorSettings;
   updatedAt?: string;
 }
 

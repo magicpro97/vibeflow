@@ -154,6 +154,9 @@
         <!-- #556 #576: env-scrub policy for spawned engines -->
         <EnvScrubEditor v-model="form.envPolicy" />
 
+        <!-- #689: curator scheduling + findings -->
+        <CuratorSettings v-if="form.curator" v-model="form.curator" @validity="curatorValid = $event" />
+
         <div v-if="err" class="flex items-start gap-2 p-2 rounded border border-neutral-800 text-red-400 text-xs">
           <span class="shrink-0">⚠</span><span>{{ err }}</span>
         </div>
@@ -177,7 +180,7 @@
 
         <div class="flex justify-end gap-2 pt-2">
           <button type="button" class="px-3 py-1.5 rounded border border-neutral-800 text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 transition-colors" @click="confirmClose">Cancel</button>
-          <button type="submit" class="btn-primary" :disabled="saving">
+          <button type="submit" class="btn-primary" :disabled="saving || !curatorValid">
             {{ saving ? "Saving…" : "Save" }}
           </button>
         </div>
@@ -190,6 +193,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
 import type { VibeSettings } from "../types.js";
+import CuratorSettings from "./CuratorSettings.vue";
 import EnvScrubEditor from "./EnvScrubEditor.vue";
 import InfoTip from "./InfoTip.vue";
 
@@ -202,6 +206,8 @@ const err = ref<string | null>(null);
 const form = ref<VibeSettings | null>(null);
 const dialogEl = ref<HTMLElement | null>(null);
 const showDiscardConfirm = ref(false);
+/** #689: curator schedule validity — blocks Save when invalid. */
+const curatorValid = ref(true);
 /** Deep clone of original for dirty-checking — avoids mutating shared API cache */
 const original = ref<VibeSettings | null>(null);
 
@@ -243,6 +249,24 @@ onMounted(async () => {
     // AND the dirty-check baseline matches (else isDirty is true on open).
     if (form.value && !form.value.envPolicy) form.value.envPolicy = {};
     if (original.value && !original.value.envPolicy) original.value.envPolicy = {};
+    // #689: coerce missing curator → defaults on BOTH (same rationale as envPolicy)
+    // so the CuratorSettings editor binds and the dirty baseline matches.
+    if (form.value && !form.value.curator) {
+      form.value.curator = {
+        enabled: false,
+        observeMode: true,
+        schedule: "0 9 * * 1",
+        severityThreshold: "medium",
+      };
+    }
+    if (original.value && !original.value.curator) {
+      original.value.curator = {
+        enabled: false,
+        observeMode: true,
+        schedule: "0 9 * * 1",
+        severityThreshold: "medium",
+      };
+    }
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -301,8 +325,8 @@ async function save() {
   saving.value = true;
   try {
     err.value = null;
-    await api.settings.set(form.value);
-    original.value = JSON.parse(JSON.stringify(form.value)) as VibeSettings;
+    const savedSettings = await api.settings.set(form.value);
+    original.value = JSON.parse(JSON.stringify(savedSettings)) as VibeSettings;
     saved.value = true;
     // Brief "Saved" confirmation before closing
     setTimeout(() => emit("close"), 1500);

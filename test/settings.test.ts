@@ -14,6 +14,7 @@ import {
   settingsPath,
   writeSettings,
 } from "../src/settings.js";
+import { DEFAULT_CURATOR_SETTINGS } from "../src/skills/curator-settings.js";
 
 /** Make a throwaway repo dir and return its path. */
 function tmpRepo(): string {
@@ -501,6 +502,137 @@ describe("settings.skills (#687)", () => {
       // later unrelated write keeps the stored skills block
       writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
       expect(readSettings(dir).skills?.autoResolve).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("settings.curator (#689)", () => {
+  test("DEFAULT_SETTINGS carries the default curator block", () => {
+    expect(DEFAULT_SETTINGS.curator).toEqual(DEFAULT_CURATOR_SETTINGS);
+  });
+
+  test("an empty repo returns the default curator block (off, observe, Mon 9am, medium)", () => {
+    const dir = tmpRepo();
+    try {
+      expect(readSettings(dir).curator).toEqual(DEFAULT_CURATOR_SETTINGS);
+      expect(readSettings(dir).curator).toEqual({
+        enabled: false,
+        observeMode: true,
+        schedule: "0 9 * * 1",
+        severityThreshold: "medium",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit observe-mode toggle round-trips through write→read (#689)", () => {
+    const dir = tmpRepo();
+    try {
+      const written = writeSettings(
+        dir,
+        { curator: { ...DEFAULT_CURATOR_SETTINGS, enabled: true, observeMode: false } },
+        { now: fixedNow },
+      );
+      expect(written.curator?.observeMode).toBe(false);
+      expect(readSettings(dir).curator).toEqual({
+        enabled: true,
+        observeMode: false,
+        schedule: "0 9 * * 1",
+        severityThreshold: "medium",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a valid custom block round-trips (schedule + threshold preserved)", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(
+        dir,
+        JSON.stringify({
+          curator: {
+            enabled: true,
+            observeMode: false,
+            schedule: "30 2 * * *",
+            severityThreshold: "high",
+          },
+        }),
+      );
+      expect(readSettings(dir).curator).toEqual({
+        enabled: true,
+        observeMode: false,
+        schedule: "30 2 * * *",
+        severityThreshold: "high",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("closed enum: an unknown severityThreshold falls back to the default", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(
+        dir,
+        JSON.stringify({
+          curator: { enabled: true, severityThreshold: "critical", schedule: "30 2 * * *" },
+        }),
+      );
+      const c = readSettings(dir).curator;
+      expect(c?.severityThreshold).toBe("medium");
+      expect(c?.enabled).toBe(true); // unrelated fields kept
+      expect(c?.schedule).toBe("30 2 * * *");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("cron validation: non-five-field, overlong, or garbage schedules fall back to default", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ curator: { enabled: true, schedule: "0 9 * *" } }));
+      const four = readSettings(dir).curator;
+      expect(four?.schedule).toBe("0 9 * * 1");
+      expect(four?.enabled).toBe(true); // non-schedule fields survive
+
+      writeRaw(dir, JSON.stringify({ curator: { schedule: "R".repeat(140) } }));
+      expect(readSettings(dir).curator?.schedule).toBe("0 9 * * 1");
+
+      writeRaw(dir, JSON.stringify({ curator: { schedule: "0 9 * * monday" } }));
+      expect(readSettings(dir).curator?.schedule).toBe("0 9 * * 1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a garbage curator block falls back to defaults", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ curator: "nonsense" }));
+      expect(readSettings(dir).curator).toEqual(DEFAULT_CURATOR_SETTINGS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial curator write preserves unmentioned fields via coerce", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(
+        dir,
+        { curator: { ...DEFAULT_CURATOR_SETTINGS, enabled: true } },
+        { now: fixedNow },
+      );
+      writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
+      const c = readSettings(dir).curator;
+      expect(c?.enabled).toBe(true);
+      expect(c?.observeMode).toBe(true);
+      expect(c?.schedule).toBe("0 9 * * 1");
+      expect(c?.severityThreshold).toBe("medium");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

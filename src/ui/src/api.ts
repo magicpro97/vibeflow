@@ -62,6 +62,18 @@ export const api = {
       req<{ settings: VibeSettings }>("POST", "/api/settings", s).then((r) => r.settings),
   },
   skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
+  // #689: recent curator findings (severity-badged, sanitized).
+  curator: () =>
+    req<{
+      ok: boolean;
+      findings: import("./types.js").CuratorFindingView[];
+      counts: import("./types.js").CuratorCounts;
+      total: number;
+    }>("GET", "/api/skills/curator").then((r) => ({
+      findings: r.findings,
+      counts: r.counts,
+      total: r.total,
+    })),
   attachments: () =>
     req<{ attachments: unknown[] }>("GET", "/api/attachments").then((r) => r.attachments),
   logsRecent: (since = 0, limit = 200) =>
