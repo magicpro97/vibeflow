@@ -92,7 +92,11 @@ async function openPreview(id: string, e: Event) {
 
 function closePreview() {
   store.closeRegistryPreview();
-  nextTick(() => lastTrigger.value?.focus());
+  nextTick(() => {
+    const t = lastTrigger.value;
+    if (t?.isConnected) t.focus();
+    lastTrigger.value = null;
+  });
 }
 
 function trapModalTab(e: KeyboardEvent) {
@@ -125,6 +129,7 @@ onMounted(() => {
   document.addEventListener("focusin", onFocusIn, true);
 });
 onUnmounted(() => {
+  if (store.registryPreview) store.closeRegistryPreview();
   document.removeEventListener("focusin", onFocusIn, true);
 });
 

@@ -112,7 +112,10 @@ describe("RegistryView.vue: inert preview, no execute", () => {
     expect(src).toContain('@keydown.tab="trapModalTab"');
     expect(src).toContain('@keydown.esc.stop="closePreview()"');
     expect(src).toContain("modalClose.value?.focus()");
-    expect(src).toContain("lastTrigger.value?.focus()");
+    expect(src).toContain("t?.isConnected");
+  });
+  test("unmount closes preview before listener cleanup", () => {
+    expect(src).toContain("if (store.registryPreview) store.closeRegistryPreview();");
   });
 });
 
@@ -131,10 +134,10 @@ describe("SkillPanel.vue: WAI-ARIA tabs", () => {
   });
   test("tabpanel has id/aria-labelledby + roving keyboard nav", () => {
     expect(src).toContain('role="tabpanel"');
-    expect(src).toContain("'panel-skills'");
-    expect(src).toContain(
-      ":aria-labelledby=\"tab === 'skills' ? 'tab-skills' : 'tab-registries'\"",
-    );
+    expect(src).toContain('id="panel-skills"');
+    expect(src).toContain('id="panel-registries"');
+    expect(src).toContain('aria-labelledby="tab-skills"');
+    expect(src).toContain('aria-labelledby="tab-registries"');
     expect(src).toContain('@keydown="onTabKeydown"');
   });
 });
@@ -157,8 +160,30 @@ describe("SkillPanel.vue: explicit tab keyboard handling", () => {
   test("Home always goes to skills; End always goes to registries", () => {
     expect(src).toContain('e.key === "Home"');
     expect(src).toContain('e.key === "End"');
-    expect(src).toContain('goToTab("skills")');
-    expect(src).toContain('goToTab("registries")');
+    expect(src).toContain('selectTab("skills")');
+    expect(src).toContain('selectTab("registries")');
+  });
+});
+
+describe("SkillPanel.vue: selectTab routes all tab changes", () => {
+  const src = read("components/SkillPanel.vue");
+
+  test("click handlers use selectTab, not direct assignment", () => {
+    expect(src).toContain("@click=\"selectTab('skills')\"");
+    expect(src).toContain("@click=\"selectTab('registries')\"");
+    expect(src).not.toContain('@click="tab = ');
+  });
+
+  test("keyboard Home/End/Arrow route through selectTab", () => {
+    expect(src).toContain('selectTab("skills")');
+    expect(src).toContain('selectTab("registries")');
+    expect(src).not.toContain('goToTab("skills")');
+    expect(src).not.toContain('goToTab("registries")');
+  });
+
+  test("selectTab clears preview when leaving registries", () => {
+    expect(src).toContain('if (tab.value === "registries" && next !== "registries")');
+    expect(src).toContain("store.closeRegistryPreview()");
   });
 });
 

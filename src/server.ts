@@ -23,7 +23,7 @@ import {
   registerPending,
 } from "./server/pending-hooks.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
-import { handleRegistryPreview, handleRegistryView } from "./server/registry-route.js";
+import { handleRegistryView } from "./server/registry-route.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { toSafeSkills } from "./skills/api-types.js";
 import { sharedCatalogDir } from "./skills/catalog.js";
