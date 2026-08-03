@@ -26,6 +26,7 @@ import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { toSafeSkills } from "./skills/api-types.js";
 import { sharedCatalogDir } from "./skills/catalog.js";
+import { curatorView } from "./skills/curator-view.js";
 import { parseRegistryLock } from "./skills/registry-channel.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
@@ -193,6 +194,16 @@ export function startServer(
       if (method === "GET" && path === "/api/settings") {
         if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json({ ok: true, ...settingsView(activeRepo) });
+      }
+
+      // --- GET /api/skills/curator (#689: guarded) — recent curator findings ---
+      if (method === "GET" && path === "/api/skills/curator") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        const view = curatorView(activeRepo);
+        if ("ok" in view && view.ok === false) {
+          return Response.json({ error: view.error }, { status: 500 });
+        }
+        return Response.json({ ok: true, ...view });
       }
 
       // --- GET /api/file — token+loopback guarded, sandboxed to activeRepo (#558) ---
