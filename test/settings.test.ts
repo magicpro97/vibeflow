@@ -7,6 +7,7 @@ import { CTX_DIR } from "../src/core.js";
 import {
   DEFAULT_FAILURE_PROTECTION,
   DEFAULT_SETTINGS,
+  DEFAULT_SKILLS_CONFIG,
   DEFAULT_TIMEOUT_SECONDS,
   priorityRank,
   readSettings,
@@ -421,6 +422,85 @@ describe("settings.hooks (guardrail policy)", () => {
       // A later unrelated write (e.g. enabling a tool) must not re-expand hooks.
       writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
       expect(readSettings(dir).hooks?.templates).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("settings.skills (#687)", () => {
+  test("DEFAULT_SETTINGS carries the default skills block", () => {
+    expect(DEFAULT_SETTINGS.skills).toEqual(DEFAULT_SKILLS_CONFIG);
+  });
+
+  test("an empty repo returns the default skills block (autoResolve on, pointer, all engines)", () => {
+    const dir = tmpRepo();
+    try {
+      expect(readSettings(dir).skills).toEqual(DEFAULT_SKILLS_CONFIG);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a valid skills block round-trips through write→read", () => {
+    const dir = tmpRepo();
+    try {
+      const skills = {
+        autoResolve: false,
+        mirrorMode: "full" as const,
+        targetEngines: ["claude" as const, "codex" as const],
+      };
+      const written = writeSettings(dir, { skills }, { now: fixedNow });
+      expect(written.skills).toEqual(skills);
+      expect(readSettings(dir).skills).toEqual(skills);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("invalid engines are dropped; all-invalid falls back to all ENGINES", () => {
+    const dir = tmpRepo();
+    try {
+      // force a raw file to exercise coerce with a bogus engine list
+      writeRaw(
+        dir,
+        JSON.stringify({ skills: { autoResolve: false, targetEngines: ["bogus", "codex"] } }),
+      );
+      const read = readSettings(dir);
+      expect(read.skills?.targetEngines).toEqual(["codex"]);
+      expect(read.skills?.autoResolve).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a garbage skills field falls back to defaults", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ skills: "nonsense" }));
+      expect(readSettings(dir).skills).toEqual(DEFAULT_SKILLS_CONFIG);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial skills write preserves unmentioned fields via coerce", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(
+        dir,
+        {
+          skills: {
+            autoResolve: false,
+            mirrorMode: "pointer",
+            targetEngines: [...DEFAULT_SKILLS_CONFIG.targetEngines],
+          },
+        },
+        { now: fixedNow },
+      );
+      // later unrelated write keeps the stored skills block
+      writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
+      expect(readSettings(dir).skills?.autoResolve).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

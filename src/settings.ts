@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
+import { ENGINES, type Engine } from "./core/types.js";
 import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
 import type { UserMcpServer } from "./tools/index.js";
 
@@ -64,12 +65,22 @@ export interface VibeSettings {
   /** #548: user-declared MCP servers (any transport) fanned out to every engine's
    *  config by writeToolConfigs. Absent = none (today's behavior). */
   mcpServers?: Record<string, UserMcpServer>;
-  /** #549: `vf eval` regression-gate config. minPassRate is the expected verdict
-   *  pass-rate (0..1); minSamples is the floor below which eval warns instead of
-   *  failing. Absent = no gate (eval reports only). */
+  /** #549: `vf eval` regression-gate config. */
   eval?: { minPassRate?: number; minSamples?: number };
+  /** #687: skills configuration. Absent = defaults apply. */
+  skills?: SkillsConfig;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
+}
+
+/** #687: skills resolution and mirroring policy. */
+export interface SkillsConfig {
+  /** When true, auto-resolve draft skills on init/sync. Default: true. */
+  autoResolve: boolean;
+  /** Mirror mode: "pointer" (symlink into each engine skill dir) or "full" (copy). Default: "pointer". */
+  mirrorMode: "pointer" | "full";
+  /** Target engines to mirror skills into. Default: all ENGINES. */
+  targetEngines: Engine[];
 }
 
 /** Default dispatch timeout (seconds) — long enough for a real engine run, short enough to unstick. */
@@ -84,6 +95,12 @@ export const DEFAULT_FAILURE_PROTECTION: FailureProtection = {
 };
 
 /** Default baseline. `readSettings` always returns a fresh copy, never this object. */
+export const DEFAULT_SKILLS_CONFIG: SkillsConfig = {
+  autoResolve: true,
+  mirrorMode: "pointer",
+  targetEngines: [...ENGINES],
+};
+
 export const DEFAULT_SETTINGS: VibeSettings = {
   tools: { codegraph: true, lsp: true },
   toolPriority: [...TIERS],
@@ -92,6 +109,8 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   // lie — settings said on but non-TTY init never asked.
   memory: false,
   notifications: true,
+  // #687: default skills policy — auto-resolve on, symlink mirror into all engines.
+  skills: { ...DEFAULT_SKILLS_CONFIG, targetEngines: [...DEFAULT_SKILLS_CONFIG.targetEngines] },
   updatedAt: "",
 };
 
@@ -107,6 +126,7 @@ function defaults(): VibeSettings {
     failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
     memory: DEFAULT_SETTINGS.memory,
     notifications: DEFAULT_SETTINGS.notifications,
+    skills: { ...DEFAULT_SKILLS_CONFIG, targetEngines: [...DEFAULT_SKILLS_CONFIG.targetEngines] },
     updatedAt: DEFAULT_SETTINGS.updatedAt,
   };
 }
@@ -221,6 +241,22 @@ function coerceEval(raw: unknown): { minPassRate?: number; minSamples?: number }
   return out.minPassRate === undefined && out.minSamples === undefined ? undefined : out;
 }
 
+/** #687: validate a stored skills config block → defaults on garbage/absent. */
+function coerceSkillsConfig(raw: unknown): SkillsConfig | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const out: SkillsConfig = { ...DEFAULT_SKILLS_CONFIG };
+  if (typeof obj.autoResolve === "boolean") out.autoResolve = obj.autoResolve;
+  if (obj.mirrorMode === "pointer" || obj.mirrorMode === "full") out.mirrorMode = obj.mirrorMode;
+  if (Array.isArray(obj.targetEngines)) {
+    const wanted = obj.targetEngines.filter(
+      (e): e is Engine => typeof e === "string" && (ENGINES as readonly string[]).includes(e),
+    );
+    if (wanted.length > 0) out.targetEngines = wanted;
+  }
+  return out;
+}
+
 /** Merge a partial/old/unknown stored object over the defaults into a complete VibeSettings. */
 function coerce(raw: unknown): VibeSettings {
   const out = defaults();
@@ -280,6 +316,10 @@ function coerce(raw: unknown): VibeSettings {
     const ev = coerceEval(obj.eval);
     if (ev) out.eval = ev;
   }
+  // #687: skills always materialized (defaults on absent/garbage) — it lives in
+  // DEFAULT_SETTINGS so readSettings returns a complete, predictable block.
+  const sk = coerceSkillsConfig(obj.skills);
+  if (sk) out.skills = sk;
   return out;
 }
 
@@ -333,6 +373,9 @@ export function writeSettings(
   // #549: eval is replace-on-write like envPolicy — keep prior block when next omits it.
   const evalCfg = "eval" in next ? coerceEval(next.eval) : current.eval;
   if (evalCfg) merged.eval = evalCfg;
+  // #687: skills is replace-on-write — coerce the handed block over defaults.
+  const skillsCfg = "skills" in next ? coerceSkillsConfig(next.skills) : current.skills;
+  if (skillsCfg) merged.skills = skillsCfg;
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
   return merged;
 }
