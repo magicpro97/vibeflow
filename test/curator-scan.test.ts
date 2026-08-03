@@ -317,6 +317,12 @@ describe("byte-identical idempotence", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("handleCuratorSubcommand > issue dispatches to proposal handler", () => {
+    writeCuratorFindings(dir, { schemaVersion: 1, findings: [] });
+    const code = handleCuratorSubcommand(dir, ["issue"]);
+    expect(code).toBe(0);
+  });
+
   test("identical rerun produces byte-identical store", () => {
     const r1 = curatorScan(dir, {
       discoverSkills: () => [],
