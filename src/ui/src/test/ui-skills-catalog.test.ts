@@ -247,6 +247,106 @@ assert("Tab in middle no-op", computeFocusTarget(1, 3, false, false) === null);
 assert("Shift+Tab in middle no-op", computeFocusTarget(1, 3, true, false) === null);
 assert("Empty focusable returns null", computeFocusTarget(0, 0, false, false) === null);
 
+// ── 8. #690: scope pill, owner tag, stale warning display helpers ──
+
+function scopePillText(scope?: string): string | null {
+  return scope ?? null;
+}
+
+assert("scope pill shows common", scopePillText("common") === "common");
+assert("scope pill shows project", scopePillText("project") === "project");
+assert("scope pill shows adapter", scopePillText("adapter") === "adapter");
+assert("scope pill undefined when no scope", scopePillText(undefined) === null);
+
+function ownerTagText(owners?: string[]): string | null {
+  if (!owners?.length) return null;
+  if (owners.length === 1) return `Owner: ${owners[0]}`;
+  return `Owner: ${owners[0]} +${owners.length - 1}`;
+}
+
+assert("owner tag single", ownerTagText(["alice"]) === "Owner: alice");
+assert("owner tag multiple", ownerTagText(["alice", "bob"]) === "Owner: alice +1");
+assert("owner tag empty", ownerTagText([]) === null);
+assert("owner tag undefined", ownerTagText(undefined) === null);
+
+function staleWarningText(stale?: boolean, reason?: string): string | null {
+  if (!stale) return null;
+  return reason ? `⚠ stale (${reason})` : "⚠ stale";
+}
+
+assert(
+  "stale warning with reason",
+  staleWarningText(true, "hash mismatch") === "⚠ stale (hash mismatch)",
+);
+assert("stale warning without reason", staleWarningText(true) === "⚠ stale");
+assert("stale warning false", staleWarningText(false) === null);
+assert("stale warning undefined", staleWarningText(undefined) === null);
+
+// ── 9. #690: SafeSkill shape with new fields passes validation ──
+
+type SafeSkill690 = {
+  name: string;
+  description: string;
+  version?: string;
+  status: string;
+  origin: "project-local" | "shared";
+  securityScan: string;
+  scope?: string;
+  domain?: { id?: string; role?: string };
+  owners?: string[];
+  stale?: boolean;
+  staleReason?: string;
+};
+
+function validateSkill690(s: SafeSkill690): string[] {
+  const errors: string[] = [];
+  if (!s.name) errors.push("name required");
+  if (!s.description) errors.push("description required");
+  if (!["project-local", "shared"].includes(s.origin)) errors.push("invalid origin");
+  if (!["not-scanned", "pass", "warn", "blocked"].includes(s.securityScan))
+    errors.push("invalid securityScan");
+  if (s.scope !== undefined && !["common", "project", "adapter", "organization"].includes(s.scope))
+    errors.push("invalid scope");
+  return errors;
+}
+
+const fullSkill: SafeSkill690 = {
+  name: "full-skill",
+  description: "all fields",
+  origin: "shared",
+  status: "verified",
+  securityScan: "pass",
+  scope: "project",
+  domain: { id: "db", role: "canonical" },
+  owners: ["ops@example.com"],
+  stale: true,
+  staleReason: "hash mismatch",
+};
+assert("full skill #690 passes validation", validateSkill690(fullSkill).length === 0);
+
+const noScope: SafeSkill690 = {
+  name: "no-scope",
+  description: "no scope set",
+  origin: "shared",
+  status: "draft",
+  securityScan: "not-scanned",
+};
+assert("skill without scope still valid", validateSkill690(noScope).length === 0);
+
+const badScope: SafeSkill690 = {
+  name: "bad-scope",
+  description: "invalid scope",
+  origin: "shared",
+  status: "draft",
+  securityScan: "not-scanned",
+  scope: "nope",
+};
+const badScopeErrs = validateSkill690(badScope);
+assert(
+  "invalid scope caught",
+  badScopeErrs.some((e) => e.includes("scope")),
+);
+
 // ── Results ──
 
 if (failed > 0) {
