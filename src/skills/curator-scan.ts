@@ -5,6 +5,7 @@ import { CTX_DIR, c } from "../core.js";
 import { out } from "../logbus.js";
 import { checkAnchors } from "./anchor-freshness.js";
 import { auditSkillDuplicates } from "./audit-duplicates.js";
+import { handleCuratorProposalSubcommand } from "./curator-proposals.js";
 import { discoverSkills } from "./discovery.js";
 import { parseRegistryLock } from "./registry-channel.js";
 
@@ -167,6 +168,9 @@ export function handleCuratorSubcommand(repo: string, rest: string[]): number {
     }
     return total > 0 ? 1 : 0;
   }
-  out("vf", c.dim("Usage: vf skills curator scan"));
+  if (sub === "issue" || sub === "pr") {
+    return handleCuratorProposalSubcommand(repo, sub, rest.slice(1));
+  }
+  out("vf", c.dim("Usage: vf skills curator scan | issue [--dry-run] | pr [--dry-run]"));
   return 2;
 }
