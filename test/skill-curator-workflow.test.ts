@@ -51,9 +51,10 @@ describe("skill-curator workflow", () => {
     expect(content).toContain("steps.find.outputs.found");
   });
 
-  test("runs curator scan on local scope with continue-on-error", () => {
+  test("runs curator scan on repo scope with continue-on-error", () => {
     expect(content).toContain("continue-on-error: true");
-    expect(content).toContain("node dist/cli.js skills curator scan --scope=local");
+    expect(content).toContain("node dist/cli.js skills curator scan --scope=repo");
+    expect(content).not.toContain("node dist/cli.js skills curator scan --scope=local");
   });
 
   test("reads findings.json for issue body", () => {

@@ -40,7 +40,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          node dist/cli.js skills curator scan --scope=local
+          node dist/cli.js skills curator scan --scope=repo
 
       - name: Build issue body
         id: body

@@ -40,6 +40,22 @@ export interface CuratorScanResult {
   schemaVersion: 1;
 }
 
+export type FindingScope = "local" | "repo";
+
+export function parseCuratorScope(args: string[]): FindingScope | null {
+  if (args.length === 0) return "local";
+  if (args.length !== 1) return null;
+  if (args[0] === "--scope=local") return "local";
+  if (args[0] === "--scope=repo") return "repo";
+  return null;
+}
+
+export function curatorFingerprint(commitSha: string, domainId: string, factId: string): string {
+  const h = createHash("sha256");
+  h.update(`${commitSha}\u0000${domainId}\u0000${factId}`);
+  return h.digest("hex");
+}
+
 function findingKey(f: Finding): string {
   switch (f.type) {
     case "stale-anchor":
@@ -153,6 +169,10 @@ export function readCuratorFindings(repo: string): CuratorScanResult | null {
 export function handleCuratorSubcommand(repo: string, rest: string[]): number {
   const sub = rest[0];
   if (sub === "scan") {
+    if (parseCuratorScope(rest.slice(1)) === null) {
+      out("vf", c.dim("Usage: vf skills curator scan [--scope=local|repo]"));
+      return 2;
+    }
     const result = curatorScan(repo);
     writeCuratorFindings(repo, result);
     const counts: Record<string, number> = {};
@@ -171,6 +191,11 @@ export function handleCuratorSubcommand(repo: string, rest: string[]): number {
   if (sub === "issue" || sub === "pr") {
     return handleCuratorProposalSubcommand(repo, sub, rest.slice(1));
   }
-  out("vf", c.dim("Usage: vf skills curator scan | issue [--dry-run] | pr [--dry-run]"));
+  out(
+    "vf",
+    c.dim(
+      "Usage: vf skills curator scan [--scope=local|repo] | issue [--dry-run] | pr [--dry-run]",
+    ),
+  );
   return 2;
 }

@@ -189,7 +189,7 @@ vf skills draft [--new] <name> # resolve existing domain before creating a draft
 vf skills propose-merge <a> <b> # print non-destructive merged skill proposal
 vf skills propose-split <skill> # print non-destructive section split proposal
 vf skills crystallize <run-id>  # extract recurring patterns; if they match an existing skill, print PATCH PROPOSAL (stdout only), else write crystallized-run-* draft
-vf skills curator scan    # scan skills for stale anchors, duplicate owners, unpinned registry entries; writes .vibeflow/curator/findings.json
+vf skills curator scan [--scope=local|repo]  # scan skills for stale anchors, duplicate owners, unpinned registry entries; default local writes private ignored finding output, repo output is candidate for shared publisher (shared dedup not yet done); writes .vibeflow/curator/findings.json
 vf skills import <dir>     # import a local skill dir into .vibeflow/skills/
 vf skills import context7:<query>  # import a Context7 skill (approval-gated) into the canonical store
 ```

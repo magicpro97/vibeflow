@@ -9,8 +9,10 @@ import type { AuditDuplicatesResult } from "../src/skills/audit-duplicates.js";
 import {
   type CuratorScanResult,
   type Finding,
+  curatorFingerprint,
   curatorScan,
   handleCuratorSubcommand,
+  parseCuratorScope,
   readCuratorFindings,
   writeCuratorFindings,
 } from "../src/skills/curator-scan.js";
@@ -44,6 +46,42 @@ function captureConsole(fn: () => number): { code: number; lines: string[] } {
     console.error = origErr;
   }
 }
+
+describe("parseCuratorScope", () => {
+  test("default [] returns local", () => {
+    expect(parseCuratorScope([])).toBe("local");
+  });
+
+  test("only --scope=local and --scope=repo accepted", () => {
+    expect(parseCuratorScope(["--scope=local"])).toBe("local");
+    expect(parseCuratorScope(["--scope=repo"])).toBe("repo");
+  });
+
+  test("split --scope repo rejected", () => {
+    expect(parseCuratorScope(["--scope", "repo"])).toBeNull();
+  });
+
+  test("duplicate and unknown scope rejected", () => {
+    expect(parseCuratorScope(["--scope=local", "--scope=repo"])).toBeNull();
+    expect(parseCuratorScope(["--scope=remote"])).toBeNull();
+    expect(parseCuratorScope(["--scope=local", "--scope=local"])).toBeNull();
+  });
+});
+
+describe("curatorFingerprint", () => {
+  test("matches known digest for fixed inputs", () => {
+    expect(curatorFingerprint("abc123", "stale-anchor", "myskill")).toBe(
+      "eca2f91cb786a145049cac52ef8e1923db3121998abc5a841c16d7696038d588",
+    );
+  });
+
+  test("changing any input changes digest", () => {
+    const base = curatorFingerprint("abc123", "stale-anchor", "myskill");
+    expect(curatorFingerprint("abc1234", "stale-anchor", "myskill")).not.toBe(base);
+    expect(curatorFingerprint("abc123", "duplicate-owner", "myskill")).not.toBe(base);
+    expect(curatorFingerprint("abc123", "stale-anchor", "myskill2")).not.toBe(base);
+  });
+});
 
 describe("curatorScan", () => {
   test("no skills, no lock — empty findings", () => {
@@ -275,6 +313,14 @@ describe("handleCuratorSubcommand", () => {
     expect(existsSync(path)).toBe(true);
     const parsed = JSON.parse(readFileSync(path, "utf8")) as CuratorScanResult;
     expect(parsed.findings).toEqual([]);
+  });
+
+  test("scan: rejects invalid scope before scanning", () => {
+    const { code, lines } = captureConsole(() =>
+      handleCuratorSubcommand(dir, ["scan", "--scope=nope"]),
+    );
+    expect(code).toBe(2);
+    expect(lines.some((l) => l.includes("Usage"))).toBe(true);
   });
 
   test("unknown subcommand returns 2", () => {
