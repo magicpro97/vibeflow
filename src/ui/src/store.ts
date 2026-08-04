@@ -256,7 +256,7 @@ export const useVfStore = defineStore("vf", () => {
     }
   }
 
-  async function resolveDomainImpact(query: string): Promise<DomainRootView["children"]> {
+  async function resolveDomainImpact(query: string): Promise<string[]> {
     const impact = await api.domains.impact(query);
     return impact.skills;
   }

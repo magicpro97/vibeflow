@@ -2,7 +2,7 @@
 // Kept OUT of server.ts so the validation is unit-testable and the file stays
 // under the size cap. Both endpoints are READ-ONLY: they only project metadata
 // from the two authoritative sources (readDomainFacts / analyzeSkillImpact) and
-// never touch the disk, network, or write path.
+// read metadata from disk but never mutate disk, call the network, or enter a write path.
 
 import { buildDomainView, isValidFactQuery } from "../skills/domain-view.js";
 import { analyzeSkillImpact } from "../skills/impact.js";

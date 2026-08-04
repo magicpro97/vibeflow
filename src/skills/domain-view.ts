@@ -1,7 +1,7 @@
 // #691: read-only Domain & Facts projection for the UI.
 // Pure DTO builder over the two authoritative sources: readDomainFacts (facts.ts)
-// and discoverSkills (registry.ts). No new graph schema, no filesystem paths, no
-// raw file bytes are ever emitted to the browser — every field is a bounded,
+// and discoverSkills (registry.ts). No new graph schema, absolute filesystem paths,
+// or raw file bytes are ever emitted to the browser — every field is a bounded,
 // validated value derived from those two authorities.
 
 import { readDomainFacts } from "./facts.js";
@@ -144,6 +144,8 @@ export function buildDomainView(
     if (skill.domain?.role !== "canonical" || !skill.domain.id) continue;
     if (!canonicalNameById.has(skill.domain.id)) canonicalNameById.set(skill.domain.id, skill.name);
   }
+  const canonicalEntries = [...canonicalNameById];
+  const domainIdByCanonical = new Map(canonicalEntries.map(([id, canonical]) => [canonical, id]));
 
   const childrenByDomain = new Map<string, string[]>();
   const skillNames = new Set(skills.map((skill) => skill.name));
@@ -154,7 +156,7 @@ export function buildDomainView(
     childrenByDomain.set(id, list);
   }
   for (const skill of skills) {
-    const id = [...canonicalNameById].find(
+    const id = canonicalEntries.find(
       ([domain, canonical]) =>
         skill.name !== canonical &&
         (skill.dependsOn?.includes(domain) || skill.dependsOn?.includes(canonical)),
@@ -163,7 +165,7 @@ export function buildDomainView(
     addChild(id, skill.name);
   }
   for (const fact of projected) {
-    const id = [...canonicalNameById].find(([, canonical]) => canonical === fact.owner)?.[0];
+    const id = domainIdByCanonical.get(fact.owner);
     if (!id) continue;
     for (const dependent of fact.dependents) addChild(id, dependent);
   }

@@ -122,7 +122,7 @@ async function runImpact() {
   try {
     const skills = await store.resolveDomainImpact(q);
     highlighted.value = new Set(skills);
-    selected.value = null;
+    if (selected.value !== q) selected.value = null;
     impactMessage.value =
       skills.length > 0
         ? `Impacted skills: ${skills.join(", ")}`
