@@ -52,29 +52,32 @@ assert(
   /api\.settings\.applyPolicy\([\s\S]*policyPreview\.value\.id/.test(panel),
 );
 // #692: after a successful approved apply, non-policy form edits must be
-// persisted too — otherwise same-form tools/memory/notifications/failureProtection
-// edits are silently dropped when the panel closes.
+// persisted too — previously the UI issued a separate /api/settings POST
+// (two writes, partial-state risk). Now apply sends non-policy settings as
+// its payload and the server merges them with the approved policy in one write.
 assert(
-  "applyPolicy persists non-policy form edits after apply",
-  /applyPolicy\([\s\S]*envPolicy: _ep, hooks: _hk[\s\S]*api\.settings\.set\(nonPolicy\)/.test(
+  "applyPolicy stops sending the separate settings.set; apply gets non-policy in payload",
+  /envPolicy: _ep, hooks: _hk[\s\S]*api\.settings\.applyPolicy\([\s\S]*\{\s*\.\.\.nonPolicy\s*\}/.test(
     panel,
-  ),
+  ) &&
+    !/envPolicy: _ep, hooks: _hk[\s\S]*api\.settings\.set\(nonPolicy\)[\s\S]*api\.settings\.applyPolicy/.test(
+      panel,
+    ),
 );
 assert(
   "non-policy persist strips policy so approved policy is never overwritten",
   /envPolicy: _ep, hooks: _hk/.test(panel),
 );
 assert(
-  "non-policy persist happens before panel closes",
-  /api\.settings\.set\(nonPolicy\)[\s\S]*setTimeout\(\(\) => emit\("close"\)/.test(panel),
+  "non-policy apply resolves before panel closes",
+  /api\.settings\.applyPolicy\([\s\S]*setTimeout\(\(\) => emit\("close"\)/.test(panel),
 );
-// #692 regression: after applyPolicy's non-policy persist, original.value must
-// be reassigned from the RETURNED settings of api.settings.set — not from the
-// stripped nonPolicy object. Assigning nonPolicy drops envPolicy/hooks from the
-// baseline, so every later save re-detects a policy diff and previews again.
+// #692 regression: original.value must be reassigned from the RETURNED settings
+// of applyPolicy — not form.value/nonPolicy (that drops envPolicy/hooks from the
+// baseline, so every later save re-detects a policy diff and previews again).
 assert(
   "applyPolicy rebases original from returned settings, not nonPolicy",
-  /const savedSettings = await api\.settings\.set\(nonPolicy\)[\s\S]*original\.value = clone\(savedSettings\)/.test(
+  /const savedSettings = await api\.settings\.applyPolicy\([\s\S]*original\.value = clone\(savedSettings\)/.test(
     panel,
   ),
 );
@@ -87,6 +90,10 @@ assert("api exposes previewPolicy", /previewPolicy:/.test(api));
 assert("previewPolicy POSTs to /api/settings/preview", /"\/api\/settings\/preview"/.test(api));
 assert("api exposes applyPolicy", /applyPolicy:/.test(api));
 assert("applyPolicy POSTs to /api/settings/apply", /"\/api\/settings\/apply"/.test(api));
+assert(
+  "applyPolicy forwards non-policy settings in the apply payload",
+  /applyPolicy:[\s\S]*settings\?: Partial<VibeSettings>[\s\S]*\? \{\s*settings\s*\}/.test(api),
+);
 
 // ── Results ──
 

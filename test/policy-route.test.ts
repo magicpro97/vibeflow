@@ -44,6 +44,7 @@ describe("policy routes", () => {
       },
     );
     expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
     expect(writes).toEqual([candidate]);
   });
 
@@ -125,6 +126,66 @@ describe("policy routes", () => {
     );
     expect(response.status).toBe(500);
     expect(audited).toEqual([]);
+  });
+
+  test("apply receives non-policy settings and writes once (merged policy + settings)", async () => {
+    const base = { ...current, memory: false, notifications: true } as unknown as VibeSettings;
+    const writes: unknown[] = [];
+    const preview = (await (
+      await previewPolicy("repo-merge", request(candidate), {
+        read: () => base,
+        write: () => base,
+      })
+    ).json()) as { id: string };
+    const response = applyPolicy(
+      "repo-merge",
+      {
+        previewId: preview.id,
+        confirmationText: "ALLOW POLICY RELAXATION",
+        settings: { memory: true, notifications: false },
+      },
+      {
+        read: () => base,
+        write: (_repo, next) => {
+          writes.push(next);
+          return { ...base, ...next };
+        },
+        audit: () => true,
+      },
+    );
+    expect(response.status).toBe(200);
+    // Single server write: non-policy settings merged with the approved policy candidate.
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toEqual({ ...candidate, memory: true, notifications: false });
+  });
+
+  test("apply rejects settings containing policy keys", async () => {
+    const preview = (await (
+      await previewPolicy("repo-rej", request(candidate), {
+        read: () => current,
+        write: () => current,
+      })
+    ).json()) as { id: string };
+    const withEnv = applyPolicy(
+      "repo-rej",
+      {
+        previewId: preview.id,
+        confirmationText: "ALLOW POLICY RELAXATION",
+        settings: { envPolicy: { allow: ["EVIL"] } },
+      },
+      { read: () => current, write: () => current, audit: () => true },
+    );
+    expect(withEnv.status).toBe(400);
+    const withHooks = applyPolicy(
+      "repo-rej",
+      {
+        previewId: preview.id,
+        confirmationText: "ALLOW POLICY RELAXATION",
+        settings: { hooks: { templates: [], custom: [] } },
+      },
+      { read: () => current, write: () => current, audit: () => true },
+    );
+    expect(withHooks.status).toBe(400);
   });
 
   test("audit rollback failure still returns a controlled 500", async () => {

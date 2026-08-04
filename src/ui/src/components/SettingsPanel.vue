@@ -374,18 +374,14 @@ async function applyPolicy(confirmation: string) {
   saving.value = true;
   try {
     err.value = null;
-    await api.settings.applyPolicy(
+    // #692: apply sends non-policy settings as the payload so policy + regular
+    // edits land in ONE server write — no separate /api/settings POST.
+    const { envPolicy: _ep, hooks: _hk, ...nonPolicy } = form.value as VibeSettings;
+    const savedSettings = await api.settings.applyPolicy(
       policyPreview.value.id,
       policyPreview.value.relaxation ? confirmation : "",
+      { ...nonPolicy },
     );
-    // #692: applyPolicy only committed the policy candidate. Persist the
-    // non-policy form edits (tools, memory, notifications, failureProtection,
-    // curator, …) right after so they aren't silently dropped. The apply
-    // endpoint stays opaque {previewId, confirmationText}; policy is not
-    // re-sent — rebuild the object without policy fields so a stale candidate
-    // can't ever overwrite the just-approved policy.
-    const { envPolicy: _ep, hooks: _hk, ...nonPolicy } = form.value as VibeSettings;
-    const savedSettings = await api.settings.set(nonPolicy);
     original.value = clone(savedSettings);
     saved.value = true;
     policyPreview.value = null;

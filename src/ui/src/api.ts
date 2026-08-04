@@ -65,11 +65,12 @@ export const api = {
       req<{ settings: VibeSettings }>("POST", "/api/settings", s).then((r) => r.settings),
     previewPolicy: (s: Pick<VibeSettings, "envPolicy" | "hooks">) =>
       req<import("./types.js").PolicyPreview>("POST", "/api/settings/preview", s),
-    applyPolicy: (previewId: string, confirmationText: string) =>
-      req<{ settings: VibeSettings }>("POST", "/api/settings/apply", {
+    applyPolicy: (previewId: string, confirmationText: string, settings?: Partial<VibeSettings>) =>
+      req<{ ok: boolean }>("POST", "/api/settings/apply", {
         previewId,
         confirmationText,
-      }).then((r) => r.settings),
+        ...(settings ? { settings } : {}),
+      }).then(() => api.settings.get()),
   },
   skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
   // #689: recent curator findings (severity-badged, sanitized).
