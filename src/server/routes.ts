@@ -31,6 +31,7 @@ import {
   handlePlanReviewCommentsPost,
   handlePlanReviewPost,
 } from "./plan-review.js";
+import { handlePolicyRoute } from "./policy-route.js";
 import { handleRegistryPreview } from "./registry-route.js";
 
 export interface RouteCtx {
@@ -38,8 +39,6 @@ export interface RouteCtx {
   setActiveRepo: (repo: string) => void;
 }
 
-/** Max length of a pre-dispatch guidance note (#536). 100KB is generous for a
- *  steering paragraph while bounding the unbounded on-disk append. */
 const GUIDANCE_NOTE_CAP = 100 * 1024;
 
 export async function handleMutationRoute(
@@ -49,7 +48,6 @@ export async function handleMutationRoute(
   req: Request,
   url: URL,
 ): Promise<Response | null> {
-  // File upload (raw binary, not JSON)
   if (method === "POST" && path === "/api/upload") {
     const safe = safeAttachName(url.searchParams.get("name") || "");
     if (!safe) {
@@ -58,8 +56,6 @@ export async function handleMutationRoute(
     const dir = attachDir(ctx.getActiveRepo());
     mkdirSync(dir, { recursive: true });
     const dest = join(dir, safe);
-    // safeAttachName() strips path separators via basename, so
-    // dest is always under dir. No need to re-verify.
     const blob = await req.blob();
     if (blob.size > ATTACH_CAP) {
       return Response.json({ error: "file too large" }, { status: 400 });
@@ -106,6 +102,9 @@ export async function handleMutationRoute(
     return handlePlanReviewCommentsDelete(ctx.getActiveRepo(), path, url);
   }
 
+  if (method === "POST" && (path === "/api/settings/preview" || path === "/api/settings/apply")) {
+    return handlePolicyRoute(ctx.getActiveRepo(), path, req);
+  }
   const payload = (await req.json()) as Record<string, unknown>;
 
   if (path === "/api/detect") {
@@ -293,6 +292,8 @@ export async function handleMutationRoute(
     return Response.json(runPreflight(payload));
   }
 
+  if (path === "/api/settings" && ("envPolicy" in payload || "hooks" in payload))
+    return Response.json({ error: "policy changes require preview approval" }, { status: 400 });
   // biome-ignore format: keep compact so `}` is not a standalone line (bun:coverage gap)
   if (path === "/api/settings") { applySettings(ctx.getActiveRepo(), payload); return Response.json({ ok: true, ...settingsView(ctx.getActiveRepo()) }); }
 
@@ -395,6 +396,5 @@ export function handleProjectsRoute(path: string, url: URL): Response | null {
     const events = replayFromLog(logFile, since, limit);
     return Response.json({ events });
   }
-  // fallback
   return null;
 }

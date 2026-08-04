@@ -160,6 +160,19 @@ export interface CuratorView {
   total: number;
 }
 
+export interface PolicyDiffEntry {
+  field: string;
+  before: unknown;
+  after: unknown;
+  relaxation: boolean;
+}
+
+export interface PolicyPreview {
+  id: string;
+  diff: PolicyDiffEntry[];
+  relaxation: boolean;
+}
+
 export interface VibeSettings {
   tools: { codegraph: boolean; lsp: boolean };
   toolPriority: ToolTier[];
