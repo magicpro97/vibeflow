@@ -44,7 +44,12 @@ export function validatePolicyCandidate(value: unknown): Policy | null {
     const hooks = raw.hooks;
     if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return null;
     const obj = hooks as Record<string, unknown>;
-    if (!Object.keys(obj).every((key) => key === "templates" || key === "custom")) return null;
+    if (
+      !("templates" in obj) ||
+      !("custom" in obj) ||
+      !Object.keys(obj).every((key) => key === "templates" || key === "custom")
+    )
+      return null;
     const templates = strings(obj.templates);
     if (!templates || !templates.every((template) => HOOK_TEMPLATES.has(template))) return null;
     if (!Array.isArray(obj.custom) || obj.custom.length > MAX_ITEMS) return null;

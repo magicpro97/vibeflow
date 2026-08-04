@@ -21,7 +21,10 @@ describe("policy routes", () => {
     const writes: unknown[] = [];
     const previewResponse = await previewPolicy("repo", request(candidate), {
       read: () => current,
-      write: () => current,
+      write: (_repo, next) => {
+        writes.push(next);
+        return current;
+      },
     });
     const preview = (await previewResponse.json()) as { id: string };
     expect(writes).toEqual([]);

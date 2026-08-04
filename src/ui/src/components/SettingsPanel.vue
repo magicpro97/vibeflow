@@ -360,7 +360,7 @@ async function save() {
 }
 
 /** Extract just the policy fields for #692 preview routing / dirty baseline. */
-function pickPolicy(s: VibeSettings | null): Pick<VibeSettings, "envPolicy" | "hooks"> {
+function pickPolicy(s: VibeSettings | null): Partial<Pick<VibeSettings, "envPolicy" | "hooks">> {
   if (!s) return {};
   return {
     ...(s.envPolicy ? { envPolicy: s.envPolicy } : {}),

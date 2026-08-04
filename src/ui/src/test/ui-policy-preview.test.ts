@@ -2,7 +2,6 @@
 // No Vue mount infra — asserts structural invariants + pure routing helpers.
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 let passed = 0;
 let failed = 0;
@@ -16,7 +15,6 @@ function assert(label: string, ok: boolean) {
   }
 }
 
-const here = fileURLToPath(new URL(".", import.meta.url));
 const modal = readFileSync(new URL("../components/PolicyDiffModal.vue", import.meta.url), "utf8");
 const panel = readFileSync(new URL("../components/SettingsPanel.vue", import.meta.url), "utf8");
 const api = readFileSync(new URL("../api.ts", import.meta.url), "utf8");
