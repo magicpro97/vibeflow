@@ -1392,6 +1392,186 @@ import {
 } from "../src/server/pending-hooks.js";
 import { handleMutationRoute, handleProjectsRoute } from "../src/server/routes.js";
 
+test("POST /api/settings/preview without CSRF token returns 403", async () => {
+  const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
+  try {
+    const response = await fetch(`${url}/api/settings/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ envPolicy: { allow: ["PATH"] } }),
+    });
+    expect(response.status).toBe(403);
+  } finally {
+    server.stop();
+  }
+});
+
+test("POST /api/settings rejects direct policy writes", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-policy-bypass-"));
+  try {
+    const ctx = { getActiveRepo: () => tmp, setActiveRepo: (_r: string) => {} };
+    const req = new Request("http://127.0.0.1/api/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ envPolicy: { allow: ["HOME"] } }),
+    });
+    const response = await handleMutationRoute(ctx, "POST", "/api/settings", req, new URL(req.url));
+    expect(response?.status).toBe(400);
+    const body = (await response?.json()) as { error?: string };
+    expect(body.error).toMatch(/preview approval/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// --- handleMutationRoute /api/settings/preview + /api/settings/apply ---
+// Preview must be inert (no write). Apply consumes the opaque preview exactly
+// once, validates exact relaxation confirmation, and appends exactly one audit
+// record. A relaxed policy change plus a non-relaxing change both apply.
+
+test("handleMutationRoute POST /api/settings/preview is inert and returns opaque preview; apply writes once and audits once", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-polroute-"));
+  try {
+    const ctx = { getActiveRepo: () => tmp, setActiveRepo: (_r: string) => {} };
+    const previewReq = new Request("http://127.0.0.1/api/settings/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        envPolicy: { deny: [], allow: ["HOME", "PATH"] },
+        hooks: { templates: [], custom: [] },
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    const previewRes = await handleMutationRoute(
+      ctx,
+      "POST",
+      "/api/settings/preview",
+      previewReq,
+      new URL(previewReq.url),
+    );
+    expect(previewRes).not.toBeNull();
+    expect((previewRes as Response).status).toBe(200);
+    const preview = (await (previewRes as Response).json()) as {
+      id: string;
+      relaxation: boolean;
+      diff: { field: string; relaxation: boolean }[];
+    };
+    expect(typeof preview.id).toBe("string");
+    expect(preview.id.length).toBeGreaterThan(0);
+    expect(preview.relaxation).toBe(true);
+
+    // No settings file written by preview alone
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(tmp, ".vibeflow", "SETTINGS.json"))).toBe(false);
+
+    // Invalid (missing) confirmation → 400, no settings file
+    const badApply = new Request("http://127.0.0.1/api/settings/apply", {
+      method: "POST",
+      body: JSON.stringify({ previewId: preview.id, confirmationText: "nope" }),
+      headers: { "content-type": "application/json" },
+    });
+    const badRes = await handleMutationRoute(
+      ctx,
+      "POST",
+      "/api/settings/apply",
+      badApply,
+      new URL(badApply.url),
+    );
+    expect((badRes as Response).status).toBe(400);
+    expect(existsSync(join(tmp, ".vibeflow", "SETTINGS.json"))).toBe(false);
+
+    // Valid apply → 200, settings persisted, audit record appended
+    const goodApply = new Request("http://127.0.0.1/api/settings/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        previewId: preview.id,
+        confirmationText: "ALLOW POLICY RELAXATION",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    const goodRes = await handleMutationRoute(
+      ctx,
+      "POST",
+      "/api/settings/apply",
+      goodApply,
+      new URL(goodApply.url),
+    );
+    expect((goodRes as Response).status).toBe(200);
+
+    const { readFileSync } = await import("node:fs");
+    const stored = JSON.parse(readFileSync(join(tmp, ".vibeflow", "SETTINGS.json"), "utf8")) as {
+      envPolicy?: { deny?: string[]; allow?: string[] };
+      hooks?: { templates: string[] };
+    };
+    expect(stored.envPolicy?.allow).toEqual(["HOME", "PATH"]);
+    expect(stored.envPolicy?.deny).toEqual([]);
+    expect(stored.hooks?.templates).toEqual([]);
+
+    const { readFileSync: read2 } = await import("node:fs");
+    const lines = read2(join(tmp, ".vibeflow", "logs", "skill-audit.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] as string)).toMatchObject({
+      actor: "human",
+      action: "policy",
+      evidence: [preview.id],
+    });
+
+    // Replay → 400 (single-use)
+    const replayReq = new Request("http://127.0.0.1/api/settings/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        previewId: preview.id,
+        confirmationText: "ALLOW POLICY RELAXATION",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    const replayRes = await handleMutationRoute(
+      ctx,
+      "POST",
+      "/api/settings/apply",
+      replayReq,
+      new URL(replayReq.url),
+    );
+    expect((replayRes as Response).status).toBe(400);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("handleMutationRoute POST /api/settings/preview rejects invalid payload without writing", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "vf-polbad-"));
+  try {
+    const ctx = { getActiveRepo: () => tmp, setActiveRepo: (_r: string) => {} };
+    const req = new Request("http://127.0.0.1/api/settings/preview", {
+      method: "POST",
+      body: JSON.stringify({ envPolicy: { allow: ["A\nB"] } }),
+      headers: { "content-type": "application/json" },
+    });
+    const res = await handleMutationRoute(
+      ctx,
+      "POST",
+      "/api/settings/preview",
+      req,
+      new URL(req.url),
+    );
+    expect(res).not.toBeNull();
+    expect((res as Response).status).toBe(400);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // --- handleMutationRoute /api/hook/pending unit tests (covers routes.ts lines 292-302) ---
 
 test("handleMutationRoute POST /api/hook/pending: registers hook and returns ok:true", async () => {

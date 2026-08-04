@@ -169,6 +169,13 @@
           Unsaved changes
         </div>
 
+        <PolicyDiffModal
+          v-if="policyPreview"
+          :preview="policyPreview"
+          @cancel="policyPreview = null"
+          @apply="applyPolicy"
+        />
+
         <!-- Discard confirm inline -->
         <div v-if="showDiscardConfirm" class="flex items-center justify-between gap-3 px-3 py-2 rounded border border-neutral-800 text-xs">
           <span class="text-neutral-400">Discard unsaved changes?</span>
@@ -192,10 +199,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
-import type { VibeSettings } from "../types.js";
+import type { PolicyPreview, VibeSettings } from "../types.js";
 import CuratorSettings from "./CuratorSettings.vue";
 import EnvScrubEditor from "./EnvScrubEditor.vue";
 import InfoTip from "./InfoTip.vue";
+import PolicyDiffModal from "./PolicyDiffModal.vue";
+
+/** Deep clone — avoids aliasing the shared API-cached object. */
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -204,6 +217,7 @@ const saving = ref(false);
 const saved = ref(false);
 const err = ref<string | null>(null);
 const form = ref<VibeSettings | null>(null);
+const policyPreview = ref<PolicyPreview | null>(null);
 const dialogEl = ref<HTMLElement | null>(null);
 const showDiscardConfirm = ref(false);
 /** #689: curator schedule validity — blocks Save when invalid. */
@@ -325,11 +339,53 @@ async function save() {
   saving.value = true;
   try {
     err.value = null;
-    const savedSettings = await api.settings.set(form.value);
-    original.value = JSON.parse(JSON.stringify(savedSettings)) as VibeSettings;
+    const originalPolicy = pickPolicy(original.value);
+    const nextPolicy = pickPolicy(form.value);
+    // #692: sensitive policy changes (envPolicy / hooks) go through a
+    // server-generated preview + exact confirmation. Non-sensitive settings
+    // keep the direct save path.
+    if (JSON.stringify(originalPolicy) !== JSON.stringify(nextPolicy)) {
+      policyPreview.value = await api.settings.previewPolicy(nextPolicy);
+    } else {
+      const savedSettings = await api.settings.set(form.value);
+      original.value = JSON.parse(JSON.stringify(savedSettings)) as VibeSettings;
+      saved.value = true;
+      setTimeout(() => emit("close"), 1500);
+    }
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    saving.value = false;
+  }
+}
+
+/** Extract just the policy fields for #692 preview routing / dirty baseline. */
+function pickPolicy(s: VibeSettings | null): Partial<Pick<VibeSettings, "envPolicy" | "hooks">> {
+  if (!s) return {};
+  return {
+    ...(s.envPolicy ? { envPolicy: s.envPolicy } : {}),
+    ...(s.hooks ? { hooks: s.hooks } : {}),
+  };
+}
+
+/** #692: apply a confirmed preview; close on success. */
+async function applyPolicy(confirmation: string) {
+  if (!policyPreview.value) return;
+  saving.value = true;
+  try {
+    err.value = null;
+    // #692: apply sends non-policy settings as the payload so policy + regular
+    // edits land in ONE server write — no separate /api/settings POST.
+    const { envPolicy: _ep, hooks: _hk, ...nonPolicy } = form.value as VibeSettings;
+    const savedSettings = await api.settings.applyPolicy(
+      policyPreview.value.id,
+      policyPreview.value.relaxation ? confirmation : "",
+      { ...nonPolicy },
+    );
+    original.value = clone(savedSettings);
     saved.value = true;
-    // Brief "Saved" confirmation before closing
-    setTimeout(() => emit("close"), 1500);
+    policyPreview.value = null;
+    setTimeout(() => emit("close"), 500);
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {

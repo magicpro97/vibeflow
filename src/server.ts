@@ -664,6 +664,8 @@ export function startServer(
             path === "/api/ask" ||
             path === "/api/preflight" ||
             path === "/api/settings" ||
+            path === "/api/settings/preview" ||
+            path === "/api/settings/apply" ||
             path === "/api/verify" ||
             path === "/api/hook/approve" ||
             path.startsWith("/api/guidance/") ||
