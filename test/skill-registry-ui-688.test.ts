@@ -151,17 +151,17 @@ describe("SkillPanel.vue: explicit tab keyboard handling", () => {
     expect(src).not.toContain("moveTab(0)");
   });
 
-  test("ArrowLeft/ArrowRight wrap between the two tabs", () => {
+  test("ArrowLeft/ArrowRight wrap between tabs", () => {
     expect(src).toContain('e.key === "ArrowLeft"');
     expect(src).toContain('e.key === "ArrowRight"');
     expect(src).toContain("(idx + dir + TABS.length) % TABS.length");
   });
 
-  test("Home always goes to skills; End always goes to registries", () => {
+  test("Home always goes to skills; End always goes to domains", () => {
     expect(src).toContain('e.key === "Home"');
     expect(src).toContain('e.key === "End"');
     expect(src).toContain('selectTab("skills")');
-    expect(src).toContain('selectTab("registries")');
+    expect(src).toContain('selectTab("domains")');
   });
 });
 
@@ -176,7 +176,7 @@ describe("SkillPanel.vue: selectTab routes all tab changes", () => {
 
   test("keyboard Home/End/Arrow route through selectTab", () => {
     expect(src).toContain('selectTab("skills")');
-    expect(src).toContain('selectTab("registries")');
+    expect(src).toContain('selectTab("domains")');
     expect(src).not.toContain('goToTab("skills")');
     expect(src).not.toContain('goToTab("registries")');
   });

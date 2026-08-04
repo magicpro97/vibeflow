@@ -45,6 +45,17 @@
           @click="selectTab('registries')"
           @keydown="onTabKeydown"
         >Registries</button>
+        <button
+          id="tab-domains"
+          role="tab"
+          :aria-selected="tab === 'domains'"
+          :aria-controls="'panel-domains'"
+          :tabindex="tab === 'domains' ? 0 : -1"
+          class="px-3 py-1.5 text-xs rounded-t transition-colors"
+          :class="tab === 'domains' ? 'text-neutral-100 border-b-2 border-neutral-200' : 'text-neutral-500 hover:text-neutral-300'"
+          @click="selectTab('domains')"
+          @keydown="onTabKeydown"
+        >Domain</button>
       </div>
 
       <div
@@ -124,6 +135,16 @@
       >
         <RegistryView />
       </div>
+
+      <div
+        id="panel-domains"
+        role="tabpanel"
+        aria-labelledby="tab-domains"
+        tabindex="0"
+        :hidden="tab !== 'domains'"
+      >
+        <DomainFactsView />
+      </div>
     </div>
   </div>
 </template>
@@ -132,23 +153,25 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { scanDisplay } from "../lib/scan-helper.js";
 import { useVfStore } from "../store.js";
+import DomainFactsView from "./DomainFactsView.vue";
 import RegistryView from "./RegistryView.vue";
 
 const emit = defineEmits<{ close: [] }>();
 const store = useVfStore();
 const dialogEl = ref<HTMLElement | null>(null);
-const tab = ref<"skills" | "registries">("skills");
+const tab = ref<"skills" | "registries" | "domains">("skills");
 
-function selectTab(next: "skills" | "registries") {
+function selectTab(next: "skills" | "registries" | "domains") {
   if (tab.value === "registries" && next !== "registries") {
     store.closeRegistryPreview();
   }
   tab.value = next;
-  const id = next === "skills" ? "tab-skills" : "tab-registries";
+  const id =
+    next === "skills" ? "tab-skills" : next === "registries" ? "tab-registries" : "tab-domains";
   document.getElementById(id)?.focus();
 }
 
-const TABS: ("skills" | "registries")[] = ["skills", "registries"];
+const TABS: ("skills" | "registries" | "domains")[] = ["skills", "registries", "domains"];
 
 function moveTab(dir: -1 | 1) {
   const idx = TABS.indexOf(tab.value);
@@ -169,7 +192,7 @@ function onTabKeydown(e: KeyboardEvent) {
     selectTab("skills");
   } else if (e.key === "End") {
     e.preventDefault();
-    selectTab("registries");
+    selectTab("domains");
   }
 }
 
