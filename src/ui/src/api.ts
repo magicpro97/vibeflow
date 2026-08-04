@@ -1,6 +1,8 @@
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
 import type {
   DashboardSelection,
+  DomainImpact,
+  DomainsView,
   RegistryPreview,
   RegistryViewEntry,
   SafeSkill,
@@ -9,7 +11,6 @@ import type {
   WorkflowDashboardItem,
   WorkflowState,
 } from "./types.js";
-
 const CSRF = document.querySelector<HTMLMetaElement>('meta[name="vf-token"]')?.content ?? "";
 
 /** Warn once in console if CSRF token is missing — all write requests will 403 */
@@ -87,6 +88,12 @@ export const api = {
         action: "update",
         registry,
       }),
+  },
+  // #691: read-only Domain & Facts view + affected-skill impact resolution.
+  domains: {
+    view: () => req<DomainsView>("GET", "/api/domains").then((r) => r.roots),
+    impact: (query: string) =>
+      req<DomainImpact>("GET", `/api/domains/impact?q=${encodeURIComponent(query)}`),
   },
   attachments: () =>
     req<{ attachments: unknown[] }>("GET", "/api/attachments").then((r) => r.attachments),

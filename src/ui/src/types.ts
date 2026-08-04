@@ -304,3 +304,32 @@ export interface RegistryPreview {
   registry: string;
   plan: string;
 }
+
+// ── #691: Domain & Facts view types ────────────────────────────────────
+export interface DomainFactView {
+  key: string;
+  owner: string;
+  version: string;
+  statement: string;
+  paths: string[];
+}
+
+export interface DomainRootView {
+  id: string;
+  canonical: string;
+  facts: DomainFactView[];
+  children: string[];
+}
+
+export interface DomainsView {
+  ok: true;
+  roots: DomainRootView[];
+}
+
+export interface DomainImpact {
+  ok: boolean;
+  query: string;
+  facts: string[];
+  skills: string[];
+  error?: string;
+}

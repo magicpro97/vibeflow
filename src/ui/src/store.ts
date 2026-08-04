@@ -5,6 +5,7 @@ import type { AskPrefill } from "./lib/ask-prefill.js";
 import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
 import { resolveRepoPath } from "./lib/resolve-repo-path.js";
 import type {
+  DomainRootView,
   PlanComment,
   PlanRevision,
   ProjectEntry,
@@ -47,6 +48,10 @@ export const useVfStore = defineStore("vf", () => {
   const registryLoading = ref(false);
   const registryError = ref<string | null>(null);
   const registryPreview = ref<RegistryPreview | null>(null);
+  // #691: read-only domain view state (read-model, no mutation).
+  const domains = ref<DomainRootView[]>([]);
+  const domainsLoading = ref(false);
+  const domainsError = ref<string | null>(null);
   const askOpen = ref(false);
   const askPrefill = ref<AskPrefill | null>(null);
   const selectedWorkflowKey = ref<string | null>(null);
@@ -238,6 +243,24 @@ export const useVfStore = defineStore("vf", () => {
     registryPreview.value = null;
   }
 
+  async function loadDomains() {
+    domainsLoading.value = true;
+    domainsError.value = null;
+    try {
+      domains.value = await api.domains.view();
+    } catch (e) {
+      domains.value = [];
+      domainsError.value = e instanceof Error ? e.message.slice(0, 120) : "Failed to load domains";
+    } finally {
+      domainsLoading.value = false;
+    }
+  }
+
+  async function resolveDomainImpact(query: string): Promise<DomainRootView["children"]> {
+    const impact = await api.domains.impact(query);
+    return impact.skills;
+  }
+
   /** Loads workflow state from server. Returns the new state, or null if not found yet.
    *  Throws on unexpected errors (non-404) so callers can surface them. */
   async function loadState() {
@@ -361,5 +384,10 @@ export const useVfStore = defineStore("vf", () => {
     loadRegistries,
     previewRegistryUpdate,
     closeRegistryPreview,
+    domains,
+    domainsLoading,
+    domainsError,
+    loadDomains,
+    resolveDomainImpact,
   };
 });

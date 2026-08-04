@@ -7,6 +7,7 @@ import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { askStreamResponse } from "./server/ask-route.js";
+import { handleDomainImpact, handleDomainsView } from "./server/domain-route.js";
 import { handleFileRoute } from "./server/file-route.js";
 import {
   listAttachments,
@@ -195,6 +196,18 @@ export function startServer(
       if (method === "GET" && path === "/api/skills/registries") {
         if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         return handleRegistryView(activeRepo);
+      }
+
+      // --- GET /api/domains (#691: guarded, read-only) ---
+      if (method === "GET" && path === "/api/domains") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleDomainsView(activeRepo);
+      }
+
+      // --- GET /api/domains/impact (#691: guarded, read-only) ---
+      if (method === "GET" && path === "/api/domains/impact") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleDomainImpact(activeRepo, url.searchParams.get("q"));
       }
 
       // --- GET /api/settings (#561: guarded) ---
