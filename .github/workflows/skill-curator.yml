@@ -3,25 +3,23 @@ name: Skill Curator Weekly Report
 # Runs deterministic curator scan weekly, posts aggregate health report as
 # a single issue. Re-runs update the same issue (no duplicates).
 # Deduplication is by exact title match only — no label dependency.
-# Read-only except for the issue write step.
+# Writes one Git notes ref and one aggregate issue; no finding detail leaves the runner.
 
 on:
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
 
-permissions:
-  contents: read
-  issues: write
-
 concurrency:
   group: skill-curator-report
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  report:
+  sync:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,10 +35,31 @@ jobs:
           bun run build
 
       - name: Run curator scan
-        continue-on-error: true
         run: |
           set -euo pipefail
-          node dist/cli.js skills curator scan --scope=repo
+          node dist/cli.js skills curator scan --scope=repo --sync --yes || rc=$?
+          if [ "${rc:-0}" -gt 1 ]; then exit "$rc"; fi
+
+      - name: Upload curator findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: curator-findings
+          path: .vibeflow/curator/findings.json
+          if-no-files-found: error
+
+  report:
+    needs: sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Download curator findings
+        uses: actions/download-artifact@v4
+        with:
+          name: curator-findings
+          path: .vibeflow/curator
 
       - name: Build issue body
         id: body
@@ -85,7 +104,8 @@ jobs:
           set -euo pipefail
           EXISTING=$(gh issue list \
             --state all \
-            --limit 500 \
+            --search 'in:title "[skill-curator] Weekly Skill Health Report"' \
+            --limit 1000 \
             --json number,title \
             --jq '[.[] | select(.title == "[skill-curator] Weekly Skill Health Report") | .number][0] // empty' \
           )

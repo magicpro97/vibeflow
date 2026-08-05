@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,8 +7,31 @@ import { out } from "../logbus.js";
 import { checkAnchors } from "./anchor-freshness.js";
 import { auditSkillDuplicates } from "./audit-duplicates.js";
 import { handleCuratorProposalSubcommand } from "./curator-proposals.js";
+import {
+  type GitRunner,
+  curatorFingerprint,
+  parseCuratorScanOptions,
+  renderCuratorSyncPreview,
+  resolveCleanCuratorCommit,
+  syncCuratorMarkers,
+} from "./curator-sync.js";
 import { discoverSkills } from "./discovery.js";
 import { parseRegistryLock } from "./registry-channel.js";
+
+export {
+  CURATOR_NOTES_REF,
+  CURATOR_REMOTE,
+  curatorFingerprint,
+  isSafeCuratorIdentity,
+  parseCuratorMarkers,
+  parseCuratorScanOptions,
+  renderCuratorMarkers,
+  renderCuratorSyncPreview,
+} from "./curator-sync.js";
+export type { CuratorMarker, CuratorScanOptions, CuratorScope, GitRunner } from "./curator-sync.js";
+export function parseCuratorScope(args: string[]): "local" | "repo" | null {
+  return parseCuratorScanOptions(args)?.scope ?? null;
+}
 
 export type FindingType = "stale-anchor" | "duplicate-owner" | "unpinned-registry";
 
@@ -40,23 +64,7 @@ export interface CuratorScanResult {
   schemaVersion: 1;
 }
 
-export type FindingScope = "local" | "repo";
-
-export function parseCuratorScope(args: string[]): FindingScope | null {
-  if (args.length === 0) return "local";
-  if (args.length !== 1) return null;
-  if (args[0] === "--scope=local") return "local";
-  if (args[0] === "--scope=repo") return "repo";
-  return null;
-}
-
-export function curatorFingerprint(commitSha: string, domainId: string, factId: string): string {
-  const h = createHash("sha256");
-  h.update(`${commitSha}\u0000${domainId}\u0000${factId}`);
-  return h.digest("hex");
-}
-
-function findingKey(f: Finding): string {
+export function findingKey(f: Finding): string {
   switch (f.type) {
     case "stale-anchor":
       return f.skill;
@@ -135,7 +143,7 @@ export function curatorScan(
   const withKey: (Finding & { _key: string })[] = findings.map((f) => {
     return { ...f, _key: `${f.type}\u0000${findingKey(f)}` };
   });
-  withKey.sort((a, b) => a._key.localeCompare(b._key));
+  withKey.sort((a, b) => (a._key < b._key ? -1 : a._key > b._key ? 1 : 0));
 
   const seen = new Set<string>();
   const deduped: Finding[] = [];
@@ -167,26 +175,102 @@ export function readCuratorFindings(repo: string): CuratorScanResult | null {
 }
 
 export function handleCuratorSubcommand(repo: string, rest: string[]): number {
+  return handleCuratorSubcommandWithDeps(repo, rest);
+}
+
+export function handleCuratorSubcommandWithDeps(
+  repo: string,
+  rest: string[],
+  deps: {
+    scan?: typeof curatorScan;
+    writeFindings?: typeof writeCuratorFindings;
+    resolveCommit?: (repo: string) => string | null;
+    sync?: typeof syncCuratorMarkers;
+    git?: GitRunner;
+  } = {},
+): number {
   const sub = rest[0];
   if (sub === "scan") {
-    if (parseCuratorScope(rest.slice(1)) === null) {
-      out("vf", c.dim("Usage: vf skills curator scan [--scope=local|repo]"));
+    const opts = parseCuratorScanOptions(rest.slice(1));
+    if (opts === null) {
+      out(
+        "vf",
+        c.dim(
+          "Usage: vf skills curator scan [--scope=local|repo] [--sync] [--yes]  (--sync previews; --yes syncs Git notes)",
+        ),
+      );
       return 2;
     }
-    const result = curatorScan(repo);
-    writeCuratorFindings(repo, result);
-    const counts: Record<string, number> = {};
-    for (const f of result.findings) counts[f.type] = (counts[f.type] ?? 0) + 1;
-    const total = result.findings.length;
-    if (total === 0) {
-      out("vf", c.green("✔ No issues found."));
-    } else {
-      out("vf", c.bold(`${total} issue(s) found:`));
-      for (const [type, count] of Object.entries(counts)) {
-        if (count > 0) out("vf", `  ${type}: ${count}`);
-      }
+    const git: GitRunner =
+      deps.git ??
+      ((args, cwd) => {
+        const result = spawnSync("git", args, { cwd, encoding: "utf8", timeout: 60_000 });
+        return {
+          status: result.status ?? 1,
+          stdout: result.stdout ?? "",
+          stderr: result.stderr ?? "",
+        };
+      });
+    const resolveCommit = deps.resolveCommit ?? ((cwd) => resolveCleanCuratorCommit(cwd, git));
+    const commit = opts.scope === "repo" ? resolveCommit(repo) : null;
+    if (opts.scope === "repo" && !commit) {
+      out("vf", c.red("Repo scope requires a clean worktree and a valid HEAD commit."), {
+        level: "error",
+      });
+      return 2;
     }
-    return total > 0 ? 1 : 0;
+    const scan = deps.scan ?? curatorScan;
+    const writeFindings = deps.writeFindings ?? writeCuratorFindings;
+    const result = scan(repo);
+    writeFindings(repo, result);
+    if (opts.scope === "local") {
+      const counts: Record<string, number> = {};
+      for (const f of result.findings) counts[f.type] = (counts[f.type] ?? 0) + 1;
+      const total = result.findings.length;
+      if (total === 0) {
+        out("vf", c.green("✔ No issues found."));
+      } else {
+        out("vf", c.bold(`${total} issue(s) found:`));
+        for (const [type, count] of Object.entries(counts)) {
+          if (count > 0) out("vf", `  ${type}: ${count}`);
+        }
+      }
+      return total > 0 ? 1 : 0;
+    }
+    if (!commit) return 1;
+    if (!opts.sync) {
+      out("vf", c.dim(`Scope: repo — anchored to ${commit.slice(0, 12)}; shared sync disabled.`));
+      return result.findings.length > 0 ? 1 : 0;
+    }
+    if (!opts.yes) {
+      for (const line of renderCuratorSyncPreview()) out("vf", c.dim(line));
+      return result.findings.length > 0 ? 1 : 0;
+    }
+    const sync = deps.sync ?? syncCuratorMarkers;
+    const shared = result.findings.map((finding) => ({
+      type: finding.type,
+      findingKey: findingKey(finding),
+    }));
+    const synced = sync(repo, commit, shared, git);
+    if (!synced.synced) {
+      out(
+        "vf",
+        c.red(
+          "Shared curator sync failed; local findings were preserved and shared dedup is unverified.",
+        ),
+        {
+          level: "error",
+        },
+      );
+      return 2;
+    }
+    const duplicates = new Set(synced.duplicateFingerprints);
+    const newFindings = result.findings.filter((finding) => {
+      const fingerprint = curatorFingerprint(commit, finding.type, findingKey(finding));
+      return fingerprint !== null && !duplicates.has(fingerprint);
+    });
+    out("vf", c.green(`✔ Shared curator sync complete; ${newFindings.length} new finding(s).`));
+    return newFindings.length > 0 ? 1 : 0;
   }
   if (sub === "issue" || sub === "pr") {
     return handleCuratorProposalSubcommand(repo, sub, rest.slice(1));
@@ -194,7 +278,7 @@ export function handleCuratorSubcommand(repo: string, rest: string[]): number {
   out(
     "vf",
     c.dim(
-      "Usage: vf skills curator scan [--scope=local|repo] | issue [--dry-run] | pr [--dry-run]",
+      "Usage: vf skills curator scan [--scope=local|repo] [--sync] [--yes] | issue [--dry-run] | pr [--dry-run]",
     ),
   );
   return 2;

@@ -7,7 +7,7 @@ describe("skill-curator workflow", () => {
   test("has required top-level keys", () => {
     expect(content).toMatch(/^name:\s*Skill Curator Weekly Report/m);
     expect(content).toMatch(/^on:/m);
-    expect(content).toMatch(/^permissions:/m);
+    expect(content).toMatch(/^ {4}permissions:/m);
     expect(content).toMatch(/^concurrency:/m);
     expect(content).toMatch(/^jobs:/m);
   });
@@ -18,14 +18,20 @@ describe("skill-curator workflow", () => {
     expect(content).toContain("workflow_dispatch:");
   });
 
-  test("permissions scoped to contents:read and issues:write", () => {
+  test("sync and report jobs use least-privilege permissions", () => {
+    expect(content).toContain("sync:");
+    expect(content).toContain("report:");
+    expect(content).toContain("contents: write");
     expect(content).toContain("contents: read");
     expect(content).toContain("issues: write");
+    expect(content).toContain("needs: sync");
   });
 
   test("pinned action versions", () => {
     expect(content).toContain("actions/checkout@v4");
     expect(content).toContain("oven-sh/setup-bun@v2");
+    expect(content).toContain("actions/upload-artifact@v4");
+    expect(content).toContain("actions/download-artifact@v4");
   });
 
   test("shell strict mode in every multi-line run step", () => {
@@ -38,6 +44,8 @@ describe("skill-curator workflow", () => {
 
   test("finds existing report issue by exact title, no label dependency", () => {
     expect(content).toContain("gh issue list");
+    expect(content).toContain("--search 'in:title \"[skill-curator] Weekly Skill Health Report\"'");
+    expect(content).toContain("--limit 1000");
     expect(content).toContain("--json number,title");
     expect(content).toContain('select(.title == "[skill-curator] Weekly Skill Health Report")');
     expect(content).not.toContain("gh label create");
@@ -51,9 +59,11 @@ describe("skill-curator workflow", () => {
     expect(content).toContain("steps.find.outputs.found");
   });
 
-  test("runs curator scan on repo scope with continue-on-error", () => {
-    expect(content).toContain("continue-on-error: true");
-    expect(content).toContain("node dist/cli.js skills curator scan --scope=repo");
+  test("runs explicit repo sync and preserves finding exit status", () => {
+    expect(content).toContain("contents: write");
+    expect(content).toContain("cancel-in-progress: false");
+    expect(content).toContain("node dist/cli.js skills curator scan --scope=repo --sync --yes");
+    expect(content).toContain('if [ "${rc:-0}" -gt 1 ]; then exit "$rc"; fi');
     expect(content).not.toContain("node dist/cli.js skills curator scan --scope=local");
   });
 

@@ -209,7 +209,7 @@ ${c.bold("Subcommands:")}
   import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
   init <name>                scaffold an empty SKILL.md stub
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
-  curator scan [--scope=local|repo]  scan: local default (ignored by shared publisher); repo = future shared publish candidate (no cross-run dedup yet)
+  curator scan [--scope=local|repo] [--sync] [--yes]  scan: local default is private; repo anchors clean HEAD; --sync previews notes sharing; --yes syncs origin notes
   eval <skill-dir>           eval cases; semantic-filter [--max-reviews N] [--reviewer ID] finds pairs (reviews execute only when BOTH flags set, N>0; opt-in/no network)
   registry <add|list|update|install> manage remote skill registries (git-backed) — see below
 
