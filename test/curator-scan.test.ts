@@ -9,9 +9,9 @@ import type { AuditDuplicatesResult } from "../src/skills/audit-duplicates.js";
 import {
   type CuratorScanResult,
   type Finding,
-  curatorFingerprint,
   curatorScan,
   handleCuratorSubcommand,
+  handleCuratorSubcommandWithDeps,
   parseCuratorScope,
   readCuratorFindings,
   writeCuratorFindings,
@@ -65,21 +65,6 @@ describe("parseCuratorScope", () => {
     expect(parseCuratorScope(["--scope=local", "--scope=repo"])).toBeNull();
     expect(parseCuratorScope(["--scope=remote"])).toBeNull();
     expect(parseCuratorScope(["--scope=local", "--scope=local"])).toBeNull();
-  });
-});
-
-describe("curatorFingerprint", () => {
-  test("matches known digest for fixed inputs", () => {
-    expect(curatorFingerprint("abc123", "stale-anchor", "myskill")).toBe(
-      "eca2f91cb786a145049cac52ef8e1923db3121998abc5a841c16d7696038d588",
-    );
-  });
-
-  test("changing any input changes digest", () => {
-    const base = curatorFingerprint("abc123", "stale-anchor", "myskill");
-    expect(curatorFingerprint("abc1234", "stale-anchor", "myskill")).not.toBe(base);
-    expect(curatorFingerprint("abc123", "duplicate-owner", "myskill")).not.toBe(base);
-    expect(curatorFingerprint("abc123", "stale-anchor", "myskill2")).not.toBe(base);
   });
 });
 
@@ -321,6 +306,77 @@ describe("handleCuratorSubcommand", () => {
     );
     expect(code).toBe(2);
     expect(lines.some((l) => l.includes("Usage"))).toBe(true);
+  });
+
+  test("repo scope rejects dirty state before scan or local write", () => {
+    let scanned = false;
+    let wrote = false;
+    const { code } = captureConsole(() =>
+      handleCuratorSubcommandWithDeps(dir, ["scan", "--scope=repo"], {
+        resolveCommit: () => null,
+        scan: () => {
+          scanned = true;
+          return { schemaVersion: 1, findings: [] };
+        },
+        writeFindings: () => {
+          wrote = true;
+        },
+      }),
+    );
+    expect(code).toBe(2);
+    expect(scanned).toBe(false);
+    expect(wrote).toBe(false);
+  });
+
+  test("repo scope handles unavailable Git without scanning", () => {
+    let scanned = false;
+    const { code } = captureConsole(() =>
+      handleCuratorSubcommandWithDeps("/definitely-not-a-repository", ["scan", "--scope=repo"], {
+        scan: () => {
+          scanned = true;
+          return { schemaVersion: 1, findings: [] };
+        },
+      }),
+    );
+    expect(code).toBe(2);
+    expect(scanned).toBe(false);
+  });
+
+  test("repo scope reports anchored scan, previews sync, and fails closed on sync error", () => {
+    const commit = "a".repeat(40);
+    const result = {
+      schemaVersion: 1 as const,
+      findings: [
+        { id: "x", type: "stale-anchor" as const, skill: "alpha", detail: "private detail" },
+      ],
+    };
+    const base = { resolveCommit: () => commit, scan: () => result, writeFindings: () => {} };
+
+    expect(
+      captureConsole(() => handleCuratorSubcommandWithDeps(dir, ["scan", "--scope=repo"], base))
+        .code,
+    ).toBe(1);
+    const preview = captureConsole(() =>
+      handleCuratorSubcommandWithDeps(dir, ["scan", "--scope=repo", "--sync"], base),
+    );
+    expect(preview.code).toBe(1);
+    expect(preview.lines.join("\n")).toContain("Shared sync preview");
+    expect(
+      captureConsole(() =>
+        handleCuratorSubcommandWithDeps(dir, ["scan", "--scope=repo", "--sync", "--yes"], {
+          ...base,
+          sync: () => ({ synced: false, duplicateFingerprints: new Set() }),
+        }),
+      ).code,
+    ).toBe(2);
+    const success = captureConsole(() =>
+      handleCuratorSubcommandWithDeps(dir, ["scan", "--scope=repo", "--sync", "--yes"], {
+        ...base,
+        sync: () => ({ synced: true, duplicateFingerprints: new Set() }),
+      }),
+    );
+    expect(success.code).toBe(1);
+    expect(success.lines.join("\n")).toContain("1 new finding(s)");
   });
 
   test("unknown subcommand returns 2", () => {

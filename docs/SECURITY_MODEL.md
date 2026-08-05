@@ -153,6 +153,29 @@ trusted machine-wide. The gate is optional (degrades gracefully when the scanner
 absent), so when it is not installed, only manually-reviewed skills should be
 promoted to `verified`.
 
+## Curator shared synchronization
+
+Curator scans are local-first. `vf skills curator scan` and
+`vf skills curator scan --scope=local` write only an ignored local findings report;
+they do not run Git, contact a remote, create issues, or publish findings.
+
+`vf skills curator scan --scope=repo` requires a clean checkout and anchors the
+scan to immutable `HEAD`. It still does not contact a remote. Add `--sync` to
+preview the only possible shared operation. The preview names remote `origin`,
+ref `refs/notes/vibeflow-curator`, sent fields, excluded fields, visibility risk,
+and the exact `--scope=repo --sync --yes` confirmation command.
+
+Only `--scope=repo --sync --yes` fetches and pushes that exact Git notes ref.
+The note stores a commit OID, finding type, and SHA-256 fingerprint. It never
+stores finding detail, finding keys, paths, source content, URLs, usernames, or
+credentials. Remote readers may still infer that a matching finding existed, so
+do not enable sync where that fact is sensitive.
+
+Git notes are duplicate-reporting hints, not a security attestation. A collaborator
+with Git write access can add a marker. Markers never approve a change, resolve a
+finding, or bypass a security gate. GitHub Issues may project human-readable
+reports later but are not curator deduplication authority.
+
 ## External skill security scan (optional)
 
 `vf skills verify <name>` promotes a local skill to `verified`. Before the status is
