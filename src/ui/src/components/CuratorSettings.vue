@@ -74,6 +74,14 @@
     <div v-else-if="loaded && !error" class="text-[11px] text-neutral-600 italic">No curator findings</div>
 
     <div v-if="error" class="text-[11px] text-red-400">{{ error }}</div>
+
+    <button type="button" class="btn-secondary text-xs" @click="openSetup">Set up CI: skill-curator.yml</button>
+    <CuratorSetupModal
+      v-if="setupPreview"
+      :preview="setupPreview"
+      @cancel="setupPreview = null"
+      @apply="applySetup"
+    />
   </fieldset>
 </template>
 
@@ -81,7 +89,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../api.js";
 import { isValidSchedule } from "../lib/curator-schedule.js";
-import type { CuratorFindingView, CuratorSettings } from "../types.js";
+import type { CuratorFindingView, CuratorSettings, CuratorSetupPreview } from "../types.js";
+import CuratorSetupModal from "./CuratorSetupModal.vue";
 import InfoTip from "./InfoTip.vue";
 
 const props = defineProps<{ modelValue: CuratorSettings }>();
@@ -98,6 +107,7 @@ const model = computed<CuratorSettings>({
 const findings = ref<CuratorFindingView[]>([]);
 const loaded = ref(false);
 const error = ref("");
+const setupPreview = ref<CuratorSetupPreview | null>(null);
 
 const scheduleValid = computed(() => isValidSchedule(props.modelValue.schedule));
 
@@ -117,6 +127,29 @@ function severityBadge(sev: string): string {
       return "bg-yellow-500/15 text-yellow-400 border border-yellow-500/30";
     default:
       return "bg-neutral-500/15 text-neutral-400 border border-neutral-500/30";
+  }
+}
+
+async function openSetup() {
+  error.value = "";
+  try {
+    setupPreview.value = await api.curatorSetup.preview();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function applySetup(confirmation: string) {
+  if (!setupPreview.value) return;
+  try {
+    await api.curatorSetup.apply(
+      setupPreview.value.id,
+      setupPreview.value.currentHash,
+      confirmation,
+    );
+    setupPreview.value = null;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
   }
 }
 

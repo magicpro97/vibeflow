@@ -160,6 +160,15 @@ export interface CuratorView {
   total: number;
 }
 
+export interface CuratorSetupPreview {
+  id: string;
+  target: string;
+  existing: boolean;
+  currentHash: string;
+  diff: string;
+  confirmation: string;
+}
+
 export interface PolicyDiffEntry {
   field: string;
   before: unknown;

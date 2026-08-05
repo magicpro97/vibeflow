@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { c } from "../core.js";
 import { out } from "../logbus.js";
 
-export type SkillAuditAction = "verify" | "unverify" | "waiver" | "policy";
+export type SkillAuditAction = "verify" | "unverify" | "waiver" | "policy" | "curator-setup";
 
 export interface StoredSkillAuditEvent {
   ts: string;
@@ -48,7 +48,13 @@ export interface ReadSkillAuditDeps {
   exists?: (path: string) => boolean;
 }
 
-const VALID_ACTIONS: ReadonlySet<string> = new Set(["verify", "unverify", "waiver", "policy"]);
+const VALID_ACTIONS: ReadonlySet<string> = new Set([
+  "verify",
+  "unverify",
+  "waiver",
+  "policy",
+  "curator-setup",
+]);
 const VALID_STATUSES: ReadonlySet<string> = new Set(["verified", "unverified"]);
 
 function logDir(repo: string): string {

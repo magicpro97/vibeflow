@@ -85,6 +85,16 @@ export const api = {
       counts: r.counts,
       total: r.total,
     })),
+  curatorSetup: {
+    preview: () =>
+      req<import("./types.js").CuratorSetupPreview>("POST", "/api/curator/setup/preview", {}),
+    apply: (previewId: string, currentHash: string, confirmationText: string) =>
+      req<{ ok: boolean }>("POST", "/api/curator/setup/apply", {
+        previewId,
+        currentHash,
+        confirmationText,
+      }),
+  },
   // #688: registry read + inert preview (read-only, never executes).
   registries: {
     list: () =>

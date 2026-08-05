@@ -15,6 +15,7 @@ import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { writeGuidance } from "../dispatch/guidance.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
 import { askResponse } from "./ask-route.js";
+import { handleCuratorSetupRoute } from "./curator-setup-route.js";
 import {
   ATTACH_CAP,
   applySettings,
@@ -31,7 +32,6 @@ import {
   handlePlanReviewCommentsPost,
   handlePlanReviewPost,
 } from "./plan-review.js";
-import { handlePolicyRoute } from "./policy-route.js";
 import { handleRegistryPreview } from "./registry-route.js";
 
 export interface RouteCtx {
@@ -102,8 +102,9 @@ export async function handleMutationRoute(
     return handlePlanReviewCommentsDelete(ctx.getActiveRepo(), path, url);
   }
 
-  if (method === "POST" && (path === "/api/settings/preview" || path === "/api/settings/apply")) {
-    return handlePolicyRoute(ctx.getActiveRepo(), path, req);
+  if (method === "POST") {
+    const response = await handleCuratorSetupRoute(ctx.getActiveRepo(), path, req);
+    if (response) return response;
   }
   const payload = (await req.json()) as Record<string, unknown>;
 
@@ -393,8 +394,7 @@ export function handleProjectsRoute(path: string, url: URL): Response | null {
     const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 500);
     if (!repoPath) return Response.json({ error: "path required" }, { status: 400 });
     const logFile = join(repoPath, CTX_DIR, "logs", "current.log");
-    const events = replayFromLog(logFile, since, limit);
-    return Response.json({ events });
+    return Response.json({ events: replayFromLog(logFile, since, limit) });
   }
   return null;
 }
