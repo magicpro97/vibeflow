@@ -13,6 +13,7 @@ import { writeFileSafe } from "../core.js";
 import {
   CURATOR_SETUP_CONFIRMATION,
   CURATOR_SETUP_PREVIEW_MAX_BYTES,
+  CURATOR_SETUP_PREVIEW_MAX_LINES,
   CURATOR_SETUP_TARGET,
   CuratorSetupStore,
   buildCuratorWorkflow,
@@ -91,6 +92,12 @@ export async function previewCuratorSetup(
     const current = d.read(repo, CURATOR_SETUP_TARGET);
     if (Buffer.byteLength(current, "utf8") > CURATOR_SETUP_PREVIEW_MAX_BYTES) {
       return Response.json({ error: "existing workflow is too large to preview" }, { status: 413 });
+    }
+    if (current.split("\n").length > CURATOR_SETUP_PREVIEW_MAX_LINES) {
+      return Response.json(
+        { error: "existing workflow has too many lines to preview" },
+        { status: 413 },
+      );
     }
     const preview = curatorSetupPreviews.create(repo, current);
     const diff = unifiedDiff(current, buildCuratorWorkflow());

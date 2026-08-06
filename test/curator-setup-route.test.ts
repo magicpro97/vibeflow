@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CURATOR_SETUP_CONFIRMATION,
   CURATOR_SETUP_PREVIEW_MAX_BYTES,
+  CURATOR_SETUP_PREVIEW_MAX_LINES,
   buildCuratorWorkflow,
   curatorContentHash,
 } from "../src/curator-setup.js";
@@ -136,6 +137,12 @@ describe("previewCuratorSetup — read-only, exact diff #693", () => {
 
   test("oversized existing workflow is rejected before diff allocation", async () => {
     const h = harness({ [`repo-a::${TARGET}`]: "x".repeat(CURATOR_SETUP_PREVIEW_MAX_BYTES + 1) });
+    const res = await preview(h);
+    expect(res.status).toBe(413);
+  });
+
+  test("too many short existing workflow lines are rejected before diff allocation", async () => {
+    const h = harness({ [`repo-a::${TARGET}`]: "x\n".repeat(CURATOR_SETUP_PREVIEW_MAX_LINES) });
     const res = await preview(h);
     expect(res.status).toBe(413);
   });

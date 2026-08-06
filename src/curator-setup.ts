@@ -17,6 +17,8 @@ export const CURATOR_SETUP_TTL_MS = 5 * 60 * 1000;
 export const CURATOR_SETUP_MAX = 20;
 /** Caps preview input before LCS allocation; existing workflow content is untrusted. */
 export const CURATOR_SETUP_PREVIEW_MAX_BYTES = 64 * 1024;
+/** Bounds LCS rows even when untrusted input consists of tiny lines. */
+export const CURATOR_SETUP_PREVIEW_MAX_LINES = 1_000;
 /** Exact phrase a user must type to confirm file creation. */
 export const CURATOR_SETUP_CONFIRMATION = "CREATE CURATOR WORKFLOW";
 
