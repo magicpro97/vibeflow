@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { writeFileSafe } from "../core.js";
 import {
   CURATOR_SETUP_CONFIRMATION,
+  CURATOR_SETUP_PREVIEW_MAX_BYTES,
   CURATOR_SETUP_TARGET,
   CuratorSetupStore,
   buildCuratorWorkflow,
@@ -81,16 +82,16 @@ export async function previewCuratorSetup(
   reqOrBody: Request | Record<string, unknown>,
   deps?: Pick<CuratorSetupRouteDeps, "read" | "now">,
 ): Promise<Response> {
-  let payload: unknown;
   if (reqOrBody instanceof Request) {
-    payload = await readJson(reqOrBody);
-    if (!payload) return invalidJson();
-  } else {
-    payload = reqOrBody;
+    const valid = await readJson(reqOrBody);
+    if (!valid) return invalidJson();
   }
   const d = deps ?? curatorSetupDeps();
   try {
     const current = d.read(repo, CURATOR_SETUP_TARGET);
+    if (Buffer.byteLength(current, "utf8") > CURATOR_SETUP_PREVIEW_MAX_BYTES) {
+      return Response.json({ error: "existing workflow is too large to preview" }, { status: 413 });
+    }
     const preview = curatorSetupPreviews.create(repo, current);
     const diff = unifiedDiff(current, buildCuratorWorkflow());
     return Response.json({
@@ -112,7 +113,7 @@ export function applyCuratorSetup(
   deps?: CuratorSetupRouteDeps,
 ): Response {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return invalidJson();
-  if ("target" in payload && payload.target !== CURATOR_SETUP_TARGET) {
+  if ("target" in payload) {
     return Response.json(
       { error: "target is server-controlled; do not send a target" },
       { status: 400 },

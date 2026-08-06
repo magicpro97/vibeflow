@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   CURATOR_SETUP_CONFIRMATION,
+  CURATOR_SETUP_PREVIEW_MAX_BYTES,
   buildCuratorWorkflow,
   curatorContentHash,
 } from "../src/curator-setup.js";
@@ -131,6 +132,12 @@ describe("previewCuratorSetup — read-only, exact diff #693", () => {
     const h = harness();
     await preview(h);
     expect(h.writeCalls).toEqual([]);
+  });
+
+  test("oversized existing workflow is rejected before diff allocation", async () => {
+    const h = harness({ [`repo-a::${TARGET}`]: "x".repeat(CURATOR_SETUP_PREVIEW_MAX_BYTES + 1) });
+    const res = await preview(h);
+    expect(res.status).toBe(413);
   });
 
   test("existing file: surfaces exact diff against current content, existing=true", async () => {
@@ -285,6 +292,24 @@ describe("applyCuratorSetup — creates exact file + local audit evidence #693",
       },
     );
     expect(out.status).toBe(500);
+  });
+
+  test("rejects any client-supplied target", async () => {
+    const h = harness();
+    const res = await preview(h);
+    const body = (await res.json()) as { id: string; currentHash: string };
+    const out = applyCuratorSetup(
+      "repo-a",
+      {
+        previewId: body.id,
+        currentHash: body.currentHash,
+        confirmationText: CURATOR_SETUP_CONFIRMATION,
+        target: TARGET,
+      },
+      h.deps,
+    );
+    expect(out.status).toBe(400);
+    expect(h.writeCalls).toEqual([]);
   });
 
   test("rejects traversal or wrong target in payload — server-supplied target wins", async () => {

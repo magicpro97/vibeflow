@@ -124,7 +124,6 @@ describe("CuratorSetupStore — opaque preview + single-use + TTL + hash guard #
       () => now,
       () => "id",
     );
-    const wf = "content\n";
     const p = store.create("repo-a", "old");
     expect(store.consume(p.id, "repo-a", "old", CURATOR_SETUP_CONFIRMATION)).not.toBeNull();
     expect(store.consume(p.id, "repo-a", "old", CURATOR_SETUP_CONFIRMATION)).toBeNull();
