@@ -343,7 +343,7 @@ export function hookSelftest(
 }
 
 /** Stable marker the current generator emits in every managed git hook. */
-const MANAGED_MARKER = "vibeflow-managed";
+const MANAGED_MARKER = "# # vibeflow-managed";
 /** Legacy generated header pre-dating the marker (pre-commit/post-checkout/post-merge). */
 const LEGACY_MARKERS = [
   "# VibeFlow guardrail:",
@@ -357,7 +357,18 @@ const LEGACY_MARKERS = [
  * a user-owned hook whose exact bytes MUST be preserved (never chained).
  */
 export function isManagedHook(content: string): boolean {
-  return content.includes(MANAGED_MARKER) || LEGACY_MARKERS.some((m) => content.includes(m));
+  return (
+    content.split("\n").some((line) => line.trim() === MANAGED_MARKER) ||
+    LEGACY_MARKERS.some((m) => content.includes(m))
+  );
+}
+
+function managedHookAt(path: string): boolean {
+  try {
+    return isManagedHook(readFileSync(path, "utf8"));
+  } catch {
+    return false;
+  }
 }
 
 function writeHookFile(dest: string, content: string): void {
@@ -383,8 +394,7 @@ export function installHooks(base?: string): number {
     if (!rel.startsWith(".githooks/")) continue;
     const dest = join(dir, rel);
     if (existsSync(dest)) {
-      const existing = readFileSync(dest, "utf8");
-      if (!isManagedHook(existing)) {
+      if (!managedHookAt(dest)) {
         // pre-commit/post-checkout/post-merge: also non-clobber (fresh-init safety).
         if (!rel.endsWith("/pre-push")) continue;
         preservedUserHook = true;
@@ -606,11 +616,7 @@ export function emitHookFiles(base: string, engines?: Engine[], codexHome?: stri
       continue;
     }
     // #748: never clobber a user-owned .githooks hook — preserve exact bytes, skip it.
-    if (
-      rel.startsWith(".githooks/") &&
-      existsSync(dest) &&
-      !isManagedHook(readFileSync(dest, "utf8"))
-    ) {
+    if (rel.startsWith(".githooks/") && existsSync(dest) && !managedHookAt(dest)) {
       out("vf", c.yellow(`! ${rel} is a user-owned hook — preserved, not overwritten.`));
       continue;
     }
