@@ -194,6 +194,8 @@ describe("gitGuardrailArmed + two-tier note (#624 Task 4)", () => {
       expect(gitGuardrailArmed(dir)).toBe(false);
       writeFileSync(join(dir, ".githooks", "pre-push"), "#!/bin/sh\nexit 1\n");
       expect(gitGuardrailArmed(dir)).toBe(true);
+      writeFileSync(join(dir, ".githooks", "pre-push"), "");
+      expect(gitGuardrailArmed(dir)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

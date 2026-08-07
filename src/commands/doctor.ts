@@ -137,10 +137,13 @@ export function liveGuardrailArmed(base: string): boolean {
  *  core.hooksPath. #748: git guardrails are armed only when BOTH .githooks/pre-commit
  *  and .githooks/pre-push exist, so the doctor message keeps them distinct. */
 export function gitGuardrailArmed(base: string): boolean {
-  return (
-    existsSync(join(base, ".githooks", "pre-commit")) &&
-    existsSync(join(base, ".githooks", "pre-push"))
-  );
+  try {
+    const preCommit = statSync(join(base, ".githooks", "pre-commit"));
+    const prePush = statSync(join(base, ".githooks", "pre-push"));
+    return preCommit.isFile() && prePush.isFile() && preCommit.size > 0 && prePush.size > 0;
+  } catch {
+    return false;
+  }
 }
 
 export function guardrailOffNote(): string {

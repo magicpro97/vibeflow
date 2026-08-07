@@ -288,15 +288,15 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // Runs on every init (first or re-init) to catch upgrades and restore a
   // deleted vf skill. Short-circuits internally when already current.
   if (!opts.dry) ensureInitUpdated(base);
-  // #624 Task 2: arm the portable git guardrail on a FRESH repo only. Non-clobbering:
-  // skip when .githooks/pre-commit already exists (fresh install already done, OR the
-  // repo self-hosts its own hooks like vibeflow itself). Git pre-commit is safe to
-  // default ON — fires only on `git commit`, bypassable with --no-verify, and does NOT
-  // hot-reload into a live agent (unlike .claude/settings.json, which stays --yes-gated).
+  // #624/#748: arm/repair portable git guardrails on a repo when either managed hook
+  // is missing. installHooks preserves every user-owned hook byte-for-byte and returns
+  // nonzero with manual-integration guidance, so re-init can safely add pre-push to an
+  // older repo that already has VibeFlow pre-commit.
   if (
     !opts.dry &&
     existsSync(join(base, ".git")) &&
-    !existsSync(join(base, ".githooks", "pre-commit"))
+    (!existsSync(join(base, ".githooks", "pre-commit")) ||
+      !existsSync(join(base, ".githooks", "pre-push")))
   ) {
     installHooks(base);
   }

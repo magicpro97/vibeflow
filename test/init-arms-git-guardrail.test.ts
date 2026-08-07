@@ -42,6 +42,7 @@ describe("init arms git guardrail (Task 2 #624)", () => {
       applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
       const content = readFileSync(join(dir, ".githooks", "pre-commit"), "utf8");
       expect(content).toBe(sentinel);
+      expect(existsSync(join(dir, ".githooks", "pre-push"))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
