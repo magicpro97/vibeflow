@@ -33,6 +33,14 @@ around a hook defeats the safety layer and is a tracked anti-pattern (see `pitfa
 re-run `vf doctor` (or `vf hooks status`) and confirm the gate shows armed before you rely
 on it.
 
+## Pre-push review evidence
+
+`vf hooks install` installs both pre-commit and pre-push. Pre-push verifies exact current
+HEAD with local commit evidence and fails closed with a repair command. It does not call
+LLMs, GitHub, or the network. `git push --no-verify` bypasses local feedback only; required
+remote `review-thread-gate` remains authority. Existing user-owned hooks are preserved and
+need manual integration.
+
 Powered by VibeFlow.
 
 ## Web UI interactive approval

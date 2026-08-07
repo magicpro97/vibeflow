@@ -134,10 +134,16 @@ export function liveGuardrailArmed(base: string): boolean {
   return false;
 }
 /** #624 Task 4: the COMMIT-TIME git guardrail — .githooks/pre-commit routed via
- *  core.hooksPath. Independent of the live per-tool-call gate: this fires on
- *  `git commit`, is host-agnostic, and is armed by default on fresh `vf init`. */
+ *  core.hooksPath. #748: git guardrails are armed only when BOTH .githooks/pre-commit
+ *  and .githooks/pre-push exist, so the doctor message keeps them distinct. */
 export function gitGuardrailArmed(base: string): boolean {
-  return existsSync(join(base, ".githooks", "pre-commit"));
+  try {
+    const preCommit = statSync(join(base, ".githooks", "pre-commit"));
+    const prePush = statSync(join(base, ".githooks", "pre-push"));
+    return preCommit.isFile() && prePush.isFile() && preCommit.size > 0 && prePush.size > 0;
+  } catch {
+    return false;
+  }
 }
 
 export function guardrailOffNote(): string {
@@ -214,7 +220,7 @@ export async function doctor(
   out("vf", `  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
   out(
     "vf",
-    `  ${gitGuardrailArmed(base) ? c.green("commit-time guardrail: ON (.githooks/pre-commit)") : c.yellow("commit-time guardrail: OFF — run 'vf hooks install' or re-init to arm .githooks/pre-commit")}`,
+    `  git guardrails: ${gitGuardrailArmed(base) ? c.green("ON (pre-commit + pre-push)") : c.yellow("OFF — run 'vf hooks install' or re-init to arm .githooks/pre-commit + pre-push")}`,
   );
   out("vf", `  ${liveGuardrailArmed(base) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
   out(

@@ -72,7 +72,7 @@ vf skills resolve # demand-driven skill needs (list | search <term> | resolve)
 vf tools status   # optional code-nav tools (status | enable | disable | install <tool>)
 vf discover docs <lib> --yes   # Context7 docs/skills lookup (network requires approval)
 vf verify         # typecheck / lint / test + confidence / evidence / scope gates
-vf hooks install  # wire the pre-commit gate (core.hooksPath → .githooks; `emit` writes engine configs)
+vf hooks install  # wire fail-closed pre-commit + pre-push gates (core.hooksPath → .githooks)
 vf workflow delete|import  # manage/combine workflows
 vf hook            # evaluate a JSON hook event from stdin (for engine guardrails)
 ```

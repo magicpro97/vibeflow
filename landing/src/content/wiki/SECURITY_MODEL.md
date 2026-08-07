@@ -259,6 +259,14 @@ the least-privilege and no-code-execution posture:
 - Never printed: the token, full event payload, comment body, or GraphQL request
   headers. Unresolved current threads are reported as `path:line — @author — url`.
 
+### Pre-push review-evidence gate (local only)
+
+Pre-push is deterministic local fast feedback. It binds verification to pushed current
+`HEAD`, reads only local evidence, and fails closed on missing, stale, malformed,
+unreadable, or failed applicable evidence. It performs no network, LLM, GitHub API, or
+Copilot call and never transports local evidence. User-owned hooks are preserved.
+`git push --no-verify` bypasses local feedback; remote `review-thread-gate` remains authority.
+
 ## Secrets handling
 
 Agents and hooks must not print or store secrets.

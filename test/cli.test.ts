@@ -932,6 +932,7 @@ describe("hooks emit is non-destructive by default (bug 2)", () => {
     ".codex/hooks.json",
     ".github/hooks/copilot.json",
     ".githooks/pre-commit",
+    ".githooks/pre-push",
     ".githooks/post-checkout",
     ".githooks/post-merge",
   ];
@@ -994,6 +995,7 @@ describe("hooks emit is non-destructive by default (bug 2)", () => {
         ".github/hooks/copilot.json",
         ".opencode/plugins/vf-guard.ts",
         ".githooks/pre-commit",
+        ".githooks/pre-push",
         ".githooks/post-checkout",
         ".githooks/post-merge",
       ];

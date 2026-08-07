@@ -190,6 +190,7 @@ export function checkReviewEvidence(
   repo: string,
   required: boolean,
   git: GitRead = defaultGit,
+  reviewBase?: string,
 ): Check {
   const headResult = git(repo, ["rev-parse", "--verify", "HEAD"]);
   const head = headResult.stdout.trim();
@@ -198,11 +199,42 @@ export function checkReviewEvidence(
       ? { required: true, ok: false, reason: "review-evidence: cannot resolve HEAD" }
       : { required: false, ok: true, reason: "review-evidence(warn): cannot resolve HEAD" };
   const path = recordPath(repo, head);
-  let raw: string;
+  let symlink = false;
   try {
-    if (lstatSync(path).isSymbolicLink()) throw new Error();
-    raw = readFileSync(path, "utf8");
+    symlink = lstatSync(path).isSymbolicLink();
   } catch {
+    /* absent below */
+  }
+  if (symlink) {
+    // A present symlink is NOT a genuinely missing record; never use the
+    // #748 docs-only fallback, fail closed.
+    return required
+      ? { required: true, ok: false, reason: "review-evidence: record missing" }
+      : { required: false, ok: true, reason: "review-evidence(warn): record missing" };
+  }
+  let absent = false;
+  let unreadable = false;
+  let raw = "";
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") absent = true;
+    else unreadable = true;
+  }
+  if (absent || unreadable) {
+    // #748 fallback ONLY on a genuinely absent record: a valid ancestor
+    // review base with no applicable checklist lets a docs-only push pass
+    // without a reviewer record. Any other invalid existing record never
+    // reaches here and still fails closed.
+    if (
+      !unreadable &&
+      isSha(reviewBase) &&
+      git(repo, ["merge-base", "--is-ancestor", reviewBase as string, head]).status === 0
+    ) {
+      const changed = changedFiles(repo, reviewBase as string, head, git);
+      if (changed && requiredIds(changed).length === 0)
+        return { required, ok: true, reason: "review-evidence: no applicable checklist" };
+    }
     return required
       ? { required: true, ok: false, reason: "review-evidence: record missing" }
       : { required: false, ok: true, reason: "review-evidence(warn): record missing" };

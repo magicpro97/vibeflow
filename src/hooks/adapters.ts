@@ -11,25 +11,17 @@
  * downgrade banner noting that Edit/Write/apply_patch are not natively blocked.
  */
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { Engine } from "../core.js";
 import { antigravityHookConfig } from "./antigravity.js";
+import { cliPath, gitPostCheckout, gitPostMerge, gitPreCommit, gitPrePush } from "./git-hooks.js";
+
+export { cliPath, gitPostCheckout, gitPostMerge, gitPreCommit, gitPrePush } from "./git-hooks.js";
 
 /** Stable marker the generator emits in the opencode plugin so the live-
  *  guardrail probe can distinguish generator output from a hand-rolled file
  *  that happens to mention `vf hook`. Kept in sync with `src/commands/doctor.ts`. */
 const GUARDRAIL_SENTINEL = "vibeflow-guardrail";
-
-/** Resolve the absolute path to dist/cli.js (or src/cli.ts in dev). */
-function cliPath(): string {
-  const self = fileURLToPath(import.meta.url);
-  const normalized = self.replace(/\\/g, "/");
-  if (normalized.endsWith("/dist/cli.js")) return self;
-  // In dev (bun test / ts-node): self is src/hooks/adapters.ts → walk up to root then dist/.
-  const root = join(dirname(self), "..", "..");
-  return join(root, "dist", "cli.js");
-}
 
 /** Prefer Bun; safe under Node; injectable for tests. */
 export function hookRuntime(which?: (name: string) => string | null): "bun" | "node" {
@@ -318,65 +310,6 @@ export default VfGuard;
 `;
 }
 
-/**
- * A portable git pre-commit that funnels staged files through `vf hook`. Fails CLOSED:
- * command not found or empty decision → block. Calls `node <absolute-path> hook`.
- */
-export function gitPreCommit(): string {
-  const cmd = cliPath();
-  return [
-    "#!/usr/bin/env sh",
-    "# VibeFlow guardrail: route staged changes through the universal hook decision.",
-    "# Fails closed — if the hook cannot decide, the commit is blocked.",
-    "# Bypass intentionally with `git commit --no-verify` only when you know why.",
-    "set -eu",
-    "files=$(git diff --cached --name-only --diff-filter=ACM | sed 's/.*/\"&\"/' | paste -sd, -)",
-    'event=$(printf \'{"event":"pre-write","files":[%s]}\' "$files")',
-    "# Capture the decision; if node fails to run, fail closed.",
-    `if ! decision=$(printf "%s" "$event" | node "${cmd}" hook); then`,
-    '  echo "vibeflow hook: could not evaluate changes — blocking (fail-closed)" >&2',
-    "  exit 1",
-    "fi",
-    'echo "$decision"',
-    'case "$decision" in',
-    '  *\\"decision\\":\\"block\\"*) echo "blocked by VibeFlow hook" >&2; exit 1 ;;',
-    '  *\\"decision\\":\\"require_approval\\"*) echo "VibeFlow hook needs approval — blocking commit; review then --no-verify if intended" >&2; exit 1 ;;',
-    '  "") echo "vibeflow hook: empty decision — blocking (fail-closed)" >&2; exit 1 ;;',
-    "esac",
-    `ie_output=$(node "${cmd}" skills impact-evidence --staged 2>&1) || { echo "$ie_output" >&2; exit 1; }`,
-    'echo "vibeflow hook: allowed"',
-    "",
-  ].join("\n");
-}
-
-/** Re-index code-navigation tools when the working tree's branch changes, so a code graph
- * never goes stale. `post-checkout` gets ($1 prev, $2 new, $3 flag); flag=1 means a branch
- * checkout (vs a file checkout) — only then is a re-index warranted. Best-effort: never
- * blocks the checkout (|| true), and `vf tools sync` itself is a no-op unless codegraph is
- * enabled AND its binary is present. */
-export function gitPostCheckout(): string {
-  const cmd = cliPath();
-  return [
-    "#!/usr/bin/env sh",
-    "# VibeFlow: keep the code-navigation index in sync on branch change.",
-    "# Args: $1=prev-HEAD $2=new-HEAD $3=branch-flag (1 = branch checkout).",
-    '[ "${3:-0}" = "1" ] || exit 0',
-    `node "${cmd}" tools sync >/dev/null 2>&1 || true`,
-    "",
-  ].join("\n");
-}
-
-/** Re-index after a merge brings in new code (post-merge has no branch-flag arg). Best-effort. */
-export function gitPostMerge(): string {
-  const cmd = cliPath();
-  return [
-    "#!/usr/bin/env sh",
-    "# VibeFlow: refresh the code-navigation index after a merge pulls in new code.",
-    `node "${cmd}" tools sync >/dev/null 2>&1 || true`,
-    "",
-  ].join("\n");
-}
-
 export function engineHookFiles(engines?: Engine[]): Record<string, string> {
   return {
     ...(!engines || engines.includes("claude")
@@ -393,6 +326,7 @@ export function engineHookFiles(engines?: Engine[]): Record<string, string> {
       ? { ".agents/hooks.json": antigravityHookConfig(cliPath()) }
       : {}),
     ".githooks/pre-commit": gitPreCommit(),
+    ".githooks/pre-push": gitPrePush(),
     ".githooks/post-checkout": gitPostCheckout(),
     ".githooks/post-merge": gitPostMerge(),
   };

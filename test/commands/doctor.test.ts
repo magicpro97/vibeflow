@@ -184,13 +184,18 @@ describe("detectRepo", () => {
 });
 
 describe("gitGuardrailArmed + two-tier note (#624 Task 4)", () => {
-  test("true when .githooks/pre-commit exists, false otherwise", () => {
+  test("true only when BOTH .githooks/pre-commit and pre-push exist", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-gg-"));
     try {
       expect(gitGuardrailArmed(dir)).toBe(false);
       mkdirSync(join(dir, ".githooks"), { recursive: true });
       writeFileSync(join(dir, ".githooks", "pre-commit"), "#!/bin/sh\nexit 1\n");
+      // only pre-commit → OFF
+      expect(gitGuardrailArmed(dir)).toBe(false);
+      writeFileSync(join(dir, ".githooks", "pre-push"), "#!/bin/sh\nexit 1\n");
       expect(gitGuardrailArmed(dir)).toBe(true);
+      writeFileSync(join(dir, ".githooks", "pre-push"), "");
+      expect(gitGuardrailArmed(dir)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
