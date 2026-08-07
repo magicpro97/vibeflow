@@ -11,6 +11,7 @@ import { parseMarketplace, parseRegistryLock, registryCacheDir } from "./registr
 import type { RegistryEntry } from "./registry-types.js";
 import type { SkillNeed } from "./resolver.js";
 import { type SecurityScanResult, scanSkillDir } from "./security-scan.js";
+import type { SkillAcquisitionDecision } from "./telemetry.js";
 
 export type AcquisitionScanStatus =
   | { state: "not-scanned"; reason: string }
@@ -264,8 +265,11 @@ export async function runSkillAcquisitionGate(opts: {
   ) => number;
   scanner?: (dir: string) => SecurityScanResult;
   readDeps?: AcquisitionReadDeps;
+  command?: string;
+  recordDecisions?: (events: SkillAcquisitionDecision[]) => void;
 }): Promise<AcquisitionGateResult> {
-  const { repo, needs, execute, approver, install, scanner, readDeps } = opts;
+  const { repo, needs, execute, approver, install, scanner, readDeps, command, recordDecisions } =
+    opts;
   const deps: AcquisitionReadDeps = { ...readDeps, scanner };
 
   if (!execute) {
@@ -293,6 +297,7 @@ export async function runSkillAcquisitionGate(opts: {
     }
   }
 
+  let failed: string | undefined;
   if (install) {
     for (const p of approved) {
       const code = install(repo, p.source.registryId, p.name, {
@@ -301,19 +306,45 @@ export async function runSkillAcquisitionGate(opts: {
         yes: true,
       });
       if (code !== 0) {
+        failed = p.name;
         unresolved.push(p.need);
         const remaining = approved.slice(approved.indexOf(p) + 1);
         for (const r of remaining) unresolved.push(r.need);
-        return {
-          ok: false,
-          reason: `install failed for ${p.name}`,
-          installed,
-          unresolved,
-          proposals,
-        };
+        break;
       }
       installed.push(p.name);
     }
+  }
+
+  if (recordDecisions) {
+    recordDecisions(
+      proposals.map((p): SkillAcquisitionDecision => ({
+        event: "acquisition-decision",
+        skill: p.name,
+        source: `${p.source.registryId}@${p.source.commitOID.slice(0, 12)}`,
+        decision: !p.approvable
+          ? "blocked"
+          : decisions.get(p.id) !== "approve"
+            ? "reject"
+            : failed === p.name
+              ? "install-failed"
+              : installed.includes(p.name)
+                ? "approve"
+                : "reject",
+        command: command ?? "orchestrate",
+        at: new Date().toISOString(),
+      })),
+    );
+  }
+
+  if (failed) {
+    return {
+      ok: false,
+      reason: `install failed for ${failed}`,
+      installed,
+      unresolved,
+      proposals,
+    };
   }
 
   const finalUnresolved = needs

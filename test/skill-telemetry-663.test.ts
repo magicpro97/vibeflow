@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { skills } from "../src/commands/skills.js";
@@ -7,10 +7,14 @@ import type { SkillNeed } from "../src/skills/resolver.js";
 import {
   appendTelemetry,
   readTelemetry,
+  recordAcquisitionDecisions,
   recordSkillResolution,
   summarizeTelemetry,
 } from "../src/skills/telemetry.js";
-import type { SkillTelemetryEvent } from "../src/skills/telemetry.js";
+import type {
+  SkillAcquisitionDecision,
+  SkillTelemetryEvent,
+} from "../src/skills/telemetry.js";
 
 let base: string;
 let logDir: string;
@@ -308,5 +312,69 @@ describe("skills resolve emits telemetry", () => {
     expect(events.length).toBeGreaterThanOrEqual(1);
     const last = events[events.length - 1];
     expect(last?.command).toBe("resolve");
+  });
+});
+
+function dec(overrides: Partial<SkillAcquisitionDecision> = {}): SkillAcquisitionDecision {
+  return {
+    event: "acquisition-decision",
+    skill: "xlsx-reader",
+    source: "skills@aaaaaaaaaaaa",
+    decision: "approve",
+    command: "orchestrate",
+    at: "2025-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("recordAcquisitionDecisions (#682 audit)", () => {
+  function rawLines(): string[] {
+    return readFileSync(join(logDir, "skills-telemetry.jsonl"), "utf8").trim().split("\n");
+  }
+
+  test("writes exact JSONL decision events with bounded source", () => {
+    expect(recordAcquisitionDecisions([dec()], { dir: base })).toBe(true);
+    const lines = rawLines();
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] as string) as SkillAcquisitionDecision;
+    expect(parsed).toEqual({
+      event: "acquisition-decision",
+      skill: "xlsx-reader",
+      source: "skills@aaaaaaaaaaaa",
+      decision: "approve",
+      command: "orchestrate",
+      at: "2025-01-01T00:00:00.000Z",
+    });
+  });
+
+  test("covers approve/reject/blocked/install-failed cases, one line each", () => {
+    const events: SkillAcquisitionDecision[] = [
+      dec({ skill: "a", source: "r1@a", decision: "approve" }),
+      dec({ skill: "b", source: "r2@b", decision: "reject" }),
+      dec({ skill: "c", source: "r3@c", decision: "blocked" }),
+      dec({ skill: "d", source: "r4@d", decision: "install-failed" }),
+    ];
+    expect(recordAcquisitionDecisions(events, { dir: base })).toBe(true);
+    const parsed = rawLines().map((l) => JSON.parse(l) as SkillAcquisitionDecision);
+    expect(parsed.map((p) => p.decision)).toEqual(["approve", "reject", "blocked", "install-failed"]);
+    expect(parsed.map((p) => p.skill)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  test("never leaks path/URL/finding content", () => {
+    const events: SkillAcquisitionDecision[] = [
+      dec({ source: "skills@a".repeat(16), command: "orchestrate" }),
+    ];
+    recordAcquisitionDecisions(events, { dir: base });
+    const raw = rawLines().join("\n");
+    expect(raw).not.toContain(base);
+    expect(raw).not.toContain("github.com");
+    expect(raw).not.toContain(".vibeflow");
+    expect(raw).not.toContain("boom|rm -rf");
+  });
+
+  test("write failure is non-fatal (returns false, does not throw)", () => {
+    const badDir = join(base, "not-a-directory");
+    writeFileSync(badDir, "block");
+    expect(recordAcquisitionDecisions([dec()], { dir: badDir })).toBe(false);
   });
 });

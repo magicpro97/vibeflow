@@ -23,6 +23,16 @@ export interface SkillTelemetryEvent {
   failures: string[];
 }
 
+export interface SkillAcquisitionDecision {
+  event: "acquisition-decision";
+  skill: string;
+  /** registryId@<12-char OID>, bounded — never a path/URL. */
+  source: string;
+  decision: "approve" | "reject" | "blocked" | "install-failed";
+  command: string;
+  at: string;
+}
+
 function logDir(opts?: { dir?: string }): string {
   const base = opts?.dir ?? process.cwd();
   const dir = join(base, ".vibeflow", "logs");
@@ -194,4 +204,20 @@ export function recordSkillResolution(
     },
     opts,
   );
+}
+
+/** #682 — record one bounded acquisition-decision event per settled proposal. */
+export function recordAcquisitionDecisions(
+  events: SkillAcquisitionDecision[],
+  opts?: { dir?: string },
+): boolean {
+  try {
+    logDir(opts);
+    const path = logPath(opts);
+    for (const e of events) appendFileSync(path, `${JSON.stringify(e)}\n`, "utf8");
+    trimTelemetry(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
