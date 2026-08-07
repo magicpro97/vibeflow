@@ -43,10 +43,15 @@ export function requestSkillAcquisitionDecisions(
   const uniq = new Map<string, SkillAcquisitionProposal>();
   for (const p of proposals) {
     if (!p || typeof p.id !== "string" || !p.id) continue;
+    const duplicate = uniq.get(p.id);
+    if (duplicate && fingerprint(duplicate) !== fingerprint(p)) {
+      throw new Error("conflicting payload for pending skill acquisition");
+    }
     uniq.set(p.id, p);
   }
 
-  if (pending.size + uniq.size > MAX_PENDING_CARDS) {
+  const added = [...uniq.keys()].filter((id) => !pending.has(id)).length;
+  if (pending.size + added > MAX_PENDING_CARDS) {
     throw new Error(`too many pending skill acquisitions (max ${MAX_PENDING_CARDS})`);
   }
 

@@ -88,6 +88,21 @@ describe("pending-skill-acquisitions", () => {
     await wait;
   });
 
+  test("rejects conflicting duplicate IDs within one request", () => {
+    expect(() =>
+      requestSkillAcquisitionDecisions([proposal("p1"), proposal("p1", { name: "other" })]),
+    ).toThrow("conflicting payload");
+  });
+
+  test("an exact duplicate does not consume another cap slot", async () => {
+    const cards = Array.from({ length: 32 }, (_, i) => proposal(`p${i}`));
+    const first = requestSkillAcquisitionDecisions(cards);
+    const duplicate = requestSkillAcquisitionDecisions([cards[0] as SkillAcquisitionProposal]);
+    clearPendingSkillAcquisitions();
+    expect((await first).size).toBe(32);
+    expect((await duplicate).size).toBe(1);
+  });
+
   test("enforces 32-card cap", async () => {
     const many = Array.from({ length: 33 }, (_, i) => proposal(`p${i}`));
     let threw = false;

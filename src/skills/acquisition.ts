@@ -269,6 +269,16 @@ export async function runSkillAcquisitionGate(opts: {
 
   if (proposals.length === 0 || !approver) {
     const unresolved = needs.filter((n) => n.status === "missing").map((n) => n.need);
+    recordDecisions?.(
+      proposals.map((p) => ({
+        event: "acquisition-decision",
+        skill: p.name,
+        source: `${p.source.registryId}@${p.source.commitOID.slice(0, 12)}`,
+        decision: "reject",
+        command: command ?? "orchestrate",
+        at: new Date().toISOString(),
+      })),
+    );
     return { ok: true, installed: [], unresolved, proposals };
   }
 

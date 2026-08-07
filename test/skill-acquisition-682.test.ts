@@ -317,6 +317,19 @@ describe("runSkillAcquisitionGate", () => {
     if (gate.ok) expect(gate.unresolved).toContain("xlsx-reader");
   });
 
+  test("missing approver records each proposal as rejected", async () => {
+    const f = makeFixture();
+    const events: Array<{ decision: string }> = [];
+    await runSkillAcquisitionGate({
+      repo: f.repo,
+      needs: f.needs,
+      execute: true,
+      readDeps: readDeps(f.home),
+      recordDecisions: (recorded) => events.push(...recorded),
+    });
+    expect(events.map((event) => event.decision)).toEqual(["reject"]);
+  });
+
   test("decisions for all proposals collected before first install", async () => {
     const f = makeFixture({
       needs: [missingNeed("xlsx-reader"), missingNeed("text-reader")],
