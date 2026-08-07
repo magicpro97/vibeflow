@@ -122,6 +122,7 @@ describe("review-thread-gate workflow (static)", () => {
     expect(WORKFLOW).toContain("submitted, edited, dismissed");
     expect(WORKFLOW).toContain("pull_request_review_comment:");
     expect(WORKFLOW).toContain("created, edited, deleted");
+    expect(WORKFLOW).toContain("if: github.event.pull_request.base.ref == 'main'");
   });
 
   test("pins exact actions/github-script SHA and v7.0.1 tag", () => {
