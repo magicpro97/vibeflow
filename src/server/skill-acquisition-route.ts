@@ -12,7 +12,12 @@ import {
 
 /** GET /api/skills/acquisitions/pending — read-only bounded card list. */
 export function handleSkillAcquisitionPending(): Response {
-  return Response.json({ pending: listPendingSkillAcquisitions() });
+  return Response.json({
+    pending: listPendingSkillAcquisitions().map(({ source, ...proposal }) => ({
+      ...proposal,
+      source: { registryId: source.registryId, commitOID: source.commitOID },
+    })),
+  });
 }
 
 /**

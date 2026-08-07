@@ -63,10 +63,17 @@ function setupState(dir: string) {
 }
 
 describe("skill-acquisition-route: body validation", () => {
-  test("GET pending returns empty list with no pending", () => {
+  test("GET pending returns browser-safe cards without registry paths", async () => {
     clearPendingSkillAcquisitions();
+    const wait = requestSkillAcquisitionDecisions([proposal("p1")]);
     const res = handleSkillAcquisitionPending();
     expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(raw).not.toContain("skillPath");
+    expect(raw).not.toContain("skills/p1");
+    expect(raw).not.toContain("github.com");
+    expect(resolveDecisionViaRoute("p1", "reject")).toBe(200);
+    await wait;
   });
 
   test("POST invalid body → 400", () => {
