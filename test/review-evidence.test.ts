@@ -562,6 +562,9 @@ describe("review-base fallback (#748)", () => {
     });
     // Still fails closed — a symlink is not a genuine missing record.
     expect(checkReviewEvidence(repo, true, read, base).ok).toBe(false);
+    const warning = checkReviewEvidence(repo, false, read, base);
+    expect(warning.ok).toBe(true);
+    expect(warning.reason).toContain("warn");
     rmSync(repo, { recursive: true, force: true });
   });
 

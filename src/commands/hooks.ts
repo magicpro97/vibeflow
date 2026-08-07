@@ -385,17 +385,15 @@ export function installHooks(base?: string): number {
     if (existsSync(dest)) {
       const existing = readFileSync(dest, "utf8");
       if (!isManagedHook(existing)) {
-        if (rel.endsWith("/pre-push")) {
-          preservedUserHook = true;
-          out(
-            "vf",
-            c.yellow(
-              `! ${rel} is a user-owned hook — preserved, not overwritten. Integrate the pre-push review gate manually (see docs).`,
-            ),
-          );
-          continue;
-        }
         // pre-commit/post-checkout/post-merge: also non-clobber (fresh-init safety).
+        if (!rel.endsWith("/pre-push")) continue;
+        preservedUserHook = true;
+        out(
+          "vf",
+          c.yellow(
+            `! ${rel} is a user-owned hook — preserved, not overwritten. Integrate the pre-push review gate manually (see docs).`,
+          ),
+        );
         continue;
       }
     }

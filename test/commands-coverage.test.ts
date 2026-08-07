@@ -2006,6 +2006,44 @@ describe("commands.hooks subcommand branches", () => {
     }
   });
 
+  test("hooks install preserves a user-owned pre-commit while adding pre-push", () => {
+    const dir = freshDir("vf-hooks-install-user-");
+    const { execSync } = require("node:child_process") as typeof import("node:child_process");
+    execSync(
+      "git init -q && mkdir -p .githooks && printf '#!/bin/sh\\n# custom\\n' > .githooks/pre-commit",
+      {
+        cwd: dir,
+        stdio: "ignore",
+      },
+    );
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(hooks("install", {})).toBe(0);
+      expect(readFileSync(join(dir, ".githooks", "pre-commit"), "utf8")).toContain("# custom");
+      expect(existsSync(join(dir, ".githooks", "pre-push"))).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  test("hooks install refreshes an existing managed pre-commit", () => {
+    const dir = freshDir("vf-hooks-install-managed-");
+    const { execSync } = require("node:child_process") as typeof import("node:child_process");
+    execSync(
+      "git init -q && mkdir -p .githooks && printf '# VibeFlow guardrail: stale\\n' > .githooks/pre-commit",
+      { cwd: dir, stdio: "ignore" },
+    );
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(hooks("install", {})).toBe(0);
+      expect(readFileSync(join(dir, ".githooks", "pre-commit"), "utf8")).toContain("set -eu");
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
   test("hooks: emit --dry-run is non-destructive (line 2051-2061)", () => {
     expect(hooks("emit", { "dry-run": true })).toBe(0);
     expect(existsSync(join(dir, ".claude", "settings.json"))).toBe(false);
