@@ -107,6 +107,22 @@ export const api = {
         registry,
       }),
   },
+  // #682: pending skill acquisition cards + explicit approve/reject decisions.
+  // The waiting /api/orchestrate request owns installation; this only resolves
+  // the in-memory broker. GET is guarded/read-only, POST needs the CSRF token.
+  acquisitions: {
+    pending: () =>
+      req<import("./types.js").AcquisitionPendingResponse>(
+        "GET",
+        "/api/skills/acquisitions/pending",
+      ).then((r) => r.pending),
+    decision: (id: string, decision: import("./types.js").AcquisitionDecision) =>
+      req<import("./types.js").AcquisitionDecisionResponse>(
+        "POST",
+        "/api/skills/acquisitions/decision",
+        { id, decision },
+      ),
+  },
   // #691: read-only Domain & Facts view + affected-skill impact resolution.
   domains: {
     view: () => req<DomainsView>("GET", "/api/domains").then((r) => r.roots),
