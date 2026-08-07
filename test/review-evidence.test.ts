@@ -295,6 +295,44 @@ describe("review evidence primitives", () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
+  test("checkReviewEvidence ok carries the passed required flag", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-review-flag-"));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: {
+        status: 0,
+        stdout: "M\ttest/routes.test.ts\nM\tsrc/routes.ts\n",
+      },
+    });
+    mkdirSync(join(repo, ".vibeflow/review-evidence/v1"), { recursive: true });
+    writeFileSync(recordPath(repo, head), record());
+    expect(checkReviewEvidence(repo, false, read)).toMatchObject({
+      required: false,
+      ok: true,
+    });
+    expect(checkReviewEvidence(repo, true, read)).toMatchObject({ required: true, ok: true });
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("parseRecord allows negative-test anchor on unchanged safe path", () => {
+    const safe = record().replace(
+      '"negative-test","path":"test/routes.test.ts","line":1',
+      '"negative-test","path":"test/util.test.ts","line":1',
+    );
+    expect(parseRecord(safe, base, head, changed).ok).toBe(true);
+    const unsafe = safe.replace('"path":"test/util.test.ts"', '"path":"../util.test.ts"');
+    expect(parseRecord(unsafe, base, head, changed).ok).toBe(false);
+  });
+
+  test("rejects source anchor not in item paths", () => {
+    const badSource = record().replace(
+      '"source","path":"src/routes.ts","line":1',
+      '"source","path":"test/routes.test.ts","line":1',
+    );
+    expect(parseRecord(badSource, base, head, changed).ok).toBe(false);
+  });
+
   test("record path is head-bound", () => {
     expect(recordPath("repo", head)).toBe(
       join("repo", ".vibeflow/review-evidence/v1", `${head}.json`),
@@ -357,6 +395,58 @@ describe("review evidence producer command", () => {
       headSha: head,
     });
     rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("writes evidence when no test changed using tracked test file", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-review-fallback-"));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      "merge-base --is-ancestor aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":
+        { status: 0, stdout: "" },
+      "status --porcelain": { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: { status: 0, stdout: "M\tsrc/routes.ts\n" },
+      "ls-files :(glob)**/*.test.* :(glob)**/*.spec.*": {
+        status: 0,
+        stdout: "test/routes.test.ts\ntest/util.spec.ts\n",
+      },
+    });
+    expect(
+      reviewEvidence(repo, ["--base", base], read, () => ({
+        status: "passed",
+        exitCode: 0,
+        timedOut: false,
+        findings: [],
+      })),
+    ).toBe(0);
+    const [item] = (
+      JSON.parse(readFileSync(recordPath(repo, head), "utf8")) as {
+        required: { anchors: { path: string }[] }[];
+      }
+    ).required;
+    expect(item?.anchors.map((anchor) => anchor.path)).toEqual([
+      "src/routes.ts",
+      "test/routes.test.ts",
+    ]);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("fails when no changed or tracked test file exists", () => {
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      "merge-base --is-ancestor aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":
+        { status: 0, stdout: "" },
+      "status --porcelain": { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: { status: 0, stdout: "M\tsrc/routes.ts\n" },
+      "ls-files :(glob)**/*.test.* :(glob)**/*.spec.*": { status: 0, stdout: "" },
+    });
+    expect(
+      reviewEvidence("repo", ["--base", base], read, () => ({
+        status: "passed",
+        exitCode: 0,
+        timedOut: false,
+        findings: [],
+      })),
+    ).toBe(1);
   });
 
   test("rejects invalid grammar and failed reviewer", () => {

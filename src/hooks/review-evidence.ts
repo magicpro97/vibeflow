@@ -169,7 +169,7 @@ export function parseRecord(
       anchors.some(
         (anchor) =>
           !safePath(anchor.path) ||
-          !changedSet.has(anchor.path as string) ||
+          (anchor.kind !== "negative-test" && !changedSet.has(anchor.path as string)) ||
           !Number.isInteger(anchor.line) ||
           (anchor.line as number) < 1,
       )
@@ -225,7 +225,7 @@ export function checkReviewEvidence(
     return { required, ok: true, reason: "review-evidence: no applicable checklist" };
   const parsed = parseRecord(raw, base, head, changed);
   return parsed.ok
-    ? { required: true, ok: true, reason: "review-evidence(ok)" }
+    ? { required, ok: true, reason: "review-evidence(ok)" }
     : required
       ? { required: true, ok: false, reason: `review-evidence: ${parsed.reason}` }
       : { required: false, ok: true, reason: `review-evidence(warn): ${parsed.reason}` };

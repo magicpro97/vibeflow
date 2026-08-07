@@ -73,7 +73,13 @@ export function reviewEvidence(
     JSON.stringify(changedFiles(repo, baseSha, headSha, git)) !== JSON.stringify(changed)
   )
     return 1;
-  const test = changed.find((file) => /(?:\.test|\.spec)\.[^/]+$/.test(file.path));
+  const changedTest = changed.find((file) => /(?:\.test|\.spec)\.[^/]+$/.test(file.path));
+  const test =
+    changedTest?.path ??
+    git(repo, ["ls-files", ":(glob)**/*.test.*", ":(glob)**/*.spec.*"])
+      .stdout.split("\n")
+      .map((path) => path.trim())
+      .find((path) => path && /(?:\.test|\.spec)\.[^/]+$/.test(path));
   if (!test) return 1;
   writeEvidence(repo, {
     schemaVersion: 1,
@@ -90,7 +96,7 @@ export function reviewEvidence(
         paths,
         anchors: [
           { kind: "source", path: paths[0] ?? "", line: 1 },
-          { kind: "negative-test", path: test.path, line: 1 },
+          { kind: "negative-test", path: test, line: 1 },
         ],
       };
     }),
