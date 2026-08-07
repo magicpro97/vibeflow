@@ -2,6 +2,7 @@
 
 import { spawnSync as _spawnSync } from "node:child_process";
 import { writeState } from "../core.js";
+import { appendReviewEvidence } from "../hooks/review-evidence-gate.js";
 import { snapshotImpl } from "../spec-freshness.js";
 import {
   appendJournal,
@@ -23,6 +24,7 @@ import {
   writeFileSafe,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
+import { autoCrystallizeAndReport, printVerifyReport } from "./verify-report.js";
 import { runWaiverGate } from "./waiver-gate.js";
 /** Current git HEAD sha for `base`, or "HEAD" when git unavailable. Used as diff base for Type-B drift detection. */
 function readVerifiedSha(base: string): string {
@@ -194,6 +196,7 @@ export async function collectVerifyReportAsync(
       goal: string,
     ) => Promise<{ covered: boolean; uncovered: string[]; score?: number }>; // ADR-003
     allowUnverifiedEvidence?: boolean; // ADR-004 escape hatch
+    requireReviewEvidence?: boolean;
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
@@ -236,6 +239,7 @@ export async function collectVerifyReportAsync(
   const rawState = readState(base);
   if (inject.allowUnverifiedEvidence && rawState) rawState._allowUnverifiedEvidence = true;
   const policy = policyGates(rawState, { base });
+  appendReviewEvidence(policy, base, inject.requireReviewEvidence === true);
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
 
   // Type B drift PRODUCER: when the toolchain gates are all green, fingerprint
@@ -279,6 +283,7 @@ export function verify(
     journal?: boolean;
     coverage?: boolean;
     allowUnverifiedEvidence?: boolean;
+    requireReviewEvidence?: boolean;
     catalogDir?: string;
   } = {},
 ): number {
@@ -327,12 +332,9 @@ export function verify(
   const st = readState();
   if (inject.allowUnverifiedEvidence && st) st._allowUnverifiedEvidence = true;
   const report = policyGates(st);
-  for (const ok of report.passed) out("vf", c.green(`✓ ${ok}`));
-  for (const w of report.warnings) out("vf", c.yellow(`⚠ ${w}`));
-  for (const f of report.failures) {
-    failed++;
-    out("vf", c.red(`✗ ${f}`));
-  }
+  appendReviewEvidence(report, base, inject.requireReviewEvidence === true);
+  printVerifyReport(report);
+  failed += report.failures.length;
 
   if (inject.coverage) {
     const lcovPath = join(base, "coverage", "lcov.info");
@@ -386,15 +388,4 @@ export function verify(
     autoCrystallizeAndReport(base);
   }
   return 0;
-}
-
-function autoCrystallizeAndReport(base: string): void {
-  const cz = autoCrystallizeRun(base, `verify-${new Date().toISOString().slice(0, 10)}`);
-  if (cz.drafted)
-    out(
-      "vf",
-      c.green(
-        `+ drafted skill ${cz.draftName} (${cz.patternCount} pattern(s)) — DRAFT, review before install`,
-      ),
-    );
 }

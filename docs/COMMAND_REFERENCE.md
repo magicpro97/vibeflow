@@ -333,8 +333,12 @@ failing notifier is swallowed so it can't break the merge flow.
 
 ```bash
 vf verify
+vf verify --require-review-evidence
 vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migration escape hatch)
+vf review evidence --base <full-SHA> --result <review-result.json>
 ```
+
+Review evidence stays local at `.vibeflow/review-evidence/v1/<headSha>.json`. `vf verify` performs no LLM/network call; default mode warns, while `--require-review-evidence` fails closed. `--allow-unverified-evidence` does not bypass this gate.
 
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
 missing evidence on a `done` unit, and overlapping work-unit scopes all fail.
