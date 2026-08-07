@@ -14,6 +14,7 @@ import type {
   SkillAcquisitionProposal,
 } from "../skills/acquisition.js";
 import { runSkillAcquisitionGate } from "../skills/acquisition.js";
+import { registryInstall } from "../skills/registry-install.js";
 import { type SkillNeed, resolveSkillNeeds } from "../skills/resolver.js";
 import { recordAcquisitionDecisions, recordSkillResolution } from "../skills/telemetry.js";
 import { confirmInput } from "../terminal-prompts/prompts.js";
@@ -25,6 +26,20 @@ export type AcquisitionInstall = (
   skillName: string,
   opts: Record<string, unknown>,
 ) => number;
+
+export function productionAcquisitionInstall(
+  repo: string,
+  registryId: string,
+  skillName: string,
+  opts: Record<string, unknown>,
+  install: typeof registryInstall = registryInstall,
+): number {
+  return install(repo, registryId, skillName, {
+    yes: opts.yes === true,
+    version: typeof opts.version === "string" ? opts.version : undefined,
+    onCollision: opts.onCollision === "skip" ? "skip" : undefined,
+  });
+}
 
 export interface AcquisitionInject {
   acquisitionApprover?: AcquisitionApprover;
@@ -97,7 +112,7 @@ export async function preDispatchAcquisition(
     needs: preNeeds,
     execute,
     approver,
-    install: inject.acquisitionInstall,
+    install: inject.acquisitionInstall ?? productionAcquisitionInstall,
     readDeps: inject.acquisitionReadDeps,
     command,
     recordDecisions: (evs) => recordAcquisitionDecisions(evs, { dir: repo }),

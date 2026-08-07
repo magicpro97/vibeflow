@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { orchestrate, run } from "../src/commands.js";
 import { preDispatchAcquisition } from "../src/commands/orchestrate-acquisition.js";
+import { productionAcquisitionInstall } from "../src/commands/orchestrate-acquisition.js";
 import { type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
@@ -114,6 +115,25 @@ const okSpawner: AsyncSpawner = async () => ({
 });
 
 describe("preDispatchAcquisition (#682 adapter)", () => {
+  test("production installer delegates to registryInstall with acquisition-safe options", () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const code = productionAcquisitionInstall(
+      "/repo",
+      "registry",
+      "skill",
+      {
+        yes: true,
+        version: "1.0.0",
+        onCollision: "skip",
+      },
+      (_repo, _registry, _skill, opts) => {
+        seen.push(opts ?? {});
+        return 7;
+      },
+    );
+    expect(code).toBe(7);
+    expect(seen).toEqual([{ yes: true, version: "1.0.0", onCollision: "skip" }]);
+  });
   test("resolves from goal + attachment names + repo scan before dispatch", async () => {
     const { repo, home } = makeCacheFixture();
     writeStateFixture(repo);
