@@ -343,7 +343,10 @@ export function hookSelftest(
 }
 
 /** Stable marker the current generator emits in every managed git hook. */
-const MANAGED_MARKER = "# # vibeflow-managed";
+const MANAGED_MARKERS = [
+  "# # vibeflow-managed — generated;",
+  "# # vibeflow-managed — mirrors the generated hook,",
+];
 /** Legacy generated header pre-dating the marker (pre-commit/post-checkout/post-merge). */
 const LEGACY_MARKERS = [
   "# VibeFlow guardrail:",
@@ -358,7 +361,9 @@ const LEGACY_MARKERS = [
  */
 export function isManagedHook(content: string): boolean {
   return (
-    content.split("\n").some((line) => line.trim() === MANAGED_MARKER) ||
+    content
+      .split("\n")
+      .some((line) => MANAGED_MARKERS.some((marker) => line.trim().startsWith(marker))) ||
     LEGACY_MARKERS.some((m) => content.includes(m))
   );
 }

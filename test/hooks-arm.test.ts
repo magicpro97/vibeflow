@@ -201,7 +201,10 @@ describe("armHooks", () => {
 
 describe("pre-push non-clobber (#748)", () => {
   test("only current and exact legacy VibeFlow headers count as managed", () => {
-    expect(isManagedHook("# # vibeflow-managed")).toBe(true);
+    expect(isManagedHook("# # vibeflow-managed — generated; stale")).toBe(true);
+    expect(isManagedHook("# # vibeflow-managed — mirrors the generated hook, but local")).toBe(
+      true,
+    );
     expect(isManagedHook("# VibeFlow guardrail: route staged changes")).toBe(true);
     expect(isManagedHook("# VibeFlow: keep the code-navigation index in sync")).toBe(true);
     expect(isManagedHook("# VibeFlow: refresh the code-navigation index after a merge")).toBe(true);
@@ -240,7 +243,7 @@ describe("pre-push non-clobber (#748)", () => {
     const dir = tmpRepo();
     try {
       mkdirSync(join(dir, ".githooks"), { recursive: true });
-      writeFileSync(join(dir, ".githooks", "pre-push"), "# # vibeflow-managed\n# stale");
+      writeFileSync(join(dir, ".githooks", "pre-push"), "# # vibeflow-managed — generated; stale");
       const written = emitHookFiles(dir, EXCLUDE_CODEX);
       expect(written).toContain(".githooks/pre-push");
       expect(readFileSync(join(dir, ".githooks", "pre-push"), "utf8")).toContain(
