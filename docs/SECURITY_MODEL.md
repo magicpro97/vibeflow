@@ -244,6 +244,21 @@ To revert, remove VibeFlow's `PreToolUse` and `PostToolUse` entries from
 `~/.codex/hooks.json`, then remove or set `codex_hooks = false` under `[features]` in
 `~/.codex/config.toml`.
 
+### Review-thread gate (CI, read-only)
+
+`.github/workflows/review-thread-gate.yml` is a read-only GitHub Actions gate that
+blocks a merge while any review thread on the current PR head is unresolved. It honors
+the least-privilege and no-code-execution posture:
+
+- Job permissions are exactly `pull-requests: read`; the top-level `permissions` is
+  `{}`. The only token used is `GITHUB_TOKEN` (no PAT, no `pull_request_target`).
+- It never runs `actions/checkout` and never executes PR code. It queries GitHub GraphQL
+  for the PR's live `headRefOid` and paginated `reviewThreads`, and compares
+  `headRefOid` against the event `pull_request.head.sha` so a stale-queued success after
+  a force-push fails closed.
+- Never printed: the token, full event payload, comment body, or GraphQL request
+  headers. Unresolved current threads are reported as `path:line — @author — url`.
+
 ## Secrets handling
 
 Agents and hooks must not print or store secrets.

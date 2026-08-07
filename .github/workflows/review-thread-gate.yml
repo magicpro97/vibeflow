@@ -1,0 +1,127 @@
+name: Review Thread Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+permissions: {}
+
+jobs:
+  review-thread-gate:
+    name: review-thread-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Require all current review threads to be resolved
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // review-thread-gate:start
+            const number = context.payload.pull_request?.number;
+            if (!Number.isInteger(number) || number <= 0) {
+              core.setFailed("review-thread-gate: missing or invalid pull_request number");
+              return;
+            }
+            const headSha = context.payload.pull_request?.head?.sha;
+            if (typeof headSha !== "string" || !/^[0-9a-f]{40}$/.test(headSha)) {
+              core.setFailed("review-thread-gate: missing or invalid head sha");
+              return;
+            }
+            const { owner, repo } = context.repo;
+            const query = `
+            query ReviewThreadGate($owner: String!, $repo: String!, $number: Int!, $after: String) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  headRefOid
+                  reviewThreads(first: 100, after: $after) {
+                    nodes {
+                      isResolved
+                      isOutdated
+                      path
+                      line
+                      comments(first: 1) {
+                        nodes { author { login } url }
+                      }
+                    }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }
+            }`;
+
+            const current = [];
+            let after = null;
+            let pages = 0;
+            const cursors = new Set();
+            while (true) {
+              pages += 1;
+              if (pages > 100) {
+                core.setFailed("review-thread-gate: pagination exceeded 100 pages");
+                return;
+              }
+              const data = await github.graphql(query, {
+                owner,
+                repo,
+                number,
+                after,
+              });
+              const pr = data?.repository?.pullRequest;
+              if (!pr) {
+                core.setFailed("review-thread-gate: pullRequest not found or malformed response");
+                return;
+              }
+              if (
+                typeof pr.headRefOid !== "string" ||
+                !pr.headRefOid ||
+                !pr.reviewThreads ||
+                !pr.reviewThreads.nodes ||
+                !pr.reviewThreads.pageInfo
+              ) {
+                core.setFailed("review-thread-gate: malformed response shape");
+                return;
+              }
+              if (pr.headRefOid !== headSha) {
+                core.setFailed(
+                  `review-thread-gate: stale head (live ${pr.headRefOid.slice(0, 8)} != event ${headSha.slice(0, 8)})`,
+                );
+                return;
+              }
+              for (const t of pr.reviewThreads.nodes) {
+                if (t.isResolved || t.isOutdated) {
+                  continue;
+                }
+                const author = t.comments?.nodes?.[0]?.author?.login ?? "unknown";
+                const url = t.comments?.nodes?.[0]?.url ?? "(no url)";
+                const line = t.line ?? "?";
+                const path = typeof t.path === "string" && t.path ? t.path : "(unknown path)";
+                current.push(`${path}:${line} — @${author} — ${url}`);
+              }
+              if (pr.reviewThreads.pageInfo.hasNextPage) {
+                const cursor = pr.reviewThreads.pageInfo.endCursor;
+                if (!cursor || cursors.has(cursor)) {
+                  core.setFailed("review-thread-gate: missing or repeated pagination cursor");
+                  return;
+                }
+                cursors.add(cursor);
+                after = cursor;
+                continue;
+              }
+              break;
+            }
+
+            if (current.length === 0) {
+              core.info(`review-thread-gate: 0 unresolved current thread(s) at ${headSha.slice(0, 12)}`);
+              return;
+            }
+            core.setFailed(
+              `review-thread-gate: ${current.length} unresolved current thread(s):\n${current.join("\n")}`,
+            );
+            // review-thread-gate:end

@@ -90,5 +90,22 @@ behave identically on `win32` and `posix`.
 
 ---
 
+## Branch protection
+
+Required checks (Settings > Branches > main), after rollout of the review-thread gate: `check`, `review-thread-gate`. Required checks appear after the first PR is opened against `main`. The `review-thread-gate` check name is exactly `review-thread-gate`.
+
+The workflow jobs `skill-validation`, `skill-security`, and `domain-integrity` are available but are **not** currently required; configuring them as required checks is outside the scope of the review-thread gate (#749).
+
+### Review-thread gate
+
+`.github/workflows/review-thread-gate.yml` blocks a merge while any review thread on the current PR head is unresolved.
+
+- It runs with the least privilege: job `permissions: pull-requests: read`, top-level `permissions: {}`. It never checks out the PR, never executes PR code, and does not use `pull_request_target`.
+- Automatic reruns happen on `pull_request` (opened/synchronize/reopened/ready_for_review), `pull_request_review` (submitted/edited/dismissed), and `pull_request_review_comment` (created/edited/deleted) events.
+- GitHub does not emit an Actions event when a review thread is resolved. After resolving the last thread, rerun the latest failed `review-thread-gate` run; the rerun queries live thread state and passes.
+- An old success cannot satisfy a new head: a push (`synchronize`) creates a new run, and the job validates the live `headRefOid` against the event `pull_request.head.sha`, failing on a stale queued event after a force-push.
+
+---
+
 **Related:** [Master Spec](./MASTER_SPEC.md) · [Self-Hosted Runner](./SELF_HOSTED_RUNNER.md)
 [Edit this page on GitHub](https://github.com/magicpro97/vibeflow/edit/main/docs/DEPLOYMENT.md)
