@@ -11,10 +11,7 @@ import {
   recordSkillResolution,
   summarizeTelemetry,
 } from "../src/skills/telemetry.js";
-import type {
-  SkillAcquisitionDecision,
-  SkillTelemetryEvent,
-} from "../src/skills/telemetry.js";
+import type { SkillAcquisitionDecision, SkillTelemetryEvent } from "../src/skills/telemetry.js";
 
 let base: string;
 let logDir: string;
@@ -356,7 +353,12 @@ describe("recordAcquisitionDecisions (#682 audit)", () => {
     ];
     expect(recordAcquisitionDecisions(events, { dir: base })).toBe(true);
     const parsed = rawLines().map((l) => JSON.parse(l) as SkillAcquisitionDecision);
-    expect(parsed.map((p) => p.decision)).toEqual(["approve", "reject", "blocked", "install-failed"]);
+    expect(parsed.map((p) => p.decision)).toEqual([
+      "approve",
+      "reject",
+      "blocked",
+      "install-failed",
+    ]);
     expect(parsed.map((p) => p.skill)).toEqual(["a", "b", "c", "d"]);
   });
 

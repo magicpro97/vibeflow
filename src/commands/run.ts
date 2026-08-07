@@ -15,6 +15,8 @@
 //
 // Refs: issue #80 (split src/commands.ts).
 
+import type { AcquisitionApprover, AcquisitionReadDeps } from "../skills/acquisition.js";
+import type { confirmInput } from "../terminal-prompts/prompts.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -52,6 +54,8 @@ import type {
   PreflightFn,
   ProjectContext,
 } from "./_shared.js";
+import { preDispatchAcquisition } from "./orchestrate-acquisition.js";
+import type { AcquisitionInstall } from "./orchestrate-acquisition.js";
 
 /**
  * The `vf run <engine>` entry point. Validates the engine name, ensures
@@ -70,6 +74,11 @@ export async function run(
     base?: string;
     git?: GitRunner;
     spawner?: AsyncSpawner;
+    acquisitionApprover?: AcquisitionApprover;
+    acquisitionInstall?: AcquisitionInstall;
+    acquisitionIsTTY?: () => boolean;
+    acquisitionConfirm?: typeof confirmInput;
+    acquisitionReadDeps?: AcquisitionReadDeps;
     // Test seam: probe passed to engineCommand() so unit tests can
     // exercise the unavailable + warning branches (line 1431-1437)
     // without depending on the real PATH (e.g. a missing copilot CLI).
@@ -126,6 +135,18 @@ export async function run(
     return 0;
   }
   if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));
+  // #682: intercept missing skill needs before readiness/protection/spawn — single-unit
+  // `vf run` must not bypass acquisition. Rejected/unavailable/blocked/install-failed
+  // acquisitions keep the skill gap and the run proceeds.
+  await preDispatchAcquisition(
+    base,
+    goal,
+    (state.attachments ?? []).map((a) => a.name),
+    "run",
+    flags.yes === true,
+    flags.yes === true,
+    inject,
+  );
   // The dry-run path never launches, so it stays cheap: no git gate, no checkpoint.
   if (!flags.yes) {
     out("vf");

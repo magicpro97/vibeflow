@@ -270,7 +270,7 @@ export async function runSkillAcquisitionGate(opts: {
 }): Promise<AcquisitionGateResult> {
   const { repo, needs, execute, approver, install, scanner, readDeps, command, recordDecisions } =
     opts;
-  const deps: AcquisitionReadDeps = { ...readDeps, scanner };
+  const deps: AcquisitionReadDeps = scanner ? { ...readDeps, scanner } : (readDeps ?? {});
 
   if (!execute) {
     const { proposals } = buildAcquisitionProposals(repo, needs, deps);
@@ -318,22 +318,24 @@ export async function runSkillAcquisitionGate(opts: {
 
   if (recordDecisions) {
     recordDecisions(
-      proposals.map((p): SkillAcquisitionDecision => ({
-        event: "acquisition-decision",
-        skill: p.name,
-        source: `${p.source.registryId}@${p.source.commitOID.slice(0, 12)}`,
-        decision: !p.approvable
-          ? "blocked"
-          : decisions.get(p.id) !== "approve"
-            ? "reject"
-            : failed === p.name
-              ? "install-failed"
-              : installed.includes(p.name)
-                ? "approve"
-                : "reject",
-        command: command ?? "orchestrate",
-        at: new Date().toISOString(),
-      })),
+      proposals.map(
+        (p): SkillAcquisitionDecision => ({
+          event: "acquisition-decision",
+          skill: p.name,
+          source: `${p.source.registryId}@${p.source.commitOID.slice(0, 12)}`,
+          decision: !p.approvable
+            ? "blocked"
+            : decisions.get(p.id) !== "approve"
+              ? "reject"
+              : failed === p.name
+                ? "install-failed"
+                : installed.includes(p.name)
+                  ? "approve"
+                  : "reject",
+          command: command ?? "orchestrate",
+          at: new Date().toISOString(),
+        }),
+      ),
     );
   }
 
