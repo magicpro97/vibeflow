@@ -91,6 +91,10 @@ describe("skill-acquisition-route: body validation", () => {
     expect(res.status).toBe(400);
   });
 
+  test("POST empty id → 400", () => {
+    expect(handleSkillAcquisitionDecision({ id: "", decision: "reject" }).status).toBe(400);
+  });
+
   test("POST unknown id → 404", () => {
     clearPendingSkillAcquisitions();
     const res = handleSkillAcquisitionDecision({ id: "ghost", decision: "reject" });

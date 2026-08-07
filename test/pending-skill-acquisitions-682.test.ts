@@ -26,6 +26,9 @@ function proposal(
 }
 
 describe("pending-skill-acquisitions", () => {
+  test("empty request resolves immediately", async () => {
+    expect([...(await requestSkillAcquisitionDecisions([])).entries()]).toEqual([]);
+  });
   afterEach(() => {
     clearPendingSkillAcquisitions();
   });

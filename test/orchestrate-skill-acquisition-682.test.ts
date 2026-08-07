@@ -233,6 +233,29 @@ describe("preDispatchAcquisition (#682 adapter)", () => {
     expect(res.unresolved).toContain("xlsx-reader");
   });
 
+  test("TTY skips confirm for a blocked proposal", async () => {
+    const { repo, home } = makeCacheFixture();
+    let prompts = 0;
+    const res = await preDispatchAcquisition(repo, "goal", ["data.xlsx"], "run", true, false, {
+      acquisitionIsTTY: () => true,
+      acquisitionConfirm: async () => {
+        prompts++;
+        return true;
+      },
+      acquisitionReadDeps: {
+        homedir: () => home,
+        scanner: () => ({
+          scanned: true,
+          risk_severity: "HIGH",
+          risk_score: 90,
+          findings: [{ rule_id: "R", message: "blocked" }],
+        }),
+      },
+    });
+    expect(prompts).toBe(0);
+    expect(res.unresolved).toContain("xlsx-reader");
+  });
+
   test("non-TTY real run without --yes never prompts and skips install", async () => {
     const { repo, home } = makeCacheFixture();
     writeStateFixture(repo);

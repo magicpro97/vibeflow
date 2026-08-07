@@ -175,16 +175,7 @@ export function findAcquisitionCandidates(
     const candidate = candidates[0];
     if (!candidate) continue;
     const { entry, cacheDir, mpSkills } = candidate;
-    const mpSkill = mpSkills[0];
-    if (!mpSkill) {
-      resolutions.push({
-        state: "unresolved",
-        need: need.need,
-        reason: need.reason,
-        acquire: need.acquire,
-      });
-      continue;
-    }
+    const mpSkill = mpSkills[0] as (typeof mpSkills)[number];
 
     const subPath = mpSkill.path ?? `skills/${mpSkill.name}`;
     const skillDir = registrySkillDir(cacheDir, subPath);
@@ -222,14 +213,9 @@ export function findAcquisitionCandidates(
   }
 
   return resolutions.sort((a, b) => {
-    const na =
-      a.state === "proposal" ? a.proposal.need : a.state === "unresolved" ? a.need : a.need;
-    const nb =
-      b.state === "proposal" ? b.proposal.need : b.state === "unresolved" ? b.need : b.need;
-    if (na !== nb) return na.localeCompare(nb);
-    const ra = a.state === "proposal" ? a.proposal.source.registryId : "";
-    const rb = b.state === "proposal" ? b.proposal.source.registryId : "";
-    return ra.localeCompare(rb);
+    const na = a.state === "proposal" ? a.proposal.need : a.need;
+    const nb = b.state === "proposal" ? b.proposal.need : b.need;
+    return na.localeCompare(nb);
   });
 }
 
