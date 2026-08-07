@@ -129,6 +129,12 @@ Approval is required before:
 - granting network, filesystem, or credential access
 ```
 
+Missing skills are resolved before agent launch only from a configured pinned registry
+cache. The read-only card includes immutable source and security scan status. `--yes`, TTY,
+or Web UI approval authorizes the existing install pipeline; HIGH/CRITICAL remains blocked.
+Rejecting, missing, or failing acquisition preserves a skill gap and does not cancel agent
+dispatch. Approval grants neither review proof nor verified trust.
+
 ## Debate policy
 
 For complex or high-risk tasks, run a debate before execution.

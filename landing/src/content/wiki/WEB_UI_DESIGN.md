@@ -233,6 +233,12 @@ Approval button if required
 
 ## Approval UX
 
+Stage 3 polls for skill-acquisition cards while `/api/orchestrate` waits. Each card shows
+need, candidate version, pinned registry commit, and bounded security scan status. Approve
+is disabled for HIGH/CRITICAL; Reject skips acquisition and continues with a skill gap.
+The browser only resolves a guarded decision endpoint—it never installs directly. Cards
+are keyboard trapped, Escape rejects, errors are assertive, and focus returns to Run agents.
+
 Approval prompts should support:
 
 ```text

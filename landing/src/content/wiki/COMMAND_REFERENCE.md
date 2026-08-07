@@ -235,6 +235,18 @@ VibeFlow does not pre-install skills. Needs are reported with a suggested on-dem
 acquisition command. Imported skills start `experimental` and must be validated +
 approved before promotion to `verified`.
 
+### Skill acquisition before agent dispatch
+
+`vf run` and `vf orchestrate` inspect configured pinned registry caches before agents
+start. An exact verified match becomes a read-only approval card with name, version,
+immutable registry commit, and security scan status; proposal creation performs no
+network call or catalog/lock write. `--yes` auto-approves installable cards, an
+interactive TTY asks explicitly, and the Web UI exposes Approve/Reject. HIGH/CRITICAL
+remains blocked. Approved skills use the normal install pipeline and are scanned again;
+approval creates no review proof and grants no `verified` trust. Rejection, ambiguity,
+missing candidates, and install failure preserve a skill gap and do not cancel agent
+dispatch. Browser decisions only resolve the waiting run; no direct browser install API exists.
+
 The canonical store is `.vibeflow/skills/<name>/` (one `SKILL.md` plus optional
 `scripts/`, `references/`, `assets/`). The three engine mirrors
 (`.claude/skills/`, `.agents/skills/`, `.github/skills/`) are kept in sync by
