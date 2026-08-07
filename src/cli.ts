@@ -4,6 +4,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import {
+  defaultGit,
   demo,
   discover,
   doctor,
@@ -17,6 +18,8 @@ import {
   printCommandHelp,
   printHelp,
   printVersion,
+  reviewEvidence,
+  reviewerFromResult,
   run,
   skills,
   status,
@@ -263,7 +266,18 @@ async function main(argv: string[]): Promise<number> {
         journal: flags.journal === true,
         coverage: flags.coverage === true,
         allowUnverifiedEvidence: flags["allow-unverified-evidence"] === true,
+        requireReviewEvidence: flags["require-review-evidence"] === true,
       });
+    case "review": {
+      if (
+        positionals[0] !== "evidence" ||
+        typeof flags.base !== "string" ||
+        typeof flags.result !== "string"
+      )
+        return 2;
+      const reviewer = reviewerFromResult(flags.result);
+      return reviewer ? reviewEvidence(cwd(), ["--base", flags.base], defaultGit, reviewer) : 1;
+    }
     case "decision":
       return decision(positionals[0], flags);
     case "state":

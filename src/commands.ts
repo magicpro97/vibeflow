@@ -176,6 +176,7 @@ export {
 } from "./commands/tools.js";
 export type { StepSpawner } from "./commands/tools.js";
 export { verify, detectToolchain } from "./commands/tools-detect.js";
+export { reviewEvidence, reviewerFromResult, defaultGit } from "./commands/review-evidence.js";
 export type { ToolchainPlan } from "./commands/tools-detect.js";
 export { repoLanguages, writeToolConfigs } from "./commands/tools-mcp-config.js";
 // === Re-export the workflow cluster (issue #80, phase 8/14) ===
