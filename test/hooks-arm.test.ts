@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { armHooks, emitHookFiles } from "../src/commands/hooks.js";
+import { armHooks, emitHookFiles, isManagedHook } from "../src/commands/hooks.js";
 import { readSettings } from "../src/settings.js";
 
 function tmpRepo(): string {
@@ -17,6 +17,7 @@ const ENGINE_FILES = [
   ".githooks/pre-commit",
   ".githooks/post-checkout",
   ".githooks/post-merge",
+  ".githooks/pre-push",
 ];
 
 const EXCLUDE_CODEX: import("../src/core.js").Engine[] = [
@@ -192,6 +193,58 @@ describe("armHooks", () => {
     try {
       armHooks(dir, { templates: [], custom: [] }, EXCLUDE_CODEX);
       expect(readSettings(dir).hooks?.templates).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("pre-push non-clobber (#748)", () => {
+  test("only current and exact legacy VibeFlow headers count as managed", () => {
+    expect(isManagedHook("# vibeflow-managed")).toBe(true);
+    expect(isManagedHook("# VibeFlow guardrail: route staged changes")).toBe(true);
+    expect(isManagedHook("# VibeFlow: keep the code-navigation index in sync")).toBe(true);
+    expect(isManagedHook("# VibeFlow: refresh the code-navigation index after a merge")).toBe(true);
+    expect(isManagedHook("# VibeFlow: handle my custom deployment")).toBe(false);
+  });
+
+  test("a user-owned .githooks/pre-push is preserved byte-for-byte by emitHookFiles", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".githooks"), { recursive: true });
+      const userHook = "#!/bin/sh\n# my custom pre-push\necho custom\n";
+      writeFileSync(join(dir, ".githooks", "pre-push"), userHook);
+      const written = emitHookFiles(dir, EXCLUDE_CODEX);
+      // Skipped path must NOT be reported as written.
+      expect(written).not.toContain(".githooks/pre-push");
+      expect(readFileSync(join(dir, ".githooks", "pre-push"), "utf8")).toBe(userHook);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a managed (vibeflow) .githooks/pre-push is updated by emitHookFiles", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".githooks"), { recursive: true });
+      writeFileSync(join(dir, ".githooks", "pre-push"), "# vibeflow-managed stale");
+      const written = emitHookFiles(dir, EXCLUDE_CODEX);
+      expect(written).toContain(".githooks/pre-push");
+      expect(readFileSync(join(dir, ".githooks", "pre-push"), "utf8")).toContain(
+        "# vibeflow-managed",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fresh dir: pre-push is created alongside pre-commit; pre-commit preserved", () => {
+    const dir = tmpRepo();
+    try {
+      const written = emitHookFiles(dir, EXCLUDE_CODEX);
+      expect(written).toContain(".githooks/pre-push");
+      expect(written).toContain(".githooks/pre-commit");
+      expect(existsSync(join(dir, ".githooks", "pre-push"))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

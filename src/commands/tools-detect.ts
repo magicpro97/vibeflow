@@ -197,6 +197,7 @@ export async function collectVerifyReportAsync(
     ) => Promise<{ covered: boolean; uncovered: string[]; score?: number }>; // ADR-003
     allowUnverifiedEvidence?: boolean; // ADR-004 escape hatch
     requireReviewEvidence?: boolean;
+    reviewBase?: string; // #748: pushed-range fallback base
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
@@ -239,7 +240,7 @@ export async function collectVerifyReportAsync(
   const rawState = readState(base);
   if (inject.allowUnverifiedEvidence && rawState) rawState._allowUnverifiedEvidence = true;
   const policy = policyGates(rawState, { base });
-  appendReviewEvidence(policy, base, inject.requireReviewEvidence === true);
+  appendReviewEvidence(policy, base, inject.requireReviewEvidence === true, inject.reviewBase);
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
 
   // Type B drift PRODUCER: when the toolchain gates are all green, fingerprint
@@ -284,6 +285,7 @@ export function verify(
     coverage?: boolean;
     allowUnverifiedEvidence?: boolean;
     requireReviewEvidence?: boolean;
+    reviewBase?: string; // #748
     catalogDir?: string;
   } = {},
 ): number {
@@ -332,7 +334,7 @@ export function verify(
   const st = readState();
   if (inject.allowUnverifiedEvidence && st) st._allowUnverifiedEvidence = true;
   const report = policyGates(st);
-  appendReviewEvidence(report, base, inject.requireReviewEvidence === true);
+  appendReviewEvidence(report, base, inject.requireReviewEvidence === true, inject.reviewBase);
   printVerifyReport(report);
   failed += report.failures.length;
 

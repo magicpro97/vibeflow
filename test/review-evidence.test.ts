@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { reviewEvidence, reviewerFromResult } from "../src/commands/review-evidence.js";
 import { appendReviewEvidence } from "../src/hooks/review-evidence-gate.js";
@@ -499,5 +499,94 @@ describe("review evidence producer command", () => {
         throw new Error("must not run");
       }),
     ).toBe(0);
+  });
+});
+
+describe("review-base fallback (#748)", () => {
+  test("missing record + valid ancestor base + docs-only diff passes without a record", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-fallback-docs-"));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: { status: 0, stdout: "M\tREADME.md\n" },
+    });
+    const result = checkReviewEvidence(repo, true, read, base);
+    expect(result.ok).toBe(true);
+    expect(result.reason).toContain("no applicable checklist");
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("missing record + applicable source diff fails", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-fallback-src-"));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: {
+        status: 0,
+        stdout: "M\tREADME.md\nM\tsrc/routes.ts\nM\ttest/routes.test.ts\n",
+      },
+    });
+    const result = checkReviewEvidence(repo, true, read, base);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("record missing");
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("invalid/non-ancestor review base fails closed", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-fallback-stale-"));
+    const nonAncestor = "c".repeat(40);
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${nonAncestor} ${head}`]: { status: 1, stdout: "" },
+    });
+    expect(checkReviewEvidence(repo, true, read, nonAncestor).ok).toBe(false);
+    expect(checkReviewEvidence(repo, true, read, nonAncestor).reason).toContain("record missing");
+    // not required → warn (fail-open) but never a false pass
+    const warn = checkReviewEvidence(repo, false, read, nonAncestor);
+    expect(warn.ok).toBe(true);
+    expect(warn.reason).toContain("record missing");
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("symlinked existing record cannot use docs-only fallback", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-fallback-symlink-"));
+    const dir = join(repo, ".vibeflow/review-evidence/v1");
+    mkdirSync(dir, { recursive: true });
+    const target = join(dir, "target-record.json");
+    writeFileSync(target, record());
+    symlinkSync(target, recordPath(repo, head));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: { status: 0, stdout: "M\tREADME.md\n" },
+    });
+    // Still fails closed — a symlink is not a genuine missing record.
+    expect(checkReviewEvidence(repo, true, read, base).ok).toBe(false);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("malformed existing record cannot use docs-only fallback", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-fallback-malformed-"));
+    mkdirSync(join(repo, ".vibeflow/review-evidence/v1"), { recursive: true });
+    writeFileSync(recordPath(repo, head), "{}");
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: { status: 0, stdout: "M\tREADME.md\n" },
+    });
+    // Malformed record is present → fails closed, never the docs-only pass.
+    expect(checkReviewEvidence(repo, true, read, base).reason).toContain("invalid base/manifest");
+    expect(checkReviewEvidence(repo, true, read, base).ok).toBe(false);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("default no-base behavior unchanged (missing record still fails when required)", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-fallback-nobase-"));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+    });
+    expect(checkReviewEvidence(repo, true, read).ok).toBe(false);
+    expect(checkReviewEvidence(repo, true, read).reason).toContain("record missing");
+    rmSync(repo, { recursive: true, force: true });
   });
 });

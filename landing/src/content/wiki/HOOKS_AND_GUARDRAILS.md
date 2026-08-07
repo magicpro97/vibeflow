@@ -40,7 +40,17 @@ engine's native hook events to `vf hook`:
 .codex/hooks.json            → Codex post-command/post-write/verify-result → `vf hook`
 .github/hooks/copilot.json   → Copilot preToolUse (fail-closed) + postToolUse → `vf hook`
 .githooks/pre-commit         → shell hook routing staged files through `vf hook`
+.githooks/pre-push           → current-HEAD verify + local review-evidence gate
 ```
+
+### Git pre-push review gate
+
+`vf hooks install` adds a fail-closed pre-push hook. It binds verification to pushed
+current `HEAD`, derives the pushed-range base, and runs
+`vf verify --require-review-evidence --review-base <full-SHA>`. It ignores tags and
+deletions and rejects mixed-base multi-branch pushes. No LLM/network/API runs inside the
+hook. `git push --no-verify` bypasses local feedback only; remote `review-thread-gate`
+remains authoritative. User-owned hooks are preserved, never auto-chained.
 
 These are each engine's own native configuration format (not VibeFlow-invented files), so
 no separate executable wrapper is needed: every engine already knows how to invoke a

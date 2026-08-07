@@ -288,11 +288,19 @@ optional `CONTEXT7_API_KEY` env var raises the rate limit (keyless is allowed).
 ## Hooks (guardrails)
 
 ```bash
-vf hooks status     # show core.hooksPath
-vf hooks install    # wire core.hooksPath → .githooks
-vf hooks emit       # write engine hook configs (Claude/Codex/Copilot + git pre-commit)
+vf hooks status     # show core.hooksPath and live guardrail status
+vf hooks install    # install fail-closed pre-commit + pre-push; preserve user-owned hooks
+vf hooks emit       # write engine configs plus managed git hooks
 echo '<json-event>' | vf hook       # → {"decision":"allow|warn|require_approval|block",...}
 ```
+
+The generated `.githooks/pre-push` validates the exact pushed `HEAD`, derives the pushed
+range base, then runs `vf verify --require-review-evidence --review-base <full-SHA>`.
+Missing, stale, malformed, unreadable, or failed evidence blocks with a repair command;
+docs-only ranges with no applicable checklist need no reviewer record. The hook makes no
+LLM, network, GitHub API, or Copilot call. `git push --no-verify` bypasses only this local
+fast-feedback gate; required remote `review-thread-gate` remains authoritative. Existing
+user-owned git hooks are preserved and must be integrated manually.
 
 ### require_approval in web UI context
 When VF_HOOK_MODE=default and .vibeflow/.ui-port exists, require_approval
@@ -334,11 +342,14 @@ failing notifier is swallowed so it can't break the merge flow.
 ```bash
 vf verify
 vf verify --require-review-evidence
+vf verify --require-review-evidence --review-base <full-SHA>
 vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migration escape hatch)
 vf review evidence --base <full-SHA> --result <review-result.json>
 ```
 
 Review evidence stays local at `.vibeflow/review-evidence/v1/<headSha>.json`. `vf verify` performs no LLM/network call; default mode warns, while `--require-review-evidence` fails closed. `--allow-unverified-evidence` does not bypass this gate.
+`--review-base` is the full ancestor SHA used only to classify a missing record as a
+no-checklist range; it never weakens malformed or present-record validation.
 
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
 missing evidence on a `done` unit, and overlapping work-unit scopes all fail.

@@ -262,11 +262,18 @@ async function main(argv: string[]): Promise<number> {
     case "hooks":
       return hooks(positionals[0], flags);
     case "verify":
+      // #748: --review-base must be a full lowercase 40-char SHA; reject early.
+      if (
+        flags["review-base"] !== undefined &&
+        !/^[0-9a-f]{40}$/.test(String(flags["review-base"]))
+      )
+        return 2;
       return verify({
         journal: flags.journal === true,
         coverage: flags.coverage === true,
         allowUnverifiedEvidence: flags["allow-unverified-evidence"] === true,
         requireReviewEvidence: flags["require-review-evidence"] === true,
+        reviewBase: flags["review-base"] === undefined ? undefined : String(flags["review-base"]),
       });
     case "review": {
       if (

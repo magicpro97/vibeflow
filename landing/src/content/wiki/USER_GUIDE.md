@@ -281,14 +281,19 @@ work-unit scopes fail.
 ### Hooks (guardrails)
 
 ```bash
-vf hooks status               # show core.hooksPath
-vf hooks install              # wire core.hooksPath → .githooks
-vf hooks emit                 # write engine hook configs (Claude/Codex/Copilot + git)
+vf hooks status               # show git path + live guardrail status
+vf hooks install              # install fail-closed pre-commit + pre-push gates
+vf hooks emit                 # write engine configs plus managed git hooks
 echo '{"event":"pre-command","command":"rm -rf /"}' | vf hook   # → {"decision":"block",...}
 ```
 
 All engine hook configs delegate to one entrypoint — `vf hook` — which scores risk and
 returns `allow | warn | require_approval | block`.
+
+`.githooks/pre-push` runs current-HEAD verification with local review evidence. It fails
+closed with repair guidance, but docs-only/no-checklist ranges need no reviewer record.
+No network or LLM runs inside it. `git push --no-verify` bypasses local feedback only;
+remote `review-thread-gate` remains authoritative. User-owned hooks are preserved.
 
 ---
 

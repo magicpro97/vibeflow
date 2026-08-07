@@ -342,21 +342,64 @@ export function hookSelftest(
   return 0;
 }
 
+/** Stable marker the current generator emits in every managed git hook. */
+const MANAGED_MARKER = "vibeflow-managed";
+/** Legacy generated header pre-dating the marker (pre-commit/post-checkout/post-merge). */
+const LEGACY_MARKERS = [
+  "# VibeFlow guardrail:",
+  "# VibeFlow: keep the code-navigation index",
+  "# VibeFlow: refresh the code-navigation index",
+];
+
+/**
+ * #748 non-clobber: classify an existing .githooks/* file as VibeFlow-managed
+ * only when it carries a current or legacy generated header. Anything else is
+ * a user-owned hook whose exact bytes MUST be preserved (never chained).
+ */
+export function isManagedHook(content: string): boolean {
+  return content.includes(MANAGED_MARKER) || LEGACY_MARKERS.some((m) => content.includes(m));
+}
+
+function writeHookFile(dest: string, content: string): void {
+  writeFileSafe(dest, content);
+  try {
+    chmodSync(dest, 0o755);
+  } catch {
+    /* best-effort: non-POSIX filesystems may not support the exec bit */
+  }
+}
+
 export function installHooks(base?: string): number {
   const dir = base ?? cwd();
-  // Write the portable .githooks/* files first, THEN point git at them. Only the
-  // git-level hooks (pre-commit/post-checkout/post-merge) — engine configs like
+  // #748: refuse to clobber a user-owned hook. Only overwrite files recognized as
+  // VibeFlow-managed (or absent). User-owned pre-push must survive install and is
+  // surfaced as an incomplete install with manual integration guidance.
+  let preservedUserHook = false;
+  // Write the portable .githooks/* files FIRST, then point git at them. Only the
+  // git-level hooks (pre-commit/pre-push/post-checkout/post-merge) — engine configs like
   // .claude/settings.json stay behind `emit --yes` because they hot-reload a live
   // PreToolUse hook into a running agent.
   for (const [rel, content] of Object.entries(engineHookFiles())) {
     if (!rel.startsWith(".githooks/")) continue;
     const dest = join(dir, rel);
-    writeFileSafe(dest, content);
-    try {
-      chmodSync(dest, 0o755);
-    } catch {
-      /* best-effort: non-POSIX filesystems may not support the exec bit */
+    if (existsSync(dest)) {
+      const existing = readFileSync(dest, "utf8");
+      if (!isManagedHook(existing)) {
+        if (rel.endsWith("/pre-push")) {
+          preservedUserHook = true;
+          out(
+            "vf",
+            c.yellow(
+              `! ${rel} is a user-owned hook — preserved, not overwritten. Integrate the pre-push review gate manually (see docs).`,
+            ),
+          );
+          continue;
+        }
+        // pre-commit/post-checkout/post-merge: also non-clobber (fresh-init safety).
+        continue;
+      }
     }
+    writeHookFile(dest, content);
   }
   // PR28 audit Task 7 (M3): the old code only printed a green success line when
   // git exited 0. On non-zero exit (not a git repo, read-only filesystem, missing
@@ -373,6 +416,16 @@ export function installHooks(base?: string): number {
     out("vf", c.green("Installed: core.hooksPath → .githooks"));
     out("vf");
     out("vf", liveGuardrailArmed(dir) ? c.green("live guardrail: ON") : guardrailOffNote());
+    if (preservedUserHook) {
+      out(
+        "vf",
+        c.yellow(
+          "! pre-push review gate NOT installed — a user-owned .githooks/pre-push exists. Integrate `vf verify --require-review-evidence --review-base <sha>` manually, or move your hook and re-run `vf hooks install`.",
+        ),
+        { level: "error" },
+      );
+      return 1;
+    }
     return 0;
   }
   // Failure: surface stderr + likely cause. The hint text is intentionally generic —
@@ -552,6 +605,15 @@ export function emitHookFiles(base: string, engines?: Engine[], codexHome?: stri
       }
       writeFileSafe(dest, merged);
       written.push(rel);
+      continue;
+    }
+    // #748: never clobber a user-owned .githooks hook — preserve exact bytes, skip it.
+    if (
+      rel.startsWith(".githooks/") &&
+      existsSync(dest) &&
+      !isManagedHook(readFileSync(dest, "utf8"))
+    ) {
+      out("vf", c.yellow(`! ${rel} is a user-owned hook — preserved, not overwritten.`));
       continue;
     }
     writeFileSafe(dest, content);

@@ -236,7 +236,11 @@ per-event `.vibeflow/hooks/*.ts` scripts; instead every config delegates to the 
 .github/hooks/copilot.json   (Copilot preToolUse (fail-closed) + postToolUse → `vf hook`)
 .agents/hooks.json           (Antigravity PreToolUse/PostToolUse → `vf hook --antigravity`; named-key merge)
 .githooks/pre-commit         (fail-closed shell hook routing staged files → `vf hook`)
+.githooks/pre-push           (fail-closed current-HEAD `vf verify` + local review-evidence gate)
 ```
+
+VibeFlow replaces only managed git hooks. Existing user-owned hooks stay byte-identical
+and need manual pre-push integration; unknown shell is never chained automatically.
 
 Purpose:
 

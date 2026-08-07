@@ -284,11 +284,18 @@ optional `CONTEXT7_API_KEY` env var raises the rate limit (keyless is allowed).
 ## Hooks (guardrails)
 
 ```bash
-vf hooks status     # show core.hooksPath
-vf hooks install    # wire core.hooksPath → .githooks
-vf hooks emit       # write engine hook configs (Claude/Codex/Copilot + git pre-commit)
+vf hooks status     # show core.hooksPath and live guardrail status
+vf hooks install    # install fail-closed pre-commit + pre-push; preserve user-owned hooks
+vf hooks emit       # write engine configs plus managed git hooks
 echo '<json-event>' | vf hook       # → {"decision":"allow|warn|require_approval|block",...}
 ```
+
+The generated `.githooks/pre-push` validates exact pushed `HEAD`, derives the pushed
+range base, then runs `vf verify --require-review-evidence --review-base <full-SHA>`.
+Missing, stale, malformed, unreadable, or failed evidence blocks; docs-only ranges with
+no applicable checklist need no reviewer record. No LLM/network/API runs in the hook.
+`git push --no-verify` bypasses local feedback only; remote `review-thread-gate` remains
+authoritative. User-owned hooks are preserved for manual integration.
 
 ### require_approval in web UI context
 When VF_HOOK_MODE=default and .vibeflow/.ui-port exists, require_approval
@@ -329,8 +336,12 @@ failing notifier is swallowed so it can't break the merge flow.
 
 ```bash
 vf verify
+vf verify --require-review-evidence --review-base <full-SHA>
 vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migration escape hatch)
 ```
+
+`--review-base` is an ancestor SHA used only to classify a genuinely missing record as a
+no-checklist range; it never weakens present-record validation.
 
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
 missing evidence on a `done` unit, and overlapping work-unit scopes all fail.

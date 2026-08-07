@@ -305,10 +305,9 @@ ${c.bold("Examples:")}
 Manage git/engine hook wiring (all hooks delegate to \`vf hook\`).
 
 ${c.bold("Subcommands:")}
-  status     show the configured core.hooksPath (default)
-  install    point git core.hooksPath at .githooks
-  emit       write per-engine hook config files into the repo
-             (dry-run by default; pass --yes to actually write)
+  status     show core.hooksPath plus live guardrail status (default)
+  install    install fail-closed pre-commit + pre-push hooks and point core.hooksPath at .githooks
+  emit       write per-engine hook configs (dry-run; --yes writes)
 
 ${c.bold("Examples:")}
   vf hooks status
@@ -322,7 +321,8 @@ npm/Gradle/monorepo) plus the policy gates (confidence / evidence / scope) over 
 workflow ledger. Returns nonzero if any gate fails.
 
 ${c.bold("Examples:")}
-  vf verify`,
+  vf verify
+  vf verify --require-review-evidence --review-base <full-SHA>`,
 
   eval: () => `${c.bold("vf eval")} ${c.dim("[--min-pass-rate <0..1>] [--min-samples <n>] [--json] [--out <file>]")}
 Read the verdict/verify telemetry vf already writes during normal use, aggregate a
