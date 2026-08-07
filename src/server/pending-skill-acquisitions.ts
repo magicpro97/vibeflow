@@ -6,10 +6,7 @@
 // 404, and cleanup/clear rejects outstanding waits (never a dangling promise).
 // No disk, network, or install calls.
 
-import type {
-  AcquisitionDecision,
-  SkillAcquisitionProposal,
-} from "../skills/acquisition.js";
+import type { AcquisitionDecision, SkillAcquisitionProposal } from "../skills/acquisition.js";
 
 const MAX_PENDING_CARDS = 32;
 

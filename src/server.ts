@@ -23,9 +23,11 @@ import {
   onPendingResolved,
   registerPending,
 } from "./server/pending-hooks.js";
+import { clearPendingSkillAcquisitions } from "./server/pending-skill-acquisitions.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
 import { handleRegistryView } from "./server/registry-route.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
+import { handleSkillAcquisitionPending } from "./server/skill-acquisition-route.js";
 import { toSafeSkills } from "./skills/api-types.js";
 import { sharedCatalogDir } from "./skills/catalog.js";
 import { curatorView } from "./skills/curator-view.js";
@@ -83,6 +85,7 @@ export function startServer(
 
   let activeRepo = cwd();
   clearPending(); // discard orphaned hooks from previous server instance
+  clearPendingSkillAcquisitions(); // #682 — reject outstanding acquisition waits on startup
 
   const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
 
@@ -190,6 +193,12 @@ export function startServer(
           needs,
           validation: { errors: validation.errors, warnings: validation.warnings },
         });
+      }
+
+      // --- GET /api/skills/acquisitions/pending (#682: guarded, read-only) ---
+      if (method === "GET" && path === "/api/skills/acquisitions/pending") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleSkillAcquisitionPending();
       }
 
       // --- GET /api/skills/registries (#688: guarded, read-only) ---
@@ -670,6 +679,7 @@ export function startServer(
             path === "/api/curator/setup/apply" ||
             path === "/api/verify" ||
             path === "/api/hook/approve" ||
+            path === "/api/skills/acquisitions/decision" ||
             path.startsWith("/api/guidance/") ||
             path === "/api/upload" ||
             path === "/api/plan-review/revisions" ||

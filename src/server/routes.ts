@@ -27,16 +27,19 @@ import {
   syncAttachments,
 } from "./handlers.js";
 import { listPending, resolvePending } from "./pending-hooks.js";
+import { requestSkillAcquisitionDecisions } from "./pending-skill-acquisitions.js";
 import {
   handlePlanReviewCommentsDelete,
   handlePlanReviewCommentsPost,
   handlePlanReviewPost,
 } from "./plan-review.js";
 import { handleRegistryPreview } from "./registry-route.js";
+import { handleSkillAcquisitionDecision } from "./skill-acquisition-route.js";
 
 export interface RouteCtx {
   getActiveRepo: () => string;
   setActiveRepo: (repo: string) => void;
+  orchestrateFn?: typeof orchestrate;
 }
 
 const GUIDANCE_NOTE_CAP = 100 * 1024;
@@ -200,14 +203,10 @@ export async function handleMutationRoute(
       return Response.json({ error: "no workflow state — run init first" }, { status: 400 });
     }
     const engine = typeof payload.engine === "string" ? payload.engine : "claude";
-    // dry defaults to true (read-only preview) for backward compat.
-    // Web UI passes dry:false to actually run; that also sets yes:true for cli mode.
+    // Web dry:false selects a real run; acquisition still uses its injected approver.
     const dry = payload.dry !== false;
     const yes = !dry; // yes:true enables cli mode in resolveMode()
-    // Pre-stamp synthetic evidence on done units that have none. Without evidence,
-    // orchestrate's isComplete() check (status=done && confidence>=1 && evidence.length>0)
-    // returns false → the unit is re-dispatched → engine probe → timeout on unavailable engine.
-    // Stamping here lets orchestrate recognise them as already complete and skip engine launch.
+    // Stamp evidence so legacy done units satisfy orchestrate's completeness contract.
     if (!dry) {
       const preState = readState(ctx.getActiveRepo());
       if (preState) {
@@ -222,7 +221,9 @@ export async function handleMutationRoute(
         if (prePatched) writeState(ctx.getActiveRepo(), preState);
       }
     }
-    await orchestrate({ engine, dry, yes }, ctx.getActiveRepo());
+    await (ctx.orchestrateFn ?? orchestrate)({ engine, dry, yes }, ctx.getActiveRepo(), {
+      acquisitionApprover: (proposals) => requestSkillAcquisitionDecisions(proposals),
+    });
     return Response.json({ ok: true, state: readState(ctx.getActiveRepo()) });
   }
 
@@ -298,8 +299,7 @@ export async function handleMutationRoute(
   // biome-ignore format: keep compact so `}` is not a standalone line (bun:coverage gap)
   if (path === "/api/settings") { applySettings(ctx.getActiveRepo(), payload); return Response.json({ ok: true, ...settingsView(ctx.getActiveRepo()) }); }
 
-  // POST /api/verify — runs collectVerifyReportAsync (B1 seam, non-blocking so Bun.serve
-  // keeps serving SSE/state while gates run)
+  // POST /api/verify — async so the server keeps serving state/SSE while gates run.
   if (path === "/api/verify") {
     const goalEval = url.searchParams.get("goal-eval") === "1";
     const currentState = readState(ctx.getActiveRepo());
@@ -313,7 +313,6 @@ export async function handleMutationRoute(
     return Response.json({ ok: report.ok, gates, policy: report.policy });
   }
 
-  // POST /api/hook/approve — user clicked Allow/Block in UI
   if (path === "/api/hook/approve") {
     const id = typeof payload.id === "string" ? payload.id : "";
     const decision = payload.decision === "allow" ? "allow" : "block";
@@ -323,12 +322,14 @@ export async function handleMutationRoute(
     return Response.json({ ok: true });
   }
 
-  // POST /api/hook/pending — hook process registers itself for UI approval
+  if (path === "/api/skills/acquisitions/decision") {
+    return handleSkillAcquisitionDecision(payload);
+  }
+
   if (path === "/api/hook/pending") {
     const id = typeof payload.id === "string" ? payload.id : "";
     if (!id) return Response.json({ error: "id required" }, { status: 400 });
     const { registerPending } = await import("./pending-hooks.js");
-    // registerPending returns a Promise — we don't await it here; the long-poll resolves it
     registerPending(
       id,
       payload.input as import("../core/types.js").HookInput,
@@ -373,7 +374,6 @@ export async function handleMutationRoute(
   return null;
 }
 
-/** Handle read-only /api/projects/* routes. Returns null if path not matched. */
 export function handleProjectsRoute(path: string, url: URL): Response | null {
   if (path === "/api/projects") {
     return Response.json({ projects: readRegistry() });

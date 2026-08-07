@@ -1,14 +1,17 @@
 // #682 Task 9 — RED tests for the in-memory pending skill-acquisition broker.
 import { afterEach, describe, expect, test } from "bun:test";
-import type { AcquisitionDecision, SkillAcquisitionProposal } from "../src/skills/acquisition.js";
 import {
   clearPendingSkillAcquisitions,
   listPendingSkillAcquisitions,
   requestSkillAcquisitionDecisions,
   resolveSkillAcquisition,
 } from "../src/server/pending-skill-acquisitions.js";
+import type { AcquisitionDecision, SkillAcquisitionProposal } from "../src/skills/acquisition.js";
 
-function proposal(id: string, overrides: Partial<SkillAcquisitionProposal> = {}): SkillAcquisitionProposal {
+function proposal(
+  id: string,
+  overrides: Partial<SkillAcquisitionProposal> = {},
+): SkillAcquisitionProposal {
   return {
     id,
     need: `need-${id}`,
@@ -73,9 +76,7 @@ describe("pending-skill-acquisitions", () => {
     // Conflicting payload under same id fails closed — no duplicate wait registered.
     let conflicting: Promise<ReadonlyMap<string, AcquisitionDecision>> | null = null;
     try {
-      conflicting = requestSkillAcquisitionDecisions([
-        proposal("p1", { name: "different-name" }),
-      ]);
+      conflicting = requestSkillAcquisitionDecisions([proposal("p1", { name: "different-name" })]);
     } catch {
       conflicting = null;
     }
