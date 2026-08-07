@@ -224,6 +224,18 @@ describe("pre-push non-clobber (#748)", () => {
     }
   });
 
+  test("a non-file pre-push path is preserved without aborting emit", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".githooks", "pre-push"), { recursive: true });
+      const written = emitHookFiles(dir, EXCLUDE_CODEX);
+      expect(written).not.toContain(".githooks/pre-push");
+      expect(existsSync(join(dir, ".githooks", "pre-push"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("a managed (vibeflow) .githooks/pre-push is updated by emitHookFiles", () => {
     const dir = tmpRepo();
     try {
