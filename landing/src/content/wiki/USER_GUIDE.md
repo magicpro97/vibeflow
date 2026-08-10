@@ -279,11 +279,20 @@ vf units evidence <name>      # recorded evidence paths
 
 ```bash
 vf verify
+vf verify --sandbox docker \
+  --sandbox-image registry.example/vf@sha256:<digest> \
+  --sandbox-volume vf-deps-<lock-sha256>
 ```
 
 Runs `typecheck`/`lint`/`test` when your `package.json` declares them, **plus** the policy
 gates: confidence `< 1` fails, a `done` unit with no evidence fails, and overlapping
 work-unit scopes fail.
+
+Use sandbox mode for untrusted agent-authored tests/build scripts. It runs synchronous CLI
+gates with no network or inherited host environment, using a disposable source copy rather
+than your active worktree. Prepare a digest-pinned toolchain image and Linux dependency
+volume first; label the volume `vibeflow.lock-sha256=<lockfile SHA-256>`. vf never installs,
+pulls, or falls back to host execution when sandbox preflight fails.
 
 ### Hooks (guardrails)
 

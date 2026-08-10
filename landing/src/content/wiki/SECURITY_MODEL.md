@@ -340,6 +340,27 @@ emits `{ kind: "coord-env-scrub", dropped }` to `vf logs`), matching the tool de
 
 The read-only policy summary is surfaced in the web UI Settings panel ("Env scrub").
 
+## Verify Docker sandbox
+
+`vf verify --sandbox docker` is an opt-in boundary for synchronous CLI toolchain and waiver
+gates. Host execution remains default. Sandbox preflight requires a running Docker daemon,
+a locally available digest-pinned image, one supported lockfile, a dependency volume whose
+`vibeflow.lock-sha256` label exactly matches that lockfile, and a non-root host UID/GID.
+Failure aborts; vf never silently retries on the host, pulls/builds an image, or installs
+dependencies.
+
+The container receives `--network none`, no `-e`/`--env-file`, no Docker socket or home
+mount, `--cap-drop ALL`, `no-new-privileges`, PID/CPU/memory limits, and an explicit host
+UID/GID. Exactly two mounts are supplied: a writable disposable source copy at `/w` and the
+named dependency volume read-only at `/w/node_modules`. The active worktree and its `.git` metadata are not
+mounted. The copy lives temporarily under `.vibeflow/sandbox-*` so Docker Desktop/Colima can
+bind-mount it on macOS. A bounded gate timeout triggers best-effort `docker rm -f`; the copy
+is removed after success or failure.
+
+Residual trust remains: the operator-supplied image, dependency volume, Docker daemon, and
+container-runtime isolation. Code can mutate its disposable copy. v1 does not sandbox the
+web verify API, orchestrate per-unit gates, or arbitrary acceptance commands.
+
 ## Local web server
 
 The `vf ui` server is the interactive console (intake → generate → dispatch). Because it now

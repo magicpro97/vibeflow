@@ -356,6 +356,9 @@ vf verify
 vf verify --require-review-evidence
 vf verify --require-review-evidence --review-base <full-SHA>
 vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migration escape hatch)
+vf verify --sandbox docker \
+  --sandbox-image registry.example/vf@sha256:<digest> \
+  --sandbox-volume vf-deps-<lock-sha256>
 vf review evidence --base <full-SHA> --result <review-result.json>
 ```
 
@@ -365,6 +368,14 @@ no-checklist range; it never weakens malformed or present-record validation.
 
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
 missing evidence on a `done` unit, and overlapping work-unit scopes all fail.
+
+`--sandbox docker` runs synchronous CLI toolchain and waiver gates offline in a Docker
+container. It mounts a disposable source copy, never the active worktree, and passes no
+host environment. The image must already exist locally and be pinned by OCI digest; vf
+never pulls/builds it. The named dependency volume must carry label
+`vibeflow.lock-sha256=<SHA-256 of the single supported lockfile>`. Missing Docker daemon,
+image, matching volume, or host UID/GID fails closed without running a host gate. The web
+verify API and orchestrate per-unit gates remain host-only in this first version.
 
 ## Eval (Telemetry Success-Rate Gate)
 
