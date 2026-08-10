@@ -323,10 +323,10 @@ export async function runSkillAcquisitionGate(opts: {
             ? "blocked"
             : decisions.get(p.id) !== "approve"
               ? "reject"
-              : failed === p.name
-                ? "install-failed"
-                : installed.includes(p.name)
-                  ? "approve"
+              : installed.includes(p.name)
+                ? "approve"
+                : failed !== undefined
+                  ? "install-failed"
                   : "reject",
           command: command ?? "orchestrate",
           at: new Date().toISOString(),

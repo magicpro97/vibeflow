@@ -443,6 +443,32 @@ describe("runSkillAcquisitionGate", () => {
     expect(gate.unresolved).toContain("xlsx-reader");
   });
 
+  test("approved proposals skipped after an earlier install failure are not audited as rejects", async () => {
+    const f = makeFixture({
+      needs: [missingNeed("xlsx-reader"), missingNeed("text-reader")],
+      lockRegistries: [
+        {
+          name: "s",
+          url: registryUrl("s"),
+          commitOID: "a".repeat(40),
+          skills: ["xlsx-reader", "text-reader"],
+        },
+      ],
+    });
+    const events: Array<{ decision: string }> = [];
+    await runSkillAcquisitionGate({
+      repo: f.repo,
+      needs: f.needs,
+      execute: true,
+      readDeps: readDeps(f.home),
+      approver: async (proposals) =>
+        new Map(proposals.map((proposal) => [proposal.id, "approve" as const])),
+      install: () => 1,
+      recordDecisions: (recorded) => events.push(...recorded),
+    });
+    expect(events.map((event) => event.decision)).toEqual(["install-failed", "install-failed"]);
+  });
+
   test("HIGH/CRITICAL scan blocks approval (non-approvable)", async () => {
     const f = makeFixture({
       marketplaces: new Map([
