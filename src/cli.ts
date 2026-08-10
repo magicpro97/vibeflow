@@ -37,6 +37,7 @@ import { lanExposureWarning } from "./commands/lan-warning.js";
 import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
 import { installLogbus, out } from "./logbus.js";
+import { parseSandboxFlags } from "./sandbox.js";
 import { startServer } from "./server.js";
 import { notifyUpdate, updateCheck } from "./update-check.js";
 
@@ -266,12 +267,18 @@ async function main(argv: string[]): Promise<number> {
       const reviewBase =
         flags["review-base"] === undefined ? undefined : String(flags["review-base"]);
       if (reviewBase !== undefined && !/^[0-9a-f]{40}$/i.test(reviewBase)) return 2;
+      const sandbox = parseSandboxFlags(flags);
+      if (!sandbox.ok) {
+        out("vf", c.red(sandbox.message), { level: "error" });
+        return sandbox.exitCode;
+      }
       return verify({
         journal: flags.journal === true,
         coverage: flags.coverage === true,
         allowUnverifiedEvidence: flags["allow-unverified-evidence"] === true,
         requireReviewEvidence: flags["require-review-evidence"] === true,
         reviewBase: reviewBase?.toLowerCase(),
+        sandbox: sandbox.request,
       });
     }
     case "review": {

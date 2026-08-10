@@ -315,14 +315,14 @@ ${c.bold("Examples:")}
   vf hooks emit           ${c.dim("# dry-run: show what would be written")}
   vf hooks emit --yes`,
 
-  verify: () => `${c.bold("vf verify")}
-Run the project's toolchain gates (typecheck / lint / test, auto-detected for
-npm/Gradle/monorepo) plus the policy gates (confidence / evidence / scope) over the
-workflow ledger. Returns nonzero if any gate fails.
+  verify:
+    () => `${c.bold("vf verify")} ${c.dim("[--sandbox docker --sandbox-image <digest> --sandbox-volume <name>]")}
+Run auto-detected toolchain + policy gates; nonzero when any gate fails.
+Sandbox runs offline over a disposable copy, without host env/network. Image must be local
+and digest-pinned; dependency volume must be labeled with lockfile SHA-256. Fails closed.
 
-${c.bold("Examples:")}
-  vf verify
-  vf verify --require-review-evidence --review-base <full-SHA>`,
+${c.bold("Examples:")} vf verify
+  vf verify --sandbox docker --sandbox-image registry/vf@sha256:<digest> --sandbox-volume vf-deps-<lock-sha>`,
 
   eval: () => `${c.bold("vf eval")} ${c.dim("[--min-pass-rate <0..1>] [--min-samples <n>] [--json] [--out <file>]")}
 Read the verdict/verify telemetry vf already writes during normal use, aggregate a

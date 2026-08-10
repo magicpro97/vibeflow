@@ -6029,7 +6029,7 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
       /export\s*\{[^}]*\btoolsSync\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\bverify\b[^}]*\}\s*from\s*["']\.\/commands\/tools-detect\.js["']/,
+      /export\s*\{[^}]*\bverify\b[^}]*\}\s*from\s*["']\.\/commands\/verify\.js["']/,
     );
     expect(src).toMatch(
       /export\s*\{[^}]*\brepoLanguages\b[^}]*\}\s*from\s*["']\.\/commands\/tools-mcp-config\.js["']/,
@@ -6082,6 +6082,7 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
     const commands = readSrc("src/commands.ts");
     const tools = readSrc("src/commands/tools.ts");
     const toolsDetect = readSrc("src/commands/tools-detect.ts");
+    const verify = readSrc("src/commands/verify.ts");
     const toolsMcp = readSrc("src/commands/tools-mcp-config.ts");
     const workflow = readSrc("src/commands/workflow.ts");
     const help = readSrc("src/commands/help.ts");
@@ -6094,7 +6095,7 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
     // MCP/config writers move to tools-mcp-config.ts.
     expect(tools).toMatch(/^export\s+function\s+tools\s*\(/m);
     expect(tools).toMatch(/^export\s+function\s+toolsSync\s*\(/m);
-    expect(toolsDetect).toMatch(/^export\s+function\s+verify\s*\(/m);
+    expect(verify).toMatch(/^export\s+function\s+verify\s*\(/m);
     expect(toolsMcp).toMatch(/^export\s+function\s+repoLanguages\s*\(/m);
     expect(tools).toMatch(/^export\s+function\s+ensureToolIndex\s*\(/m);
     expect(toolsDetect).toMatch(/^export\s+function\s+detectToolchain\s*\(/m);

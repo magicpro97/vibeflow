@@ -28,7 +28,7 @@ export interface FakeSpawnerOptions {
   /** When set, capture calls here. */
   calls?: Array<{ cmd: string; args: readonly string[]; options?: unknown }>;
   /** Default status to return if no exitFor matches. Default 0. */
-  defaultStatus?: number;
+  defaultStatus?: number | null;
 }
 
 /**
