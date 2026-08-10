@@ -71,6 +71,10 @@ import { maybeFocus, tipState } from "./orchestrate-focus.js";
 import { loadAgentRoles } from "../agents/role-loader.js";
 // Resolver helpers in orchestrate-resolve.ts (#186 PR7); facade imports for internal use and re-exports the 5 public test seams.
 import { makePhaseTracker, makeProgressReporter } from "../orchestrator/phase-tracker.js";
+import type { AcquisitionApprover, AcquisitionReadDeps } from "../skills/acquisition.js";
+import type { confirmInput } from "../terminal-prompts/prompts.js";
+import { preDispatchAcquisition } from "./orchestrate-acquisition.js";
+import type { AcquisitionInstall } from "./orchestrate-acquisition.js";
 import {
   announceLaunch,
   engineReady,
@@ -108,6 +112,11 @@ export async function orchestrate(
     publishGit?: PublishRunner;
     publishGh?: PublishRunner;
     gate?: ScopedGateFn;
+    acquisitionApprover?: AcquisitionApprover;
+    acquisitionInstall?: AcquisitionInstall;
+    acquisitionIsTTY?: () => boolean;
+    acquisitionConfirm?: typeof confirmInput;
+    acquisitionReadDeps?: AcquisitionReadDeps;
   } = {},
 ): Promise<number> {
   // M2: install the logbus before any `out("engine-stderr", …)` can fire. The bus is the
@@ -188,6 +197,18 @@ export async function orchestrate(
     for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
     return verdict.verdict === "met" ? 0 : 1;
   }
+  // #682: intercept missing skill needs BEFORE launch/preflight/protection so approval
+  // (or rejection) never follows engine readiness. Rejected/unavailable/blocked/install-failed
+  // acquisitions keep the skill gap and dispatch continues.
+  await preDispatchAcquisition(
+    base,
+    state.goal,
+    (state.attachments ?? []).map((a) => a.name),
+    "orchestrate",
+    mode !== "dry",
+    flags.yes === true,
+    inject,
+  );
   const launch = announceLaunch(engine, mode);
   if (launch.skip) return 1;
   // Stronger gate: a real (cli) dispatch requires a live-ready engine. When the caller injects
@@ -213,10 +234,8 @@ export async function orchestrate(
     prot = { checkpoint: plan.checkpoint, fp, git, quota: { limited: false }, rolledBack: false };
   }
 
-  // Build the dispatch spawner honoring the configured per-unit timeout (0 disables it). An
-  // injected spawner (tests/headless) always wins so suites never launch a real engine.
-  // Bridge mode runs $VIBEFLOW_AI (a shell command string, possibly with args) — spawn via
-  // shell so it parses, consistent with aiGenerate.
+  // Build the dispatch spawner honoring the configured per-unit timeout (0 disables it).
+  // Injected spawners (tests/headless) always win; bridge spawns via shell.
   const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
   const spawner =
     inject.spawner ??
@@ -225,11 +244,7 @@ export async function orchestrate(
       shell: mode === "bridge",
       // #556: honor the per-repo env-scrub policy on the orchestrator safety-net spawner.
       envPolicy: readSettings(base).envPolicy,
-      // M2: route any stderr noise the engine emits to the bus. Each per-unit
-      // dispatcher has its own streamSpawner that adds { unit, engine } meta;
-      // the orchestrator-level spawner is the SAFETY NET for engines that bypass
-      // the per-unit path (e.g. the bridge mode shell call). Level=warn is the
-      // documented default for engine-stderr.
+      // M2: route any stderr noise the engine emits to the bus.
       onStderrChunk: (text) => {
         out("engine-stderr", text, {
           level: "warn",
@@ -262,32 +277,18 @@ export async function orchestrate(
     `Orchestrating ${units.length} unit(s) → ${engine} (${mode}, concurrency ${concurrency})`,
   );
 
-  // W1: per-unit worktree isolation. STRICTLY opt-in via `--isolate` (cli mode
-  // only). Each isolated unit dispatches in its own git worktree so concurrent
-  // engines never share one working tree. Default OFF — isolation has a real
-  // git-worktree cost and changes the on-disk layout, so it is never auto-on
-  // (that would silently alter the default single-tree dispatch behavior).
-  // NOTE: the isolate `base` is a git COMMIT-ISH (passed to `git worktree add
-  // -b <branch> <path> <base>`), NOT a directory. Use HEAD so each unit's
-  // worktree forks from the current commit; `base` (the run dir) is a path and
-  // would make `git worktree add` fail with "invalid reference".
+  // W1: per-unit worktree isolation, STRICTLY opt-in via `--isolate` (cli only).
   const isolate =
     flags.isolate === true && mode === "cli" ? { base: "HEAD", wt: inject.wt } : undefined;
   if (isolate) {
     out("vf", c.dim("  worktree isolation ON — each unit dispatches in its own git worktree"));
   }
 
-  // #275-C: the whole-project typecheck is identical for every unit on the same
-  // codebase, so run it at most ONCE per orchestrate run and share the verdict.
+  // #275-C: the whole-project typecheck is identical for every unit, so run it once and share.
   const gateFn = flags["no-unit-gate"]
     ? undefined
     : (inject.gate ?? makeSharedTypecheckGate(defaultRun));
   // Live per-unit progress so a headless `--yes` run is not a silent black box.
-  // start → update the spinner text; done → a persistent one-line ✓/• tick (via
-  // out("vf"), which always tees to the terminal even when the engine buffers
-  // its own output). The done counter is monotonic; with concurrency > 1 it is
-  // the honest progress signal (ev.index is list position, not start order).
-  // #523: elapsed/cost/tokens in the phase footer + TTY self-redraw.
   const t0 = Date.now();
   const tracker = makePhaseTracker(units.length);
   const onProgress = makeProgressReporter(tracker, t0, (ev) =>

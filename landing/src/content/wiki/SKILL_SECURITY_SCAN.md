@@ -69,6 +69,15 @@ frontmatter/path validation but before catalog copy and lock update:
   Finding `rule_id`/`message` printed.
 - **MEDIUM** → warns, install continues.
 - **LOW/NONE/not-scanned** → passes.
+
+### Approval-card pre-scan
+
+Agent dispatch may pre-scan an exact verified candidate from a configured pinned registry
+cache to show truthful security scan status before approval. This read-only proposal step
+does not fetch or install. Scanner absence is shown as `not-scanned`, never as pass;
+HIGH/CRITICAL disables approval. An approved candidate is scanned again by the normal
+registry install gate. Rejection or scan failure leaves a skill gap and agent dispatch
+continues; approval does not create review proof or promote trust.
 - Dry-run (`--yes` omitted) prints `security scan: skillspector scan <dir> --no-llm`
   as a planned action.
 - Scan summary persisted in `SKILL_REGISTRY.lock.json` as `InstalledSkill.scan_summary`

@@ -259,6 +259,13 @@ vf orchestrate --yes          # real dispatch through the engine CLI
 independent reviewer (a unit only passes at confidence `1.0` with evidence), then the
 orchestrator-only goal-eval prints `met | partial | blocked`.
 
+Before `run` or `orchestrate` launches an agent, an exact verified match in a configured
+pinned registry cache appears as an approval card with security scan status. Card creation
+is read-only and offline. `--yes` auto-approves installable cards; TTY/Web UI can decide
+explicitly; non-TTY without consent never waits. HIGH/CRITICAL stays blocked. Approved
+skills use the normal install and re-scan path without gaining review proof or verified
+trust. Rejection, ambiguity, or install failure keeps a skill gap and the agent run continues.
+
 ### Inspect the ledger
 
 ```bash

@@ -77,6 +77,8 @@
 
     <!-- Hook approval modal: surfaces require_approval hooks during dispatch -->
     <HookApprovalModal />
+    <!-- #682 skill acquisition approval cards: approve/reject before any install -->
+    <SkillAcquisitionModal />
 
     <!-- Work unit table -->
     <WorkUnitTable :units="units" empty-text="No tasks yet — click Run agents to start." />
@@ -106,6 +108,7 @@
     <!-- Action row -->
     <div class="flex items-center gap-2 pt-1">
       <button
+        id="run-agents-button"
         class="btn-primary"
         :disabled="orchestrating || anyRunning"
         :title="orchestrating ? 'Agents are being assigned — please wait' : anyRunning ? 'Agents are running — wait for completion' : 'Assign pending units to agents and start them running'"
@@ -156,6 +159,7 @@ import type { Engine } from "../types.js";
 const ALL_ENGINES: Engine[] = ["claude", "copilot", "codex", "opencode", "antigravity"];
 import HookApprovalModal from "./HookApprovalModal.vue";
 import InfoTip from "./InfoTip.vue";
+import SkillAcquisitionModal from "./SkillAcquisitionModal.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
 
 // ── Types ──────────────────────────────────────────────────────────────────

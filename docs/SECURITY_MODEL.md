@@ -106,6 +106,17 @@ Old or unsafe skill → deprecated
 
 Skills requiring shell, network, write access, or credentials must be explicitly approved.
 
+### Dispatch-time skill acquisition
+
+Before agent dispatch, VibeFlow searches only configured pinned registry caches for an
+exact verified candidate. Building the approval card is read-only and performs no network
+or catalog/lock mutation. The card shows bounded identity and security scan status, never
+cache paths or registry credentials. `--yes`, an interactive TTY answer, or a Web UI card
+may approve installation; non-TTY execution without consent skips acquisition without
+hanging. HIGH/CRITICAL findings remain blocked, and approved candidates pass through the
+authoritative install-time scan again. Approval is not review proof and does not promote
+trust. Rejection or failure preserves a skill gap and agent dispatch continues.
+
 ## Vendor registry cache (read-only)
 
 Installed vendor registries live at `~/.vibeflow/skill-registries/<url-hash>/` and are

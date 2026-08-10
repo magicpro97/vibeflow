@@ -52,7 +52,7 @@ Write the dispatch prompt for one engine. Without --yes it is a read-only dry ru
 --yes launches the engine CLI behind the source-protection gate.
 
 ${c.bold("Options:")}
-  --yes               launch the engine (otherwise dry-run only)
+  --yes               launch and auto-approve installable pinned-registry skill acquisitions; scan blocks still apply
   --auto-wip          snapshot a dirty tree before launching instead of refusing
   --require-git       refuse to launch outside a git repo
   --rollback-on-fail  reset the tree to the pre-dispatch checkpoint on failure
@@ -86,7 +86,7 @@ record evidence, then evaluate the goal. Default mode is a read-only dry run.
 
 ${c.bold("Options:")}
   --engine <e>        target engine (default: copilot)
-  --yes               real run — launch the engine (otherwise dry preview)
+  --yes               real run; auto-approve installable pinned-registry skill acquisitions; scan blocks still apply
   --concurrency <n>   max units dispatched in parallel
   --risk <class>      docs | simple-code | feature | architecture | security | deploy
   --auto-wip / --require-git / --rollback-on-fail   source-protection toggles

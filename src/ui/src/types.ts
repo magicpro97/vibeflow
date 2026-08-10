@@ -309,6 +309,40 @@ export interface SafeSkill {
   staleReason?: string;
 }
 
+// ── #682: Skill acquisition approval cards ──────────────────────────────
+// Mirrors src/skills/acquisition.ts (bounded, browser-safe). Source exposes
+// registryId + short commitOID only — never URL / skillPath / absolute path.
+export type AcquisitionDecision = "approve" | "reject";
+
+export type AcquisitionScanStatus =
+  | { state: "not-scanned"; reason: string }
+  | { state: "passed"; highestSeverity: "none" | "low" | "medium" }
+  | { state: "blocked"; highestSeverity: "high" | "critical"; findings: number };
+
+export interface SkillAcquisitionSource {
+  registryId: string;
+  commitOID: string;
+}
+
+export interface SkillAcquisitionProposal {
+  id: string;
+  need: string;
+  reason: string;
+  name: string;
+  version: string;
+  source: SkillAcquisitionSource;
+  scan: AcquisitionScanStatus;
+  approvable: boolean;
+}
+
+export interface AcquisitionPendingResponse {
+  pending: SkillAcquisitionProposal[];
+}
+
+export interface AcquisitionDecisionResponse {
+  ok: boolean;
+}
+
 // ── #688: Registry view types ────────────────────────────────────────────
 export interface RegistryViewEntry {
   id: string;
