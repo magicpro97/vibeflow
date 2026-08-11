@@ -320,9 +320,12 @@ describe("adapters", () => {
 });
 
 describe("cli help routing", () => {
-  const runCli = (args: string[]): { code: number; stdout: string; stderr: string } => {
-    const r = cpSpawnSync("bun", ["run", "src/cli.ts", ...args], {
-      cwd: process.cwd(),
+  const runCli = (
+    args: string[],
+    cwdDir?: string,
+  ): { code: number; stdout: string; stderr: string } => {
+    const r = cpSpawnSync("bun", ["run", join(import.meta.dir, "../src/cli.ts"), ...args], {
+      cwd: cwdDir ?? process.cwd(),
       env: { ...process.env, NO_COLOR: "1" },
     });
     return {
@@ -371,6 +374,54 @@ describe("cli help routing", () => {
     expect(short.code).toBe(0);
     expect(short.stdout).toContain("vf verify");
     expect(short.stdout).not.toBe(global);
+  });
+
+  test("`vf review check` with non-SHA base is a usage error (exit 2)", () => {
+    for (const args of [
+      ["review", "check"],
+      ["review", "check", "--base", "short"],
+      ["review", "check", "--base", "not-a-sha"],
+      ["review", "check", "--base"],
+    ]) {
+      const { code } = runCli(args);
+      expect(code).toBe(2);
+    }
+  });
+
+  test("`vf review check` in a fresh repo holds HEAD and reports missing evidence (exit 1)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-check-"));
+    try {
+      const result = runCli(["review", "check", "--base", `${"a".repeat(40)}`], dir);
+      expect(result.code).toBe(1);
+      expect(result.stdout + result.stderr).toContain("review-evidence");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("`vf review check --base <full SHA>` on a docs-only change returns 0 via fallback", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-check-ok-"));
+    const git = (args: string[]) => cpSpawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    try {
+      git(["init", "-b", "main"]);
+      git(["config", "user.name", "Test User"]);
+      git(["config", "user.email", "test@example.com"]);
+      writeFileSync(join(dir, "README.md"), "# base\n");
+      git(["add", "README.md"]);
+      git(["commit", "-m", "base"]);
+      const base = git(["rev-parse", "HEAD"]).stdout.trim();
+      writeFileSync(join(dir, "README.md"), "# base\n\nsecond\n");
+      git(["add", "README.md"]);
+      git(["commit", "-m", "docs only"]);
+      const headBefore = git(["rev-parse", "HEAD"]).stdout.trim();
+
+      const result = runCli(["review", "check", "--base", base], dir);
+      expect(result.code).toBe(0);
+      expect(result.stdout + result.stderr).toContain("review-evidence: no applicable checklist");
+      expect(git(["rev-parse", "HEAD"]).stdout.trim()).toBe(headBefore);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

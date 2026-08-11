@@ -2,7 +2,7 @@
 # VibeFlow pre-push gate for the VibeFlow repo itself (dogfood).
 # # vibeflow-managed — mirrors the generated hook, but uses the dev entrypoint
 # so this repo also gates every push on current-HEAD review evidence.
-# Fails closed: pushed sha != HEAD, unresolvable base, or a failed verify blocks.
+# Fails closed: pushed sha != HEAD, unresolvable base, or a failed evidence check blocks.
 # Bypass with `git push --no-verify` — remote `review-thread-gate` (CI) stays authoritative.
 set -eu
 remote_name="${1:-origin}"
@@ -14,7 +14,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   head_sha=$(git rev-parse --verify HEAD)
   if [ "$local_sha" != "$head_sha" ]; then
     echo "vibeflow pre-push: refusing $local_ref — pushed sha $local_sha is not current HEAD ($head_sha)." >&2
-    echo "Check out the branch and run \`vf verify\`, then push again." >&2
+    echo "Check out the branch and run \`vf review check\`, then push again." >&2
     exit 1
   fi
   if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
@@ -33,10 +33,10 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   count=$((count + 1))
 done
 if [ "$count" -eq 0 ]; then exit 0; fi
-if ! bun src/cli.ts verify --require-review-evidence --review-base "$base"; then
+if ! bun src/cli.ts review check --base "$base"; then
   echo "vibeflow pre-push: review evidence required but missing/invalid for $base" >&2
   echo "Run bun src/cli.ts review evidence --base <base> --result <review-result.json>, then" >&2
-  echo "bun src/cli.ts verify --require-review-evidence --review-base <base>." >&2
+  echo "bun src/cli.ts review check --base <base>." >&2
   exit 1
 fi
 exit 0
