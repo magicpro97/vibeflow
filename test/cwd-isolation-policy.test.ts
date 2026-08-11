@@ -35,30 +35,76 @@ const BASELINE = new Map<string, Map<string, number>>([]);
 
 // Strip // and /* */ comments and quoted strings so a plain
 // `process.chdir(` mention in a comment or a literal string is not a violation.
+// Newlines inside comments and template literals are preserved so reported
+// line numbers stay correct. Template interpolation `${...}` is scanned as
+// code (recursively), so a chdir inside one is still caught.
 function stripCommentedCode(code: string): string {
+  return scan(code, 0, false)[0];
+}
+
+// Recursively scan a code region. With stopAtBrace, stops after the matching
+// `}` (used for template interpolation); otherwise runs to end of `code`.
+function scan(code: string, start: number, stopAtBrace: boolean): [string, number] {
   let out = "";
-  let i = 0;
-  while (i < code.length) {
+  let i = start;
+  let depth = stopAtBrace ? 1 : 0;
+  const n = code.length;
+  while (i < n) {
     const two = code.slice(i, i + 2);
     if (two === "//") {
-      while (i < code.length && code[i] !== "\n") i++;
+      while (i < n && code[i] !== "\n") i++;
     } else if (two === "/*") {
-      while (i < code.length && !(code[i] === "*" && code[i + 1] === "/")) i++;
-      i += 2;
-    } else if (code[i] === '"' || code[i] === "'" || code[i] === "`") {
-      const quote = code[i];
+      while (i < n && !(code[i] === "*" && code[i + 1] === "/")) {
+        if (code[i] === "\n") out += "\n";
+        i++;
+      }
+      i = Math.min(i + 2, n);
+    } else if (code[i] === '"' || code[i] === "'") {
+      const q = code[i];
       i++;
-      while (i < code.length && code[i] !== quote) {
+      while (i < n && code[i] !== q) {
+        if (code[i] === "\n") out += "\n";
         if (code[i] === "\\") i++;
         i++;
       }
-      if (i < code.length) i++;
+      if (i < n) i++;
+    } else if (code[i] === "`") {
+      i++;
+      while (i < n) {
+        if (code[i] === "\\") i += 2;
+        else if (code[i] === "`") {
+          i++;
+          break;
+        } else if (code[i] === "$" && code[i + 1] === "{") {
+          i += 2;
+          const [expr, next] = scan(code, i, true);
+          out += expr;
+          i = next;
+        } else {
+          if (code[i] === "\n") out += "\n";
+          i++;
+        }
+      }
+    } else if (code[i] === "{") {
+      if (stopAtBrace) depth++;
+      out += code[i];
+      i++;
+    } else if (code[i] === "}") {
+      if (stopAtBrace) {
+        depth--;
+        if (depth === 0) {
+          i++;
+          break;
+        }
+      }
+      out += code[i];
+      i++;
     } else {
       out += code[i];
       i++;
     }
   }
-  return out;
+  return [out, i];
 }
 
 // Given comment/string-stripped lines and a per-text baseline count, return
@@ -105,5 +151,29 @@ describe("cwd isolation policy (converted high-risk files)", () => {
     const lines = ["  process.chdir(dir);", "  process.chdir(dir);"];
     const baseline = new Map([["process.chdir(dir);", 1]]);
     expect(detectExtraneousChdir(lines, baseline)).toEqual(["2:process.chdir(dir);"]);
+  });
+
+  test("process.chdir inside template interpolation is caught on its real line", () => {
+    const code = [
+      "const p = (",
+      "  await main()",
+      ").then(() => {",
+      "  run(`${process.chdir(dir)} done`);",
+      "});",
+    ].join("\n");
+    // Baseline treats the code-generated "process.chdir(dir);" line at zero.
+    const baseline = new Map<string, number>([]);
+    const lines = stripCommentedCode(code).split("\n");
+    expect(detectExtraneousChdir(lines, baseline)).toEqual(["4:run(process.chdir(dir));"]);
+  });
+
+  test("ordinary template text mentioning process.chdir is ignored", () => {
+    const code = [
+      "const msg = `switch to ${dir} via process.chdir is done`;",
+      "  process.chdir(orig);",
+    ].join("\n");
+    const baseline = new Map([["process.chdir(orig);", 1]]);
+    const lines = stripCommentedCode(code).split("\n");
+    expect(detectExtraneousChdir(lines, baseline)).toEqual([]);
   });
 });
