@@ -433,7 +433,7 @@ export function installHooks(base?: string): number {
       out(
         "vf",
         c.yellow(
-          "! pre-push review gate NOT installed — a user-owned .githooks/pre-push exists. Integrate `vf verify --require-review-evidence --review-base <sha>` manually, or move your hook and re-run `vf hooks install`.",
+          "! pre-push review gate NOT installed — a user-owned .githooks/pre-push exists. Integrate `vf review check --base <sha>` manually, or move your hook and re-run `vf hooks install`.",
         ),
         { level: "error" },
       );

@@ -303,7 +303,7 @@ echo '<json-event>' | vf hook       # → {"decision":"allow|warn|require_approv
 ```
 
 The generated `.githooks/pre-push` validates exact pushed `HEAD`, derives the pushed
-range base, then runs `vf verify --require-review-evidence --review-base <full-SHA>`.
+range base, then runs `vf review check --base <full-SHA>`.
 Missing, stale, malformed, unreadable, or failed evidence blocks; docs-only ranges with
 no applicable checklist need no reviewer record. No LLM/network/API runs in the hook.
 `git push --no-verify` bypasses local feedback only; remote `review-thread-gate` remains

@@ -6,21 +6,32 @@ import { join } from "node:path";
 import { engineHookFiles, gitPrePush } from "../src/hooks/adapters.js";
 
 const ZERO = "0".repeat(40);
-const baseFoo = "a".repeat(40);
-const baseBar = "b".repeat(40);
 const other = "c".repeat(40);
+
+function git(dir: string, args: string): string {
+  return execSync(`git -c user.email=t@t -c user.name=t ${args}`, {
+    cwd: dir,
+    encoding: "utf8",
+  }).trim();
+}
 
 function freshGitDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "vf-prepush-"));
   execSync(
-    "git init -q -b main && git -c user.email=t@t -c user.name=t commit --allow-empty -q -m base",
+    "git init -q -b main && git -c user.email=t@t -c user.name=t commit --allow-empty -q -m base && git -c user.email=t@t -c user.name=t commit --allow-empty -q -m second",
     { cwd: dir, stdio: "ignore" },
   );
   return dir;
 }
 
 function head(dir: string): string {
-  return execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf8" }).trim();
+  return git(dir, "rev-parse HEAD");
+}
+
+/** Create a divergent/leaf commit object without touching HEAD. */
+function commitTree(dir: string, parent: string, msg: string): string {
+  const tree = git(dir, "write-tree");
+  return git(dir, `commit-tree ${tree} -p ${parent} -m ${JSON.stringify(msg)}`);
 }
 
 /** Run the generated pre-push hook body with injected stub verify command.
@@ -31,6 +42,7 @@ function runHook(
   stubExit: number,
 ): { status: number; out: string } {
   const logFile = join(dir, "verify-call.log");
+  writeFileSync(logFile, "");
   const stub = join(dir, "stub.js");
   writeFileSync(
     stub,
@@ -76,35 +88,64 @@ describe("generated pre-push hook (#748)", () => {
   const dir = freshGitDir();
   const h = head(dir);
 
-  test("engine map exposes a vibeflow-managed evidence-only pre-push gate", () => {
+  test("generated and dogfood hooks keep the evidence-only base protocol", () => {
     expect(engineHookFiles()[".githooks/pre-push"]).toBeDefined();
-    const sh = gitPrePush();
-    expect(sh).toContain("# vibeflow-managed");
-    expect(sh).toContain('review check --base "$base"');
-    expect(sh).not.toContain("verify --require-review-evidence");
-    expect(sh).toContain("git push --no-verify");
+    const generated = gitPrePush();
+    const dogfood = readFileSync(join(import.meta.dir, "..", ".githooks", "pre-push"), "utf8");
+    for (const sh of [generated, dogfood]) {
+      expect(sh).toContain('merge-base "$local_sha" "$remote_sha"');
+      expect(sh).toContain('merge-base HEAD "refs/remotes/${remote_name}/HEAD"');
+      expect(sh).toContain('review check --base "$base"');
+      expect(sh).not.toContain("verify --require-review-evidence");
+      expect(sh).toContain("git push --no-verify");
+    }
+    expect(generated).toContain("# vibeflow-managed");
   });
 
-  test("existing-branch push uses remote sha as review base; valid evidence check permits", () => {
-    const r = runHook(dir, [`refs/heads/main ${h} refs/heads/main ${baseFoo}`], 0);
+  test("existing-branch push uses merge-base of local & remote sha when remote is ancestor", () => {
+    const parent = git(dir, "rev-parse HEAD^");
+    const r = runHook(dir, [`refs/heads/main ${h} refs/heads/main ${parent}`], 0);
     expect(r.status).toBe(0);
-    expect(argsFor(dir)).toEqual(["review", "check", "--base", baseFoo]);
+    expect(argsFor(dir)).toEqual(["review", "check", "--base", parent]);
+  });
+
+  test("amended local vs stale non-ancestor remote: review base is common ancestor, not remote sha", () => {
+    const base = h;
+    const remoteOld = commitTree(dir, base, "remote old tip");
+    const localAmended = commitTree(dir, base, "local rewritten");
+    git(dir, `reset -q --hard ${localAmended}`);
+    const r = runHook(dir, [`refs/heads/main ${localAmended} refs/heads/main ${remoteOld}`], 0);
+    expect(r.status).toBe(0);
+    expect(argsFor(dir)).toEqual(["review", "check", "--base", base]);
+    expect(argsFor(dir)[3]).not.toBe(remoteOld);
+    git(dir, `reset -q --hard ${h}`);
+  });
+
+  test("unrelated remote history blocks before the evidence check", () => {
+    const unrelated = git(dir, "mktree < /dev/null");
+    const remote = git(dir, `commit-tree ${unrelated} -m ${JSON.stringify("unrelated remote")}`);
+    const r = runHook(dir, [`refs/heads/main ${h} refs/heads/main ${remote}`], 0);
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain("cannot resolve review base");
+    expect(r.out).toContain("Fetch remote history");
+    expect(argsFor(dir)).toEqual([]);
   });
 
   test("non-zero evidence check blocks the push", () => {
-    const r = runHook(dir, [`refs/heads/main ${h} refs/heads/main ${baseBar}`], 1);
+    const parent = git(dir, "rev-parse HEAD^");
+    const r = runHook(dir, [`refs/heads/main ${h} refs/heads/main ${parent}`], 1);
     expect(r.status).not.toBe(0);
     expect(r.out).toMatch(/missing|invalid|fail/i);
   });
 
   test("local sha differing from HEAD blocks with repair guidance", () => {
-    const r = runHook(dir, [`refs/heads/main ${other} refs/heads/main ${baseFoo}`], 0);
+    const r = runHook(dir, [`refs/heads/main ${other} refs/heads/main ${h}`], 0);
     expect(r.status).not.toBe(0);
     expect(r.out).toContain("not current HEAD");
   });
 
   test("SHA-mismatch repair says checkout + push again, without verifier advice", () => {
-    const r = runHook(dir, [`refs/heads/main ${other} refs/heads/main ${baseFoo}`], 0);
+    const r = runHook(dir, [`refs/heads/main ${other} refs/heads/main ${h}`], 0);
     expect(r.status).not.toBe(0);
     expect(r.out).toContain("Check out the branch you intend to push, then push again.");
     expect(r.out).not.toContain("vf verify");
@@ -112,26 +153,25 @@ describe("generated pre-push hook (#748)", () => {
   });
 
   test("ignores tags and deletions; gates only the pushed branch", () => {
+    const parent = git(dir, "rev-parse HEAD^");
     const r = runHook(
       dir,
       [
-        `refs/tags/v1 ${h} refs/tags/v1 ${baseBar}`,
+        `refs/tags/v1 ${h} refs/tags/v1 ${parent}`,
         `refs/heads/main ${ZERO} refs/heads/main ${ZERO}`,
-        `refs/heads/main ${h} refs/heads/main ${baseBar}`,
+        `refs/heads/main ${h} refs/heads/main ${parent}`,
       ],
       0,
     );
     expect(r.status).toBe(0);
-    expect(argsFor(dir)).toEqual(["review", "check", "--base", baseBar]);
+    expect(argsFor(dir)).toEqual(["review", "check", "--base", parent]);
   });
 
   test("multi-ref push with differing bases fails closed", () => {
+    const parent = git(dir, "rev-parse HEAD^");
     const r = runHook(
       dir,
-      [
-        `refs/heads/one ${h} refs/heads/one ${baseFoo}`,
-        `refs/heads/two ${h} refs/heads/two ${baseBar}`,
-      ],
+      [`refs/heads/one ${h} refs/heads/one ${parent}`, `refs/heads/two ${h} refs/heads/two ${h}`],
       0,
     );
     expect(r.status).not.toBe(0);
