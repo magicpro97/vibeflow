@@ -195,7 +195,6 @@ export function isHexOID(s: string): boolean {
   return /^[0-9a-f]{1,64}$/.test(s);
 }
 
-/** Canonical registry-name validator (lowercase-hyphen/dot syntax). */
 export function isValidRegistryName(name: string): boolean {
   return /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(name);
 }
@@ -205,25 +204,27 @@ function spawnGit(
   inject?: { spawnSync?: SpawnFn },
 ): { status: number; stdout: string; stderr: string } {
   const _spawn = inject?.spawnSync ?? defaultSpawn;
-  const result = _spawn("git", args, { timeout: 60_000, stdio: "pipe" });
+  const cwd = args[0] === "clone" ? dirname(args.at(-1) ?? "") : (args[1] ?? "");
+  const result = _spawn("git", args, {
+    timeout: 60_000,
+    stdio: "pipe",
+    cwd,
+  });
   return {
     status: result.status ?? 1,
     stdout: typeof result.stdout === "string" ? result.stdout : (result.stdout?.toString() ?? ""),
     stderr: typeof result.stderr === "string" ? result.stderr : (result.stderr?.toString() ?? ""),
   };
 }
-
 function planClone(url: string, cacheDir: string, ref: string): GitOp[] {
   return [
     { cmd: "git", args: ["clone", "--filter=blob:none", "--no-checkout", url, cacheDir] },
     { cmd: "git", args: ["-C", cacheDir, "fetch", "origin", ref] },
   ];
 }
-
 function planFetch(cacheDir: string, ref: string): GitOp[] {
   return [{ cmd: "git", args: ["-C", cacheDir, "fetch", "origin", ref] }];
 }
-
 function resolveOidAndCheckout(cacheDir: string, inject?: { spawnSync?: SpawnFn }): string | null {
   const oidResult = spawnGit(["-C", cacheDir, "rev-parse", "FETCH_HEAD"], inject);
   const oid = oidResult.status === 0 ? oidResult.stdout.trim() : "";
@@ -231,7 +232,6 @@ function resolveOidAndCheckout(cacheDir: string, inject?: { spawnSync?: SpawnFn 
   const co = spawnGit(["-C", cacheDir, "checkout", "--detach", oid], inject);
   return co.status === 0 ? oid : null;
 }
-
 export function registryAdd(
   repo: string,
   url: string,
@@ -248,7 +248,6 @@ export function registryAdd(
 
   const cacheDir = registryCacheDir(url);
   const lock = parseRegistryLock(repo);
-
   if (lock.registries.some((r) => r.name === name)) {
     out("vf", c.red(`Registry "${name}" already exists in lock file.`), { level: "error" });
     return 1;
@@ -265,6 +264,7 @@ export function registryAdd(
     return 0;
   }
 
+  if (!opts.spawnSync) mkdirSync(dirname(cacheDir), { recursive: true });
   for (const op of ops) {
     const result = spawnGit(op.args, { spawnSync: opts.spawnSync });
     if (result.status !== 0) {

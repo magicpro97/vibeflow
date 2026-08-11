@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   type InstalledSkill,
   type MarketplaceSkill,
@@ -35,13 +35,13 @@ function tmpRepo(): string {
 }
 
 function fakeGit(opts: { status?: number; stdout?: string; stderr?: string } = {}) {
-  const calls: Array<{ cmd: string; args: string[] }> = [];
+  const calls: Array<{ cmd: string; args: string[]; options: Record<string, unknown> }> = [];
   const spawn = (
     _cmd: string,
     args: readonly string[],
-    _opts: Record<string, unknown>,
+    options: Record<string, unknown>,
   ): { status: number; stdout: string; stderr: string } => {
-    calls.push({ cmd: _cmd, args: [...args] });
+    calls.push({ cmd: _cmd, args: [...args], options: { ...options } });
     return { status: opts.status ?? 0, stdout: opts.stdout ?? "", stderr: opts.stderr ?? "" };
   };
   return { calls, spawn };
@@ -322,6 +322,28 @@ describe("registryAdd", () => {
     expect(existsSync(registryLockPath(repo))).toBe(false);
   });
 
+  test("with --yes: exact argv unchanged and explicit options.cwd per operation (#cwd)", () => {
+    const repo = tmpRepo();
+    const url = "https://github.com/x/skills.git";
+    const { calls, spawn } = fakeGit({ stdout: `${"a".repeat(40)}\n` });
+    const code = registryAdd(repo, url, "cwd-reg", "v1.0", {
+      spawnSync: spawn,
+      yes: true,
+    });
+    expect(code).toBe(0);
+    const cacheDir = registryCacheDir(url);
+    // Exact argv unchanged
+    expect(calls[0]?.args).toEqual(["clone", "--filter=blob:none", "--no-checkout", url, cacheDir]);
+    expect(calls[1]?.args).toEqual(["-C", cacheDir, "fetch", "origin", "v1.0"]);
+    expect(calls[2]?.args).toEqual(["-C", cacheDir, "rev-parse", "FETCH_HEAD"]);
+    expect(calls[3]?.args).toEqual(["-C", cacheDir, "checkout", "--detach", "a".repeat(40)]);
+    // Explicit CWD sequence per operation
+    expect(calls[0]?.options.cwd).toBe(dirname(cacheDir));
+    expect(calls[1]?.options.cwd).toBe(cacheDir);
+    expect(calls[2]?.options.cwd).toBe(cacheDir);
+    expect(calls[3]?.options.cwd).toBe(cacheDir);
+  });
+
   test("validates name format", () => {
     const repo = tmpRepo();
     const { spawn } = fakeGit();
@@ -462,16 +484,23 @@ describe("registryUpdate", () => {
       ],
     });
     let callCount = 0;
-    const spawn = (_cmd: string, _args: readonly string[], _opts: unknown) => {
+    const calls: Array<{ args: string[]; options: Record<string, unknown> }> = [];
+    const spawn = (_cmd: string, args: readonly string[], options: Record<string, unknown>) => {
+      calls.push({ args: [...args], options: { ...options } });
       callCount++;
       const oid = "a".repeat(39) + callCount.toString(16);
       return { status: 0, stdout: `${oid}\n`, stderr: "" };
     };
     const code = registryUpdate(repo, undefined, { spawnSync: spawn, yes: true });
     expect(code).toBe(0);
+    for (const call of calls) {
+      const cacheDir = call.args[0] === "clone" ? call.args.at(-1) : call.args[1];
+      expect(call.options.cwd).toBe(call.args[0] === "clone" ? dirname(cacheDir ?? "") : cacheDir);
+    }
+    expect(calls.filter((call) => call.args[0] === "clone")).toHaveLength(2);
     const lock = parseRegistryLock(repo);
     expect(lock.registries).toHaveLength(2);
-    expect(lock.registries[0]?.commitOID).not.toBe("old1");
+    expect(lock.registries[0]?.commitOID).toHaveLength(40);
     expect(lock.registries[1]?.commitOID).not.toBe("old2");
   });
 
