@@ -105,7 +105,7 @@ export function gitPrePush(verifyCmd?: string): string {
     "  head_sha=$(git rev-parse --verify HEAD)",
     '  if [ "$local_sha" != "$head_sha" ]; then',
     '    echo "vibeflow pre-push: refusing $local_ref — pushed sha $local_sha is not current HEAD ($head_sha)." >&2',
-    '    echo "Check out the branch to push and run `vf verify`, then push again." >&2',
+    '    echo "Check out the branch you intend to push, then push again." >&2',
     "    exit 1",
     "  fi",
     '  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then',

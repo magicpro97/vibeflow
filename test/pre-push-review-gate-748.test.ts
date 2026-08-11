@@ -103,6 +103,14 @@ describe("generated pre-push hook (#748)", () => {
     expect(r.out).toContain("not current HEAD");
   });
 
+  test("SHA-mismatch repair says checkout + push again, without verifier advice", () => {
+    const r = runHook(dir, [`refs/heads/main ${other} refs/heads/main ${baseFoo}`], 0);
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain("Check out the branch you intend to push, then push again.");
+    expect(r.out).not.toContain("vf verify");
+    expect(r.out).not.toContain("review check");
+  });
+
   test("ignores tags and deletions; gates only the pushed branch", () => {
     const r = runHook(
       dir,

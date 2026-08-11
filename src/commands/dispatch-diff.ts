@@ -85,15 +85,16 @@ export interface WorktreeOps {
  *  integration hermetic instead of depending on ambient `process.cwd()`. */
 export function makeWorktreeOps(
   spawn: typeof spawnSync = spawnSync,
-  repoDir: string = process.cwd(),
+  repoDir?: string,
 ): WorktreeOps {
   return {
     create(branch, base) {
-      const parentDir = resolve(repoDir, "..");
+      const cwd = repoDir ?? process.cwd();
+      const parentDir = resolve(cwd, "..");
       const wtPath = defaultWorktreePath(branch, parentDir);
-      const scriptPath = join(repoDir, "scripts", "create-worktree.sh");
+      const scriptPath = join(cwd, "scripts", "create-worktree.sh");
       const r = spawn(scriptPath, [branch, wtPath, "--base", base], {
-        cwd: repoDir,
+        cwd,
         encoding: "utf8",
         timeout: 60_000,
       });
@@ -104,9 +105,10 @@ export function makeWorktreeOps(
       return wtPath;
     },
     remove(path) {
+      const cwd = repoDir ?? process.cwd();
       try {
         spawn("git", ["worktree", "remove", "--force", path], {
-          cwd: repoDir,
+          cwd,
           encoding: "utf8",
           timeout: 30_000,
         });
