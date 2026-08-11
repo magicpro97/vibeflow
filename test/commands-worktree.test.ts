@@ -436,37 +436,52 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
   // worktree list --porcelain`."
 
   (process.platform === "win32" ? test.skip : test)(
-    "(t) E2E [TS wrapper] worktree create: exit 0, worktree exists, node_modules is a symlink",
+    "(t) E2E [TS wrapper] worktree create: exit 0, caller cwd unchanged, worktree exists, node_modules is a symlink",
     () => {
+      const callerCwd = process.cwd();
       const { repoDir } = plantRepoWithScripts();
-      // chdir into the tmpdir so `buildCreateArgs` resolves the
-      // helper at `<repoDir>/scripts/create-worktree.sh`. The
-      // `defaultWorktreePath` will also resolve to
-      // `<repoDir>/vf-wt-a6test`, which is inside the tmpdir.
-      process.chdir(repoDir);
-
-      const code = worktree(["create", "a6test"], {});
-      expect(code).toBe(0);
-
       const wtDir = join(repoDir, "vf-wt-a6test");
-      // The worktree path must exist after create.
-      expect(existsSync(wtDir)).toBe(true);
-      // A6 spec: "verify node_modules is a symlink to the parent's."
-      const lstat = lstatSync(join(wtDir, "node_modules"));
-      expect(lstat.isSymbolicLink()).toBe(true);
-      const linkTarget = readlinkSync(join(wtDir, "node_modules"));
-      const expectedParent = join(repoDir, "node_modules");
-      if (linkTarget.startsWith("/")) {
-        const { realpathSync } = require("node:fs") as typeof import("node:fs");
-        expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
-      } else {
-        expect(join(wtDir, "node_modules", linkTarget)).toBe(expectedParent);
+
+      try {
+        // Explicit repoDir — the caller's process.cwd() must stay
+        // unchanged and every git/helper invocation uses repoDir.
+        const code = worktree(["create", "a6test"], {}, { repoDir });
+        expect(code).toBe(0);
+        expect(process.cwd()).toBe(callerCwd);
+
+        // The worktree path must exist after create.
+        expect(existsSync(wtDir)).toBe(true);
+        // A6 spec: "verify node_modules is a symlink to the parent's."
+        const lstat = lstatSync(join(wtDir, "node_modules"));
+        expect(lstat.isSymbolicLink()).toBe(true);
+        const linkTarget = readlinkSync(join(wtDir, "node_modules"));
+        const expectedParent = join(repoDir, "node_modules");
+        if (linkTarget.startsWith("/")) {
+          const { realpathSync } = require("node:fs") as typeof import("node:fs");
+          expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
+        } else {
+          expect(join(wtDir, "node_modules", linkTarget)).toBe(expectedParent);
+        }
+      } finally {
+        try {
+          execFileSync("git", ["worktree", "remove", "--force", wtDir], {
+            cwd: repoDir,
+            stdio: "ignore",
+          });
+        } catch {
+          // best-effort: worktree may not have been created
+        }
+        expect(process.cwd()).toBe(callerCwd);
       }
     },
   );
 
   test("(u) E2E [TS wrapper] worktree remove: exit 0, worktree gone, branch pruned from list", () => {
+    const callerCwd = process.cwd();
     const { repoDir, wtDir } = plantRepoWithScripts();
+    const baseSha = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
     // First, create a worktree via real `git worktree add` (no
     // need to go through the TS wrapper for the create here —
     // we're testing remove).
@@ -475,21 +490,34 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
     });
     expect(existsSync(wtDir)).toBe(true);
 
-    // Now run the TS wrapper's remove against the real repo.
-    process.chdir(repoDir);
-    const code = worktree(["remove", "a6test"], {});
-    expect(code).toBe(0);
+    try {
+      // Explicit repoDir — caller's cwd unchanged, remove uses repoDir.
+      const code = worktree(["remove", "a6test"], {}, { repoDir });
+      expect(code).toBe(0);
+      expect(process.cwd()).toBe(callerCwd);
 
-    // Worktree dir must be gone.
-    expect(existsSync(wtDir)).toBe(false);
-    // The branch must be pruned from the worktree list. We check
-    // this by re-running `git worktree list --porcelain` and
-    // asserting the branch doesn't appear.
-    const porcelain = execFileSync("git", ["worktree", "list", "--porcelain"], {
-      cwd: repoDir,
-      encoding: "utf8",
-    });
-    expect(porcelain).not.toContain("branch refs/heads/a6test");
+      // Worktree dir must be gone.
+      expect(existsSync(wtDir)).toBe(false);
+      // The branch must be pruned from the worktree list. We check
+      // this by re-running `git worktree list --porcelain` and
+      // asserting the branch doesn't appear.
+      const porcelain = execFileSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: repoDir,
+        encoding: "utf8",
+      });
+      expect(porcelain).not.toContain("branch refs/heads/a6test");
+    } finally {
+      try {
+        execFileSync("git", ["branch", "-D", "a6test"], { cwd: repoDir, stdio: "ignore" });
+      } catch {
+        // best-effort: branch may already be gone
+      }
+      // Caller CWD, fixture HEAD, and branch state unchanged after test.
+      expect(process.cwd()).toBe(callerCwd);
+      expect(
+        execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+      ).toBe(baseSha);
+    }
   });
 
   // ---- (y) worktree remove: when `git worktree list` itself fails → exit 1 ----
