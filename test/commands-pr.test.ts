@@ -31,24 +31,32 @@ import {
 
 import { EXIT_NOT_FOUND } from "../src/commands/pr-queue.js";
 import { type LogEvent, getLogbus, installLogbus } from "../src/logbus.js";
-let origCwd: string;
 let dir: string;
 
 beforeEach(() => {
-  origCwd = process.cwd();
   dir = mkdtempSync(join(tmpdir(), "vf-pr-test-"));
-  execFileSync("git", ["init", "-b", "main"], { cwd: dir });
-  execFileSync("git", ["config", "user.email", "test@local"], { cwd: dir });
-  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  const gitDir = (args: string[]) => execFileSync("git", args, { cwd: dir });
+  gitDir(["init", "-b", "main"]);
+  gitDir(["config", "user.email", "test@local"]);
+  gitDir(["config", "user.name", "Test"]);
   writeFileSync(join(dir, "README.md"), "# test\n");
-  execFileSync("git", ["add", "README.md"], { cwd: dir });
-  execFileSync("git", ["commit", "-m", "initial", "--", "README.md"], { cwd: dir });
-  process.chdir(dir);
+  gitDir(["add", "README.md"]);
+  gitDir(["commit", "-m", "initial", "--", "README.md"]);
 });
 
 afterEach(() => {
-  process.chdir(origCwd);
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("fixture isolation", () => {
+  test("caller process.cwd() and fixture HEAD are unchanged by tests", () => {
+    expect(process.cwd()).not.toBe(dir);
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).trim();
+    expect(head.length).toBe(40);
+  });
 });
 
 describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
