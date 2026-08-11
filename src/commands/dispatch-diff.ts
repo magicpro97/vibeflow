@@ -79,14 +79,21 @@ export interface WorktreeOps {
 
 /** Build a WorktreeOps backed by `spawn` (defaults to the real spawnSync).
  *  The injectable `spawn` seam lets tests exercise create/remove without
- *  touching real git — pass a fake that returns the desired status/throw. */
-export function makeWorktreeOps(spawn: typeof spawnSync = spawnSync): WorktreeOps {
+ *  touching real git — pass a fake that returns the desired status/throw.
+ *  `repoDir` is the repo root used for the worktree parent path and as the
+ *  working directory for the script/git; callers pass it to make the real-git
+ *  integration hermetic instead of depending on ambient `process.cwd()`. */
+export function makeWorktreeOps(
+  spawn: typeof spawnSync = spawnSync,
+  repoDir: string = process.cwd(),
+): WorktreeOps {
   return {
     create(branch, base) {
-      const parentDir = resolve(process.cwd(), "..");
+      const parentDir = resolve(repoDir, "..");
       const wtPath = defaultWorktreePath(branch, parentDir);
-      const scriptPath = join(process.cwd(), "scripts", "create-worktree.sh");
+      const scriptPath = join(repoDir, "scripts", "create-worktree.sh");
       const r = spawn(scriptPath, [branch, wtPath, "--base", base], {
+        cwd: repoDir,
         encoding: "utf8",
         timeout: 60_000,
       });
@@ -99,6 +106,7 @@ export function makeWorktreeOps(spawn: typeof spawnSync = spawnSync): WorktreeOp
     remove(path) {
       try {
         spawn("git", ["worktree", "remove", "--force", path], {
+          cwd: repoDir,
           encoding: "utf8",
           timeout: 30_000,
         });
