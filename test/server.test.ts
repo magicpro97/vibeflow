@@ -2776,8 +2776,7 @@ describe("bindAll security (#561)", () => {
 
 test("GET /api/skills returns browser-safe skill objects", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vf-skills-test-"));
-  const orig = process.cwd();
-  process.chdir(dir);
+  const callerCwd = process.cwd();
   try {
     mkdirSync(join(dir, ".vibeflow", "skills", "test-skill"), { recursive: true });
     mkdirSync(join(dir, ".vibeflow"), { recursive: true });
@@ -2824,7 +2823,7 @@ test("GET /api/skills returns browser-safe skill objects", async () => {
       }),
     );
 
-    const { server, url } = await startServer(0);
+    const { server, url } = await startServer(0, { repoDir: dir });
     try {
       const res = await fetch(`${url}/api/skills`);
       const body = (await res.json()) as Record<string, unknown>;
@@ -2865,16 +2864,15 @@ test("GET /api/skills returns browser-safe skill objects", async () => {
     } finally {
       server.stop();
     }
+    expect(process.cwd()).toBe(callerCwd);
   } finally {
-    process.chdir(orig);
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("GET /api/skills omits registry for uninstalled skills", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vf-skills-no-reg-"));
-  const orig = process.cwd();
-  process.chdir(dir);
+  const callerCwd = process.cwd();
   try {
     mkdirSync(join(dir, ".vibeflow", "skills", "local-skill"), { recursive: true });
     mkdirSync(join(dir, ".vibeflow"), { recursive: true });
@@ -2913,7 +2911,7 @@ test("GET /api/skills omits registry for uninstalled skills", async () => {
       }),
     );
 
-    const { server, url } = await startServer(0);
+    const { server, url } = await startServer(0, { repoDir: dir });
     try {
       const res = await fetch(`${url}/api/skills`);
       const body = (await res.json()) as Record<string, unknown>;
@@ -2924,16 +2922,15 @@ test("GET /api/skills omits registry for uninstalled skills", async () => {
     } finally {
       server.stop();
     }
+    expect(process.cwd()).toBe(callerCwd);
   } finally {
-    process.chdir(orig);
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("GET /api/skills omits registry when no lock file", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vf-skills-no-lock-"));
-  const orig = process.cwd();
-  process.chdir(dir);
+  const callerCwd = process.cwd();
   try {
     mkdirSync(join(dir, ".vibeflow", "skills", "free-skill"), { recursive: true });
     writeFileSync(
@@ -2941,7 +2938,7 @@ test("GET /api/skills omits registry when no lock file", async () => {
       ["---", "name: free-skill", "description: no lock", "---"].join("\n"),
     );
 
-    const { server, url } = await startServer(0);
+    const { server, url } = await startServer(0, { repoDir: dir });
     try {
       const res = await fetch(`${url}/api/skills`);
       const body = (await res.json()) as Record<string, unknown>;
@@ -2952,8 +2949,8 @@ test("GET /api/skills omits registry when no lock file", async () => {
     } finally {
       server.stop();
     }
+    expect(process.cwd()).toBe(callerCwd);
   } finally {
-    process.chdir(orig);
     rmSync(dir, { recursive: true, force: true });
   }
 });
