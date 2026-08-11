@@ -28,7 +28,7 @@ export function printHelp(): number {
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot | opencode | antigravity (--yes to launch)
     ${c.cyan("ask <f>:<lines>")}   inline code Q&A: stream an engine's answer about a snippet (--engine)
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
-    ${c.cyan("review evidence")}   create local commit-anchored review evidence (--base <full-SHA> --result <JSON>)
+    ${c.cyan("review evidence|check")}   create local commit-anchored evidence (--base <full-SHA> --result <JSON>) or validate it (--base <full-SHA>)
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
     ${c.cyan("canary [sub]")}      list | link <unit> <file> | check — human-authored canary tests (ADR-005)

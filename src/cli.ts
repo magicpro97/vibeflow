@@ -36,6 +36,7 @@ import { evalCmd } from "./commands/eval.js";
 import { lanExposureWarning } from "./commands/lan-warning.js";
 import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
+import { checkReviewEvidence } from "./hooks/review-evidence.js";
 import { installLogbus, out } from "./logbus.js";
 import { parseSandboxFlags } from "./sandbox.js";
 import { startServer } from "./server.js";
@@ -282,6 +283,12 @@ async function main(argv: string[]): Promise<number> {
       });
     }
     case "review": {
+      if (positionals[0] === "check") {
+        if (typeof flags.base !== "string" || !/^[0-9a-f]{40}$/i.test(flags.base)) return 2;
+        const result = checkReviewEvidence(cwd(), true, defaultGit, flags.base.toLowerCase());
+        out("vf", result.reason, { level: result.ok ? "info" : "error" });
+        return result.ok ? 0 : 1;
+      }
       if (
         positionals[0] !== "evidence" ||
         typeof flags.base !== "string" ||
