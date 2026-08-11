@@ -127,6 +127,7 @@ describe("generated pre-push hook (#748)", () => {
     const r = runHook(dir, [`refs/heads/main ${h} refs/heads/main ${remote}`], 0);
     expect(r.status).not.toBe(0);
     expect(r.out).toContain("cannot resolve review base");
+    expect(r.out).toContain("Fetch remote history");
     expect(argsFor(dir)).toEqual([]);
   });
 
