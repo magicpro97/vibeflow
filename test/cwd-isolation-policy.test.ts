@@ -26,22 +26,12 @@ const CONVERTED_HIGH_RISK = [
 // of pre-existing legacy occurrences per file. Derived once from the current
 // sources; do not edit to paper over new insertions. Files absent from this
 // map have a zero baseline (every occurrence is an extraneous insertion).
-const BASELINE = new Map<string, Map<string, number>>([
-  [
-    "test/commands-worktree.test.ts",
-    new Map([
-      ["process.chdir(dir);", 12],
-      ["process.chdir(origCwd);", 1],
-    ]),
-  ],
-  [
-    "test/server.test.ts",
-    new Map([
-      ["process.chdir(dir);", 3],
-      ["process.chdir(orig);", 3],
-    ]),
-  ],
-]);
+//
+// commands-worktree and server.test are now fully converted: every
+// process.chdir in these files is a violation. The other listed files
+// (commands-pr, verify-sandbox-554, server-file-route) have zero legacy
+// occurrences and are also enforced at zero via absence from this map.
+const BASELINE = new Map<string, Map<string, number>>([]);
 
 // Strip // and /* */ comments and quoted strings so a plain
 // `process.chdir(` mention in a comment or a literal string is not a violation.
