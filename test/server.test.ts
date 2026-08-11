@@ -274,25 +274,21 @@ describe("server HTTP API handlers", () => {
   test("GET /events deprecated SSE returns 200 (line 400-410)", async () => {
     // Set up a workflow with a unit that has a stream.log so the
     // per-unit stream tail path (line 404-410) is exercised.
-    const { server, url } = (await startServer()) as {
-      server: { stop: () => void };
-      url: string;
-    };
+    // All writes go to a mkdtemp fixture repo (never the active checkout).
     const { mkdirSync, writeFileSync, mkdtempSync, rmSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    const dir = mkdtempSync(join(tmpdir(), "vf-events-"));
+    const callerCwd = process.cwd();
+    const fixture = mkdtempSync(join(tmpdir(), "vf-events-"));
     try {
-      const token = await csrfToken(url);
-      // Create a unit with a stream.log file inside the active repo
-      const unitDir = join(process.cwd(), ".vibeflow", "workunits", "u1");
-      mkdirSync(join(unitDir, ".gitignore-path-not-used"), { recursive: true });
+      // Create a unit with a stream.log file inside the fixture repo
+      const unitDir = join(fixture, ".vibeflow", "workunits", "u1");
       mkdirSync(unitDir, { recursive: true });
       writeFileSync(join(unitDir, "stream.log"), "data: first event\n\ndata: second event\n\n");
       // Write a workflow state with this unit so the per-unit stream
       // tail path fires (it iterates state.work_units).
       const { writeState } = await import("../src/core.js");
-      writeState(process.cwd(), {
+      writeState(fixture, {
         task_id: "T1",
         goal: "test",
         success_criteria: [],
@@ -312,38 +308,45 @@ describe("server HTTP API handlers", () => {
         ],
         totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 500);
+      const { server, url } = (await startServer(0, { repoDir: fixture })) as {
+        server: { stop: () => void };
+        url: string;
+      };
       try {
-        const res = await fetch(`${url}/events`, {
-          headers: { "x-vibeflow-token": token },
-          signal: controller.signal,
-        });
-        expect(res.status).toBe(200);
-        expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("expected a body");
-        const dec = new TextDecoder();
-        let buf = "";
-        while (buf.length < 4096) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value);
-          if (buf.includes("first event")) break;
+        const token = await csrfToken(url);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 500);
+        try {
+          const res = await fetch(`${url}/events`, {
+            headers: { "x-vibeflow-token": token },
+            signal: controller.signal,
+          });
+          expect(res.status).toBe(200);
+          expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+          const reader = res.body?.getReader();
+          if (!reader) throw new Error("expected a body");
+          const dec = new TextDecoder();
+          let buf = "";
+          while (buf.length < 4096) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value);
+            if (buf.includes("first event")) break;
+          }
+          expect(buf).toContain("first event");
+        } finally {
+          clearTimeout(timer);
+          controller.abort();
         }
-        expect(buf).toContain("first event");
       } finally {
-        clearTimeout(timer);
-        controller.abort();
         server.stop();
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(join(process.cwd(), ".vibeflow", "workunits", "u1"), {
-        recursive: true,
-        force: true,
-      });
+      try {
+        expect(process.cwd()).toBe(callerCwd);
+      } finally {
+        rmSync(fixture, { recursive: true, force: true });
+      }
     }
   });
 
@@ -1082,22 +1085,39 @@ describe("server HTTP API handlers", () => {
   });
 
   test("GET /api/logs/session returns 0 when session-start-seq file is absent (lines 204-206)", async () => {
-    const { server, url } = (await startServer()) as { server: { stop: () => void }; url: string };
-    // Temporarily rename the file so the catch branch fires
+    // Use a fixture repo so the rename targets an explicit path, never the
+    // active checkout. Caller CWD is unchanged.
     const { join } = await import("node:path");
-    const { renameSync, existsSync } = await import("node:fs");
-    const seqFile = join(process.cwd(), ".vibeflow", "logs", "session-start-seq");
-    const tmpFile = `${seqFile}.bak`;
-    const existed = existsSync(seqFile);
-    if (existed) renameSync(seqFile, tmpFile);
+    const { mkdtempSync, rmSync, mkdirSync, renameSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const callerCwd = process.cwd();
+    const fixture = mkdtempSync(join(tmpdir(), "vf-sessionseq-"));
     try {
-      const res = await fetch(`${url}/api/logs/session`);
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { sessionStartSeq: number };
-      expect(body.sessionStartSeq).toBe(0);
+      // Write a seq file so the server's read path is exercised, then rename
+      // it away to force the catch branch (returns 0).
+      const seqFile = join(fixture, ".vibeflow", "logs", "session-start-seq");
+      const tmpFile = `${seqFile}.bak`;
+      mkdirSync(join(fixture, ".vibeflow", "logs"), { recursive: true });
+      writeFileSync(seqFile, "42");
+      const { server, url } = (await startServer(0, { repoDir: fixture })) as {
+        server: { stop: () => void };
+        url: string;
+      };
+      try {
+        renameSync(seqFile, tmpFile);
+        const res = await fetch(`${url}/api/logs/session`);
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { sessionStartSeq: number };
+        expect(body.sessionStartSeq).toBe(0);
+      } finally {
+        server.stop();
+      }
     } finally {
-      if (existed) renameSync(tmpFile, seqFile);
-      server.stop();
+      try {
+        expect(process.cwd()).toBe(callerCwd);
+      } finally {
+        rmSync(fixture, { recursive: true, force: true });
+      }
     }
   });
 
