@@ -18,7 +18,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     exit 1
   fi
   if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
-    candidate="$remote_sha"
+    if ! candidate=$(git merge-base "$local_sha" "$remote_sha" 2>/dev/null); then
+      echo "vibeflow pre-push: cannot resolve review base for $local_ref" >&2
+      echo "Run review evidence first, or push with --no-verify (CI stays authoritative)." >&2
+      exit 1
+    fi
   else
     if ! candidate=$(git merge-base HEAD "refs/remotes/${remote_name}/HEAD" 2>/dev/null); then
       echo "vibeflow pre-push: cannot resolve review base for new branch $local_ref" >&2

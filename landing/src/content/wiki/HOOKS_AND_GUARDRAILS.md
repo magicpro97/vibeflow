@@ -47,7 +47,7 @@ engine's native hook events to `vf hook`:
 
 `vf hooks install` adds a fail-closed pre-push hook. It binds verification to pushed
 current `HEAD`, derives the pushed-range base, and runs
-`vf verify --require-review-evidence --review-base <full-SHA>`. It ignores tags and
+`vf review check --base <full-SHA>`. It ignores tags and
 deletions and rejects mixed-base multi-branch pushes. No LLM/network/API runs inside the
 hook. `git push --no-verify` bypasses local feedback only; remote `review-thread-gate`
 remains authoritative. User-owned hooks are preserved, never auto-chained.

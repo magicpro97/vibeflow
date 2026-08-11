@@ -81,9 +81,11 @@ export function gitPostMerge(): string {
  * #748 pre-push gate. POSIX sh reading git's stdin records:
  *   <local-ref> <local-sha> <remote-ref> <remote-sha>
  * Ignores tags/deletions, requires pushed local refs to equal current HEAD,
- * derives a review base (existing branch = remote sha; new branch = merge-base
- * against the remote's HEAD), then runs `review check --base <base>` once — an
- * evidence-only check that never launches the toolchain. Any failure blocks.
+ * derives a review base (existing branch = merge-base of local & remote sha, so
+ * an amended/force-pushed local SHA is never reviewed against a stale remote
+ * tip that is not its ancestor; new branch = merge-base against the remote's
+ * HEAD), then runs `review check --base <base>` once — an evidence-only check
+ * that never launches the toolchain. Any failure blocks.
  * `verifyCmd` overrides the delegated command (test seam); the dogfood
  * .githooks/pre-push swaps it to bun.
  */
@@ -109,7 +111,11 @@ export function gitPrePush(verifyCmd?: string): string {
     "    exit 1",
     "  fi",
     '  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then',
-    '    candidate="$remote_sha"',
+    '    if ! candidate=$(git merge-base "$local_sha" "$remote_sha" 2>/dev/null); then',
+    '      echo "vibeflow pre-push: cannot resolve review base for $local_ref" >&2',
+    '      echo "Run review evidence first, or push with --no-verify (CI stays authoritative)." >&2',
+    "      exit 1",
+    "    fi",
     "  else",
     '    if ! candidate=$(git merge-base HEAD "refs/remotes/${remote_name}/HEAD" 2>/dev/null); then',
     '      echo "vibeflow pre-push: cannot resolve review base for new branch $local_ref" >&2',
