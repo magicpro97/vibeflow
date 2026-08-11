@@ -35,13 +35,14 @@ export function verify(
     allowUnverifiedEvidence?: boolean;
     requireReviewEvidence?: boolean;
     reviewBase?: string; // #748
+    projectDir?: string;
     catalogDir?: string;
     sandbox?: SandboxRequest;
     sandboxRuntime?: SandboxRuntime;
   } = {},
 ): number {
   let failed = 0;
-  const base = cwd();
+  const base = inject.projectDir ?? cwd();
   const sandboxRuntime = inject.sandboxRuntime ?? defaultSandboxRuntime();
   const sandbox = inject.sandbox
     ? prepareDockerSandbox(inject.sandbox, base, sandboxRuntime)
@@ -106,7 +107,7 @@ export function verify(
     }
 
     // Policy gates (confidence / evidence / scope) over the workflow ledger.
-    const st = readState();
+    const st = readState(base);
     if (inject.allowUnverifiedEvidence && st) st._allowUnverifiedEvidence = true;
     const report = policyGates(st);
     appendReviewEvidence(report, base, inject.requireReviewEvidence === true, inject.reviewBase);

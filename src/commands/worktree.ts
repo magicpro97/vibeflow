@@ -53,6 +53,10 @@ export interface WorktreeInject {
     args: readonly string[],
     opts?: { cwd?: string; encoding?: BufferEncoding },
   ) => RunCommandResult;
+  /** Optional repo root. When set, every git/helper invocation runs
+   *  with this explicit cwd and paths resolve against it. When unset,
+   *  they resolve `cwd()` lazily at operation time (CLI default). */
+  repoDir?: string;
 }
 
 /** Default `runCommandSync` — delegates to node:child_process.spawnSync.
@@ -96,8 +100,9 @@ export function buildCreateArgs(
   branch: string,
   path: string,
   base?: string,
+  repoDir?: string,
 ): { cmd: string; args: string[] } {
-  const scriptPath = join(cwd(), "scripts", "create-worktree.sh");
+  const scriptPath = join(repoDir ?? cwd(), "scripts", "create-worktree.sh");
   const args = [branch, path];
   if (base && base.length > 0) args.push("--base", base);
   return { cmd: scriptPath, args };
@@ -110,6 +115,7 @@ export function worktreeCreate(
   inject: WorktreeInject = {},
 ): number {
   const run = inject.runCommandSync ?? defaultRunCommandSync;
+  const repoDir = inject.repoDir ?? cwd();
   const branch = args[0];
   if (typeof branch !== "string" || branch.length === 0) {
     out(
@@ -123,7 +129,7 @@ export function worktreeCreate(
   }
   const base = typeof flags.base === "string" ? flags.base : undefined;
   const pathFlag = typeof flags.path === "string" ? flags.path : undefined;
-  const wtPath = pathFlag && pathFlag.length > 0 ? pathFlag : defaultWorktreePath(branch);
+  const wtPath = pathFlag && pathFlag.length > 0 ? pathFlag : defaultWorktreePath(branch, repoDir);
 
   // Sentinel: refuse to clobber. If the worktree path already
   // exists, error out with a clear message (A6 spec: "no silent
@@ -137,11 +143,11 @@ export function worktreeCreate(
     return 2;
   }
 
-  const { cmd, args: helperArgs } = buildCreateArgs(branch, wtPath, base);
+  const { cmd, args: helperArgs } = buildCreateArgs(branch, wtPath, base, repoDir);
   out("vf", c.dim(`vf worktree create: ${cmd} ${helperArgs.join(" ")}`), {
     meta: { kind: "worktree-create", branch, path: wtPath, base: base ?? "HEAD" },
   });
-  const r = run(cmd, helperArgs, { cwd: cwd() });
+  const r = run(cmd, helperArgs, { cwd: repoDir });
   if (r.error) {
     out("vf", c.red(`vf worktree create: failed to spawn helper: ${r.error.message}`), {
       level: "error",
@@ -174,6 +180,7 @@ export function worktreeRemove(
   inject: WorktreeInject = {},
 ): number {
   const run = inject.runCommandSync ?? defaultRunCommandSync;
+  const repoDir = inject.repoDir ?? cwd();
   const branch = args[0];
   if (typeof branch !== "string" || branch.length === 0) {
     out("vf", c.red("vf worktree remove: missing <branch>. Usage: vf worktree remove <branch>"), {
@@ -185,7 +192,7 @@ export function worktreeRemove(
   // Resolve the worktree path for the branch via `git worktree list
   // --porcelain` (same pattern the shell helper uses). We do this
   // here so the error message can name the actual path.
-  const listResult = run("git", ["worktree", "list", "--porcelain"], { cwd: cwd() });
+  const listResult = run("git", ["worktree", "list", "--porcelain"], { cwd: repoDir });
   if (listResult.status !== 0) {
     out("vf", c.red(`vf worktree remove: git worktree list failed: ${listResult.stderr.trim()}`), {
       level: "error",
@@ -213,7 +220,7 @@ export function worktreeRemove(
   // spec's "prune + force-remove merged worktrees" (a worktree
   // with uncommitted changes needs --force; for already-merged
   // branches this is the standard path).
-  const r = run("git", ["worktree", "remove", "--force", wtPath], { cwd: cwd() });
+  const r = run("git", ["worktree", "remove", "--force", wtPath], { cwd: repoDir });
   if (r.status !== 0) {
     out(
       "vf",
@@ -239,7 +246,8 @@ export function worktreeList(
   inject: WorktreeInject = {},
 ): number {
   const run = inject.runCommandSync ?? defaultRunCommandSync;
-  const r = run("git", ["worktree", "list", "--porcelain"], { cwd: cwd() });
+  const repoDir = inject.repoDir ?? cwd();
+  const r = run("git", ["worktree", "list", "--porcelain"], { cwd: repoDir });
   if (r.status !== 0) {
     out("vf", c.red(`vf worktree list: git worktree list failed: ${r.stderr.trim()}`), {
       level: "error",

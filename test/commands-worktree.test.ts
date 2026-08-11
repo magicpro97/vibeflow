@@ -60,16 +60,13 @@ import {
 } from "../src/commands.js";
 import type { RunCommandResult, WorktreeInject } from "../src/commands.js";
 
-let origCwd: string;
 let dir: string;
 
 beforeEach(() => {
-  origCwd = process.cwd();
   dir = mkdtempSync(join(tmpdir(), "vf-worktree-test-"));
 });
 
 afterEach(() => {
-  process.chdir(origCwd);
   // Best-effort: any leftover worktrees in `dir` get pruned. Tests
   // that exercise `worktreeRemove` already clean up; this guards
   // against mid-test failures.
@@ -113,19 +110,17 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
   test("(d) worktreeCreate() with existing worktree path → exit 2 (clobber refused)", () => {
     // The clobber check uses `existsSync(<wtPath>)`. Plant a file
     // at the default path so the check trips.
-    process.chdir(dir);
     const branch = "feature";
     const wtPath = defaultWorktreePath(branch, dir);
     mkdirSync(wtPath, { recursive: true });
-    const code = worktreeCreate([branch], {});
+    const code = worktreeCreate([branch], {}, { repoDir: dir });
     expect(code).toBe(2);
   });
 
   test("(e) worktreeCreate() happy path → exit 0", () => {
-    process.chdir(dir);
     const calls: { cmd: string; args: readonly string[] }[] = [];
     const run = fakeRun({ status: 0, stdout: "", stderr: "" }, calls);
-    const code = worktreeCreate(["feature"], {}, { runCommandSync: run });
+    const code = worktreeCreate(["feature"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(0);
     // The helper script is invoked with branch + path as argv.
     expect(calls.length).toBe(1);
@@ -138,25 +133,23 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
     // `/var/folders/...` -> `/private/var/folders/...`). Compare
     // against the resolved path so the test works on both
     // symlinked and non-symlinked tmpdirs.
-    expect(c0.args[1]).toBe(defaultWorktreePath("feature", process.cwd()));
+    expect(c0.args[1]).toBe(defaultWorktreePath("feature", dir));
   });
 
   test("(f) worktreeCreate() with helper exit 1 → exit 1 (relays stderr)", () => {
-    process.chdir(dir);
     const run = fakeRun({
       status: 1,
       stdout: "",
       stderr: "create-worktree.sh: git worktree add -b feature /tmp/... failed",
     });
-    const code = worktreeCreate(["feature"], {}, { runCommandSync: run });
+    const code = worktreeCreate(["feature"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(1);
   });
 
   test("(g) worktreeCreate() with helper spawn error → exit 1", () => {
-    process.chdir(dir);
     const err = new Error("ENOENT");
     const run = fakeRun({ status: null, stdout: "", stderr: "", error: err });
-    const code = worktreeCreate(["feature"], {}, { runCommandSync: run });
+    const code = worktreeCreate(["feature"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(1);
   });
 
@@ -166,17 +159,15 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
   });
 
   test("(i) worktreeRemove() with branch that has no worktree → exit 2", () => {
-    process.chdir(dir);
     // git worktree list —porcelain with no worktrees (just the
     // main repo) won't include the branch we're looking for.
     const porcelain = `worktree ${dir}\nHEAD abc123\nbranch refs/heads/main\n\n`;
     const run = fakeRun({ status: 0, stdout: porcelain, stderr: "" });
-    const code = worktreeRemove(["nope"], {}, { runCommandSync: run });
+    const code = worktreeRemove(["nope"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(2);
   });
 
   test("(j) worktreeRemove() happy path → exit 0", () => {
-    process.chdir(dir);
     const wt = "/tmp/some-worktree";
     const porcelain = `worktree ${wt}\nHEAD abc123\nbranch refs/heads/feature\n\n`;
     const calls: { cmd: string; args: readonly string[] }[] = [];
@@ -191,7 +182,7 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
       n++;
       return { status: 0, stdout: "", stderr: "" };
     };
-    const code = worktreeRemove(["feature"], {}, { runCommandSync: run });
+    const code = worktreeRemove(["feature"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(0);
     expect(calls.length).toBe(2);
     const removeCall = calls[1];
@@ -202,7 +193,6 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
   });
 
   test("(k) worktreeRemove() with git worktree remove failure → exit 1", () => {
-    process.chdir(dir);
     const wt = "/tmp/some-worktree";
     const porcelain = `worktree ${wt}\nHEAD abc123\nbranch refs/heads/feature\n\n`;
     let n = 0;
@@ -213,20 +203,18 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
       n++;
       return { status: 1, stdout: "", stderr: "permission denied" };
     };
-    const code = worktreeRemove(["feature"], {}, { runCommandSync: run });
+    const code = worktreeRemove(["feature"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(1);
     expect(n).toBe(1);
   });
 
   test("(l) worktreeList() with no worktrees → exit 0, prints (no worktrees)", () => {
-    process.chdir(dir);
     const run = fakeRun({ status: 0, stdout: "", stderr: "" });
-    const code = worktreeList([], {}, { runCommandSync: run });
+    const code = worktreeList([], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(0);
   });
 
   test("(m) worktreeList() happy path → exit 0", () => {
-    process.chdir(dir);
     const porcelain = [
       `worktree ${dir}`,
       "HEAD abc123",
@@ -238,14 +226,13 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
       "",
     ].join("\n");
     const run = fakeRun({ status: 0, stdout: porcelain, stderr: "" });
-    const code = worktreeList([], {}, { runCommandSync: run });
+    const code = worktreeList([], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(0);
   });
 
   test("(n) worktreeList() with git failure → exit 1", () => {
-    process.chdir(dir);
     const run = fakeRun({ status: 128, stdout: "", stderr: "fatal: not a git repo" });
-    const code = worktreeList([], {}, { runCommandSync: run });
+    const code = worktreeList([], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(1);
   });
 
@@ -255,10 +242,9 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
   });
 
   test("(p) buildCreateArgs: includes --base when given", () => {
-    process.chdir(dir);
-    const r = buildCreateArgs("feature", "/tmp/wt", "main");
+    const r = buildCreateArgs("feature", "/tmp/wt", "main", dir);
     expect(r.args).toEqual(["feature", "/tmp/wt", "--base", "main"]);
-    const r2 = buildCreateArgs("feature", "/tmp/wt");
+    const r2 = buildCreateArgs("feature", "/tmp/wt", undefined, dir);
     expect(r2.args).toEqual(["feature", "/tmp/wt"]);
   });
 
@@ -266,10 +252,9 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
   // Coverage: switch case "create" arm (lines 294,299) was uncovered on Windows
   // because the E2E test (t) skips on Win32. Inject-driven test works everywhere.
   test("(z-create) worktree() with action 'create' dispatches to worktreeCreate", () => {
-    process.chdir(dir);
     const calls: { cmd: string; args: readonly string[] }[] = [];
     const run = fakeRun({ status: 0, stdout: "", stderr: "" }, calls);
-    const code = worktree(["create", "feature"], {}, { runCommandSync: run });
+    const code = worktree(["create", "feature"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(0);
     expect(calls.length).toBe(1);
     const c0 = calls[0];
@@ -436,37 +421,52 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
   // worktree list --porcelain`."
 
   (process.platform === "win32" ? test.skip : test)(
-    "(t) E2E [TS wrapper] worktree create: exit 0, worktree exists, node_modules is a symlink",
+    "(t) E2E [TS wrapper] worktree create: exit 0, caller cwd unchanged, worktree exists, node_modules is a symlink",
     () => {
+      const callerCwd = process.cwd();
       const { repoDir } = plantRepoWithScripts();
-      // chdir into the tmpdir so `buildCreateArgs` resolves the
-      // helper at `<repoDir>/scripts/create-worktree.sh`. The
-      // `defaultWorktreePath` will also resolve to
-      // `<repoDir>/vf-wt-a6test`, which is inside the tmpdir.
-      process.chdir(repoDir);
-
-      const code = worktree(["create", "a6test"], {});
-      expect(code).toBe(0);
-
       const wtDir = join(repoDir, "vf-wt-a6test");
-      // The worktree path must exist after create.
-      expect(existsSync(wtDir)).toBe(true);
-      // A6 spec: "verify node_modules is a symlink to the parent's."
-      const lstat = lstatSync(join(wtDir, "node_modules"));
-      expect(lstat.isSymbolicLink()).toBe(true);
-      const linkTarget = readlinkSync(join(wtDir, "node_modules"));
-      const expectedParent = join(repoDir, "node_modules");
-      if (linkTarget.startsWith("/")) {
-        const { realpathSync } = require("node:fs") as typeof import("node:fs");
-        expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
-      } else {
-        expect(join(wtDir, "node_modules", linkTarget)).toBe(expectedParent);
+
+      try {
+        // Explicit repoDir — the caller's process.cwd() must stay
+        // unchanged and every git/helper invocation uses repoDir.
+        const code = worktree(["create", "a6test"], {}, { repoDir });
+        expect(code).toBe(0);
+        expect(process.cwd()).toBe(callerCwd);
+
+        // The worktree path must exist after create.
+        expect(existsSync(wtDir)).toBe(true);
+        // A6 spec: "verify node_modules is a symlink to the parent's."
+        const lstat = lstatSync(join(wtDir, "node_modules"));
+        expect(lstat.isSymbolicLink()).toBe(true);
+        const linkTarget = readlinkSync(join(wtDir, "node_modules"));
+        const expectedParent = join(repoDir, "node_modules");
+        if (linkTarget.startsWith("/")) {
+          const { realpathSync } = require("node:fs") as typeof import("node:fs");
+          expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
+        } else {
+          expect(join(wtDir, "node_modules", linkTarget)).toBe(expectedParent);
+        }
+      } finally {
+        try {
+          execFileSync("git", ["worktree", "remove", "--force", wtDir], {
+            cwd: repoDir,
+            stdio: "ignore",
+          });
+        } catch {
+          // best-effort: worktree may not have been created
+        }
+        expect(process.cwd()).toBe(callerCwd);
       }
     },
   );
 
   test("(u) E2E [TS wrapper] worktree remove: exit 0, worktree gone, branch pruned from list", () => {
+    const callerCwd = process.cwd();
     const { repoDir, wtDir } = plantRepoWithScripts();
+    const baseSha = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
     // First, create a worktree via real `git worktree add` (no
     // need to go through the TS wrapper for the create here —
     // we're testing remove).
@@ -475,21 +475,34 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
     });
     expect(existsSync(wtDir)).toBe(true);
 
-    // Now run the TS wrapper's remove against the real repo.
-    process.chdir(repoDir);
-    const code = worktree(["remove", "a6test"], {});
-    expect(code).toBe(0);
+    try {
+      // Explicit repoDir — caller's cwd unchanged, remove uses repoDir.
+      const code = worktree(["remove", "a6test"], {}, { repoDir });
+      expect(code).toBe(0);
+      expect(process.cwd()).toBe(callerCwd);
 
-    // Worktree dir must be gone.
-    expect(existsSync(wtDir)).toBe(false);
-    // The branch must be pruned from the worktree list. We check
-    // this by re-running `git worktree list --porcelain` and
-    // asserting the branch doesn't appear.
-    const porcelain = execFileSync("git", ["worktree", "list", "--porcelain"], {
-      cwd: repoDir,
-      encoding: "utf8",
-    });
-    expect(porcelain).not.toContain("branch refs/heads/a6test");
+      // Worktree dir must be gone.
+      expect(existsSync(wtDir)).toBe(false);
+      // The branch must be pruned from the worktree list. We check
+      // this by re-running `git worktree list --porcelain` and
+      // asserting the branch doesn't appear.
+      const porcelain = execFileSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: repoDir,
+        encoding: "utf8",
+      });
+      expect(porcelain).not.toContain("branch refs/heads/a6test");
+    } finally {
+      try {
+        execFileSync("git", ["branch", "-D", "a6test"], { cwd: repoDir, stdio: "ignore" });
+      } catch {
+        // best-effort: branch may already be gone
+      }
+      // Caller CWD, fixture HEAD, and branch state unchanged after test.
+      expect(process.cwd()).toBe(callerCwd);
+      expect(
+        execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+      ).toBe(baseSha);
+    }
   });
 
   // ---- (y) worktree remove: when `git worktree list` itself fails → exit 1 ----

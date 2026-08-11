@@ -56,7 +56,7 @@ const CSP =
 
 export function startServer(
   port = 0,
-  _opts: { uiHtmlPath?: URL; host?: string } = {},
+  _opts: { uiHtmlPath?: URL; host?: string; repoDir?: string } = {},
 ): Promise<{
   server: { stop: () => void };
   url: string;
@@ -65,6 +65,7 @@ export function startServer(
 
   const host = _opts.host ?? "127.0.0.1";
   const bindAll = host === "0.0.0.0";
+  let activeRepo = _opts.repoDir ?? cwd();
 
   const uiHtmlPath = _opts.uiHtmlPath ?? new URL("../dist/ui/index.html", import.meta.url);
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -83,7 +84,6 @@ export function startServer(
     return raw.replaceAll("__CSRF__", token).replaceAll("__VERSION__", versionVal);
   };
 
-  let activeRepo = cwd();
   clearPending(); // discard orphaned hooks from previous server instance
   clearPendingSkillAcquisitions(); // #682 — reject outstanding acquisition waits on startup
 
