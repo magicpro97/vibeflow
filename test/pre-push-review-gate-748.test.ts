@@ -9,7 +9,10 @@ const ZERO = "0".repeat(40);
 const other = "c".repeat(40);
 
 function git(dir: string, args: string): string {
-  return execSync(`git ${args}`, { cwd: dir, encoding: "utf8" }).trim();
+  return execSync(`git -c user.email=t@t -c user.name=t ${args}`, {
+    cwd: dir,
+    encoding: "utf8",
+  }).trim();
 }
 
 function freshGitDir(): string {
