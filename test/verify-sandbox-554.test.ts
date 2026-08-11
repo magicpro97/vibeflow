@@ -48,31 +48,35 @@ describe("verify docker sandbox (#554)", () => {
   test("fails closed before gate spawn when Docker is unavailable", () => {
     const base = project();
     const calls: Array<{ cmd: string; args: readonly string[] }> = [];
-    const cwd = process.cwd();
-    process.chdir(base);
+    const callerCwd = process.cwd();
     try {
       expect(
         verify({
+          projectDir: base,
           sandbox: { image, dependencyVolume: "vf-deps" },
           sandboxRuntime: runtime(base, false),
           spawner: asSpawnSync(makeFakeSpawner({ calls })),
         }),
       ).toBe(1);
       expect(calls).toHaveLength(0);
+      expect(process.cwd()).toBe(callerCwd);
     } finally {
-      process.chdir(cwd);
-      rmSync(base, { recursive: true, force: true });
+      try {
+        expect(process.cwd()).toBe(callerCwd);
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
     }
   });
 
   test("runs gates in hardened Docker argv and removes disposable target", () => {
     const base = project();
     const calls: Array<{ cmd: string; args: readonly string[] }> = [];
-    const cwd = process.cwd();
-    process.chdir(base);
+    const callerCwd = process.cwd();
     try {
       expect(
         verify({
+          projectDir: base,
           sandbox: { image, dependencyVolume: "vf-deps" },
           sandboxRuntime: runtime(base),
           spawner: asSpawnSync(makeFakeSpawner({ calls })),
@@ -88,9 +92,13 @@ describe("verify docker sandbox (#554)", () => {
       const mounted = String(args[args.indexOf("-v") + 1]).replace(/:\/w$/, "");
       expect(mounted).not.toBe(base);
       expect(existsSync(mounted)).toBe(false);
+      expect(process.cwd()).toBe(callerCwd);
     } finally {
-      process.chdir(cwd);
-      rmSync(base, { recursive: true, force: true });
+      try {
+        expect(process.cwd()).toBe(callerCwd);
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
     }
   });
 
@@ -106,20 +114,24 @@ describe("verify docker sandbox (#554)", () => {
         stderr: "",
       };
     };
-    const cwd = process.cwd();
-    process.chdir(base);
+    const callerCwd = process.cwd();
     try {
       expect(
         verify({
+          projectDir: base,
           sandbox: { image, dependencyVolume: "vf-deps" },
           sandboxRuntime,
           spawner: asSpawnSync(makeFakeSpawner({ defaultStatus: null })),
         }),
       ).toBe(1);
       expect(runtimeCalls.some((args) => args[0] === "rm" && args[1] === "-f")).toBe(true);
+      expect(process.cwd()).toBe(callerCwd);
     } finally {
-      process.chdir(cwd);
-      rmSync(base, { recursive: true, force: true });
+      try {
+        expect(process.cwd()).toBe(callerCwd);
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
     }
   });
 });
