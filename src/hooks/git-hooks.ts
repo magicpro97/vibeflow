@@ -82,9 +82,10 @@ export function gitPostMerge(): string {
  *   <local-ref> <local-sha> <remote-ref> <remote-sha>
  * Ignores tags/deletions, requires pushed local refs to equal current HEAD,
  * derives a review base (existing branch = remote sha; new branch = merge-base
- * against the remote's HEAD), then runs `vf verify --require-review-evidence
- * --review-base <base>` once. Any failure blocks. `verifyCmd` overrides the
- * delegated verify (test seam); the dogfood .githooks/pre-push swaps it to bun.
+ * against the remote's HEAD), then runs `review check --base <base>` once — an
+ * evidence-only check that never launches the toolchain. Any failure blocks.
+ * `verifyCmd` overrides the delegated command (test seam); the dogfood
+ * .githooks/pre-push swaps it to bun.
  */
 export function gitPrePush(verifyCmd?: string): string {
   const verify = verifyCmd ?? `node "${cliPath()}"`;
@@ -92,7 +93,7 @@ export function gitPrePush(verifyCmd?: string): string {
     "#!/usr/bin/env sh",
     "# VibeFlow pre-push gate: block pushes without current-HEAD review evidence.",
     "# # vibeflow-managed — generated; re-run `vf hooks install` (or `vf init`) to refresh.",
-    "# Fails closed: missing/current-HEAD mismatched/any verify failure blocks.",
+    "# Fails closed: missing/current-HEAD mismatched/any evidence-check failure blocks.",
     "# Bypass with `git push --no-verify` — remote `review-thread-gate` (CI) stays authoritative.",
     "set -eu",
     'remote_name="${1:-origin}"',
@@ -124,10 +125,10 @@ export function gitPrePush(verifyCmd?: string): string {
     "  count=$((count + 1))",
     "done",
     'if [ "$count" -eq 0 ]; then exit 0; fi',
-    'if ! @@VF_VERIFY@@ verify --require-review-evidence --review-base "$base"; then',
+    'if ! @@VF_VERIFY@@ review check --base "$base"; then',
     '  echo "vibeflow pre-push: review evidence required but missing/invalid for $base" >&2',
     '  echo "Run vf review evidence --base <base> --result <review-result.json>, then" >&2',
-    '  echo "vf verify --require-review-evidence --review-base <base>." >&2',
+    '  echo "vf review check --base <base>." >&2',
     "  exit 1",
     "fi",
     "exit 0",
