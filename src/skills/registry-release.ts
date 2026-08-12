@@ -190,7 +190,10 @@ export function sanitizeForOutput(input: string): string {
       url.password = "";
       url.search = "";
       url.hash = "";
-      out = url.toString();
+      // A whole-string http(s) URL is already stripped of credentials/query/
+      // fragment; its multi-segment path is not a filesystem path, so skip the
+      // ABS_PATH redaction that would otherwise eat the PR link from evidence.
+      return url.toString();
     }
   } catch {
     /* not a URL — leave as-is */
@@ -220,7 +223,7 @@ export function proposalIdFor(
     .join("\u001f");
   const stable = [
     String(schemaVersion),
-    identity.registry,
+    registry,
     identity.fromOid,
     identity.toOid,
     identity.version,

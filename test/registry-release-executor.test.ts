@@ -142,7 +142,7 @@ describe("approveProposal", () => {
     ]);
     expect(result.snapshot.state).toBe("completed");
     expect(status(result)).toBe("pr-opened");
-    expect(result.targets[0]?.evidence).toBe("https://github.com[redacted]");
+    expect(result.targets[0]?.evidence).toBe("https://github.com/owner/one/pull/1");
     expect(result.targets[0]?.evidence.length).toBeLessThanOrEqual(256);
   });
 

@@ -195,6 +195,15 @@ describe("sanitizeForOutput", () => {
     );
   });
 
+  test("keeps the path of an http(s) URL while stripping credentials/query/fragment", () => {
+    expect(sanitizeForOutput("https://github.com/owner/repo/pull/7")).toBe(
+      "https://github.com/owner/repo/pull/7",
+    );
+    expect(sanitizeForOutput("https://u:p@github.com/owner/repo/pull/7?x=1#f")).toBe(
+      "https://github.com/owner/repo/pull/7",
+    );
+  });
+
   test("leaves plain text intact", () => {
     expect(sanitizeForOutput("hello world 1.2.3")).toBe("hello world 1.2.3");
   });
@@ -233,6 +242,24 @@ describe("proposalIdFor identity binding (#2)", () => {
     const subset = t.slice(0, 1);
     expect(proposalIdFor(1, ident(), "reg-a", t)).not.toBe(
       proposalIdFor(1, ident(), "reg-a", subset),
+    );
+  });
+
+  test("binds the stable key to the passed registry, not identity.registry", () => {
+    // Both targets carry reg-a AND reg-b, so filtering by either yields the SAME
+    // eligible set — the only variable left is the passed `registry` arg. With
+    // identity.registry fixed to reg-a, the IDs must still differ, proving the
+    // stable key is bound to the passed `registry`, not identity.registry.
+    const r = parseRegistryFanout({
+      schemaVersion: 1,
+      targets: [
+        { repository: "a/repo", baseBranch: "main", registries: ["reg-a", "reg-b"] },
+        { repository: "b/repo", baseBranch: "main", registries: ["reg-a", "reg-b"] },
+      ],
+    });
+    if (!r.ok) throw new Error("fixture invalid");
+    expect(proposalIdFor(1, ident(), "reg-a", r.value.targets)).not.toBe(
+      proposalIdFor(1, ident(), "reg-b", r.value.targets),
     );
   });
 });

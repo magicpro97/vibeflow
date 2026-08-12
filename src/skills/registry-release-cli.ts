@@ -159,6 +159,7 @@ function parseSnapshot(raw: unknown): ReleaseSnapshot | null {
     !ID.test(raw.id) ||
     typeof raw.changelog !== "string" ||
     raw.changelog.length > MAX_CHANGELOG_LENGTH ||
+    sanitizeForOutput(raw.changelog) !== raw.changelog ||
     typeof raw.state !== "string" ||
     !PROPOSAL_STATES.has(raw.state as ProposalState) ||
     !Array.isArray(raw.plans) ||

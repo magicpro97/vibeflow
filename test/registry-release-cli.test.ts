@@ -168,8 +168,7 @@ describe("release-propose", () => {
       };
       expect(stored.changelog).toBe(safe);
 
-      const path = join(REPO, ".vibeflow", "registry-release-proposals", `${stored.id}.json`);
-      h.files.set(path, JSON.stringify({ ...stored, changelog: unsafe }));
+      // Stored changelog is already sanitized, so show/list round-trip it clean.
       expect(handleRegistryReleaseCommand(REPO, ["release", "show", stored.id], h.deps)).toBe(0);
       expect(lastJson(h)).toMatchObject({ changelog: safe });
       expect(handleRegistryReleaseCommand(REPO, ["release", "list"], h.deps)).toBe(0);
@@ -370,6 +369,21 @@ describe("release snapshot commands", () => {
       }),
     );
     expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(1);
+  });
+
+  test("fails closed when a stored changelog is not already sanitized", () => {
+    const h = harness();
+    expect(handleRegistryReleaseCommand(REPO, PROPOSE, h.deps)).toBe(0);
+    const snapshot = JSON.parse(h.writes[0]?.content ?? "{}") as { id: string };
+    const path = join(REPO, ".vibeflow", "registry-release-proposals", `${snapshot.id}.json`);
+    // A hand-tampered snapshot whose changelog contains an absolute path (which
+    // sanitizeForOutput would rewrite) must be rejected on read, not silently
+    // rewritten — otherwise show/list display a snapshot approve() later rejects.
+    for (const changelog of ["see /etc/passwd", "ctrl\u0007char", "https://u:p@h.co/x"]) {
+      h.files.set(path, JSON.stringify({ ...snapshot, changelog }));
+      expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(1);
+      expect(handleRegistryReleaseCommand(REPO, ["release", "list"], h.deps)).toBe(1);
+    }
   });
 
   test("reject writes only the pending-to-rejected transition", () => {
