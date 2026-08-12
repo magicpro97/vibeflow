@@ -229,6 +229,14 @@ Canonical order (kept in sync with `MASTER_SPEC.md`, `SKILL_PROVIDERS.md`, and
 8. npm packages only after security verification
 ```
 
+<!-- registry-release:start -->
+### Registry release proposals
+
+Release fanout is opt-in. `.vibeflow/REGISTRY_FANOUT.json` is a committed, default-deny target allowlist.
+`vf skills registry release-propose` writes an immutable local snapshot under
+`.vibeflow/registry-release-proposals/`. There is no automatic fanout, webhook, discovery, or UI execution.
+<!-- registry-release:end -->
+
 ## Learning loop — turning runs into skills
 
 VibeFlow self-improves by capturing what each run learns. Four mechanisms feed

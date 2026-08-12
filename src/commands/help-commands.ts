@@ -192,7 +192,7 @@ ${c.bold("Examples:")}
   vf config env-policy deny 'MY_APP_*'`,
 
   skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | curator scan [--scope=local|repo] | eval <skill-dir> | update-dependent <canonical-skill> | semantic-filter [--max-reviews N] [--reviewer ID] | registry <add|list|update|install>]")}
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | curator scan [--scope=local|repo] | eval <skill-dir> | update-dependent <canonical-skill> | semantic-filter [--max-reviews N] [--reviewer ID] | registry <add|list|update|install|release-propose|release>]")}
 Inspect locally discovered skills, validate the store, sync to engine mirrors,
 import external skills, capture new skills from real work, manage remote
 skill registries via git-backed lock files, and run skill trigger/task evals.
@@ -211,7 +211,7 @@ ${c.bold("Subcommands:")}
   draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
   curator scan [--scope=local|repo] [--sync] [--yes]  scan: local default is private; repo anchors clean HEAD; --sync previews notes sharing; --yes syncs origin notes
   eval <skill-dir>           eval cases; semantic-filter [--max-reviews N] [--reviewer ID] finds pairs (reviews execute only when BOTH flags set, N>0; opt-in/no network)
-  registry <add|list|update|install> manage remote skill registries (git-backed) — see below
+  registry <add|list|update|install|release-propose|release> manage remote skill registries — see below
 
 ${c.bold("Registry subcommands:")}
   registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]
@@ -256,12 +256,12 @@ ${c.bold("Examples:")}
   vf skills eval .vibeflow/skills/pdf-reader --engine opencode --json --out eval-result.json
   vf skills eval .vibeflow/skills/pdf-reader --previous eval-result.json
   vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0
-  vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0 --yes
-  vf skills registry list
-  vf skills registry update --yes
-  vf skills registry update platform --yes
   vf skills registry install platform/my-skill
-  vf skills registry install platform/my-skill --version 1.0.0 --on-collision replace --yes`,
+  vf skills registry release-propose <registry-id> --from <oid> --to <oid> --version <v>
+  vf skills registry release list
+  vf skills registry release show <proposal-id>
+  vf skills registry release reject <proposal-id>
+  vf skills registry release approve <proposal-id> --yes`,
 
   tools:
     () => `${c.bold("vf tools")} ${c.dim("[status | enable <tool> | disable <tool> | install <tool> [--yes]]")}

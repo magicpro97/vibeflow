@@ -218,6 +218,21 @@ Registries are remote git repos containing skill definitions. The lock file
 (`.vibeflow/SKILL_REGISTRY.lock.json`) records each pinned commit so updates are
 deterministic. On update failure, the prior valid commit is preserved in the lock.
 
+<!-- registry-release:start -->
+### Registry releases
+
+```bash
+vf skills registry release-propose <registry-id> --from <oid> --to <oid> --version <v> [--changelog <text>] [--dry-run]
+vf skills registry release list
+vf skills registry release show <proposal-id>
+vf skills registry release reject <proposal-id>
+vf skills registry release approve <proposal-id> --yes
+```
+
+Proposal creation is local and does not execute targets. Approval is the only fanout execution path.
+Per-target failures continue; partial failure exits 1.
+<!-- registry-release:end -->
+
 ### Security scan on registry install
 
 `vf skills registry install` runs an optional static security scan (NVIDIA
