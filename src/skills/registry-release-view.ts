@@ -33,12 +33,20 @@ export interface ReleaseProposalDetail {
   changelog: string;
   fromOid: string;
   toOid: string;
-  targets: { repository: string; baseBranch: string; status: TargetState }[];
+  targets: {
+    repository: string;
+    baseBranch: string;
+    status: TargetState;
+    evidence?: string;
+    prUrl?: string;
+  }[];
 }
 
 const ID = /^[0-9a-f]{64}$/;
 const SNAPSHOT_FILE = /^([0-9a-f]{64})\.json$/;
+const PR_URL = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/;
 const MAX_CHANGELOG_LENGTH = 10_000;
+const MAX_EVIDENCE = 256;
 const PROPOSAL_STATES = new Set<ProposalState>([
   "pending",
   "running",
@@ -66,7 +74,10 @@ const STORED_PLAN_KEYS = [
   "target",
   "fanout",
   "status",
+  "evidence",
+  "prUrl",
 ] as const;
+const REQUIRED_STORED_PLAN_KEYS = STORED_PLAN_KEYS.slice(0, 8);
 const DEFAULT_READER: SnapshotReader = {
   exists: existsSync,
   read: (path) => readFileSync(path, "utf8"),
@@ -97,18 +108,38 @@ function canonical(value: unknown): string {
 }
 
 function reconstructStoredPlan(raw: unknown, expected: ReleasePlan): StoredReleasePlan | null {
-  if (!isObject(raw) || !hasExactKeys(raw, STORED_PLAN_KEYS)) return null;
-  const { status, ...plan } = raw;
+  if (!isObject(raw)) return null;
+  const keys = Object.keys(raw);
+  if (
+    !REQUIRED_STORED_PLAN_KEYS.every((key) => keys.includes(key)) ||
+    !keys.every((key) => STORED_PLAN_KEYS.includes(key as (typeof STORED_PLAN_KEYS)[number]))
+  )
+    return null;
+  const { status, evidence, prUrl, ...plan } = raw;
   if (
     typeof status !== "string" ||
     !TARGET_STATES.has(status as TargetState) ||
+    (Object.hasOwn(raw, "evidence") &&
+      (typeof evidence !== "string" ||
+        evidence.length > MAX_EVIDENCE ||
+        sanitizeForOutput(evidence) !== evidence)) ||
+    (Object.hasOwn(raw, "prUrl") &&
+      (typeof prUrl !== "string" ||
+        !PR_URL.test(prUrl) ||
+        sanitizeForOutput(prUrl) !== prUrl ||
+        (status !== "pr-opened" && status !== "existing-pr"))) ||
     canonical(plan) !== canonical(expected)
   )
     return null;
-  return { ...expected, status: status as TargetState };
+  return {
+    ...expected,
+    status: status as TargetState,
+    ...(typeof evidence === "string" ? { evidence } : {}),
+    ...(typeof prUrl === "string" ? { prUrl } : {}),
+  };
 }
 
-// #759 DRY-DEBT: mirrors parseSnapshot in registry-release-cli.ts; consolidate into a shared parser in a follow-up task
+// #759 DRY-DEBT: mirrors Task 1's source-of-truth parser in registry-release-cli.ts; consolidate in a follow-up task
 function parseStoredSnapshot(raw: unknown): ReleaseSnapshot | null {
   if (
     !isObject(raw) ||
@@ -221,6 +252,8 @@ export function getReleaseProposal(
       repository: output(plan.target.repository),
       baseBranch: output(plan.target.baseBranch),
       status: output(plan.status) as TargetState,
+      ...(typeof plan.evidence === "string" ? { evidence: output(plan.evidence) } : {}),
+      ...(typeof plan.prUrl === "string" ? { prUrl: output(plan.prUrl) } : {}),
     })),
   };
 }

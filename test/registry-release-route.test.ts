@@ -10,17 +10,20 @@ import {
   type FanoutTarget,
   type ReleaseIdentity,
   buildReleasePlans,
+  parseReleaseIdentity,
   proposalIdFor,
 } from "../src/skills/registry-release.js";
 
 const REPO = "/repo";
 const DIR = join(REPO, ".vibeflow", "registry-release-proposals");
-const identity: ReleaseIdentity = {
+const parsedIdentity = parseReleaseIdentity({
   fromOid: "a".repeat(40),
   toOid: "b".repeat(40),
   version: "1.2.3",
   registry: "reg-a",
-};
+});
+if (!parsedIdentity.ok) throw new Error(parsedIdentity.value);
+const identity: ReleaseIdentity = parsedIdentity.value;
 const targets: FanoutTarget[] = [
   { repository: "owner/one", baseBranch: "main", registries: [identity.registry] },
 ];
@@ -35,6 +38,12 @@ const snapshot: ReleaseSnapshot = {
     ...plan,
     status: "pending",
   })),
+};
+const evidence = "Verification passed";
+const prUrl = "https://github.com/owner/one/pull/42";
+const publishedSnapshot: ReleaseSnapshot = {
+  ...snapshot,
+  plans: snapshot.plans.map((plan) => ({ ...plan, status: "pr-opened", evidence, prUrl })),
 };
 
 function memoryReader(value?: unknown, dirExists = true): SnapshotReader {
@@ -77,8 +86,8 @@ describe("registry release routes", () => {
     expect(await res.json()).toEqual({ ok: true, proposals: [] });
   });
 
-  test("returns a known release proposal", async () => {
-    const res = handleReleaseProposalView(REPO, id, memoryReader(snapshot));
+  test("returns persisted evidence and PR URL for a known release proposal", async () => {
+    const res = handleReleaseProposalView(REPO, id, memoryReader(publishedSnapshot));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -91,7 +100,15 @@ describe("registry release routes", () => {
         changelog: "Ready",
         fromOid: identity.fromOid,
         toOid: identity.toOid,
-        targets: [{ repository: "owner/one", baseBranch: "main", status: "pending" }],
+        targets: [
+          {
+            repository: "owner/one",
+            baseBranch: "main",
+            status: "pr-opened",
+            evidence,
+            prUrl,
+          },
+        ],
       },
     });
   });
@@ -111,7 +128,15 @@ describe("registry release routes", () => {
   });
 
   test("returns 404 for a tampered release proposal", async () => {
-    const res = handleReleaseProposalView(REPO, id, memoryReader({ ...snapshot, extra: true }));
+    const tampered = {
+      ...snapshot,
+      plans: snapshot.plans.map((plan) => ({
+        ...plan,
+        status: "pr-opened",
+        prUrl: "https://example.com/pull/42",
+      })),
+    };
+    const res = handleReleaseProposalView(REPO, id, memoryReader(tampered));
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "unknown release proposal" });

@@ -12,6 +12,7 @@ import {
   type ReleaseIdentity,
   type TargetState,
   buildReleasePlans,
+  parseReleaseIdentity,
   proposalIdFor,
 } from "../src/skills/registry-release.js";
 
@@ -32,12 +33,14 @@ interface FixtureOptions {
 }
 
 function snapshot(options: FixtureOptions = {}): ReleaseSnapshot {
-  const identity: ReleaseIdentity = {
+  const parsedIdentity = parseReleaseIdentity({
     fromOid: FROM,
     toOid: TO,
     version: options.version ?? "1.2.3",
     registry: "reg-a",
-  };
+  });
+  if (!parsedIdentity.ok) throw new Error(parsedIdentity.value);
+  const identity: ReleaseIdentity = parsedIdentity.value;
   const targets = options.targets ?? DEFAULT_TARGETS;
   const id = proposalIdFor(1, identity, identity.registry, targets);
   const plans = buildReleasePlans(targets, identity, identity.registry).map((plan, index) => ({
@@ -51,6 +54,13 @@ function snapshot(options: FixtureOptions = {}): ReleaseSnapshot {
     changelog: options.changelog ?? "Ready",
     state: options.state ?? "pending",
     plans,
+  };
+}
+
+function withPlanFields(value: ReleaseSnapshot, fields: Record<string, unknown>): unknown {
+  return {
+    ...value,
+    plans: value.plans.map((plan, index) => (index === 0 ? { ...plan, ...fields } : plan)),
   };
 }
 
@@ -157,6 +167,67 @@ describe("listReleaseProposals", () => {
 });
 
 describe("getReleaseProposal", () => {
+  test("returns persisted evidence and PR URL in detail but not summary", () => {
+    const h = memoryReader();
+    const value = snapshot({ statuses: ["pr-opened"] });
+    const evidence = "Verification passed";
+    const prUrl = "https://github.com/owner/one/pull/42";
+    h.put(withPlanFields(value, { evidence, prUrl }), `${value.id}.json`);
+
+    expect(getReleaseProposal(REPO, value.id, h.reader)?.targets).toEqual([
+      {
+        repository: "owner/one",
+        baseBranch: "main",
+        status: "pr-opened",
+        evidence,
+        prUrl,
+      },
+    ]);
+    const summaries = listReleaseProposals(REPO, h.reader);
+    expect(summaries).toEqual([
+      {
+        id: value.id,
+        registry: "reg-a",
+        version: "1.2.3",
+        state: "pending",
+        targetCount: 1,
+      },
+    ]);
+    expect(summaries[0]).not.toHaveProperty("evidence");
+    expect(summaries[0]).not.toHaveProperty("prUrl");
+  });
+
+  test("omits evidence and PR URL keys for an older stored plan", () => {
+    const h = memoryReader();
+    const value = snapshot();
+    h.put(value, `${value.id}.json`);
+
+    const target = getReleaseProposal(REPO, value.id, h.reader)?.targets[0];
+    expect(target).toBeDefined();
+    expect(target).not.toHaveProperty("evidence");
+    expect(target).not.toHaveProperty("prUrl");
+  });
+
+  test("rejects invalid persisted result fields and unknown plan keys", () => {
+    const prUrl = "https://github.com/owner/one/pull/42";
+    const cases: [string, Record<string, unknown>][] = [
+      ["overlong evidence", { evidence: "x".repeat(257) }],
+      ["unsafe evidence", { evidence: "see /etc/passwd" }],
+      ["non-GitHub PR URL", { status: "pr-opened", prUrl: "https://example.com/pull/42" }],
+      ["PR URL on an ineligible status", { status: "pending", prUrl }],
+      ["unknown plan key", { unexpected: true }],
+    ];
+
+    for (const [name, fields] of cases) {
+      const h = memoryReader();
+      const value = snapshot();
+      h.put(withPlanFields(value, fields), `${value.id}.json`);
+
+      expect(getReleaseProposal(REPO, value.id, h.reader), name).toBeNull();
+      expect(listReleaseProposals(REPO, h.reader), name).toEqual([]);
+    }
+  });
+
   test("returns a bounded detail with full OIDs and one status per target", () => {
     const h = memoryReader();
     const targets: FanoutTarget[] = [

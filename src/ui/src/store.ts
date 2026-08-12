@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import type { AskPrefill } from "./lib/ask-prefill.js";
 import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
 import { resolveRepoPath } from "./lib/resolve-repo-path.js";
+import { createReleaseProposalState } from "./store-release.js";
 import type {
   DomainRootView,
   PlanComment,
@@ -48,6 +49,7 @@ export const useVfStore = defineStore("vf", () => {
   const registryLoading = ref(false);
   const registryError = ref<string | null>(null);
   const registryPreview = ref<RegistryPreview | null>(null);
+  const releaseState = createReleaseProposalState();
   // #691: read-only domain view state (read-model, no mutation).
   const domains = ref<DomainRootView[]>([]);
   const domainsLoading = ref(false);
@@ -384,6 +386,7 @@ export const useVfStore = defineStore("vf", () => {
     loadRegistries,
     previewRegistryUpdate,
     closeRegistryPreview,
+    ...releaseState,
     domains,
     domainsLoading,
     domainsError,

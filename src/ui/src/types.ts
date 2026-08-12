@@ -361,6 +361,15 @@ export interface RegistryPreview {
   plan: string;
 }
 
+// ── #760: Registry release proposal view types (split to types-release.ts) ──
+export type {
+  ReleaseProposalState,
+  ReleaseTargetState,
+  ReleaseProposalSummary,
+  ReleaseProposalTarget,
+  ReleaseProposalDetail,
+} from "./types-release.js";
+
 // ── #691: Domain & Facts view types ────────────────────────────────────
 export interface DomainFactView {
   key: string;
