@@ -539,4 +539,30 @@ describe("server HTTP registry routes", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("GET /api/skills/registries/releases[/id] wires the read-only proposal API (#759)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-rel-http-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    setupLock(dir);
+    try {
+      const { server, url } = await startServer(0);
+      try {
+        // No proposals dir yet → empty, well-formed list.
+        const list = await fetch(`${url}/api/skills/registries/releases`);
+        expect(list.status).toBe(200);
+        expect(await list.json()).toEqual({ ok: true, proposals: [] });
+
+        // Unknown but well-formed id → 404 from the detail route.
+        const detail = await fetch(`${url}/api/skills/registries/releases/${"0".repeat(64)}`);
+        expect(detail.status).toBe(404);
+        expect(await detail.json()).toEqual({ error: "unknown release proposal" });
+      } finally {
+        server.stop();
+      }
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
