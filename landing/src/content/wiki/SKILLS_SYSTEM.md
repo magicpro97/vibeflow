@@ -240,6 +240,15 @@ Proposal snapshots are exposed to the dashboard through two guarded, read-only H
 `GET /api/skills/registries/releases` (sanitized summary list) and
 `GET /api/skills/registries/releases/<proposal-id>` (sanitized detail; `404` for an unknown or
 malformed id). Both fail closed on a tampered snapshot and never expose an execution endpoint.
+
+After approval runs in the CLI, each target's sanitized verify `evidence` and, for
+`pr-opened`/`existing-pr` targets, the opened `prUrl` are persisted onto the snapshot next to the
+target `status`. These post-execution fields live OUTSIDE the immutable proposal-ID hash, so they
+never change the deterministic proposal id. The Registry tab renders a read-only review surface for
+these proposals — registry, version, abbreviated OIDs, state, per-target status, changelog, verify
+evidence, and a PR link for opened targets — plus a "Copy approval command" button
+(`vf skills registry release approve <proposal-id> --yes`). There is NO approve/execute/push control
+in the UI; approval happens only in the CLI.
 <!-- registry-release:end -->
 
 ## Learning loop — turning runs into skills

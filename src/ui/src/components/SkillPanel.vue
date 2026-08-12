@@ -134,6 +134,7 @@
         :hidden="tab !== 'registries'"
       >
         <RegistryView />
+        <ReleaseProposalsView />
       </div>
 
       <div
@@ -155,6 +156,7 @@ import { scanDisplay } from "../lib/scan-helper.js";
 import { useVfStore } from "../store.js";
 import DomainFactsView from "./DomainFactsView.vue";
 import RegistryView from "./RegistryView.vue";
+import ReleaseProposalsView from "./ReleaseProposalsView.vue";
 
 const emit = defineEmits<{ close: [] }>();
 const store = useVfStore();

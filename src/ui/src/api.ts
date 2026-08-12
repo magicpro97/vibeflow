@@ -107,6 +107,18 @@ export const api = {
         registry,
       }),
   },
+  releases: {
+    list: () =>
+      req<{ ok: boolean; proposals: import("./types.js").ReleaseProposalSummary[] }>(
+        "GET",
+        "/api/skills/registries/releases",
+      ).then((r) => r.proposals),
+    get: (id: string) =>
+      req<{ ok: boolean; proposal: import("./types.js").ReleaseProposalDetail }>(
+        "GET",
+        `/api/skills/registries/releases/${encodeURIComponent(id)}`,
+      ).then((r) => r.proposal),
+  },
   // #682: pending skill acquisition cards + explicit approve/reject decisions.
   // The waiting /api/orchestrate request owns installation; this only resolves
   // the in-memory broker. GET is guarded/read-only, POST needs the CSRF token.

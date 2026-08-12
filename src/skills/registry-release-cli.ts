@@ -21,7 +21,6 @@ import {
 } from "./registry-release.js";
 
 type OutputLevel = "info" | "error";
-
 export interface RegistryReleaseCliDeps {
   existsSync?: (path: string) => boolean;
   readFileSync?: (path: string) => string;
@@ -30,7 +29,6 @@ export interface RegistryReleaseCliDeps {
   output?: (text: string, level?: OutputLevel) => void;
   executorAdapterFactory?: () => ExecutorDeps;
 }
-
 interface Io {
   exists: (path: string) => boolean;
   read: (path: string) => string;
@@ -41,7 +39,9 @@ interface Io {
 
 const ID = /^[0-9a-f]{64}$/;
 const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const PR_URL = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/;
 const MAX_CHANGELOG_LENGTH = 10_000;
+const MAX_EVIDENCE = 256;
 const PROPOSAL_STATES = new Set<ProposalState>([
   "pending",
   "running",
@@ -69,7 +69,10 @@ const STORED_PLAN_KEYS = [
   "target",
   "fanout",
   "status",
+  "evidence",
+  "prUrl",
 ] as const;
+const REQUIRED_STORED_PLAN_KEYS = STORED_PLAN_KEYS.slice(0, 8);
 const PROPOSE_USAGE =
   "Usage: vf skills registry release-propose <registry-id> --from <oid> --to <oid> --version <v> [--changelog <text>] [--dry-run]";
 const RELEASE_USAGE =
@@ -86,24 +89,19 @@ function io(deps: RegistryReleaseCliDeps): Io {
       ((text, level = "info") => out("vf", level === "error" ? c.red(text) : text, { level })),
   };
 }
-
 function proposalDir(repo: string): string {
   return join(repo, ".vibeflow", "registry-release-proposals");
 }
-
 function proposalPath(repo: string, id: string): string {
   return join(proposalDir(repo), `${id}.json`);
 }
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
 }
-
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (isObject(value))
@@ -113,19 +111,37 @@ function canonical(value: unknown): string {
       .join(",")}}`;
   return JSON.stringify(value);
 }
-
 function reconstructStoredPlan(raw: unknown, expected: ReleasePlan): StoredReleasePlan | null {
-  if (!isObject(raw) || !hasExactKeys(raw, STORED_PLAN_KEYS)) return null;
-  const { status, ...plan } = raw;
+  if (!isObject(raw)) return null;
+  const keys = Object.keys(raw);
+  if (
+    !REQUIRED_STORED_PLAN_KEYS.every((key) => keys.includes(key)) ||
+    !keys.every((key) => STORED_PLAN_KEYS.includes(key as (typeof STORED_PLAN_KEYS)[number]))
+  )
+    return null;
+  const { status, evidence, prUrl, ...plan } = raw;
   if (
     typeof status !== "string" ||
     !TARGET_STATES.has(status as TargetState) ||
+    (Object.hasOwn(raw, "evidence") &&
+      (typeof evidence !== "string" ||
+        evidence.length > MAX_EVIDENCE ||
+        sanitizeForOutput(evidence) !== evidence)) ||
+    (Object.hasOwn(raw, "prUrl") &&
+      (typeof prUrl !== "string" ||
+        !PR_URL.test(prUrl) ||
+        sanitizeForOutput(prUrl) !== prUrl ||
+        (status !== "pr-opened" && status !== "existing-pr"))) ||
     canonical(plan) !== canonical(expected)
   )
     return null;
-  return { ...expected, status: status as TargetState };
+  return {
+    ...expected,
+    status: status as TargetState,
+    ...(typeof evidence === "string" ? { evidence } : {}),
+    ...(typeof prUrl === "string" ? { prUrl } : {}),
+  };
 }
-
 function parseSourceLock(raw: unknown): Map<string, string> | null {
   if (!isObject(raw) || !hasExactKeys(raw, ["schemaVersion", "registries"])) return null;
   if (raw.schemaVersion !== 1 || !Array.isArray(raw.registries)) return null;
@@ -149,7 +165,6 @@ function parseSourceLock(raw: unknown): Map<string, string> | null {
   }
   return registries;
 }
-
 function parseSnapshot(raw: unknown): ReleaseSnapshot | null {
   if (
     !isObject(raw) ||
@@ -193,7 +208,6 @@ function parseSnapshot(raw: unknown): ReleaseSnapshot | null {
     plans: storedPlans,
   };
 }
-
 function readJson(path: string, fs: Io): unknown | null {
   try {
     return JSON.parse(fs.read(path));
@@ -201,21 +215,17 @@ function readJson(path: string, fs: Io): unknown | null {
     return null;
   }
 }
-
 function readSnapshot(repo: string, id: string, fs: Io): ReleaseSnapshot | null {
   const path = proposalPath(repo, id);
   if (!fs.exists(path)) return null;
   const snapshot = parseSnapshot(readJson(path, fs));
   return snapshot?.id === id ? snapshot : null;
 }
-
 function emitError(fs: Io, text: string): number {
   fs.output(text, "error");
   return 1;
 }
-
 type ParsedPropose = ReleaseIdentity & { changelog: string; dryRun: boolean };
-
 function parsePropose(args: string[]): ParsedPropose | null {
   let registry = "";
   let changelog = "";
@@ -259,7 +269,6 @@ function parsePropose(args: string[]): ParsedPropose | null {
       }
     : null;
 }
-
 function propose(repo: string, args: string[], fs: Io): number {
   const parsed = parsePropose(args);
   if (!parsed) {
@@ -311,7 +320,6 @@ function propose(repo: string, args: string[], fs: Io): number {
   fs.output(content);
   return 0;
 }
-
 function list(repo: string, fs: Io): number {
   const dir = proposalDir(repo);
   if (!fs.exists(dir)) {
@@ -338,14 +346,12 @@ function list(repo: string, fs: Io): number {
   fs.output(JSON.stringify(snapshots, null, 2));
   return 0;
 }
-
 function show(repo: string, id: string, fs: Io): number {
   const snapshot = readSnapshot(repo, id, fs);
   if (!snapshot) return emitError(fs, `Release proposal ${id} was not found or is invalid.`);
   fs.output(JSON.stringify(snapshot, null, 2));
   return 0;
 }
-
 function reject(repo: string, id: string, fs: Io): number {
   const snapshot = readSnapshot(repo, id, fs);
   if (!snapshot) return emitError(fs, `Release proposal ${id} was not found or is invalid.`);

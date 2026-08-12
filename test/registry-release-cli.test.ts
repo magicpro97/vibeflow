@@ -353,7 +353,7 @@ describe("release snapshot commands", () => {
     for (const plan of [
       missingStatus,
       { ...valid, status: "done" },
-      { ...valid, extra: true },
+      { ...valid, malicious: true },
       { ...valid, branch: 7 },
     ]) {
       h.files.set(path, JSON.stringify({ ...snapshot, plans: [plan] }));
@@ -368,6 +368,130 @@ describe("release snapshot commands", () => {
         plans: [valid, { ...valid, target, fanout: { schemaVersion: 1, targets: [target] } }],
       }),
     );
+    expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(1);
+  });
+
+  test("round-trips optional stored results without changing the proposal ID", () => {
+    const h = harness();
+    expect(handleRegistryReleaseCommand(REPO, PROPOSE, h.deps)).toBe(0);
+    const snapshot = JSON.parse(h.writes[0]?.content ?? "{}") as {
+      id: string;
+      plans: Array<Record<string, unknown>>;
+    };
+    const path = join(REPO, ".vibeflow", "registry-release-proposals", `${snapshot.id}.json`);
+    const prUrl = "https://github.com/owner/repo/pull/7";
+    h.files.set(
+      path,
+      JSON.stringify({
+        ...snapshot,
+        plans: snapshot.plans.map((plan) => ({
+          ...plan,
+          status: "existing-pr",
+          evidence: prUrl,
+          prUrl,
+        })),
+      }),
+    );
+
+    expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(0);
+    expect(lastJson(h)).toMatchObject({
+      id: snapshot.id,
+      plans: [{ status: "existing-pr", evidence: prUrl, prUrl }],
+    });
+  });
+
+  test("keeps snapshots without optional stored results backward compatible", () => {
+    const h = harness();
+    expect(handleRegistryReleaseCommand(REPO, PROPOSE, h.deps)).toBe(0);
+    const snapshot = JSON.parse(h.writes[0]?.content ?? "{}") as { id: string };
+
+    expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(0);
+    const plan = (lastJson(h) as { plans: Array<Record<string, unknown>> }).plans[0];
+    expect(plan?.evidence).toBeUndefined();
+    expect(plan?.prUrl).toBeUndefined();
+  });
+
+  test("fails closed on invalid stored evidence", () => {
+    const h = harness();
+    expect(handleRegistryReleaseCommand(REPO, PROPOSE, h.deps)).toBe(0);
+    const snapshot = JSON.parse(h.writes[0]?.content ?? "{}") as {
+      id: string;
+      plans: Array<Record<string, unknown>>;
+    };
+    const path = join(REPO, ".vibeflow", "registry-release-proposals", `${snapshot.id}.json`);
+    for (const evidence of [7, "x".repeat(257), "see /etc/passwd"]) {
+      h.files.set(
+        path,
+        JSON.stringify({
+          ...snapshot,
+          plans: snapshot.plans.map((plan) => ({ ...plan, evidence })),
+        }),
+      );
+      expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(1);
+    }
+  });
+
+  test("fails closed on invalid or status-inconsistent stored PR URLs", () => {
+    const h = harness();
+    expect(handleRegistryReleaseCommand(REPO, PROPOSE, h.deps)).toBe(0);
+    const snapshot = JSON.parse(h.writes[0]?.content ?? "{}") as {
+      id: string;
+      plans: Array<Record<string, unknown>>;
+    };
+    const path = join(REPO, ".vibeflow", "registry-release-proposals", `${snapshot.id}.json`);
+    for (const prUrl of [
+      "http://github.com/owner/repo/pull/1",
+      "https://github.com/owner/repo/pull/0",
+      "https://github.com/owner/repo/pull/1?token=secret",
+    ]) {
+      h.files.set(
+        path,
+        JSON.stringify({
+          ...snapshot,
+          plans: snapshot.plans.map((plan) => ({ ...plan, status: "pr-opened", prUrl })),
+        }),
+      );
+      expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(1);
+    }
+    for (const status of ["pending", "already-current", "failed"]) {
+      h.files.set(
+        path,
+        JSON.stringify({
+          ...snapshot,
+          plans: snapshot.plans.map((plan) => ({
+            ...plan,
+            status,
+            prUrl: "https://github.com/owner/repo/pull/1",
+          })),
+        }),
+      );
+      expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(1);
+    }
+  });
+
+  test("stored results cannot hide a forged plan body", () => {
+    const h = harness();
+    expect(handleRegistryReleaseCommand(REPO, PROPOSE, h.deps)).toBe(0);
+    const snapshot = JSON.parse(h.writes[0]?.content ?? "{}") as {
+      id: string;
+      plans: Array<Record<string, unknown>>;
+    };
+    const path = join(REPO, ".vibeflow", "registry-release-proposals", `${snapshot.id}.json`);
+    const prUrl = "https://github.com/owner/repo/pull/8";
+    h.files.set(
+      path,
+      JSON.stringify({
+        ...snapshot,
+        plans: snapshot.plans.map((plan) => ({
+          ...plan,
+          version: "9.9.9",
+          status: "pr-opened",
+          evidence: prUrl,
+          prUrl,
+        })),
+      }),
+    );
+
     expect(handleRegistryReleaseCommand(REPO, ["release", "show", snapshot.id], h.deps)).toBe(1);
   });
 
@@ -433,7 +557,7 @@ describe("release snapshot commands", () => {
     const h = harness();
     expect(handleRegistryReleaseCommand(REPO, PROPOSE, h.deps)).toBe(0);
     const proposal = JSON.parse(h.writes[0]?.content ?? "{}") as { id: string };
-    h.deps.executorAdapterFactory = () => approvalDeps();
+    h.deps.executorAdapterFactory = () => approvalDeps(FROM);
 
     const code = handleRegistryReleaseCommand(
       REPO,
@@ -444,7 +568,13 @@ describe("release snapshot commands", () => {
     expect(code).toBe(0);
     expect(JSON.parse(h.writes.at(-1)?.content ?? "{}")).toMatchObject({
       state: "completed",
-      plans: [{ status: "already-current" }],
+      plans: [
+        {
+          status: "pr-opened",
+          evidence: "https://github.com/owner/repo/pull/1",
+          prUrl: "https://github.com/owner/repo/pull/1",
+        },
+      ],
     });
     expect(lastJson(h)).toMatchObject({ snapshot: { state: "completed" } });
   });

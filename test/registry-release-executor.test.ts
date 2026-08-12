@@ -11,16 +11,24 @@ import {
   type ReleaseIdentity,
   type TargetState,
   buildReleasePlans,
+  parseReleaseIdentity,
+  proposalIdFor,
 } from "../src/skills/registry-release.js";
 
 const FROM = "a".repeat(40);
 const TO = "b".repeat(40);
-const IDENTITY: ReleaseIdentity = {
-  fromOid: FROM,
-  toOid: TO,
-  version: "1.2.3",
-  registry: "reg-a",
-};
+function releaseIdentity(): ReleaseIdentity {
+  const identity = parseReleaseIdentity({
+    fromOid: FROM,
+    toOid: TO,
+    version: "1.2.3",
+    registry: "reg-a",
+  });
+  if (!identity.ok) throw new Error("invalid release identity fixture");
+  return identity.value;
+}
+
+const IDENTITY = releaseIdentity();
 const TARGET_ONE: FanoutTarget = {
   repository: "owner/one",
   baseBranch: "main",
@@ -122,6 +130,23 @@ function expectInvalidSnapshot(value: ReleaseSnapshot): void {
 }
 
 describe("approveProposal", () => {
+  test("keeps the proposal ID byte-identical when stored result fields are present", () => {
+    const value = snapshot();
+    const expected = proposalIdFor(1, IDENTITY, IDENTITY.registry, [TARGET_ONE]);
+    const withResults: ReleaseSnapshot = {
+      ...value,
+      plans: value.plans.map((plan) => ({
+        ...plan,
+        status: "pr-opened" as const,
+        evidence: "https://github.com/owner/one/pull/1",
+        prUrl: "https://github.com/owner/one/pull/1",
+      })),
+    };
+
+    expect(value.id).toBe(expected);
+    expect(approveProposal(withResults, { yes: true }, harness().deps).snapshot.id).toBe(value.id);
+  });
+
   test("runs the happy path in order and returns bounded sanitized evidence", () => {
     const h = harness();
     const result = approveProposal(snapshot(), { yes: true }, h.deps);
@@ -144,6 +169,10 @@ describe("approveProposal", () => {
     expect(status(result)).toBe("pr-opened");
     expect(result.targets[0]?.evidence).toBe("https://github.com/owner/one/pull/1");
     expect(result.targets[0]?.evidence.length).toBeLessThanOrEqual(256);
+    expect(firstPlan(result.snapshot)).toMatchObject({
+      evidence: "https://github.com/owner/one/pull/1",
+      prUrl: "https://github.com/owner/one/pull/1",
+    });
   });
 
   test("refuses missing --yes and every non-pending proposal with zero external calls", () => {
@@ -297,6 +326,58 @@ describe("approveProposal", () => {
     }
   });
 
+  test("rejects unsafe stored evidence before external operations", () => {
+    for (const evidence of [7, "x".repeat(257), "see /etc/passwd"]) {
+      const value = snapshot();
+      value.plans[0] = { ...firstPlan(value), evidence } as unknown as StoredReleasePlan;
+      expectInvalidSnapshot(value);
+    }
+  });
+
+  test("rejects invalid or status-inconsistent stored PR URLs", () => {
+    for (const prUrl of [
+      "http://github.com/owner/one/pull/1",
+      "https://github.com/owner/one/pull/0",
+      "https://github.com/owner/one/pull/1?token=secret",
+    ]) {
+      const value = snapshot();
+      value.plans[0] = {
+        ...firstPlan(value),
+        status: "pr-opened",
+        prUrl,
+      };
+      expectInvalidSnapshot(value);
+    }
+    for (const status of ["pending", "already-current", "failed"] as const) {
+      const value = snapshot();
+      value.plans[0] = {
+        ...firstPlan(value),
+        status,
+        prUrl: "https://github.com/owner/one/pull/1",
+      };
+      expectInvalidSnapshot(value);
+    }
+  });
+
+  test("rejects unknown plan keys and forged plan bodies despite valid result fields", () => {
+    const unknown = snapshot();
+    unknown.plans[0] = {
+      ...firstPlan(unknown),
+      malicious: true,
+    } as StoredReleasePlan;
+    expectInvalidSnapshot(unknown);
+
+    const forged = snapshot();
+    forged.plans[0] = {
+      ...firstPlan(forged),
+      version: "9.9.9",
+      status: "existing-pr",
+      evidence: "https://github.com/owner/one/pull/9",
+      prUrl: "https://github.com/owner/one/pull/9",
+    };
+    expectInvalidSnapshot(forged);
+  });
+
   test("rejects plan fields not exactly derived from snapshot identity and targets", () => {
     const cases: Array<(value: ReleaseSnapshot) => void> = [
       (value) => {
@@ -363,6 +444,10 @@ describe("approveProposal", () => {
     };
     const result = approveProposal(snapshot(), { yes: true }, h.deps);
     expect(status(result)).toBe("existing-pr");
+    expect(firstPlan(result.snapshot)).toMatchObject({
+      evidence: "https://github.com/owner/one/pull/9",
+      prUrl: "https://github.com/owner/one/pull/9",
+    });
     expect(h.calls).toEqual(["identity", "authorize:owner/one", "existing:owner/one"]);
   });
 
@@ -374,6 +459,8 @@ describe("approveProposal", () => {
     };
     const result = approveProposal(snapshot(), { yes: true }, h.deps);
     expect(status(result)).toBe("already-current");
+    expect(firstPlan(result.snapshot)).toMatchObject({ evidence: "Registry is already current." });
+    expect(firstPlan(result.snapshot)).not.toHaveProperty("prUrl");
     expect(h.calls).toEqual([
       "identity",
       "authorize:owner/one",
@@ -404,6 +491,8 @@ describe("approveProposal", () => {
     const result = approveProposal(snapshot(), { yes: true }, h.deps);
     expect(status(result)).toBe("failed");
     expect(result.targets[0]?.evidence).toBe("failed at [redacted]");
+    expect(firstPlan(result.snapshot)).toMatchObject({ evidence: "failed at [redacted]" });
+    expect(firstPlan(result.snapshot)).not.toHaveProperty("prUrl");
     expect(h.calls.some((call) => /^(commit|push|pr):/.test(call))).toBe(false);
     expect(h.calls.at(-1)).toBe("cleanup:owner/one");
   });

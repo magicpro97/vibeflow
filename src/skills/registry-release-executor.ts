@@ -13,7 +13,11 @@ import {
   sanitizeForOutput,
 } from "./registry-release.js";
 
-export type StoredReleasePlan = ReleasePlan & { status: TargetState };
+export type StoredReleasePlan = ReleasePlan & {
+  status: TargetState;
+  evidence?: string;
+  prUrl?: string;
+};
 
 export interface ReleaseSnapshot {
   schemaVersion: 1;
@@ -92,6 +96,7 @@ interface Outcome {
 
 const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const ID = /^[0-9a-f]{64}$/;
+const PR_URL = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/;
 const MAX_CHANGELOG_LENGTH = 10_000;
 const MAX_EVIDENCE = 256;
 const TARGET_STATES = new Set<TargetState>([
@@ -114,7 +119,10 @@ const PLAN_KEYS = [
   "target",
   "fanout",
   "status",
+  "evidence",
+  "prUrl",
 ];
+const REQUIRED_PLAN_KEYS = PLAN_KEYS.slice(0, 8);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -123,6 +131,14 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+function hasPlanKeys(value: Record<string, unknown>): boolean {
+  const actual = Object.keys(value);
+  return (
+    REQUIRED_PLAN_KEYS.every((key) => actual.includes(key)) &&
+    actual.every((key) => PLAN_KEYS.includes(key))
+  );
 }
 
 function evidence(value: unknown, fallback = "Target operation failed."): string {
@@ -140,7 +156,7 @@ function sameTarget(a: FanoutTarget, b: FanoutTarget): boolean {
 }
 
 function validPlan(snapshot: ReleaseSnapshot, raw: unknown): boolean {
-  if (!isObject(raw) || !hasExactKeys(raw, PLAN_KEYS)) return false;
+  if (!isObject(raw) || !hasPlanKeys(raw)) return false;
   const plan = raw as unknown as StoredReleasePlan;
   const target = parseRegistryFanout({ schemaVersion: 1, targets: [plan.target] });
   const fanout = parseRegistryFanout(plan.fanout);
@@ -156,7 +172,16 @@ function validPlan(snapshot: ReleaseSnapshot, raw: unknown): boolean {
     isSafeBranchRef(plan.branch) &&
     fanout.value.targets.length === 1 &&
     sameTarget(target.value.targets[0] as FanoutTarget, fanout.value.targets[0] as FanoutTarget) &&
-    TARGET_STATES.has(plan.status)
+    TARGET_STATES.has(plan.status) &&
+    (!Object.hasOwn(raw, "evidence") ||
+      (typeof plan.evidence === "string" &&
+        plan.evidence.length <= MAX_EVIDENCE &&
+        sanitizeForOutput(plan.evidence) === plan.evidence)) &&
+    (!Object.hasOwn(raw, "prUrl") ||
+      (typeof plan.prUrl === "string" &&
+        PR_URL.test(plan.prUrl) &&
+        sanitizeForOutput(plan.prUrl) === plan.prUrl &&
+        (plan.status === "pr-opened" || plan.status === "existing-pr")))
   );
 }
 
@@ -201,7 +226,7 @@ function validateSnapshot(snapshot: ReleaseSnapshot): boolean {
   return (
     expected.length === snapshot.plans.length &&
     snapshot.plans.every((stored, index) => {
-      const { status: _status, ...plan } = stored;
+      const { status: _status, evidence: _evidence, prUrl: _prUrl, ...plan } = stored;
       return isDeepStrictEqual(plan, expected[index]);
     })
   );
@@ -212,7 +237,7 @@ function targetKey(plan: StoredReleasePlan): string {
 }
 
 function operationFor(snapshot: ReleaseSnapshot, plan: StoredReleasePlan): TargetOperation {
-  const { status: _status, ...releasePlan } = plan;
+  const { status: _status, evidence: _evidence, prUrl: _prUrl, ...releasePlan } = plan;
   return {
     proposalId: snapshot.id,
     releaseIdentity: snapshot.identity,
@@ -317,6 +342,12 @@ export function approveProposal(
     const outcome = cached ?? executeTarget(snapshot, plan, deps);
     outcomes.set(key, outcome);
     plan.status = outcome.status;
+    if (outcome.evidence) plan.evidence = outcome.evidence;
+    if (
+      (outcome.status === "pr-opened" || outcome.status === "existing-pr") &&
+      PR_URL.test(outcome.evidence)
+    )
+      plan.prUrl = outcome.evidence;
     targets.push({
       repository: plan.target.repository,
       baseBranch: plan.target.baseBranch,
