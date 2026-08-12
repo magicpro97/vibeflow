@@ -167,10 +167,12 @@ describe("approveProposal", () => {
     ]);
     expect(result.snapshot.state).toBe("completed");
     expect(status(result)).toBe("pr-opened");
-    expect(result.targets[0]?.evidence).toBe("https://github.com/owner/one/pull/1");
+    // evidence keeps the sanitized VERIFY output; prUrl carries the PR link separately.
+    expect(result.targets[0]?.evidence).toBe("verified");
+    expect(result.targets[0]?.prUrl).toBe("https://github.com/owner/one/pull/1");
     expect(result.targets[0]?.evidence.length).toBeLessThanOrEqual(256);
     expect(firstPlan(result.snapshot)).toMatchObject({
-      evidence: "https://github.com/owner/one/pull/1",
+      evidence: "verified",
       prUrl: "https://github.com/owner/one/pull/1",
     });
   });

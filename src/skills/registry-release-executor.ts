@@ -82,6 +82,7 @@ export interface TargetApprovalResult {
   baseBranch: string;
   status: TargetState;
   evidence: string;
+  prUrl?: string;
 }
 
 export interface ApprovalResult {
@@ -92,6 +93,7 @@ export interface ApprovalResult {
 interface Outcome {
   status: TargetState;
   evidence: string;
+  prUrl?: string;
 }
 
 const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
@@ -267,7 +269,14 @@ function executeTarget(
     }
 
     const existing = deps.existingPullRequest(operation);
-    if (existing !== null) return { status: "existing-pr", evidence: evidence(existing) };
+    if (existing !== null) {
+      const existingEvidence = evidence(existing);
+      return {
+        status: "existing-pr",
+        evidence: existingEvidence,
+        prUrl: PR_URL.test(existingEvidence) ? existingEvidence : undefined,
+      };
+    }
 
     const worktree = deps.createWorktree(operation);
     const worktreeOperation: WorktreeOperation = { ...operation, worktree };
@@ -300,7 +309,12 @@ function executeTarget(
           if (!OID.test(commitOid)) throw new Error("Commit operation returned an invalid OID.");
           deps.push({ ...worktreeOperation, commitOid });
           const pullRequest = deps.createPullRequest({ ...worktreeOperation, commitOid });
-          outcome = { status: "pr-opened", evidence: evidence(pullRequest.url) };
+          const prUrl = evidence(pullRequest.url);
+          outcome = {
+            status: "pr-opened",
+            evidence: evidence(verified.evidence, "Verification passed."),
+            prUrl: PR_URL.test(prUrl) ? prUrl : undefined,
+          };
         }
       }
     } catch (error) {
@@ -345,14 +359,16 @@ export function approveProposal(
     if (outcome.evidence) plan.evidence = outcome.evidence;
     if (
       (outcome.status === "pr-opened" || outcome.status === "existing-pr") &&
-      PR_URL.test(outcome.evidence)
+      outcome.prUrl &&
+      PR_URL.test(outcome.prUrl)
     )
-      plan.prUrl = outcome.evidence;
+      plan.prUrl = outcome.prUrl;
     targets.push({
       repository: plan.target.repository,
       baseBranch: plan.target.baseBranch,
       status: outcome.status,
       evidence: outcome.evidence,
+      ...(plan.prUrl ? { prUrl: plan.prUrl } : {}),
     });
   }
 

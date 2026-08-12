@@ -185,7 +185,24 @@ function onFocusIn(e: FocusEvent) {
 }
 
 async function copyApprovalCommand(detail: { id: string }) {
-  await navigator.clipboard.writeText(`vf skills registry release approve ${detail.id} --yes`);
+  const text = `vf skills registry release approve ${detail.id} --yes`;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // fallback for non-HTTPS / older browsers (mirrors Stage4Verify.vue)
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch {
+      return; // both methods failed — no acknowledgement
+    }
+  }
   copied.value = true;
   clearTimeout(copiedTimer);
   copiedTimer = setTimeout(() => {

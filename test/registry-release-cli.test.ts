@@ -571,7 +571,7 @@ describe("release snapshot commands", () => {
       plans: [
         {
           status: "pr-opened",
-          evidence: "https://github.com/owner/repo/pull/1",
+          evidence: "confidence: 1.0",
           prUrl: "https://github.com/owner/repo/pull/1",
         },
       ],

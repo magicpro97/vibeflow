@@ -115,6 +115,14 @@ describe("ReleaseProposalsView.vue: accessible read-only review surface", () => 
     expect(src).toContain("navigator.clipboard.writeText");
   });
 
+  test("guards the clipboard write with a fallback (no unhandled rejection)", () => {
+    // navigator.clipboard.writeText rejects on non-HTTPS / permission denial;
+    // the copy handler must catch and fall back (mirrors Stage4Verify.vue).
+    expect(src).toContain("try {");
+    expect(src).toContain("catch");
+    expect(src).toContain("document.execCommand");
+  });
+
   test("only invokes the three read-only store actions", () => {
     const calls = [...src.matchAll(/store\.(\w+)\(/g)].map((match) => match[1]);
     expect([...new Set(calls)].sort()).toEqual([
