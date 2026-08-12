@@ -2,14 +2,24 @@ import { c } from "../core.js";
 import { out } from "../logbus.js";
 import { registryAdd, registryList, registryUpdate } from "./registry-channel.js";
 import { registryInstall } from "./registry-install.js";
+import {
+  type RegistryReleaseCliDeps,
+  handleRegistryReleaseCommand,
+} from "./registry-release-cli.js";
 
 const COLLISION_OPTIONS = new Set(["skip", "replace", "rename"]);
 const INSTALL_USAGE =
   "Usage: vf skills registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--record-review] [--yes]";
 
-export function handleRegistrySubcommand(repo: string, args: string[]): number {
+export function handleRegistrySubcommand(
+  repo: string,
+  args: string[],
+  releaseDeps: RegistryReleaseCliDeps = {},
+): number {
   const cmd = args[0];
   const rest = args.slice(1);
+  if (cmd === "release-propose" || cmd === "release")
+    return handleRegistryReleaseCommand(repo, args, releaseDeps);
   if (cmd === "add") {
     let url = "";
     let name = "";
@@ -102,8 +112,12 @@ export function handleRegistrySubcommand(repo: string, args: string[]): number {
       recordReview,
     });
   }
-  out("vf", c.red("Usage: vf skills registry <add|list|update|install> [args]"), {
-    level: "error",
-  });
+  out(
+    "vf",
+    c.red("Usage: vf skills registry <add|list|update|install|release-propose|release> [args]"),
+    {
+      level: "error",
+    },
+  );
   return 2;
 }

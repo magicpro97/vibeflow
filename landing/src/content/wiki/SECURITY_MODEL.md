@@ -150,6 +150,15 @@ is deliberately excluded in V1. Shell-command mutation detection is bypass- and
 false-positive-prone. Existing workspace/outside warnings remain unchanged. This
 boundary is documented in `src/hooks/risk.ts`.
 
+<!-- registry-release:start -->
+### Registry release approval boundary
+
+`vf skills registry release approve <proposal-id> --yes` checks the active identity and canonical
+repository/base branch for each allowlisted target before creating an isolated checkout. It rejects
+target pin drift, enforces a lock-only diff, runs `vf verify` before commit, push, or PR creation,
+and emits sanitized evidence. Per-target failures continue; partial failure exits 1.
+<!-- registry-release:end -->
+
 ## Shared catalog trust boundary
 
 The shared skill catalog at `~/.vibeflow/skills/` is machine-wide: a skill promoted
