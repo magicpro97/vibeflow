@@ -286,6 +286,11 @@ Canonical order (kept in sync with `MASTER_SPEC.md`, `SKILL_PROVIDERS.md`, and
 Release fanout is opt-in. `.vibeflow/REGISTRY_FANOUT.json` is a committed, default-deny target allowlist.
 `vf skills registry release-propose` writes an immutable local snapshot under
 `.vibeflow/registry-release-proposals/`. There is no automatic fanout, webhook, discovery, or UI execution.
+
+Proposal snapshots are exposed to the dashboard through two guarded, read-only HTTP endpoints:
+`GET /api/skills/registries/releases` (sanitized summary list) and
+`GET /api/skills/registries/releases/<proposal-id>` (sanitized detail; `404` for an unknown or
+malformed id). Both fail closed on a tampered snapshot and never expose an execution endpoint.
 <!-- registry-release:end -->
 
 ## Learning loop — turning runs into skills

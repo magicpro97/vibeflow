@@ -25,6 +25,10 @@ import {
 } from "./server/pending-hooks.js";
 import { clearPendingSkillAcquisitions } from "./server/pending-skill-acquisitions.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
+import {
+  handleReleaseProposalView,
+  handleReleaseProposalsView,
+} from "./server/registry-release-route.js";
 import { handleRegistryView } from "./server/registry-route.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { handleSkillAcquisitionPending } from "./server/skill-acquisition-route.js";
@@ -205,6 +209,23 @@ export function startServer(
       if (method === "GET" && path === "/api/skills/registries") {
         if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         return handleRegistryView(activeRepo);
+      }
+
+      // --- GET /api/skills/registries/releases[/<id>] (#759: guarded, read-only) ---
+      if (method === "GET" && path === "/api/skills/registries/releases") {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleReleaseProposalsView(activeRepo);
+      }
+      if (method === "GET" && path.startsWith("/api/skills/registries/releases/")) {
+        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        let id: string;
+        try {
+          id = decodeURIComponent(path.slice("/api/skills/registries/releases/".length));
+        } catch {
+          // malformed percent-encoding (e.g. `%ZZ`, a lone `%`) → 404, never a 500 crash
+          return Response.json({ error: "unknown release proposal" }, { status: 404 });
+        }
+        return handleReleaseProposalView(activeRepo, id);
       }
 
       // --- GET /api/domains (#691: guarded, read-only) ---
