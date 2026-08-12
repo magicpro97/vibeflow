@@ -218,7 +218,13 @@ export function startServer(
       }
       if (method === "GET" && path.startsWith("/api/skills/registries/releases/")) {
         if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
-        const id = decodeURIComponent(path.slice("/api/skills/registries/releases/".length));
+        let id: string;
+        try {
+          id = decodeURIComponent(path.slice("/api/skills/registries/releases/".length));
+        } catch {
+          // malformed percent-encoding (e.g. `%ZZ`, a lone `%`) → 404, never a 500 crash
+          return Response.json({ error: "unknown release proposal" }, { status: 404 });
+        }
         return handleReleaseProposalView(activeRepo, id);
       }
 

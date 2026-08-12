@@ -557,6 +557,11 @@ describe("server HTTP registry routes", () => {
         const detail = await fetch(`${url}/api/skills/registries/releases/${"0".repeat(64)}`);
         expect(detail.status).toBe(404);
         expect(await detail.json()).toEqual({ error: "unknown release proposal" });
+
+        // Malformed percent-encoding must not 500 — decodeURIComponent throws, mapped to 404.
+        const badEnc = await fetch(`${url}/api/skills/registries/releases/%`);
+        expect(badEnc.status).toBe(404);
+        expect(await badEnc.json()).toEqual({ error: "unknown release proposal" });
       } finally {
         server.stop();
       }
