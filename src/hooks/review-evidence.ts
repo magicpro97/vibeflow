@@ -229,6 +229,7 @@ export function checkReviewEvidence(
     if (
       !unreadable &&
       isSha(reviewBase) &&
+      reviewBase !== head &&
       git(repo, ["merge-base", "--is-ancestor", reviewBase as string, head]).status === 0
     ) {
       const changed = changedFiles(repo, reviewBase as string, head, git);

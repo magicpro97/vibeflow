@@ -53,6 +53,7 @@ describe("verify docker sandbox (#554)", () => {
       expect(
         verify({
           projectDir: base,
+          requireReviewEvidence: false,
           sandbox: { image, dependencyVolume: "vf-deps" },
           sandboxRuntime: runtime(base, false),
           spawner: asSpawnSync(makeFakeSpawner({ calls })),
@@ -77,6 +78,7 @@ describe("verify docker sandbox (#554)", () => {
       expect(
         verify({
           projectDir: base,
+          requireReviewEvidence: false,
           sandbox: { image, dependencyVolume: "vf-deps" },
           sandboxRuntime: runtime(base),
           spawner: asSpawnSync(makeFakeSpawner({ calls })),
@@ -119,6 +121,7 @@ describe("verify docker sandbox (#554)", () => {
       expect(
         verify({
           projectDir: base,
+          requireReviewEvidence: false,
           sandbox: { image, dependencyVolume: "vf-deps" },
           sandboxRuntime,
           spawner: asSpawnSync(makeFakeSpawner({ defaultStatus: null })),

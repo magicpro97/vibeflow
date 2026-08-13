@@ -238,7 +238,8 @@ export async function collectVerifyReportAsync(
   const rawState = readState(base);
   if (inject.allowUnverifiedEvidence && rawState) rawState._allowUnverifiedEvidence = true;
   const policy = policyGates(rawState, { base });
-  appendReviewEvidence(policy, base, inject.requireReviewEvidence === true, inject.reviewBase);
+  // #764: web/API verification must match CLI fail-closed semantics.
+  appendReviewEvidence(policy, base, inject.requireReviewEvidence !== false, inject.reviewBase);
   const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
 
   // Type B drift PRODUCER: when the toolchain gates are all green, fingerprint

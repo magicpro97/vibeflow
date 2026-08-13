@@ -284,9 +284,9 @@ vf verify --sandbox docker \
   --sandbox-volume vf-deps-<lock-sha256>
 ```
 
-Runs `typecheck`/`lint`/`test` when your `package.json` declares them, **plus** the policy
-gates: confidence `< 1` fails, a `done` unit with no evidence fails, and overlapping
-work-unit scopes fail.
+Runs `typecheck`/`lint`/`test` when your `package.json` declares them, **plus** the policy gates:
+confidence below its risk threshold fails; every `done` unit needs machine-verifiable evidence and
+`gates.test: "pass"`; current-HEAD review evidence is required; overlapping work-unit scopes fail.
 
 Use sandbox mode for untrusted agent-authored tests/build scripts. It runs synchronous CLI
 gates with no network or inherited host environment, using a disposable source copy rather

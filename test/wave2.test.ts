@@ -202,6 +202,48 @@ describe("policy gates", () => {
     expect(policyGates(state).ok).toBe(true);
   });
 
+  test("#764: a done unit needs a passing test gate, generic evidence is not enough", () => {
+    const state: WorkflowState = {
+      ...base,
+      work_units: [
+        {
+          name: "tdd-unit",
+          status: "done",
+          confidence: 1,
+          gates: { build: "pass", lint: "pass", test: "pending", review: "pass" },
+          resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          evidence: ["commit abcdef1"],
+        },
+      ],
+    };
+
+    const report = policyGates(state);
+    expect(report.ok).toBe(false);
+    expect(report.failures).toContain(
+      'test-evidence: "tdd-unit" is done but its test gate is pending — run tests and record the passing gate before close',
+    );
+  });
+
+  test("#764: a done unit with a passing test gate clears the test-evidence bridge", () => {
+    const state: WorkflowState = {
+      ...base,
+      work_units: [
+        {
+          name: "tdd-unit",
+          status: "done",
+          confidence: 1,
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+          resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          evidence: ['bun test 2>&1 | tail -3 → "1 pass, 0 fail"'],
+        },
+      ],
+    };
+
+    expect(policyGates(state).failures.some((failure) => failure.startsWith("test-evidence"))).toBe(
+      false,
+    );
+  });
+
   // --- Skill gate: WARN-only, never FAIL (the key anti-regression). ---
   const cleanUnit = (over: Partial<WorkflowState["work_units"][number]>) => ({
     name: "u",

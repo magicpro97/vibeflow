@@ -383,12 +383,13 @@ vf verify --sandbox docker \
 vf review evidence --base <full-SHA> --result <review-result.json>
 ```
 
-Review evidence stays local at `.vibeflow/review-evidence/v1/<headSha>.json`. `vf verify` performs no LLM/network call; default mode warns, while `--require-review-evidence` fails closed. `--allow-unverified-evidence` does not bypass this gate.
+Review evidence stays local at `.vibeflow/review-evidence/v1/<headSha>.json`. `vf verify` performs no LLM/network call and fails closed by default when current-HEAD review evidence is missing or invalid; `--require-review-evidence` remains accepted for compatibility. `--allow-unverified-evidence` does not bypass this gate.
 `--review-base` is the full ancestor SHA used only to classify a missing record as a
 no-checklist range; it never weakens malformed or present-record validation.
 
-Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
-missing evidence on a `done` unit, and overlapping work-unit scopes all fail.
+Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence below its risk
+threshold, missing or unverifiable evidence, a `done` unit without `gates.test: "pass"`, missing
+current-HEAD review evidence, and overlapping work-unit scopes all fail.
 
 `--sandbox docker` runs synchronous CLI toolchain and waiver gates offline in a Docker
 container. It mounts a disposable source copy, never the active worktree, and passes no

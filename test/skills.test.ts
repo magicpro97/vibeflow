@@ -178,6 +178,9 @@ describe("registry provenance (never auto-verify external skills)", () => {
   test("discoverSkills: project-local skill shadows a same-named shared catalog skill (line 218)", () => {
     const dir = tmpRepo();
     const shared = mkdtempSync(join(tmpdir(), "vf-shared-cat-shadow-"));
+    const original = console.error;
+    const messages: string[] = [];
+    console.error = (message: string) => messages.push(message);
     try {
       const localDir = join(dir, CTX_DIR, "skills", "shadowed");
       mkdirSync(localDir, { recursive: true });
@@ -193,7 +196,41 @@ describe("registry provenance (never auto-verify external skills)", () => {
       const found = discoverSkills(dir, { sharedCatalogDir: () => shared });
       expect(found).toHaveLength(1);
       expect(found[0]?.description).toBe("local wins");
+      expect(messages).toContain(
+        `[skills] duplicate "shadowed" ignored: ${join(shared, "shadowed", "SKILL.md")} (winner: ${join(localDir, "SKILL.md")})`,
+      );
     } finally {
+      console.error = original;
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(shared, { recursive: true, force: true });
+    }
+  });
+
+  test("#764: duplicate warning strips control characters from repository paths", () => {
+    const dir = tmpRepo();
+    const shared = mkdtempSync(join(tmpdir(), "vf-shadow-\n\u001b[31m"));
+    const original = console.error;
+    const messages: string[] = [];
+    console.error = (message: string) => messages.push(message);
+    try {
+      const localDir = join(dir, CTX_DIR, "skills", "same");
+      mkdirSync(localDir, { recursive: true });
+      writeFileSync(
+        join(localDir, "SKILL.md"),
+        ["---", "name: same", "description: local", "---"].join("\n"),
+      );
+      mkdirSync(join(shared, "same"));
+      writeFileSync(
+        join(shared, "same", "SKILL.md"),
+        ["---", "name: same", "description: shared", "---"].join("\n"),
+      );
+
+      discoverSkills(dir, { sharedCatalogDir: () => shared });
+      const warning = messages.find((message) => message.includes('duplicate "same"')) ?? "";
+      expect(warning).not.toContain("\n");
+      expect(warning).not.toContain("\u001b");
+    } finally {
+      console.error = original;
       rmSync(dir, { recursive: true, force: true });
       rmSync(shared, { recursive: true, force: true });
     }

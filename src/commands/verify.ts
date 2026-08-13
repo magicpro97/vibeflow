@@ -110,7 +110,8 @@ export function verify(
     const st = readState(base);
     if (inject.allowUnverifiedEvidence && st) st._allowUnverifiedEvidence = true;
     const report = policyGates(st);
-    appendReviewEvidence(report, base, inject.requireReviewEvidence === true, inject.reviewBase);
+    // #764: hard by default; explicit false is an internal/test escape hatch.
+    appendReviewEvidence(report, base, inject.requireReviewEvidence !== false, inject.reviewBase);
     printVerifyReport(report);
     failed += report.failures.length;
 

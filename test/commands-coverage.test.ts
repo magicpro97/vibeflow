@@ -2142,7 +2142,7 @@ describe("commands.verify branches", () => {
         work_units: [],
         totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      expect(verify()).toBe(0);
+      expect(verify({ requireReviewEvidence: false })).toBe(0);
       // Warning must appear when no package.json/Gradle is found
       expect(lines.join("\n")).toContain("no package.json or Gradle build found");
     } finally {
@@ -2155,13 +2155,13 @@ describe("commands.verify branches", () => {
   test("verify on a fresh repo with NO WORKFLOW_STATE.json returns 1 (no-workflow-state) (PR28 audit C2)", () => {
     // Regression: a CI that runs `vf verify` on a fresh clone (no `vf init`) used to exit 0
     // because policyGates(null) silently passed. After the fix, policyGates(null) returns
-    // ok:false and verify() returns 1 with a clear "run `vf init`" message.
+    // ok:false and verify({ requireReviewEvidence: false }) returns 1 with a clear "run `vf init`" message.
     const dir = freshDir("vf-verify-no-state-");
     const orig = process.cwd();
     process.chdir(dir);
     try {
       // No writeState call — no .vibeflow/WORKFLOW_STATE.json on disk.
-      expect(verify()).toBe(1);
+      expect(verify({ requireReviewEvidence: false })).toBe(1);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2183,7 +2183,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify()).toBe(0);
+      expect(verify({ requireReviewEvidence: false })).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2209,7 +2209,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify();
+      const code = verify({ requireReviewEvidence: false });
       expect([0, 1]).toContain(code);
     } finally {
       process.chdir(orig);
@@ -2218,7 +2218,7 @@ describe("commands.verify branches", () => {
   });
 
   test("verify with gradle build runs gradle check (line 2227-2228)", () => {
-    // The test exercises the gradle path of `verify()` which would
+    // The test exercises the gradle path of `verify({ requireReviewEvidence: false })` which would
     // normally spawn `gradle check` as a subprocess. On GitHub Actions
     // ubuntu-latest, gradle is pre-installed but takes 28s+ to
     // bootstrap a fresh `gradle check` before timing out at
@@ -2239,7 +2239,7 @@ describe("commands.verify branches", () => {
     try {
       const calls: Array<{ cmd: string; args: readonly string[] }> = [];
       const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "gradle", status: 0 } });
-      const code = verify({ spawner: asSpawnSync(spawner) });
+      const code = verify({ requireReviewEvidence: false, spawner: asSpawnSync(spawner) });
       expect(code).toBe(0);
       // Verify the gradle path was actually exercised
       expect(calls).toHaveLength(1);
@@ -2249,6 +2249,35 @@ describe("commands.verify branches", () => {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("#764: required mode fails without current-HEAD review evidence", () => {
+    const dir = freshDir("vf-verify-review-default-");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+
+    expect(verify({ projectDir: dir, spawner: asSpawnSync(makeFakeSpawner({ calls })) })).toBe(1);
+    expect(
+      verify({
+        projectDir: dir,
+        spawner: asSpawnSync(makeFakeSpawner({ calls })),
+        requireReviewEvidence: false,
+      }),
+    ).toBe(0);
+    expect(
+      verify({
+        projectDir: dir,
+        spawner: asSpawnSync(makeFakeSpawner({ calls })),
+        requireReviewEvidence: true,
+      }),
+    ).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   test("verify appends a journal entry on pass (line 2263-2268)", () => {
@@ -2266,7 +2295,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true });
+      const code = verify({ journal: true, requireReviewEvidence: false });
       expect(code).toBe(0);
       // The journal entry was written (opt-in via journal:true; issue #154)
       const journal = existsSync(join(dir, CTX_DIR, "knowledge", "log.md"));
@@ -2299,7 +2328,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true });
+      const code = verify({ journal: true, requireReviewEvidence: false });
       expect(code).toBe(0);
       // A DRAFT skill file was written under .vibeflow/skills/crystallized-*/
       const skillsDir = join(dir, CTX_DIR, "skills");
@@ -2328,7 +2357,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify();
+      const code = verify({ requireReviewEvidence: false });
       expect(code).toBe(0);
       // Default invocation must NOT write the journal — verify is a read-only gate.
       expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(false);
@@ -2368,7 +2397,7 @@ describe("commands.verify branches", () => {
         }
         return result;
       };
-      const code = verify({ spawner: asSpawnSync(wrappedSpawner) });
+      const code = verify({ requireReviewEvidence: false, spawner: asSpawnSync(wrappedSpawner) });
       // code === 1 because the lint gate failed
       expect(code).toBe(1);
       // Sanity: the spawner was called and the failure was recorded
@@ -2381,7 +2410,7 @@ describe("commands.verify branches", () => {
   });
 
   test("verify --coverage runs the coverage gate when lcov.info exists (pass path, line 2276-2283)", () => {
-    // The sync verify() coverage gate spawns `node scripts/coverage-gate.cjs`
+    // The sync verify({ requireReviewEvidence: false }) coverage gate spawns `node scripts/coverage-gate.cjs`
     // directly (NOT through the injectable spawner). To keep the test
     // deterministic and CI-portable we drop a stub coverage-gate.cjs into the
     // tmpdir base — `node` resolves it relative to cwd=base — that exits 0.
@@ -2401,7 +2430,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify({ coverage: true })).toBe(0);
+      expect(verify({ coverage: true, requireReviewEvidence: false })).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2426,7 +2455,7 @@ describe("commands.verify branches", () => {
     process.chdir(dir);
     try {
       // coverage gate exits 1 → failed++ → verify returns 1
-      expect(verify({ coverage: true })).toBe(1);
+      expect(verify({ coverage: true, requireReviewEvidence: false })).toBe(1);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2448,7 +2477,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify({ coverage: true })).toBe(0);
+      expect(verify({ coverage: true, requireReviewEvidence: false })).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2480,7 +2509,7 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true });
+      const code = verify({ journal: true, requireReviewEvidence: false });
       expect(code).toBe(1);
       // fail-branch journal write is opt-in (issue #154)
       expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(true);
@@ -2505,7 +2534,7 @@ describe("commands.verify branches", () => {
     try {
       const calls: Array<{ cmd: string; args: readonly string[] }> = [];
       const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "flutter", status: 0 } });
-      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(0);
+      expect(verify({ requireReviewEvidence: false, spawner: asSpawnSync(spawner) })).toBe(0);
       expect(calls).toHaveLength(1);
       expect(calls[0]?.cmd).toBe("flutter");
       expect(calls[0]?.args).toEqual(["test"]);
@@ -2532,7 +2561,7 @@ describe("commands.verify branches", () => {
     try {
       const calls: Array<{ cmd: string; args: readonly string[]; options?: unknown }> = [];
       const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "node", status: 1 } });
-      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(1);
+      expect(verify({ requireReviewEvidence: false, spawner: asSpawnSync(spawner) })).toBe(1);
       const waiverCall = calls.find(
         (c) => c.cmd === "node" && c.args[0] === "scripts/waiver-policy.cjs",
       );
@@ -2566,7 +2595,7 @@ describe("commands.verify branches", () => {
     try {
       const calls: Array<{ cmd: string; args: readonly string[]; options?: unknown }> = [];
       const spawner = makeFakeSpawner({ calls, exitFor: { cmd: "node", status: 0 } });
-      expect(verify({ spawner: asSpawnSync(spawner) })).toBe(0);
+      expect(verify({ requireReviewEvidence: false, spawner: asSpawnSync(spawner) })).toBe(0);
       const waiverCall = calls.find(
         (c) => c.cmd === "node" && c.args[0] === "scripts/waiver-policy.cjs",
       );

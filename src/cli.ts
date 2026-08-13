@@ -277,7 +277,9 @@ async function main(argv: string[]): Promise<number> {
         journal: flags.journal === true,
         coverage: flags.coverage === true,
         allowUnverifiedEvidence: flags["allow-unverified-evidence"] === true,
-        requireReviewEvidence: flags["require-review-evidence"] === true,
+        // #764: user-facing `vf verify` always requires current-HEAD review
+        // evidence. The old flag remains accepted as a compatibility no-op.
+        requireReviewEvidence: true,
         reviewBase: reviewBase?.toLowerCase(),
         sandbox: sandbox.request,
       });
