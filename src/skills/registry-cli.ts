@@ -37,7 +37,7 @@ export function handleRegistrySubcommand(
         out(
           "vf",
           c.red(
-            "Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]",
+            "Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes] (or: add <owner/repo> [--name <id>] --ref <tag-or-commit>)",
           ),
           { level: "error" },
         );
@@ -48,7 +48,7 @@ export function handleRegistrySubcommand(
       out(
         "vf",
         c.red(
-          "Usage: vf skills registry add <git-url|owner/repo> --name <id> --ref <tag-or-commit> [--yes]",
+          "Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes] (or: add <owner/repo> [--name <id>] --ref <tag-or-commit>)",
         ),
         { level: "error" },
       );
@@ -68,7 +68,7 @@ export function handleRegistrySubcommand(
       out(
         "vf",
         c.red(
-          "Usage: vf skills registry add <git-url|owner/repo> --name <id> --ref <tag-or-commit> [--yes]",
+          "Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes] (or: add <owner/repo> [--name <id>] --ref <tag-or-commit>)",
         ),
         { level: "error" },
       );

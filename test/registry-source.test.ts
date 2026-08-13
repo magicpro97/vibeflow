@@ -59,4 +59,17 @@ describe("resolveRegistrySource — owner/repo shorthand (#763)", () => {
   ])("rejects invalid spec %p (%s) with null", (spec) => {
     expect(resolveRegistrySource(spec)).toBeNull();
   });
+
+  test.each([
+    ["https://github.com/x/y.git\x1b[31mINJECT", "ANSI escape"],
+    ["https://github.com/x/y.git\x07", "BEL control char"],
+    ["https://x.com/y\n.git", "newline"],
+    ["https://x.com/y\r.git", "carriage return"],
+    ["https://x.com/a b.git", "space in URL"],
+    ["git@github.com:x/y\x1b.git", "escape in scp URL"],
+  ])("rejects a URL carrying control chars / whitespace %p (%s)", (spec) => {
+    // out() does not sanitize control chars, so a passed-through URL with an
+    // ANSI/control sequence would inject into error output. Fail closed.
+    expect(resolveRegistrySource(spec)).toBeNull();
+  });
 });

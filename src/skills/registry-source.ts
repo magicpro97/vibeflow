@@ -17,6 +17,17 @@ function looksLikeUrl(spec: string): boolean {
   return spec.includes("://") || /^[\w.-]+@[\w.-]+:/.test(spec);
 }
 
+// True when every char is a printable, non-space ASCII/Unicode char: rejects
+// control chars (0x00-0x1f, 0x7f) and any whitespace. Coded as a char-code scan
+// so no control char appears in a source regex (biome noControlCharactersInRegex).
+function isPrintableNoSpace(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f) return false;
+  }
+  return true;
+}
+
 // GitHub owner/repo: each segment is a GitHub-legal name (alnum, dot, hyphen,
 // underscore), exactly one slash, no traversal/space/control chars.
 const SHORTHAND = /^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)$/;
@@ -29,7 +40,10 @@ const SHORTHAND = /^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-
  */
 export function resolveRegistrySource(spec: string): ResolvedRegistrySource | null {
   const trimmed = spec.trim();
-  if (!trimmed || trimmed.includes("\0")) return null;
+  // Fail closed on any control char or interior whitespace: out() does not
+  // sanitize, so a URL carrying an ANSI/BEL/newline sequence would inject into
+  // error output. A legitimate git URL or owner/repo never contains these.
+  if (!trimmed || !isPrintableNoSpace(trimmed)) return null;
 
   if (looksLikeUrl(trimmed)) {
     return { url: trimmed, name: undefined, shorthand: false };
