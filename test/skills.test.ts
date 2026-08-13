@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CTX_DIR, type Skill } from "../src/core.js";
+import { sanitizeSkillLogValue } from "../src/skills/discovery.js";
 import { renderSkillDetail, showSkill } from "../src/skills/lifecycle.js";
 import {
   discoverSkills,
@@ -206,34 +207,12 @@ describe("registry provenance (never auto-verify external skills)", () => {
     }
   });
 
-  test("#764: duplicate warning strips control characters from repository paths", () => {
-    const dir = tmpRepo();
-    const shared = mkdtempSync(join(tmpdir(), "vf-shadow-\n\u001b[31m"));
-    const original = console.error;
-    const messages: string[] = [];
-    console.error = (message: string) => messages.push(message);
-    try {
-      const localDir = join(dir, CTX_DIR, "skills", "same");
-      mkdirSync(localDir, { recursive: true });
-      writeFileSync(
-        join(localDir, "SKILL.md"),
-        ["---", "name: same", "description: local", "---"].join("\n"),
-      );
-      mkdirSync(join(shared, "same"));
-      writeFileSync(
-        join(shared, "same", "SKILL.md"),
-        ["---", "name: same", "description: shared", "---"].join("\n"),
-      );
-
-      discoverSkills(dir, { sharedCatalogDir: () => shared });
-      const warning = messages.find((message) => message.includes('duplicate "same"')) ?? "";
-      expect(warning).not.toContain("\n");
-      expect(warning).not.toContain("\u001b");
-    } finally {
-      console.error = original;
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(shared, { recursive: true, force: true });
-    }
+  test("#764: duplicate warning sanitizer strips Unicode controls and stops at the cap", () => {
+    const raw = `a\n\u001b\u0085\u2028\u2029${"x".repeat(2000)}`;
+    const safe = sanitizeSkillLogValue(raw);
+    for (const control of ["\n", "\u001b", "\u0085", "\u2028", "\u2029"])
+      expect(safe).not.toContain(control);
+    expect(safe).toHaveLength(1000);
   });
 
   // Issue #93: parseSkill normalized names per-root by REJECTING any
