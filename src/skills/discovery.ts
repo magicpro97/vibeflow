@@ -24,6 +24,18 @@ import { type ParseSkillOpts, trustedIdentityForSharedSkill } from "./review-pro
  */
 const SKILL_ROOTS: string[] = [join(CTX_DIR, "skills"), join(".kiro", "skills"), ...SKILL_MIRRORS];
 
+const UNSAFE_LOG_CHAR = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/** Keep repository-controlled paths from injecting control sequences into stderr. */
+export function sanitizeSkillLogValue(value: string): string {
+  let out = "";
+  for (const ch of value) {
+    out += UNSAFE_LOG_CHAR.test(ch) ? "?" : ch;
+    if (out.length >= 1000) return out.slice(0, 1000);
+  }
+  return out;
+}
+
 /** Discover every valid skill under the known roots in `repo`, de-duplicated by name.
  *  Resolution order: project-local roots first, then the shared user-scoped catalog
  *  (~/.vibeflow/skills/). A project-local skill always shadows a shared one. */
@@ -45,7 +57,12 @@ export function discoverSkills(
       const skill = parseSkill(skillMd, dir);
       if (!skill) continue;
       const key = skill.name.toLowerCase();
-      if (!byName.has(key)) byName.set(key, skill);
+      const winner = byName.get(key);
+      if (winner) {
+        console.error(
+          `[skills] duplicate "${skill.name}" ignored: ${sanitizeSkillLogValue(skill.path)} (winner: ${sanitizeSkillLogValue(winner.path)})`,
+        );
+      } else byName.set(key, skill);
     }
   }
 
@@ -67,7 +84,12 @@ export function discoverSkills(
         const skill = parseSkill(skillMd, dir, id ? { provenance: "discovered", trustedReviewIdentity: id, homedir: () => home } : { provenance: "discovered" });
         if (!skill) continue;
         const key = skill.name.toLowerCase();
-        if (!byName.has(key)) byName.set(key, skill);
+        const winner = byName.get(key);
+        if (winner) {
+          console.error(
+            `[skills] duplicate "${skill.name}" ignored: ${sanitizeSkillLogValue(skill.path)} (winner: ${sanitizeSkillLogValue(winner.path)})`,
+          );
+        } else byName.set(key, skill);
       }
     }
   } catch {

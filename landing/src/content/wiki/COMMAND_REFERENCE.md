@@ -376,11 +376,14 @@ vf verify --sandbox docker \
   --sandbox-volume vf-deps-<lock-sha256>
 ```
 
-`--review-base` is an ancestor SHA used only to classify a genuinely missing record as a
-no-checklist range; it never weakens present-record validation.
+`vf verify` fails closed by default when current-HEAD review evidence is missing or invalid;
+`--require-review-evidence` remains accepted for compatibility. `--review-base` is an ancestor SHA
+used only to classify a genuinely missing record as a no-checklist range; it never weakens
+present-record validation.
 
-Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
-missing evidence on a `done` unit, and overlapping work-unit scopes all fail.
+Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence below its risk
+threshold, missing or unverifiable evidence, a `done` unit without `gates.test: "pass"`, missing
+current-HEAD review evidence, and overlapping work-unit scopes all fail.
 
 `--sandbox docker` runs synchronous CLI toolchain and waiver gates offline in a Docker
 container. It mounts a disposable source copy, never the active worktree, and passes no

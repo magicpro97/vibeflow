@@ -225,6 +225,17 @@ export function policyGates(
     passed.push("evidence: every done unit has recorded evidence");
   }
 
+  // #764: superpowers' RED→GREEN checkpoint is a hard gate, not guidance.
+  // Generic evidence (commit/file/CI URL) cannot substitute for an executed
+  // passing test gate on a unit that claims completion.
+  const noPassingTests = units.filter((u) => u.status === "done" && u.gates.test !== "pass");
+  for (const u of noPassingTests) {
+    failures.push(
+      `test-evidence: "${u.name}" is done but its test gate is ${u.gates.test ?? "missing"} — run tests and record the passing gate before close`,
+    );
+  }
+  if (!noPassingTests.length) passed.push("test-evidence: every done unit has a passing test gate");
+
   // ADR-004 phase 2: fail on unverifiable evidence strings.
   // Escape hatch: state._allowUnverifiedEvidence=true (set by --allow-unverified-evidence flag).
   if (!state._allowUnverifiedEvidence) {

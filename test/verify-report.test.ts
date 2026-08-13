@@ -22,6 +22,22 @@ function tempProject(scripts: Record<string, string>): string {
 const tmp = tempProject({ typecheck: "exit 0", test: "exit 0" });
 
 describe("collectVerifyReportAsync", () => {
+  test("#764: current-HEAD review evidence is required by default", async () => {
+    const dir = tempProject({ test: "exit 0" });
+    mkdirSync(join(dir, CTX_DIR), { recursive: true });
+    writeState(dir, {
+      task_id: "T",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+
+    const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0) });
+    expect(report.ok).toBe(false);
+    expect(report.policy.failures).toContain("review-evidence: cannot resolve HEAD");
+  });
+
   test("runs toolchain gates and returns structured report", async () => {
     const report = await collectVerifyReportAsync(process.cwd(), { spawner: fakeSpawner(0) });
     expect(report).toHaveProperty("toolchain");
@@ -89,7 +105,10 @@ describe("collectVerifyReportAsync", () => {
       ],
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     } as never);
-    await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0) });
+    await collectVerifyReportAsync(dir, {
+      spawner: fakeSpawner(0),
+      requireReviewEvidence: false,
+    });
     const after = readState(dir) as { work_units: Array<{ impl_fingerprint?: object }> };
     // fingerprint written for the scoped file (best-effort; may be {} if git absent,
     // but the key must be SET so the gate has something to compare next time).

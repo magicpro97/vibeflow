@@ -503,6 +503,20 @@ describe("review evidence producer command", () => {
 });
 
 describe("review-base fallback (#748)", () => {
+  test("#764: review base equal to HEAD cannot bypass a missing record", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-fallback-equal-head-"));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${head} ${head}`]: { status: 0, stdout: "" },
+      [`diff --name-status -M ${head}..${head}`]: { status: 0, stdout: "" },
+    });
+
+    const result = checkReviewEvidence(repo, true, read, head);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("record missing");
+    rmSync(repo, { recursive: true, force: true });
+  });
+
   test("missing record + valid ancestor base + docs-only diff passes without a record", () => {
     const repo = mkdtempSync(join("/tmp", "vf-fallback-docs-"));
     const read = git({

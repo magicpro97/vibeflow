@@ -2,7 +2,7 @@
 title: Workflow
 description: End-to-end workflow — intake questions, context normalization, and output report for VibeFlow task orchestration.
 category: how-to
-last_updated: 2026-06-24
+last_updated: 2026-08-13
 ---
 
 # Workflow
@@ -15,6 +15,7 @@ last_updated: 2026-06-24
 - [Intake Questions](#intake-questions)
 - [Context Normalization](#context-normalization)
 - [Output Report](#output-report)
+- [Methodology checkpoints → hard gates](#methodology-checkpoints--hard-gates)
 
 ## End-to-end flow
 
@@ -117,6 +118,26 @@ Every run should produce:
 - Recommended next action
 - Skill updates proposed
 ```
+
+## Methodology checkpoints → hard gates
+
+`vf verify` enforces the outcomes described by upstream methodology skills; it does not vendor or
+rewrite their content. These gates apply by default, whether or not an advisory skill is installed.
+
+| Methodology checkpoint | vf hard gate | Block condition |
+|---|---|---|
+| `test-driven-development` (RED → GREEN) | `policyGates` test-evidence gate | Any work unit marked `done` whose `gates.test` is not `pass`. Generic commit, file, or CI evidence cannot substitute for a passing test gate. |
+| `requesting-code-review` | current-HEAD review-evidence gate | `.vibeflow/review-evidence/v1/<HEAD>.json` is missing, unreadable, stale, has a SHA/manifest mismatch, lacks required source + test anchors, or records reviewer failure/findings. The existing no-applicable-checklist exemption remains. |
+| `finishing-a-development-branch` | `policyGates` confidence + scope gates | Computed confidence is below the risk threshold, a unit is still running, evidence is missing/unverifiable, or work-unit scopes overlap. |
+
+Skill prose remains advisory; hard gates are code in `src/gates.ts` and
+`src/hooks/review-evidence.ts`. Skills do not carry an enforcement class. When duplicate skill names
+are discovered, first-root-wins remains deterministic and vf warns with both the winning and ignored
+paths rather than silently pretending one skill is a hard gate.
+
+This is an intentional behavior break: current-HEAD review evidence and a passing test gate for every
+done unit are required by default. Fix the evidence or unit gate; do not bypass the methodology with
+free-text evidence.
 
 ---
 

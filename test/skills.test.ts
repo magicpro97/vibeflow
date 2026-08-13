@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CTX_DIR, type Skill } from "../src/core.js";
+import { sanitizeSkillLogValue } from "../src/skills/discovery.js";
 import { renderSkillDetail, showSkill } from "../src/skills/lifecycle.js";
 import {
   discoverSkills,
@@ -178,6 +179,9 @@ describe("registry provenance (never auto-verify external skills)", () => {
   test("discoverSkills: project-local skill shadows a same-named shared catalog skill (line 218)", () => {
     const dir = tmpRepo();
     const shared = mkdtempSync(join(tmpdir(), "vf-shared-cat-shadow-"));
+    const original = console.error;
+    const messages: string[] = [];
+    console.error = (message: string) => messages.push(message);
     try {
       const localDir = join(dir, CTX_DIR, "skills", "shadowed");
       mkdirSync(localDir, { recursive: true });
@@ -193,10 +197,22 @@ describe("registry provenance (never auto-verify external skills)", () => {
       const found = discoverSkills(dir, { sharedCatalogDir: () => shared });
       expect(found).toHaveLength(1);
       expect(found[0]?.description).toBe("local wins");
+      expect(messages).toContain(
+        `[skills] duplicate "shadowed" ignored: ${join(shared, "shadowed", "SKILL.md")} (winner: ${join(localDir, "SKILL.md")})`,
+      );
     } finally {
+      console.error = original;
       rmSync(dir, { recursive: true, force: true });
       rmSync(shared, { recursive: true, force: true });
     }
+  });
+
+  test("#764: duplicate warning sanitizer strips Unicode controls and stops at the cap", () => {
+    const raw = `a\n\u001b\u0085\u2028\u2029${"x".repeat(2000)}`;
+    const safe = sanitizeSkillLogValue(raw);
+    for (const control of ["\n", "\u001b", "\u0085", "\u2028", "\u2029"])
+      expect(safe).not.toContain(control);
+    expect(safe).toHaveLength(1000);
   });
 
   // Issue #93: parseSkill normalized names per-root by REJECTING any
