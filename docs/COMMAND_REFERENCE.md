@@ -202,6 +202,7 @@ vf skills import context7:<query>  # import a Context7 skill (approval-gated) in
 ```bash
 vf skills registry add <git-url> --name <id> --ref <tag-or-commit>   # dry-run: show plan, no network
 vf skills registry add <git-url> --name <id> --ref <tag-or-commit> --yes  # clone + checkout + pin commit
+vf skills registry add obra/superpowers --ref <tag-or-commit> --yes  # owner/repo shorthand → https://github.com/obra/superpowers.git, name defaults to "superpowers"
 vf skills registry list                # show pinned registries with commit OID
 vf skills registry update              # re-fetch and re-pin all registries (dry-run)
 vf skills registry update --yes        # re-fetch and re-pin all registries
@@ -209,6 +210,11 @@ vf skills registry update <id> --yes   # re-fetch and re-pin a single registry
 vf skills registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--yes]
                                        # install a verified skill from a cached registry
 ```
+
+> The `owner/repo` shorthand expands to `https://github.com/owner/repo.git` and defaults the
+> registry name to the repo slug; `--ref` stays required so the pin is deterministic. An explicit
+> git URL is passed through unchanged (supply `--name` yourself). Adding a source pins its commit
+> in `.vibeflow/SKILL_REGISTRY.lock.json`; it does not install any skill (installation is separate).
 # Collision policies:
 #   skip    — leave existing untouched (default)
 #   replace — backup existing to .backup/<ts>/, then overwrite

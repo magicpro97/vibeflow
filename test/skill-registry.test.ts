@@ -656,6 +656,23 @@ describe("handleRegistrySubcommand coverage", () => {
     expect(code).toBe(0);
   });
 
+  test("#763: add owner/repo shorthand with no --name still resolves a name (not usage error 2)", () => {
+    const repo = tmpRepo();
+    const code = handleRegistrySubcommand(repo, ["add", "obra/superpowers", "--ref", "v1"]);
+    // dry-run (no --yes) prints the plan and returns 0 — NOT the old "missing name" 2.
+    expect(code).toBe(0);
+  });
+
+  test("#763: add owner/repo shorthand still requires --ref (returns 2)", () => {
+    const repo = tmpRepo();
+    expect(handleRegistrySubcommand(repo, ["add", "obra/superpowers"])).toBe(2);
+  });
+
+  test("#763: add rejects an invalid source spec with 2", () => {
+    const repo = tmpRepo();
+    expect(handleRegistrySubcommand(repo, ["add", "obra/super/powers", "--ref", "v1"])).toBe(2);
+  });
+
   test("add missing url/name/ref returns 2", () => {
     const repo = tmpRepo();
     expect(handleRegistrySubcommand(repo, ["add", "--name", "x", "--ref", "v1"])).toBe(2);
