@@ -6,6 +6,7 @@ import {
   type RegistryReleaseCliDeps,
   handleRegistryReleaseCommand,
 } from "./registry-release-cli.js";
+import { resolveRegistrySource } from "./registry-source.js";
 
 const COLLISION_OPTIONS = new Set(["skip", "replace", "rename"]);
 const INSTALL_USAGE =
@@ -43,15 +44,37 @@ export function handleRegistrySubcommand(
         return 2;
       } else if (tok !== undefined) url = tok;
     }
-    if (!url || !name || !ref) {
+    if (!url) {
       out(
         "vf",
-        c.red("Usage: vf skills registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]"),
+        c.red(
+          "Usage: vf skills registry add <git-url|owner/repo> --name <id> --ref <tag-or-commit> [--yes]",
+        ),
         { level: "error" },
       );
       return 2;
     }
-    return registryAdd(repo, url, name, ref, { yes });
+    // #763: expand `owner/repo` shorthand → GitHub URL + default name. --ref
+    // stays required so the pin is deterministic. Explicit --name still wins.
+    const source = resolveRegistrySource(url);
+    if (!source) {
+      out("vf", c.red(`Invalid registry source "${url}". Use a git URL or owner/repo.`), {
+        level: "error",
+      });
+      return 2;
+    }
+    const resolvedName = name || source.name || "";
+    if (!resolvedName || !ref) {
+      out(
+        "vf",
+        c.red(
+          "Usage: vf skills registry add <git-url|owner/repo> --name <id> --ref <tag-or-commit> [--yes]",
+        ),
+        { level: "error" },
+      );
+      return 2;
+    }
+    return registryAdd(repo, source.url, resolvedName, ref, { yes });
   }
   if (cmd === "list") {
     if (rest.length) {

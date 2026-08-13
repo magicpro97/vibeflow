@@ -214,8 +214,8 @@ ${c.bold("Subcommands:")}
   registry <add|list|update|install|release-propose|release> manage remote skill registries — see below
 
 ${c.bold("Registry subcommands:")}
-  registry add <git-url> --name <id> --ref <tag-or-commit> [--yes]
-                             clone a remote skill registry and pin to a commit
+  registry add <git-url|owner/repo> --name <id> --ref <tag-or-commit> [--yes]
+                             clone + pin a registry; owner/repo → github URL (name = repo slug)
   registry list              list pinned skill registries from the lock file
   registry update [<id>] [--yes]
                              re-fetch and re-pin every registry (or a single one);
