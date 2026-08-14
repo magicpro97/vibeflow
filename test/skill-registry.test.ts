@@ -333,7 +333,15 @@ describe("registryAdd", () => {
     expect(code).toBe(0);
     const cacheDir = registryCacheDir(url);
     // Exact argv unchanged
-    expect(calls[0]?.args).toEqual(["clone", "--filter=blob:none", "--no-checkout", "--depth", "1", url, cacheDir]);
+    expect(calls[0]?.args).toEqual([
+      "clone",
+      "--filter=blob:none",
+      "--no-checkout",
+      "--depth",
+      "1",
+      url,
+      cacheDir,
+    ]);
     expect(calls[1]?.args).toEqual(["-C", cacheDir, "fetch", "origin", "v1.0"]);
     expect(calls[2]?.args).toEqual(["-C", cacheDir, "rev-parse", "FETCH_HEAD"]);
     expect(calls[3]?.args).toEqual(["-C", cacheDir, "checkout", "--detach", "a".repeat(40)]);
