@@ -47,3 +47,4 @@ coverage/
 .ui-port
 */.vibeflow/.ui-port
 .vibeflow/knowledge/memory.db*
+.agents/agents/
