@@ -249,7 +249,10 @@ export function registryAdd(
     return 2;
   }
   // Trust boundary: only allow https:// URLs to prevent file:///, ssh://, and other scheme attacks
-  if (!url.toLowerCase().startsWith("https://")) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") throw new Error("non-https");
+  } catch {
     out("vf", c.red(`Invalid registry URL "${url}". Only https:// URLs are allowed.`), {
       level: "error",
     });
@@ -329,7 +332,10 @@ export function registryUpdate(
 
   // Trust boundary: validate lock file URLs before cloning
   for (const r of targets) {
-    if (!r.url.toLowerCase().startsWith("https://")) {
+    try {
+      const parsed = new URL(r.url);
+      if (parsed.protocol !== "https:") throw new Error("non-https");
+    } catch {
       out("vf", c.red(`Registry "${r.name}" has non-https URL "${r.url}". Refusing to clone.`), {
         level: "error",
       });

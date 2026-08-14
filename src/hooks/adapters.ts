@@ -119,10 +119,16 @@ export function claudeHookConfig(): string {
   return JSON.stringify(config, null, 2);
 }
 
-/** Shell-escape a path for safe embedding in a shell string.
+/** Shell-escape a path for safe embedding in a POSIX shell string.
  *  Wraps in single quotes; escapes embedded single quotes via '\''. */
 function shellEscape(path: string): string {
   return `'${path.replace(/'/g, "'\\''")}'`;
+}
+
+/** PowerShell-escape a path for safe embedding in a PowerShell string.
+ *  Wraps in single quotes; escapes embedded single quotes by doubling (''). */
+function powershellEscape(path: string): string {
+  return `'${path.replace(/'/g, "''")}'`;
 }
 
 /** Codex native hooks: PreToolUse blocks Bash/shell only. */
@@ -140,14 +146,19 @@ export function codexHookConfig(): string {
 }
 
 /** Build a shell command that runs `vf hook` with the absolute CLI path.
- *  Path is double-quoted to survive spaces on POSIX paths like `/Users/linhn/foo bar/...`
- *  and Windows paths like `C:\Program Files\...`. `hook` is a literal arg.
+ *  Path is single-quoted to survive spaces, $, backticks, and other shell metachars.
+ *  For PowerShell, `powershellHookCommand()` uses ''-escaping instead.
  *  The trailing `# vibeflow-guardrail` marker is consumed as a bash/sh comment and is
  *  also the stable string the `liveGuardrailArmed` probe matches against (issue #79
  *  re-review: the previous `vf hook` substring never appeared in real generated configs
  *  because generators emit `node "<abs>" hook`, not `vf hook`). */
 function hookCommand(): string {
   return `${hookRuntime()} ${shellEscape(cliPath())} hook # vibeflow-guardrail`;
+}
+
+/** PowerShell variant: uses ''-escaping instead of '\''-escaping. */
+function powershellHookCommand(): string {
+  return `${hookRuntime()} ${powershellEscape(cliPath())} hook # vibeflow-guardrail`;
 }
 
 /** Copilot `.github/hooks/copilot.json` — NATIVE enforcement via preToolUse (fail-closed).
@@ -157,12 +168,13 @@ function hookCommand(): string {
  *  Schema: {version:1, hooks:{<camelCaseEvent>:[{type:"command", bash, powershell, timeoutSec}]}}
  *  `bash` covers POSIX, `powershell` covers Windows — Copilot picks by host OS. */
 export function copilotHookConfig(): string {
-  const cmd = hookCommand();
+  const bash = hookCommand();
+  const ps = powershellHookCommand();
   const config = {
     version: 1,
     hooks: {
-      preToolUse: [{ type: "command", bash: cmd, powershell: cmd, timeoutSec: 60 }],
-      postToolUse: [{ type: "command", bash: cmd, powershell: cmd, timeoutSec: 30 }],
+      preToolUse: [{ type: "command", bash, powershell: ps, timeoutSec: 60 }],
+      postToolUse: [{ type: "command", bash, powershell: ps, timeoutSec: 30 }],
     },
   };
   return JSON.stringify(config, null, 2);
