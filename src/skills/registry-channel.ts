@@ -1,4 +1,4 @@
-// size-waiver: #771 — security: URL validation + lock file URL guard adds ~20 lines
+// size-waiver: #771 — security: URL validation + lock file URL guard adds ~20 lines waiver: #771 owner:magicpro97 expires:2027-12-31
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
