@@ -21,7 +21,7 @@ last_updated: 2026-06-24
 
 ## Purpose
 
-Hooks provide a common guardrail and automation layer across Claude Code, Codex, and GitHub Copilot CLI.
+Hooks provide a common guardrail and automation layer across Claude Code, Codex, GitHub Copilot CLI, OpenCode, and Antigravity CLI.
 
 Hooks should not contain the main reasoning logic. They should enforce safety, validate outputs, collect logs, and reduce risky behavior.
 
@@ -30,31 +30,37 @@ Hooks should not contain the main reasoning logic. They should enforce safety, v
 There is one shared decision engine behind a single CLI entrypoint — `vf hook` — and
 per-engine native config files that all delegate to it. `vf hook` reads a JSON event on
 stdin, scores its risk, and prints an `allow | warn | require_approval | block` decision
-(see `src/hooks/runner.ts`). One source of truth, three engines plus git.
+(see `src/hooks/runner.ts`). One source of truth, five engines plus git.
 
-`vf hooks emit` writes the per-engine native config into the target repo, each routing the
-engine's native hook events to `vf hook`:
+`vf hooks emit` writes the per-engine native config, each routing the engine's
+native hook events to `vf hook`:
 
 ```text
-.claude/settings.json        → Claude PreToolUse/PostToolUse/Stop hooks → `vf hook`
-.codex/hooks.json            → Codex post-command/post-write/verify-result → `vf hook`
-.github/hooks/copilot.json   → Copilot preToolUse (fail-closed) + postToolUse → `vf hook`
-.githooks/pre-commit         → shell hook routing staged files through `vf hook`
-.githooks/pre-push           → current-HEAD verify + local review-evidence gate
+.claude/settings.json        → Claude PreToolUse/PostToolUse/Stop hooks → `vf hook` (repo)
+~/.codex/hooks.json          → Codex PreToolUse/PostToolUse → `vf hook` (global)
+.github/hooks/copilot.json   → Copilot preToolUse (fail-closed) + postToolUse → `vf hook` (repo)
+.opencode/plugins/vf-guard.ts → OpenCode `tool.execute.before` plugin (throws to block) → `vf hook` (repo)
+.agents/hooks.json           → Antigravity PreToolUse/PostToolUse → `vf hook --antigravity` (repo; named-key merge)
+.githooks/pre-commit         → shell hook routing staged files through `vf hook` (repo)
+.githooks/pre-push           → current-HEAD verify + local review-evidence gate (repo)
+.githooks/post-checkout      → shell hook (repo)
+.githooks/post-merge         → shell hook (repo)
 ```
-
-### Git pre-push review gate
-
-`vf hooks install` adds a fail-closed pre-push hook. It binds verification to pushed
-current `HEAD`, derives the pushed-range base, and runs
-`vf review check --base <full-SHA>`. It ignores tags and
-deletions and rejects mixed-base multi-branch pushes. No LLM/network/API runs inside the
-hook. `git push --no-verify` bypasses local feedback only; remote `review-thread-gate`
-remains authoritative. User-owned hooks are preserved, never auto-chained.
 
 These are each engine's own native configuration format (not VibeFlow-invented files), so
 no separate executable wrapper is needed: every engine already knows how to invoke a
 command for its native hook events, and that command is `vf hook`.
+
+### Git pre-push review gate
+
+`vf hooks install` also installs a fail-closed pre-push hook. For pushed branch refs it
+requires the pushed SHA to equal checked-out `HEAD`, derives the merge base of local and
+remote SHA (or the remote-default merge base for a new branch), and runs
+`vf review check --base <full-SHA>` once. Tags and deletions are
+ignored; multi-branch pushes with different bases must be split. Missing verifier, invalid
+base, or failed evidence blocks and prints repair commands. No LLM/network/API runs inside
+the hook. `git push --no-verify` bypasses local feedback only; remote `review-thread-gate`
+remains authoritative. User-owned git hooks are never overwritten or auto-chained.
 
 ## Enforcement scope per engine (feasibility constraint)
 
@@ -64,7 +70,8 @@ native, vetoing interception point. This cannot be assumed for every engine:
 
 ```text
 Claude Code → native blocking hooks available; full pre-action enforcement.
-Codex CLI   → no equivalent vetoing pre-tool hook today; detection-only.
+Codex CLI   → native PreToolUse veto for Bash/shell only; Edit/Write/apply_patch/MCP
+              calls are not intercepted by this hook.
 Copilot CLI → native preToolUse (fail-closed: non-zero exit DENIES the tool call);
               full pre-action enforcement.
 ```
@@ -77,29 +84,29 @@ hooks degrades to detection-only. VibeFlow currently implements the fallback:
 Option A (future): run the engine under a VibeFlow-imposed process-level enforcement
   layer (sandbox / restricted FS overlay / shell-command proxy / PTY interceptor) that
   applies the same allow|warn|require_approval|block decisions independent of native hooks.
-Option B (implemented, issue #79): Claude Code AND Copilot get vetoing pre-action hooks
-  (PreToolUse / preToolUse); Codex is wired DETECTION-ONLY (post-command/post-write
-  /verify-result events) and a downgrade banner is printed to the user before Codex
-  launches.
+Option B (implemented): Claude Code AND Copilot get full vetoing pre-action hooks
+  (PreToolUse / preToolUse). Codex gets a native PreToolUse veto for Bash/shell only;
+  its remaining tool calls stay behind the apply-time diff gate and its scope is printed
+  before Codex launches.
 ```
 
 The hook adapter (`src/hooks/adapters.ts`) exposes an enforcement-capability descriptor
-(`engineEnforcement` → `native` for Claude and Copilot, `post-hoc-only` for Codex) so the
-orchestrator knows, per engine, whether pre-action blocking is real or downgraded. When it
-is downgraded, `downgradeBannerText` is surfaced before the run starts.
+(`engineEnforcement` → `native` for Claude/Copilot/opencode, `native-bash-only` for Codex)
+so the orchestrator knows, per engine, whether pre-action blocking is full or partial.
+The partial-scope banner is surfaced before Codex runs.
 
-### Apply-time gate for detection-only engines (issue #547)
+### Apply-time gate for incomplete native coverage (issue #547)
 
 Claude and Copilot veto risky actions mid-loop through their native pre-action hooks, so a
-dangerous edit or command never reaches disk without a decision. Codex has no vetoing
-pre-tool hook, so its produced changes would otherwise land unreviewed. The apply-time gate
+dangerous edit or command never reaches disk without a decision. Codex only vetoes Bash/shell,
+so its produced non-Bash changes would otherwise land unreviewed. The apply-time gate
 (`src/hooks/apply-gate.ts`) closes that one real gap by moving enforcement to the point where
 VibeFlow itself controls the flow — after a unit's review passes, before it is marked done:
 
 ```text
 enforceApplyGate(engine, diff):
-  1. Native engine (Claude / Copilot) → pass through. They already blocked mid-loop; a
-     second gate would be redundant. ONLY a post-hoc-only engine (Codex) is gated.
+  1. Fully native engine (Claude / Copilot / opencode) → pass through. Codex is gated
+     because its native hook covers Bash/shell only.
   2. classifyDiff(diff) PER-HUNK: each hunk's added lines + touched path run through the
      SAME scoreRisk classifier (DANGEROUS_COMMAND / PROTECTED_PATH + the optional semantic
      tier, #544). The MAX risk across hunks wins, and each contributing hunk names its file
@@ -111,9 +118,21 @@ enforceApplyGate(engine, diff):
      that cannot be reached resolves to `block`. Safety never silently degrades to allow.
 ```
 
-This gives every engine the same EFFECTIVE enforcement point: native engines block in-loop,
-Codex blocks at apply time. The gate is injected (default OFF), so a run with no detection-only
-engine is byte-identical to before.
+This gives every engine the same EFFECTIVE enforcement point: fully native engines block
+in-loop; Codex blocks Bash/shell in-loop and its remaining changes at apply time. The gate is
+injected (default OFF), so a run with no partial-coverage engine is byte-identical to before.
+
+### Codex hook config is global, not per-repo
+
+Codex reads hooks from `~/.codex/hooks.json`, and the native hook feature requires
+`[features] codex_hooks = true` in `~/.codex/config.toml`. Therefore `vf hooks emit --yes`
+merges VibeFlow's `PreToolUse` and `PostToolUse` entries into those two **global** files. It
+affects every repository run by Codex on this machine; VibeFlow prints this warning both in the
+dry run and immediately before writing. Existing unrelated JSON keys and hooks are preserved.
+
+To revert, remove VibeFlow's `PreToolUse` and `PostToolUse` entries from
+`~/.codex/hooks.json`, then remove or set `codex_hooks = false` under `[features]` in
+`~/.codex/config.toml`.
 
 ## Universal hook input
 

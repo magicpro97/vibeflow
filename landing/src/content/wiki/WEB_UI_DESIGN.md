@@ -44,7 +44,7 @@ Fields:
 - Repo path or GitHub URL
 - Branch
 - Create new branch yes/no
-- Preferred engine: Claude Code / Codex / Copilot CLI
+- Preferred engine: Claude Code / Codex / Copilot CLI / OpenCode / Antigravity CLI
 - Permission mode
 - Workspace path
 ```

@@ -180,11 +180,14 @@ vf skills telemetry        # print aggregate skill-usage summary from local JSON
 vf skills validate         # validate every canonical skill against the Anthropic standard
 vf skills sync             # sync .vibeflow/skills → engine mirrors (default mode: pointer)
 vf skills sync --mode pointer|full   # pointer = stub SKILL.md pointing at canonical; full = copy
-vf skills verify-sync      # verify each mirror has a SKILL.md for every canonical skill
-vf skills verify-freshness # check sourceAnchors against current disk content (SHA-256)
+vf skills sync --from-registry       # also mirror registry-pinned skills from the lock file
+vf skills verify             # promote a canonical skill to status:verified (or --undo)
+vf skills verify-sync        # verify each mirror has a SKILL.md for every canonical skill
+vf skills verify-sync --from-registry # also verify registry-pinned skills have mirrors
+vf skills verify-freshness   # check sourceAnchors against current disk content (SHA-256)
 vf skills impact <fact-or-path> # list affected skills and required evals from domain facts
 vf skills audit-duplicates # find duplicate fact ownership, triggers, and procedures
-vf skills semantic-filter [--max-reviews N] [--reviewer ID]  # find overlapping trigger/fact skill pairs (Jaccard > 0.7 or duplicate owns); reviewer is opt-in, makes no network calls on its own
+vf skills semantic-filter [--max-reviews N] [--reviewer ID]  # find overlapping trigger/fact skill pairs (Jaccard > 0.7 or duplicate owns); reviews execute only when BOTH --reviewer ID and --max-reviews N with N>0 are explicit
 vf skills draft [--new] <name> # resolve existing domain before creating a draft
 vf skills propose-merge <a> <b> # print non-destructive merged skill proposal
 vf skills propose-split <skill> # print non-destructive section split proposal
@@ -286,12 +289,14 @@ missing candidates, and install failure preserve a skill gap and do not cancel a
 dispatch. Browser decisions only resolve the waiting run; no direct browser install API exists.
 
 The canonical store is `.vibeflow/skills/<name>/` (one `SKILL.md` plus optional
-`scripts/`, `references/`, `assets/`). The three engine mirrors
-(`.claude/skills/`, `.agents/skills/`, `.github/skills/`) are kept in sync by
+`scripts/`, `references/`, `assets/`), layered on top of the shared machine-wide
+catalog at `~/.vibeflow/skills/`. The four engine mirrors
+(`.claude/skills/`, `.agents/skills/`, `.github/skills/`, `.opencode/skills/`) are kept in sync by
 `src/skills/sync.ts`: `pointer` mode writes a stub `SKILL.md` that points at the
 canonical file (default; cheap, no duplication); `full` mode copies the whole skill
 tree. `vf skills verify-sync` checks every canonical skill has a matching
-`SKILL.md` in every mirror.
+`SKILL.md` in every mirror. `--from-registry` extends both commands to also
+include skills pinned in the registry lock file (`SKILL_REGISTRY.lock.json`).
 
 ## Optional tools (code navigation)
 
@@ -340,12 +345,13 @@ vf hooks emit       # write engine configs plus managed git hooks
 echo '<json-event>' | vf hook       # → {"decision":"allow|warn|require_approval|block",...}
 ```
 
-The generated `.githooks/pre-push` validates exact pushed `HEAD`, derives the pushed
+The generated `.githooks/pre-push` validates the exact pushed `HEAD`, derives the pushed
 range base, then runs `vf review check --base <full-SHA>`.
-Missing, stale, malformed, unreadable, or failed evidence blocks; docs-only ranges with
-no applicable checklist need no reviewer record. No LLM/network/API runs in the hook.
-`git push --no-verify` bypasses local feedback only; remote `review-thread-gate` remains
-authoritative. User-owned hooks are preserved for manual integration.
+Missing, stale, malformed, unreadable, or failed evidence blocks with a repair command;
+docs-only ranges with no applicable checklist need no reviewer record. The hook makes no
+LLM, network, GitHub API, or Copilot call. `git push --no-verify` bypasses only this local
+fast-feedback gate; required remote `review-thread-gate` remains authoritative. Existing
+user-owned git hooks are preserved and must be integrated manually.
 
 ### require_approval in web UI context
 When VF_HOOK_MODE=default and .vibeflow/.ui-port exists, require_approval
@@ -386,17 +392,18 @@ failing notifier is swallowed so it can't break the merge flow.
 
 ```bash
 vf verify
+vf verify --require-review-evidence
 vf verify --require-review-evidence --review-base <full-SHA>
 vf verify --allow-unverified-evidence  # skip ADR-004 evidence format gate (migration escape hatch)
 vf verify --sandbox docker \
   --sandbox-image registry.example/vf@sha256:<digest> \
   --sandbox-volume vf-deps-<lock-sha256>
+vf review evidence --base <full-SHA> --result <review-result.json>
 ```
 
-`vf verify` fails closed by default when current-HEAD review evidence is missing or invalid;
-`--require-review-evidence` remains accepted for compatibility. `--review-base` is an ancestor SHA
-used only to classify a genuinely missing record as a no-checklist range; it never weakens
-present-record validation.
+Review evidence stays local at `.vibeflow/review-evidence/v1/<headSha>.json`. `vf verify` performs no LLM/network call and fails closed by default when current-HEAD review evidence is missing or invalid; `--require-review-evidence` remains accepted for compatibility. `--allow-unverified-evidence` does not bypass this gate.
+`--review-base` is the full ancestor SHA used only to classify a missing record as a
+no-checklist range; it never weakens malformed or present-record validation.
 
 Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence below its risk
 threshold, missing or unverifiable evidence, a `done` unit without `gates.test: "pass"`, missing

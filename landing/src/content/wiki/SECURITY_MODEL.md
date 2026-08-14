@@ -281,11 +281,12 @@ the least-privilege and no-code-execution posture:
 
 ### Pre-push review-evidence gate (local only)
 
-Pre-push is deterministic local fast feedback. It binds verification to pushed current
-`HEAD`, reads only local evidence, and fails closed on missing, stale, malformed,
-unreadable, or failed applicable evidence. It performs no network, LLM, GitHub API, or
-Copilot call and never transports local evidence. User-owned hooks are preserved.
-`git push --no-verify` bypasses local feedback; remote `review-thread-gate` remains authority.
+The repository pre-push hook is deterministic local fast feedback. It binds verification
+to the pushed current `HEAD`, reads only local commit evidence, and fails closed on missing,
+stale, malformed, unreadable, or failed applicable evidence. It performs no network, LLM,
+GitHub API, or Copilot call and never uploads/commits/attests local evidence. User-owned
+hooks are preserved. `git push --no-verify` bypasses this local gate by Git design; the
+separate required remote `review-thread-gate` remains authoritative.
 
 ## Secrets handling
 

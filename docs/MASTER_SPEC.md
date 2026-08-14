@@ -37,7 +37,7 @@ A local-first npm CLI tool that opens a web UI and orchestrates Claude Code, Cod
 - Reads and normalizes project context
 - Generates CLAUDE.md, AGENTS.md, and Copilot instructions
 - Creates Claude agents and Anthropic-style skills
-- Dispatches Claude Code, Codex, or Copilot CLI
+- Dispatches Claude Code, Codex, Copilot CLI, OpenCode, or Antigravity CLI
 - Uses hooks to control risky actions
 - Verifies diff, tests, logs, and acceptance criteria
 - Proposes skill updates from lessons learned
@@ -101,6 +101,19 @@ GitHub Copilot CLI:
 - .github/copilot-instructions.md
 - .github/instructions/*.instructions.md
 - prompt-injected selected skills
+
+OpenCode:
+- AGENTS.md
+- opencode.json
+- .opencode/plugins/vf-guard.ts
+- .opencode/skills
+
+Antigravity CLI (`agy`):
+- AGENTS.md
+- .agents/agents
+- .agents/skills
+- .agents/mcp_config.json
+- .agents/hooks.json
 ```
 
 ## Skill system

@@ -310,7 +310,7 @@ pulls, or falls back to host execution when sandbox preflight fails.
 ```bash
 vf hooks status               # show git path + live guardrail status
 vf hooks install              # install fail-closed pre-commit + pre-push gates
-vf hooks emit                 # write engine configs plus managed git hooks
+vf hooks emit                 # write engine configs (Claude/Codex/Copilot/OpenCode/Antigravity) + managed git hooks
 echo '{"event":"pre-command","command":"rm -rf /"}' | vf hook   # → {"decision":"block",...}
 ```
 

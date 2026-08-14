@@ -132,7 +132,7 @@ If no verified skill exists, the agent must:
 ## Context7 import
 
 Context7 is the only network-backed skill source. Imported skills land in the
-shared catalog (`~/.vibeflow/skills/`) and then sync to the three engine mirrors.
+shared catalog (`~/.vibeflow/skills/`) and then sync to the four engine mirrors.
 The shared catalog is machine-wide: skills promoted here are available to every project on the same machine.
 
 Pipeline (`src/skills/importer.ts`):
@@ -142,7 +142,7 @@ Pipeline (`src/skills/importer.ts`):
 2. validate             (Anthropic skill-creator standard via src/skills/validator.ts)
 3. promote              (cpSync into ~/.vibeflow/skills/<frontmatter.name>/)
 4. backup               (existing skill moved to ~/.vibeflow/skills/.backup/<ts>/<name>)
-5. sync mirrors         (vf skills sync writes .claude/ | .agents/ | .github/ mirrors)
+5. sync mirrors         (vf skills sync writes .claude/ | .agents/ | .github/ | .opencode/ mirrors)
 6. report               (errors / warnings / imported names)
 ```
 
