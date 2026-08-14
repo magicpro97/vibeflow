@@ -64,6 +64,18 @@ describe("help text", () => {
     expect(printCommandHelp("update-check")).toBe(0);
   });
 
+  test("superpowers has dry-default sync help", () => {
+    expect(hasCommandHelp("superpowers")).toBe(true);
+    expect(printCommandHelp("superpowers")).toBe(0);
+    const src = readFileSync(
+      join(import.meta.dir, "..", "src/commands/help-superpowers.ts"),
+      "utf8",
+    );
+    expect(src).toContain("vf superpowers sync");
+    expect(src).toContain("dry run by default");
+    expect(src).toContain("--yes");
+  });
+
   test("status has a per-command help block (covers the COMMAND_HELP.status arm, #613)", () => {
     expect(hasCommandHelp("status")).toBe(true);
     expect(printCommandHelp("status")).toBe(0);

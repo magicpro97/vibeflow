@@ -224,6 +224,23 @@ Registries are remote git repos containing skill definitions. The lock file
 (`.vibeflow/SKILL_REGISTRY.lock.json`) records each pinned commit so updates are
 deterministic. On update failure, the prior valid commit is preserved in the lock.
 
+### Install native Superpowers plugins
+
+```bash
+vf superpowers sync            # dry run: inspect installed engine CLIs and exact pinned actions
+vf superpowers sync --dry-run  # explicit read-only preview
+vf superpowers sync --yes      # install/take over through each engine's native plugin mechanism
+```
+
+The command requires one `superpowers` registry lock entry for
+`https://github.com/obra/superpowers.git`, a full 40-character commit OID, and a matching
+local registry-cache checkout. Engine eligibility is binary presence only; sync never runs a
+model probe. Claude, Codex, and OpenCode failures are isolated and reported separately.
+
+`--yes` persists `SUPERPOWERS_DISABLE_TELEMETRY=1` only when the engine has no explicit value,
+preserves unrelated config (including OpenCode JSON/JSONC semantics), installs the exact locked commit before removing foreign
+Superpowers selectors, and records a receipt only after native state verification succeeds.
+
 <!-- registry-release:start -->
 ### Registry releases
 

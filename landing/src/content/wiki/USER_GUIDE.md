@@ -209,6 +209,17 @@ vf skills sync           # regenerate engine mirrors from .vibeflow/skills/ (def
 vf skills verify-sync    # check each mirror has a SKILL.md for every canonical skill
 ```
 
+To pin and install Superpowers into installed native engine CLIs:
+
+```bash
+vf skills registry add obra/superpowers --ref <tag-or-commit> --yes
+vf superpowers sync            # read-only preview; no model probe or config write
+vf superpowers sync --yes      # exact locked commit via Claude/Codex/OpenCode native mechanisms
+```
+
+The apply step preserves unrelated engine config, disables optional Superpowers telemetry by
+default without overriding an explicit user value, and continues other engines when one fails.
+
 Example `vf skills resolve` output:
 
 ```text

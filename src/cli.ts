@@ -23,6 +23,7 @@ import {
   run,
   skills,
   status,
+  superpowers,
   tools,
   units,
   verify,
@@ -253,7 +254,9 @@ async function main(argv: string[]): Promise<number> {
     case "config":
       return config(positionals[0], positionals.slice(1), cwd(), flags);
     case "skills":
-      return skills(positionals[0], positionals.slice(1));
+      return skills(rest[0], rest.slice(1));
+    case "superpowers":
+      return superpowers(positionals[0], flags);
     case "tools":
       return tools(positionals[0], positionals.slice(1), flags);
     case "discover":
