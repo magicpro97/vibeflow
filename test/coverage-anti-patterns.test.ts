@@ -105,7 +105,11 @@ describe("coverage anti-patterns (test/ only)", () => {
     // with space/$/backtick survives) and a shell string (`sh -c` word-splits
     // and expands the same path, crashing node). A fakeSpawner cannot
     // reproduce the shell's tokenization, which is the entire point.
-    .filter((p) => !p.endsWith("hooks.test.ts"));
+    .filter((p) => !p.endsWith("hooks.test.ts"))
+    // The Superpowers cache-identity regression needs a real nested Git repo:
+    // a fake spawner cannot prove `rev-parse --show-toplevel` rejects a child
+    // directory that merely inherits its parent's HEAD.
+    .filter((p) => !p.endsWith("superpowers-sync-765.test.ts"));
 
   test("no test uses raw Bun.spawn or spawnSync without fakeSpawner", () => {
     for (const f of testFiles) {

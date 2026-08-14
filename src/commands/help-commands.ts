@@ -1,6 +1,7 @@
 import { c } from "./_shared.js";
-
+import { SUPERPOWERS_HELP } from "./help-superpowers.js";
 export const COMMAND_HELP: Record<string, () => string> = {
+  superpowers: SUPERPOWERS_HELP,
   ui: () => `${c.bold("vf ui")} ${c.dim("[--port <n>] [--host <addr>] [--no-open]")}
 Open the local web UI (intake wizard + workflow console). This is also the default
 command when you run \`vf\` with no arguments.
@@ -14,7 +15,6 @@ ${c.bold("Examples:")}
   vf
   vf ui --port 4173 --no-open
   vf ui --host 0.0.0.0 --port 7799`,
-
   doctor: () => `${c.bold("vf doctor")} ${c.dim("[--probe]")}
 Check required (node, git) and optional (bun, engine CLIs, docker) tools, plus
 per-engine readiness.

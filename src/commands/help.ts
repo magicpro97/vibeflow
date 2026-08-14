@@ -36,6 +36,7 @@ export function printHelp(): number {
     ${c.cyan("status")}             crash-recovery view of per-unit markers after a crash (--timeline <unit> | --json)
     ${c.cyan("config [sub]")}      memory <builtin|claude-mem|off|status> — read/toggle per-repo settings
     ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | verify-lock | import | semantic-filter | registry <add|list|update>
+    ${c.cyan("superpowers sync")}  install exact registry-locked Superpowers into installed engine CLIs (--yes)
     ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
     ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)

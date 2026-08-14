@@ -335,6 +335,24 @@ describe("cli help routing", () => {
     };
   };
 
+  test("nested skills flags reach their handlers (#765)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-cli-skills-flags-"));
+    try {
+      const registry = runCli(
+        ["skills", "registry", "add", "obra/superpowers", "--ref", "v1"],
+        dir,
+      );
+      expect(registry.code).toBe(0);
+      expect(registry.stdout).toContain("Dry-run");
+
+      const sync = runCli(["skills", "sync", "--mode", "invalid"], dir);
+      expect(sync.code).toBe(2);
+      expect(`${sync.stdout}\n${sync.stderr}`).toContain("--mode must be");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("`vf --help` prints help with no spurious Unknown command error", () => {
     const { code, stdout, stderr } = runCli(["--help"]);
     expect(code).toBe(0);
