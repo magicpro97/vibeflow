@@ -1,3 +1,4 @@
+// size-waiver: #771 — security: URL validation + lock file URL guard adds ~20 lines
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -199,6 +200,15 @@ export function isValidRegistryName(name: string): boolean {
   return /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(name);
 }
 
+/** Trust boundary: reject non-https URLs to prevent file:///, ssh://, etc. */
+function requireHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function spawnGit(
   args: string[],
   inject?: { spawnSync?: SpawnFn },
@@ -248,11 +258,7 @@ export function registryAdd(
     });
     return 2;
   }
-  // Trust boundary: only allow https:// URLs to prevent file:///, ssh://, and other scheme attacks
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:") throw new Error("non-https");
-  } catch {
+  if (!requireHttpsUrl(url)) {
     out("vf", c.red(`Invalid registry URL "${url}". Only https:// URLs are allowed.`), {
       level: "error",
     });
@@ -332,10 +338,7 @@ export function registryUpdate(
 
   // Trust boundary: validate lock file URLs before cloning
   for (const r of targets) {
-    try {
-      const parsed = new URL(r.url);
-      if (parsed.protocol !== "https:") throw new Error("non-https");
-    } catch {
+    if (!requireHttpsUrl(r.url)) {
       out("vf", c.red(`Registry "${r.name}" has non-https URL "${r.url}". Refusing to clone.`), {
         level: "error",
       });
