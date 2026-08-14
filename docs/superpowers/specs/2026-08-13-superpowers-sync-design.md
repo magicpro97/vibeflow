@@ -2,7 +2,7 @@
 
 Date: 2026-08-13
 Issue: #765 (Layer 3 of #762)
-Status: approved approach; implementation pending
+Status: implemented (PR #770)
 
 ## Decision
 

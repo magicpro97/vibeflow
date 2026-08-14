@@ -124,7 +124,7 @@ function rejectLossyJsonNumbers(raw: string): void {
     const token = raw.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/)?.[0];
     if (!token) continue;
     const numeric = Number(token);
-    if (!Number.isFinite(numeric) || (!/[.eE]/.test(token) && !Number.isSafeInteger(numeric)))
+    if (!Number.isFinite(numeric) || (Number.isInteger(numeric) && !Number.isSafeInteger(numeric)))
       throw new Error("JSON number cannot be rewritten losslessly");
     index += token.length - 1;
   }

@@ -15,7 +15,7 @@
 - `--yes` is explicit takeover consent for foreign Superpowers selectors.
 - Desired source is exactly one canonical `https://github.com/obra/superpowers.git` lock entry with a full 40-character lowercase OID and matching cache HEAD.
 - No shell interpolation; child operations use argv arrays, bounded timeout, captured output, and sanitized/bounded errors.
-- No plugin-loader reimplementation and no dependency addition.
+- No plugin-loader reimplementation and no new runtime dependency (`confbox` and `smol-toml` are bundled into `dist/cli.js`).
 - Preserve unrelated engine config; malformed config fails that engine without write.
 - Continue after per-engine failure; global lock/cache failures stop before mutation.
 - 100% changed-line coverage; docs and landing mirror stay identical where duplicated.

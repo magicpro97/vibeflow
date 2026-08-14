@@ -50,12 +50,14 @@ function harness(
       events.push(`write:${path}`);
       files.set(path, content);
     },
-    spawnSync: (command, args) => {
+    spawnSync: (command, args, opts) => {
       events.push(`spawn:${command} ${args.join(" ")}`);
+      spawnedEnv = (opts as Record<string, unknown>)?.env as Record<string, string> | undefined;
       return options.respond?.(command, args) ?? { status: 0, stdout: "", stderr: "" };
     },
   };
-  return { inject, events, files };
+  let spawnedEnv: Record<string, string> | undefined;
+  return { inject, events, files, getSpawnedEnv: () => spawnedEnv };
 }
 
 function receiptPath(): string {
@@ -332,6 +334,16 @@ describe("#765 Superpowers sync execution", () => {
       "already-current",
     ]);
     expect(h.events).toEqual(["spawn:claude plugin list --json", "spawn:codex plugin list --json"]);
+  });
+
+  test("child process env defaults telemetry but preserves explicit user override", () => {
+    const h = harness({
+      present: ["claude"],
+      env: { SUPERPOWERS_DISABLE_TELEMETRY: "0" },
+    });
+    syncSuperpowers("/repo", { yes: true }, h.inject);
+    const env = h.getSpawnedEnv();
+    expect(env?.SUPERPOWERS_DISABLE_TELEMETRY).toBe("0");
   });
 
   test("one engine failure is isolated and reported with bounded sanitized detail", () => {

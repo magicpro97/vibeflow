@@ -305,6 +305,12 @@ describe("#765 OpenCode config merge", () => {
     });
   });
 
+  test("rejects unsafe integers even in exponent notation", () => {
+    expect(() => mergeOpenCodeConfig(`{"n":9007199254740993e0,"plugin":[]}`, desired)).toThrow(
+      "JSON number cannot be rewritten losslessly",
+    );
+  });
+
   test("is a semantic no-op when desired spec is already the only managed spec", () => {
     const raw = JSON.stringify({ plugin: ["keep", desired] }, null, 4);
     expect(mergeOpenCodeConfig(raw, desired)).toEqual({ changed: false, content: raw });

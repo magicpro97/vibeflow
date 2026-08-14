@@ -321,7 +321,7 @@ export function syncSuperpowers(
   const platform = inject.platform ?? process.platform;
   const write = inject.writeFileSafe ?? nodeWriteFileSafe;
   const spawn = inject.spawnSync ?? (nodeSpawnSync as unknown as SpawnFn);
-  const childEnv = { ...filterEnv(env, {}, platform).env, [TELEMETRY_KEY]: "1" };
+  const childEnv = { [TELEMETRY_KEY]: "1", ...filterEnv(env, {}, platform).env };
   const receiptPath = join(home, ".vibeflow", "superpowers-sync.json");
   const read = (path: string) => (exists(path) ? readFile(path, "utf8") : undefined);
   const receipt = parseReceipt(read(receiptPath));
