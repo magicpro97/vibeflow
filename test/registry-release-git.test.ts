@@ -174,7 +174,7 @@ describe("registry release git adapter", () => {
       {
         command: "vf",
         args: ["verify"],
-        options: { cwd: CWD, encoding: "utf8", stdio: "pipe" },
+        options: { cwd: CWD, encoding: "utf8", stdio: "pipe", timeout: 120_000 },
       },
     ]);
   });

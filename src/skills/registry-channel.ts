@@ -1,3 +1,4 @@
+// size-waiver: #771 — security: URL validation + lock file URL guard adds ~20 lines waiver: #771 owner:magicpro97 expires:2027-12-31
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -199,6 +200,15 @@ export function isValidRegistryName(name: string): boolean {
   return /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(name);
 }
 
+/** Trust boundary: reject non-https URLs to prevent file:///, ssh://, etc. */
+function requireHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function spawnGit(
   args: string[],
   inject?: { spawnSync?: SpawnFn },
@@ -218,7 +228,10 @@ function spawnGit(
 }
 function planClone(url: string, cacheDir: string, ref: string): GitOp[] {
   return [
-    { cmd: "git", args: ["clone", "--filter=blob:none", "--no-checkout", url, cacheDir] },
+    {
+      cmd: "git",
+      args: ["clone", "--filter=blob:none", "--no-checkout", "--depth", "1", url, cacheDir],
+    },
     { cmd: "git", args: ["-C", cacheDir, "fetch", "origin", ref] },
   ];
 }
@@ -241,6 +254,12 @@ export function registryAdd(
 ): number {
   if (!isValidRegistryName(name)) {
     out("vf", c.red(`Invalid registry name "${name}". Use lowercase-hyphen/dot syntax.`), {
+      level: "error",
+    });
+    return 2;
+  }
+  if (!requireHttpsUrl(url)) {
+    out("vf", c.red(`Invalid registry URL "${url}". Only https:// URLs are allowed.`), {
       level: "error",
     });
     return 2;
@@ -315,6 +334,16 @@ export function registryUpdate(
   if (id && targets.length === 0) {
     out("vf", c.red(`Registry "${id}" not found in lock file.`), { level: "error" });
     return 1;
+  }
+
+  // Trust boundary: validate lock file URLs before cloning
+  for (const r of targets) {
+    if (!requireHttpsUrl(r.url)) {
+      out("vf", c.red(`Registry "${r.name}" has non-https URL "${r.url}". Refusing to clone.`), {
+        level: "error",
+      });
+      return 1;
+    }
   }
 
   if (targets.length === 0) {

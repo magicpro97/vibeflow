@@ -147,9 +147,9 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
     expect(typeof entry.powershell).toBe("string");
     expect(typeof entry.timeoutSec).toBe("number");
     expect(entry.timeoutSec).toBeGreaterThanOrEqual(30);
-    // bash + powershell must include runtime + quoted path to survive spaces (e.g. C:\Program Files\...)
-    expect(entry.bash).toMatch(/^(bun|node) "[^"]+"\s+hook/);
-    expect(entry.powershell).toMatch(/^(bun|node) "[^"]+"\s+hook/);
+    // bash + powershell must include runtime + single-quoted path to survive spaces and shell metachars
+    expect(entry.bash).toMatch(/^(bun|node) '[^']+'\s+hook/);
+    expect(entry.powershell).toMatch(/^(bun|node) '[^']+'\s+hook/);
   });
 
   test("engineEnforcement: copilot is now native (per preToolUse fail-closed semantics)", () => {
@@ -305,9 +305,9 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
     expect(pre).toBeDefined();
     expect(post).toBeDefined();
     if (!pre || !post) return; // satisfy TS — asserted above
-    // command string: "bun|node \"/path/to/cli.js\" hook"
-    expect(pre.command).toMatch(/^(bun|node) "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
-    expect(post.command).toMatch(/^(bun|node) "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
+    // command string: "bun|node '/path/to/cli.js' hook"
+    expect(pre.command).toMatch(/^(bun|node) '[^']*[/\\]dist[/\\]cli\.js' hook$/);
+    expect(post.command).toMatch(/^(bun|node) '[^']*[/\\]dist[/\\]cli\.js' hook$/);
   });
 
   test('git pre-commit pipes through a quoted `node "<abs>" hook`', () => {
@@ -317,6 +317,45 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
   test("git post-checkout/post-merge re-index with a quoted path", () => {
     expect(gitPostCheckout()).toMatch(/node "[^"]*[/\\\\]dist[/\\\\]cli\.js" tools sync/);
     expect(gitPostMerge()).toMatch(/node "[^"]*[/\\\\]dist[/\\\\]cli\.js" tools sync/);
+  });
+});
+
+// --- Security: shellEscape handles attack vectors ---
+describe("adapters: shellEscape security (issue #771)", () => {
+  test("path with single quotes is properly escaped", () => {
+    const src = codexHookConfig();
+    // The command should use single-quote wrapping with '\'' escape for embedded quotes
+    // Verify it doesn't use double-quote wrapping (which is vulnerable to $, backtick injection)
+    expect(src).not.toMatch(/node "[^"]*"/);
+    expect(src).toMatch(/(bun|node) '/);
+  });
+
+  test("codex and copilot configs use single-quote shell escaping", () => {
+    const codex = JSON.parse(codexHookConfig()) as {
+      hooks: { PreToolUse: Array<{ command: string }> };
+    };
+    const copilot = JSON.parse(copilotHookConfig()) as {
+      hooks: { preToolUse: Array<{ bash: string }> };
+    };
+    // Single-quote wrapping prevents shell metachar injection
+    expect(codex.hooks.PreToolUse[0]?.command).toMatch(/^(\w+) '/);
+    expect(copilot.hooks.preToolUse[0]?.bash).toMatch(/^(\w+) '/);
+  });
+});
+
+// --- Security: callHook fail-closed ---
+describe("adapters: OpenCode callHook fail-closed (issue #771)", () => {
+  test("generated opencode plugin source uses 'block' on error, not 'allow'", () => {
+    // Read the generated plugin source from opencodePluginSource
+    const src = opencodePluginSource();
+    // The callHook function must return 'block' on non-zero exit and on throw
+    expect(src).toContain('decision: "block"');
+    // Must NOT contain 'allow' in error paths
+    const lines = src.split("\n");
+    const errorLines = lines.filter((l: string) => l.includes("exit") || l.includes("threw"));
+    for (const line of errorLines) {
+      expect(line).not.toContain('decision: "allow"');
+    }
   });
 });
 

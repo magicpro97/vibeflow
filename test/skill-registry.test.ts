@@ -333,7 +333,15 @@ describe("registryAdd", () => {
     expect(code).toBe(0);
     const cacheDir = registryCacheDir(url);
     // Exact argv unchanged
-    expect(calls[0]?.args).toEqual(["clone", "--filter=blob:none", "--no-checkout", url, cacheDir]);
+    expect(calls[0]?.args).toEqual([
+      "clone",
+      "--filter=blob:none",
+      "--no-checkout",
+      "--depth",
+      "1",
+      url,
+      cacheDir,
+    ]);
     expect(calls[1]?.args).toEqual(["-C", cacheDir, "fetch", "origin", "v1.0"]);
     expect(calls[2]?.args).toEqual(["-C", cacheDir, "rev-parse", "FETCH_HEAD"]);
     expect(calls[3]?.args).toEqual(["-C", cacheDir, "checkout", "--detach", "a".repeat(40)]);
@@ -348,6 +356,52 @@ describe("registryAdd", () => {
     const repo = tmpRepo();
     const { spawn } = fakeGit();
     const code = registryAdd(repo, "https://x.com/s.git", "UPPERCASE", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
+  test("rejects non-https URL (file:// scheme)", () => {
+    const repo = tmpRepo();
+    const { calls, spawn } = fakeGit();
+    const code = registryAdd(repo, "file:///etc/passwd", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+    expect(calls).toEqual([]); // no git operations attempted
+  });
+
+  test("rejects non-https URL (ssh:// scheme)", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "ssh://git@evil.com/x.git", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
+  test("rejects non-https URL (http:// scheme)", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "http://x.com/s.git", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
+  test("accepts case-insensitive HTTPS://", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit({ stdout: `${"a".repeat(40)}\n` });
+    const code = registryAdd(repo, "HTTPS://github.com/x/skills.git", "ok-reg", "v1", {
+      spawnSync: spawn,
+      yes: true,
+    });
+    expect(code).toBe(0);
+  });
+
+  test("rejects malformed URL (no scheme)", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "not-a-url", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
+  test("rejects empty URL", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "", "evil", "v1", { spawnSync: spawn });
     expect(code).toBe(2);
   });
 
@@ -448,6 +502,18 @@ describe("registryList", () => {
 });
 
 describe("registryUpdate", () => {
+  test("rejects non-https URL in lock file", () => {
+    const repo = tmpRepo();
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeRegistryLock(repo, {
+      schemaVersion: 1,
+      registries: [{ name: "evil", url: "file:///etc/passwd", ref: "v1", commitOID: "aaa" }],
+    });
+    const { spawn } = fakeGit();
+    const code = registryUpdate(repo, undefined, { spawnSync: spawn });
+    expect(code).toBe(1);
+  });
+
   test("dry-run: prints planned ops, no git calls", () => {
     const repo = tmpRepo();
     mkdirSync(join(repo, ".vibeflow"), { recursive: true });

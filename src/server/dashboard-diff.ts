@@ -68,7 +68,7 @@ function safeByteTruncate(s: string, maxBytes: number): { result: string; trunca
 }
 
 function git(args: string[], repoPath: string): { status: number; stdout: string; stderr: string } {
-  const r = spawnSync("git", args, { cwd: repoPath, encoding: "utf8" });
+  const r = spawnSync("git", args, { cwd: repoPath, encoding: "utf8", timeout: 30_000 });
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
