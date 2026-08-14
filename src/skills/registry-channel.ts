@@ -249,7 +249,7 @@ export function registryAdd(
     return 2;
   }
   // Trust boundary: only allow https:// URLs to prevent file:///, ssh://, and other scheme attacks
-  if (!url.startsWith("https://")) {
+  if (!url.toLowerCase().startsWith("https://")) {
     out("vf", c.red(`Invalid registry URL "${url}". Only https:// URLs are allowed.`), {
       level: "error",
     });

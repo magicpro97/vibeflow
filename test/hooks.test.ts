@@ -320,6 +320,45 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
   });
 });
 
+// --- Security: shellEscape handles attack vectors ---
+describe("adapters: shellEscape security (issue #771)", () => {
+  test("path with single quotes is properly escaped", () => {
+    const src = codexHookConfig();
+    // The command should use single-quote wrapping with '\'' escape for embedded quotes
+    // Verify it doesn't use double-quote wrapping (which is vulnerable to $, backtick injection)
+    expect(src).not.toMatch(/node "[^"]*"/);
+    expect(src).toMatch(/(bun|node) '/);
+  });
+
+  test("codex and copilot configs use single-quote shell escaping", () => {
+    const codex = JSON.parse(codexHookConfig()) as {
+      hooks: { PreToolUse: Array<{ command: string }> };
+    };
+    const copilot = JSON.parse(copilotHookConfig()) as {
+      hooks: { preToolUse: Array<{ bash: string }> };
+    };
+    // Single-quote wrapping prevents shell metachar injection
+    expect(codex.hooks.PreToolUse[0]?.command).toMatch(/^(\w+) '/);
+    expect(copilot.hooks.preToolUse[0]?.bash).toMatch(/^(\w+) '/);
+  });
+});
+
+// --- Security: callHook fail-closed ---
+describe("adapters: OpenCode callHook fail-closed (issue #771)", () => {
+  test("generated opencode plugin source uses 'block' on error, not 'allow'", () => {
+    // Read the generated plugin source from opencodePluginSource
+    const src = opencodePluginSource();
+    // The callHook function must return 'block' on non-zero exit and on throw
+    expect(src).toContain('decision: "block"');
+    // Must NOT contain 'allow' in error paths
+    const lines = src.split("\n");
+    const errorLines = lines.filter((l: string) => l.includes("exit") || l.includes("threw"));
+    for (const line of errorLines) {
+      expect(line).not.toContain('decision: "allow"');
+    }
+  });
+});
+
 // --- Defect 5: git pre-commit fails CLOSED ---
 describe("adapters: git pre-commit fails closed (defect 5)", () => {
   test("no `|| true` fail-open, matches block AND require_approval, non-zero on empty", () => {

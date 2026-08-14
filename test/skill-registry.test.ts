@@ -359,6 +359,38 @@ describe("registryAdd", () => {
     expect(code).toBe(2);
   });
 
+  test("rejects non-https URL (file:// scheme)", () => {
+    const repo = tmpRepo();
+    const { calls, spawn } = fakeGit();
+    const code = registryAdd(repo, "file:///etc/passwd", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+    expect(calls).toEqual([]); // no git operations attempted
+  });
+
+  test("rejects non-https URL (ssh:// scheme)", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "ssh://git@evil.com/x.git", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
+  test("rejects non-https URL (http:// scheme)", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "http://x.com/s.git", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
+  test("accepts case-insensitive HTTPS://", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit({ stdout: `${"a".repeat(40)}\n` });
+    const code = registryAdd(repo, "HTTPS://github.com/x/skills.git", "ok-reg", "v1", {
+      spawnSync: spawn,
+      yes: true,
+    });
+    expect(code).toBe(0);
+  });
+
   test("rejects duplicate name", () => {
     const repo = tmpRepo();
     const lock: RegistryLock = {
