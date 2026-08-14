@@ -327,6 +327,16 @@ export function registryUpdate(
     return 1;
   }
 
+  // Trust boundary: validate lock file URLs before cloning
+  for (const r of targets) {
+    if (!r.url.toLowerCase().startsWith("https://")) {
+      out("vf", c.red(`Registry "${r.name}" has non-https URL "${r.url}". Refusing to clone.`), {
+        level: "error",
+      });
+      return 1;
+    }
+  }
+
   if (targets.length === 0) {
     out("vf", c.dim("No registries to update."));
     return 0;
