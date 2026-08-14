@@ -502,6 +502,18 @@ describe("registryList", () => {
 });
 
 describe("registryUpdate", () => {
+  test("rejects non-https URL in lock file", () => {
+    const repo = tmpRepo();
+    mkdirSync(join(repo, ".vibeflow"), { recursive: true });
+    writeRegistryLock(repo, {
+      schemaVersion: 1,
+      registries: [{ name: "evil", url: "file:///etc/passwd", ref: "v1", commitOID: "aaa" }],
+    });
+    const { spawn } = fakeGit();
+    const code = registryUpdate(repo, undefined, { spawnSync: spawn });
+    expect(code).toBe(1);
+  });
+
   test("dry-run: prints planned ops, no git calls", () => {
     const repo = tmpRepo();
     mkdirSync(join(repo, ".vibeflow"), { recursive: true });
