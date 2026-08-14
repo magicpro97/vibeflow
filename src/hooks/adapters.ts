@@ -257,7 +257,7 @@ function callHook(event: Record<string, unknown>): {
       timeout: 10_000,
     });
     if (r.status !== 0) {
-      return { decision: "allow", reasons: [\`vf hook exit \${r.status}\`] };
+      return { decision: "block", reasons: [\`vf hook exit \${r.status}\`] };
     }
     // The runner prints the JSON envelope on the first line and a free-form
     // "[hook] ..." log on the second line; parse only the first line so the
@@ -278,7 +278,7 @@ function callHook(event: Record<string, unknown>): {
       reasons: reason ? [reason] : [],
     };
   } catch (e) {
-    return { decision: "allow", reasons: [\`vf hook threw: \${(e as Error).message}\`] };
+    return { decision: "block", reasons: [\`vf hook threw: \${(e as Error).message}\`] };
   }
 }
 

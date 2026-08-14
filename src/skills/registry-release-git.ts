@@ -84,6 +84,7 @@ function defaultRun(childSpawnSync: GitReleaseSpawnSync = spawnSync): GitRelease
       cwd: options.cwd,
       encoding: "utf8",
       stdio: "pipe",
+      timeout: 120_000,
     });
     return {
       status: result.status ?? 1,
