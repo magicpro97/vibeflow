@@ -31,7 +31,7 @@ last_updated: 2026-08-13
 11. Agents debate high-risk decisions
 12. Orchestrator splits tasks into non-overlapping scopes
 13. Tool generates engine-specific instruction files
-14. User selects Claude Code, Codex, or Copilot CLI
+14. User selects Claude Code, Codex, Copilot CLI, OpenCode, or Antigravity CLI
 15. Tool dispatches selected engine
 16. Hooks validate commands, writes, diffs, and final output
 17. Tool shows logs, diffs, test results, risk report

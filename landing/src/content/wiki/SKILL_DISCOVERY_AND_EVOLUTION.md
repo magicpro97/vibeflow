@@ -49,7 +49,7 @@ Before designing or executing a task, the orchestrator checks:
 actually does (see `src/skills/registry.ts`):
 
 ```text
-1. Canonical local skills  → .vibeflow/skills/   (source of truth)
+1. Canonical local skills  → ~/.vibeflow/skills/  (shared, machine-wide)
 2. Mirror local skills     → .claude/skills/ | .agents/skills/ | .github/skills/
 3. Context7 HTTP API       → skills + fresh docs
 4. Anthropic official skills/plugins
@@ -63,14 +63,14 @@ actually does (see `src/skills/registry.ts`):
 Discovery sources (in order, see `src/skills/resolver.ts`):
 
 ```text
-1. .vibeflow/skills/                # canonical store
+1. ~/.vibeflow/skills/              # canonical store (shared, machine-wide)
 2. .claude/skills/                  # Claude mirror
 3. .agents/skills/                  # Codex / cross-tool mirror
 4. .github/skills/                  # Copilot mirror
 5. Context7 HTTP API                # approval-gated network
 ```
 
-`vf skills sync [--mode pointer|full]` regenerates the three mirrors from the
+`vf skills sync [--mode pointer|full]` regenerates the four mirrors from the
 canonical store. `pointer` mode (default) writes a stub `SKILL.md` per skill
 pointing at the canonical file; `full` mode copies the whole tree. After any
 canonical skill change, re-run `vf skills sync`; `vf skills verify-sync` reports

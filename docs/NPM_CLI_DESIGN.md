@@ -38,7 +38,7 @@ vf
 ```text
 1. Check Node.js version
 2. Check Git
-3. Check optional tools: Claude Code, Codex CLI, Copilot CLI, Docker, GitHub CLI
+3. Check optional tools: Claude Code, Codex CLI, Copilot CLI, OpenCode, Antigravity CLI, Docker, GitHub CLI
 4. Ask before installing missing optional tools
 5. Start local web server on 127.0.0.1
 6. Open browser automatically
@@ -85,9 +85,10 @@ sub-trees). The single binary entry is `src/cli.ts`, bundled to `dist/cli.js`.
 
 ## Example package.json
 
-The CLI ships with **zero runtime dependencies** — it runs on the Node/Bun standard
-library only (e.g. the built-in `fetch` for Context7, `node:child_process` `spawn` for git
-and engine CLIs). Everything below is dev-only tooling.
+The CLI ships with **one runtime dependency** (`proper-lockfile`, for file locking) —
+otherwise it runs on the Node/Bun standard library only (e.g. the built-in `fetch` for
+Context7, `node:child_process` `spawn` for git and engine CLIs). Everything below is
+dev-only tooling.
 
 ```json
 {
@@ -115,11 +116,11 @@ and engine CLIs). Everything below is dev-only tooling.
 
 ## Dependency installation policy
 
-### No runtime dependencies
+### One runtime dependency
 
-The published CLI installs nothing beyond itself — it uses only the Node/Bun stdlib plus
-`git` (invoked via `spawn`). There are no `commander`/`execa`/`fastify`/`open`/`ws`/`zod`
-runtime deps to pull in.
+The published CLI installs one runtime dependency (`proper-lockfile`) beyond itself —
+otherwise it uses only the Node/Bun stdlib plus `git` (invoked via `spawn`). There are no
+`commander`/`execa`/`fastify`/`open`/`ws`/`zod` runtime deps to pull in.
 
 ### Ask before installing
 
@@ -163,8 +164,8 @@ Each skill must follow the Anthropic `skill-creator` standard: a directory with
 `scripts/`, `references/`, and `assets/` folders. The reference standard lives
 at `src/skills/ANTHROPIC_SKILL_STANDARD.md` and is the only validator in
 `src/skills/validator.ts`; an imported skill that fails validation is never
-promoted. The canonical store is `.vibeflow/skills/<name>/`; the three engine
-mirrors (`.claude/skills/`, `.agents/skills/`, `.github/skills/`) are regenerated
+promoted. The canonical store is `.vibeflow/skills/<name>/`; the four engine
+mirrors (`.claude/skills/`, `.agents/skills/`, `.github/skills/`, `.opencode/skills/`) are regenerated
 by `vf skills sync` (see `src/skills/sync.ts`, `pointer` | `full` mode).
 
 ---

@@ -22,7 +22,8 @@ last_updated: 2026-06-24
 The system uses Anthropic-style skills. A skill is a directory containing `SKILL.md` and optional scripts, templates, references, and examples.
 
 ```text
-.vibeflow/skills/        # canonical skill store (source of truth)
+~/.vibeflow/skills/        # shared skill catalog (machine-wide, source of truth)
+.vibeflow/skills/          # project-local override/shadow layer (resolved first)
   <name>/
     SKILL.md             # required: frontmatter + instructions
     references/          # optional: linked reference docs
@@ -301,6 +302,26 @@ evidence, and a PR link for opened targets — plus a "Copy approval command" bu
 (`vf skills registry release approve <proposal-id> --yes`). There is NO approve/execute/push control
 in the UI; approval happens only in the CLI.
 <!-- registry-release:end -->
+
+## Skill curator (findings → proposals)
+
+The curator subsystem turns skill-catalog findings into reviewable work:
+
+- **`vf skills curator scan [--scope=local|repo]`** — scans the skill catalog for
+  findings (duplicate patterns, stale anchors, scope violations, policy gaps).
+  `local` (default) is private/offline; `repo` anchors the scan to a clean HEAD so
+  findings are reproducible in CI.
+- **`--sync` / `--yes`** — with `--scope=repo`, previews then pushes shared
+  finding markers via Git notes (`refs/notes/vibeflow-curator`) so multiple
+  machines share one findings ledger.
+- **Proposals** — findings turn into configurable draft issues and PR proposals
+  (`vf skills curator issue [--dry-run]`, `vf skills curator pr [--dry-run]`).
+- **CI** — a scheduled curator report workflow runs in CI with issue
+  deduplication (`.github/workflows/skill-curator.yml`).
+- **UI** — the web UI exposes curator settings, findings, and a registry-update
+  preview under Settings.
+- **Domain facts** — `vf skills impact` lists affected skills; the UI shows a
+  read-only domain-facts impact view.
 
 ## Learning loop — turning runs into skills
 

@@ -70,7 +70,7 @@ Discovery sources (in order, see `src/skills/resolver.ts`):
 5. Context7 HTTP API                # approval-gated network
 ```
 
-`vf skills sync [--mode pointer|full]` regenerates the three mirrors from the
+`vf skills sync [--mode pointer|full]` regenerates the four mirrors from the
 canonical store. `pointer` mode (default) writes a stub `SKILL.md` per skill
 pointing at the canonical file; `full` mode copies the whole tree. After any
 canonical skill change, re-run `vf skills sync`; `vf skills verify-sync` reports

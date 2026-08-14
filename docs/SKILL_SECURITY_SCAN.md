@@ -1,3 +1,10 @@
+---
+title: Skill Security Scan
+description: Optional static security scan gate that runs before a local skill is promoted to verified via vf skills verify.
+category: explanation
+last_updated: 2026-07-22
+---
+
 # Skill Security Scan (optional)
 
 Static security scan gate that runs:

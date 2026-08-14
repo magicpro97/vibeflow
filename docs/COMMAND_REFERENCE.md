@@ -289,7 +289,8 @@ missing candidates, and install failure preserve a skill gap and do not cancel a
 dispatch. Browser decisions only resolve the waiting run; no direct browser install API exists.
 
 The canonical store is `.vibeflow/skills/<name>/` (one `SKILL.md` plus optional
-`scripts/`, `references/`, `assets/`). The four engine mirrors
+`scripts/`, `references/`, `assets/`), layered on top of the shared machine-wide
+catalog at `~/.vibeflow/skills/`. The four engine mirrors
 (`.claude/skills/`, `.agents/skills/`, `.github/skills/`, `.opencode/skills/`) are kept in sync by
 `src/skills/sync.ts`: `pointer` mode writes a stub `SKILL.md` that points at the
 canonical file (default; cheap, no duplication); `full` mode copies the whole skill

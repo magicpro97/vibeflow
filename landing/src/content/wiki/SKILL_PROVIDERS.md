@@ -132,16 +132,17 @@ If no verified skill exists, the agent must:
 ## Context7 import
 
 Context7 is the only network-backed skill source. Imported skills land in the
-canonical store (`.vibeflow/skills/`) and then sync to the three engine mirrors.
+shared catalog (`~/.vibeflow/skills/`) and then sync to the four engine mirrors.
+The shared catalog is machine-wide: skills promoted here are available to every project on the same machine.
 
 Pipeline (`src/skills/importer.ts`):
 
 ```text
 1. fetch to a temp dir  (Context7 search → skill bundle)
 2. validate             (Anthropic skill-creator standard via src/skills/validator.ts)
-3. promote              (cpSync into .vibeflow/skills/<frontmatter.name>/)
-4. backup               (existing skill moved to .vibeflow/skills/.backup/<ts>/<name>)
-5. sync mirrors         (vf skills sync writes .claude/ | .agents/ | .github/ mirrors)
+3. promote              (cpSync into ~/.vibeflow/skills/<frontmatter.name>/)
+4. backup               (existing skill moved to ~/.vibeflow/skills/.backup/<ts>/<name>)
+5. sync mirrors         (vf skills sync writes .claude/ | .agents/ | .github/ | .opencode/ mirrors)
 6. report               (errors / warnings / imported names)
 ```
 
@@ -155,7 +156,24 @@ vf skills import context7:<query>       # fetch from Context7, then run the same
 
 A skill that fails validation is never promoted; errors and warnings are
 returned to the caller. Re-importing an existing name creates a timestamped
-backup under `.vibeflow/skills/.backup/` before overwriting.
+backup under `~/.vibeflow/skills/.backup/` before overwriting.
+
+## Non-TTY auth observability
+
+When `vf init` runs non-interactively (CI, cron, `--autopilot`), the ctx7 auth
+check cannot prompt for device OAuth. In this case the init prints a yellow
+warning and falls back to the HTTP-only discovery path (`runFindSkillsFallback`).
+
+The auth decision is persisted to `.vibeflow/ai-context/ctx7-auth-status.json`
+so it survives past the init run. Running `vf doctor` reads this file and prints
+the current ctx7 auth state — e.g.:
+
+```text
+ctx7: unauthenticated — using HTTP fallback (rate-limited, no direct install)
+```
+
+This lets operators confirm whether a given init run used the full ctx7 CLI
+install path or the degraded HTTP-only discovery.
 
 ## npm packages are not skills by default
 

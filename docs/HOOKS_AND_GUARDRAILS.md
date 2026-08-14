@@ -21,7 +21,7 @@ last_updated: 2026-06-24
 
 ## Purpose
 
-Hooks provide a common guardrail and automation layer across Claude Code, Codex, and GitHub Copilot CLI.
+Hooks provide a common guardrail and automation layer across Claude Code, Codex, GitHub Copilot CLI, OpenCode, and Antigravity CLI.
 
 Hooks should not contain the main reasoning logic. They should enforce safety, validate outputs, collect logs, and reduce risky behavior.
 
@@ -30,7 +30,7 @@ Hooks should not contain the main reasoning logic. They should enforce safety, v
 There is one shared decision engine behind a single CLI entrypoint — `vf hook` — and
 per-engine native config files that all delegate to it. `vf hook` reads a JSON event on
 stdin, scores its risk, and prints an `allow | warn | require_approval | block` decision
-(see `src/hooks/runner.ts`). One source of truth, three engines plus git.
+(see `src/hooks/runner.ts`). One source of truth, five engines plus git.
 
 `vf hooks emit` writes the per-engine native config, each routing the engine's
 native hook events to `vf hook`:
@@ -39,8 +39,12 @@ native hook events to `vf hook`:
 .claude/settings.json        → Claude PreToolUse/PostToolUse/Stop hooks → `vf hook` (repo)
 ~/.codex/hooks.json          → Codex PreToolUse/PostToolUse → `vf hook` (global)
 .github/hooks/copilot.json   → Copilot preToolUse (fail-closed) + postToolUse → `vf hook` (repo)
+.opencode/plugins/vf-guard.ts → OpenCode `tool.execute.before` plugin (throws to block) → `vf hook` (repo)
+.agents/hooks.json           → Antigravity PreToolUse/PostToolUse → `vf hook --antigravity` (repo; named-key merge)
 .githooks/pre-commit         → shell hook routing staged files through `vf hook` (repo)
 .githooks/pre-push           → current-HEAD verify + local review-evidence gate (repo)
+.githooks/post-checkout      → shell hook (repo)
+.githooks/post-merge         → shell hook (repo)
 ```
 
 These are each engine's own native configuration format (not VibeFlow-invented files), so

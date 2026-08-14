@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>The local-first orchestrator for AI coding agents.</strong><br>
-  Drive Claude Code, Codex & GitHub Copilot CLI with a confidence gate, source protection, and verified completion.
+  Drive Claude Code, Codex, GitHub Copilot CLI, OpenCode & Antigravity CLI with a confidence gate, source protection, and verified completion.
 </p>
 
 <p align="center">
@@ -63,18 +63,20 @@ npm install -g @magicpro97/vibeflow # or install globally, then use `vf`
 
 ```bash
 vf                # open the local web UI — intake wizard + live dashboard
-vf doctor         # check required and optional tools
-vf init           # scan repo + generate canonical context + engine files (--engine, --interactive, --dry-run)
-vf run claude     # dispatch Claude Code (codex | copilot; --yes to launch)
+vf doctor         # check required and optional tools (--probe for a live engine round-trip)
+vf init           # scan repo + generate canonical context + engine files (--engine, --no-ask, --dry-run)
+vf run claude     # dispatch one engine: claude | codex | copilot | opencode | antigravity (--yes to launch)
+vf ask src/x.ts:10-20 "what does this do?"   # inline code Q&A (--engine, --resume)
 vf orchestrate    # plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
 vf units status   # work-unit board: status, gates, owner, confidence
-vf skills resolve # demand-driven skill needs (list | search <term> | resolve)
+vf skills list    # skills: list | search | resolve | sync | draft | crystallize | curator scan | registry
 vf tools status   # optional code-nav tools (status | enable | disable | install <tool>)
 vf discover docs <lib> --yes   # Context7 docs/skills lookup (network requires approval)
 vf verify         # typecheck / lint / test + confidence / evidence / scope gates
-vf hooks install  # wire fail-closed pre-commit + pre-push gates (core.hooksPath → .githooks)
-vf workflow delete|import  # manage/combine workflows
-vf hook            # evaluate a JSON hook event from stdin (for engine guardrails)
+vf hooks emit     # write per-engine hook configs (--yes; `install` wires core.hooksPath)
+vf eval           # passive success-rate gate over dogfood telemetry (--min-pass-rate)
+vf pr merge-when-green   # poll CI and merge on green (queue + auto-merge)
+vf state brief    # durable cross-session coordinator brief
 ```
 
 The web UI is where you **initialize a workflow**: fill in goal, engines, doc/task sources,
@@ -84,8 +86,8 @@ engine files) and **Write dispatch prompt** for the chosen engine. Prefer the te
 
 ## Using VibeFlow as a skill
 
-`vf init` seeds a `vf` skill into your repo and syncs it to Claude Code, Codex, and GitHub
-Copilot — one cross-engine skill, no per-tool wiring.
+`vf init` seeds a `vf` skill into your repo and syncs it to Claude Code, Codex, GitHub
+Copilot, OpenCode, and Antigravity — one cross-engine skill, no per-tool wiring.
 
 ```bash
 npx @magicpro97/vibeflow init   # seed the `vf` skill + sync to every engine
@@ -95,7 +97,7 @@ vf skills resolve               # inspect / search / resolve demand-driven skill
 Activate it inside any supported CLI tool:
 
 - Type **`<your task> + vf`** in a prompt to pull the VibeFlow workflow into the request.
-- Type **`/vf`** in a CLI tool (Claude Code / Codex / Copilot) to run the skill directly.
+- Type **`/vf`** in a CLI tool (Claude Code / Codex / Copilot / OpenCode) to run the skill directly.
 - Run **`/vf`** with no args and it grills you toward a spec from the chat context.
 
 See the [Skills system](https://vibeflow-landing.web.app/wiki/skills_system) wiki page for the
@@ -103,7 +105,7 @@ full reference.
 
 ## Develop
 
-Built with **Bun** + **TypeScript**, zero runtime dependencies (Node stdlib only, so the
+Built with **Bun** + **TypeScript**, one runtime dependency (`proper-lockfile` for file locking; otherwise Node stdlib only, so the
 published CLI runs anywhere `node` does). The web UI applies the `taste-skill` design read
 with a small inline motion layer (no third-party CDN script, since the page is same-origin
 with the write API).
@@ -136,7 +138,7 @@ Plan / Debate / Task Split
   ↓
 Tool-specific adapter generation
   ↓
-Claude Code / Codex / Copilot CLI execution
+Claude Code / Codex / Copilot / OpenCode / Antigravity CLI execution
   ↓
 Diff / log / test verification
   ↓
@@ -146,9 +148,10 @@ Skill evolution proposal
 ## Main goals
 
 - Provide one npm command to start a local web UI.
-- Support Claude Code, Codex CLI, and GitHub Copilot CLI.
+- Support Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI.
 - Generate `CLAUDE.md`, `AGENTS.md`, and Copilot instruction files automatically.
 - Use Anthropic-style Skills based on `SKILL.md`.
+- Manage a skill registry (git-backed, pinned) plus a curator that turns findings into reviewable proposals.
 - Search trusted external skills/docs when local knowledge may be stale.
 - Read project documents from sources such as GitHub, Jira, Google Drive, Confluence, Notion, local folders, and others.
 - Process files such as Markdown, DOCX, XLSX, PPTX, PDF, OpenAPI, Postman, Mermaid, and Draw.io.
@@ -165,22 +168,22 @@ earns its place; the rest is generated on demand.
 ```text
 /
   package.json tsconfig.json biome.json   # toolchain config
-  src/        cli.ts core.ts commands.ts adapters.ts server.ts
-              scanner.ts dispatch.ts gates.ts frontmatter.ts
-              ai-init.ts journal.ts preflight.ts settings.ts ui.ts
-              server.html
-              skills/{registry,resolver,maintainer}.ts
-              hooks/{runner,risk,adapters,selftest}.ts
-              orchestrator/{investigate,plan,run,agent,debate,marker}.ts
-              discovery/context7.ts
-              tools/{codegraph,lsp,index}.ts
-              workflow/{lifecycle,merge}.ts
-              safety/{checkpoint,quota}.ts
-              assets/
-  test/       23+ test files
+  src/
+    cli.ts core.ts commands.ts           # entry + command router
+    commands/                             # one file per `vf` subcommand
+    server/  server.ts                    # local web UI + API routes
+    skills/                               # registry, resolver, sync, curator, validator
+    hooks/                                # runner, risk, adapters, apply-gate
+    orchestrator/                         # investigate, plan, run, agent, debate, marker
+    plan-review/  eval/  logbus/  memory/ # review, telemetry, durable stream, recall
+    dispatch/  preflight/  safety/        # engine dispatch, readiness, checkpoint/quota
+    tools/  discovery/  workflow/         # codegraph/lsp, context7, lifecycle/merge
+    ui/                                   # Vue web UI (workspace)
+  test/       190+ test files
   docs/       *.md (the specification this tool implements)
-  .githooks/  pre-commit (format-fix → typecheck → lint → test → build)
-  .github/    copilot-instructions.md, workflows/{ci,release}.yml
+  landing/    Astro marketing site + wiki (deployed to Firebase)
+  .githooks/  pre-commit + pre-push (format-fix → typecheck → lint → test → build)
+  .github/    copilot-instructions.md, workflows/{ci,release,deploy-landing,skill-curator}.yml
 ```
 
 When run against a target project, `vf init` generates only what that engine/task needs
@@ -188,7 +191,7 @@ When run against a target project, `vf init` generates only what that engine/tas
 
 ```text
 CLAUDE.md                              # Claude Code
-AGENTS.md                              # Codex + Copilot
+AGENTS.md                              # Codex + Copilot + OpenCode + Antigravity
 .github/copilot-instructions.md        # Copilot
 .vibeflow/PROJECT_CONTEXT.md REQUIREMENTS.md TASK_CONTEXT.md
 .vibeflow/WORKFLOW_POLICY.md SKILL_INDEX.md WORKFLOW_STATE.json

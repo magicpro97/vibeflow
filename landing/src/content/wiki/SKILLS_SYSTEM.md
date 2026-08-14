@@ -7,8 +7,6 @@ last_updated: 2026-06-24
 
 # Skills System
 
-![VibeFlow skills flow — canonical store synced to engine mirrors](/diagrams/skills-flow.svg)
-
 ## Contents
 
 - [Skill Standard](#skill-standard)
@@ -24,7 +22,8 @@ last_updated: 2026-06-24
 The system uses Anthropic-style skills. A skill is a directory containing `SKILL.md` and optional scripts, templates, references, and examples.
 
 ```text
-.vibeflow/skills/        # canonical skill store (source of truth)
+~/.vibeflow/skills/        # shared skill catalog (machine-wide, source of truth)
+.vibeflow/skills/          # project-local override/shadow layer (resolved first)
   <name>/
     SKILL.md             # required: frontmatter + instructions
     references/          # optional: linked reference docs
@@ -39,6 +38,7 @@ Mirrors (regenerated from the canonical store by `vf skills sync`, see
 .claude/skills/          # Claude mirror (reads SKILL.md directly)
 .agents/skills/          # Codex / cross-tool mirror
 .github/skills/          # Copilot mirror
+.opencode/skills/        # OpenCode mirror
 ```
 
 `SKILL.md` must contain YAML frontmatter and follow the Anthropic `skill-creator`
@@ -99,6 +99,58 @@ status: verified
 
 Instructions...
 ```
+
+### `scope: common | organization | project | adapter` (#655)
+
+The optional `scope` field classifies how reusable a skill is:
+
+- `common` (default when absent) — generic, applies to any project (e.g. "xlsx reader").
+- `organization` — team/org conventions (e.g. "deploy to our staging env").
+- `project` — repo-specific conventions. Contains hardcoded paths, branch names, or project IDs.
+  MUST set `project.id` (e.g. `project.id: my-org/my-repo`).
+- `adapter` — tool-specific shim (e.g. a MCP wrapper for a CLI).
+
+`project.id` is required when `scope: project | adapter`. `extends` declares
+skill names this skill inherits from (a flat list).
+
+Security boundary: `vf skills publish` rejects `scope: project` skills targeting
+a `common` registry channel, and detects hardcoded absolute paths (`/Users/…`,
+`C:\Users\…`) in common-scoped content.
+
+```yaml
+scope: project
+project.id: my-org/my-repo
+extends: [common-test-runner]
+```
+
+### Adapter pattern (`extends:` — #656)
+
+Adapter-scoped skills can declare `extends: [<common-skill>@<version>]` to
+inherit and override a base skill without duplicating its content.
+
+**Resolution** (runs in `discoverSkills`):
+
+1. Base skill loaded first from the same pool.
+2. Frontmatter: adapter fields shallow-merge on top of base (adapter wins).
+3. Body: H1/H2 sections from the adapter replace matching sections in the base.
+   Sections not present in the base are appended. Non-heading content (text
+   before the first heading) is replaced entirely.
+4. Adapter's `dir`/`path` remain unchanged → base skill source is never
+   modified.
+5. `resolvedBody` is set on the Skill object with the merged result.
+
+**Version pinning:**
+
+- `extends: [common-test-runner@1.2.3]` — pins exact version. Warnings fire
+  when installed base version differs.
+- `extends: [common-test-runner]` — no pin. A nudge warning suggests adding
+  `@<version>` when the base declares one.
+
+**Missing base:** produces an actionable warning; adapter body is used as-is.
+**Invalid extends format:** produces a warning and the entry is skipped.
+
+Adapters are transparent to consumers: the merged body is what agents see,
+but the adapter file (`SKILL.md`) still holds only the delta.
 
 ### `type: repo | knowledge` (always-on project law)
 
@@ -250,6 +302,26 @@ evidence, and a PR link for opened targets — plus a "Copy approval command" bu
 (`vf skills registry release approve <proposal-id> --yes`). There is NO approve/execute/push control
 in the UI; approval happens only in the CLI.
 <!-- registry-release:end -->
+
+## Skill curator (findings → proposals)
+
+The curator subsystem turns skill-catalog findings into reviewable work:
+
+- **`vf skills curator scan [--scope=local|repo]`** — scans the skill catalog for
+  findings (duplicate patterns, stale anchors, scope violations, policy gaps).
+  `local` (default) is private/offline; `repo` anchors the scan to a clean HEAD so
+  findings are reproducible in CI.
+- **`--sync` / `--yes`** — with `--scope=repo`, previews then pushes shared
+  finding markers via Git notes (`refs/notes/vibeflow-curator`) so multiple
+  machines share one findings ledger.
+- **Proposals** — findings turn into configurable draft issues and PR proposals
+  (`vf skills curator issue [--dry-run]`, `vf skills curator pr [--dry-run]`).
+- **CI** — a scheduled curator report workflow runs in CI with issue
+  deduplication (`.github/workflows/skill-curator.yml`).
+- **UI** — the web UI exposes curator settings, findings, and a registry-update
+  preview under Settings.
+- **Domain facts** — `vf skills impact` lists affected skills; the UI shows a
+  read-only domain-facts impact view.
 
 ## Learning loop — turning runs into skills
 

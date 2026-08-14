@@ -7,7 +7,7 @@ const npmUrl = 'https://www.npmjs.com/package/@magicpro97/vibeflow';
 const features = [
   {
     title: 'Multi-engine, out of the box',
-    body: 'Drive Claude Code, OpenAI Codex CLI, and GitHub Copilot CLI from one orchestrator with shared context and instruction files generated per engine.',
+    body: 'Drive Claude Code, OpenAI Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI from one orchestrator with shared context and instruction files generated per engine.',
   },
   {
     title: 'Source protection',
@@ -29,6 +29,14 @@ const features = [
     title: 'Skills & code-nav tools',
     body: 'Capability-matched skills plus optional codegraph and LSP navigation, wired as MCP servers with a codegraph > lsp > native priority ladder.',
   },
+  {
+    title: 'Skill curator & registry',
+    body: 'A git-backed skill registry with pinned commits, plus a curator that scans the catalog, shares findings via Git notes, and drafts reviewable issue/PR proposals.',
+  },
+  {
+    title: 'Review-evidence gates',
+    body: 'Commit-anchored self-review evidence, CI blocks on unresolved review threads, and skill-acquisition approval before anything ships.',
+  },
 ];
 
 const steps = [
@@ -41,17 +49,17 @@ const steps = [
 
 <Layout
   title="VibeFlow — Orchestrate AI coding engines with guardrails"
-  description="Local-first npm CLI that orchestrates Claude Code, Codex, and GitHub Copilot CLI with engine preflight, git source protection, work-unit orchestration, hooks, and verification."
+  description="Local-first npm CLI that orchestrates Claude Code, Codex, GitHub Copilot CLI, OpenCode, and Antigravity CLI with engine preflight, git source protection, work-unit orchestration, hooks, and verification."
 >
   <main id="main">
     <!-- Hero -->
     <section class="hero container">
-      <p class="eyebrow">Local-first · Zero runtime dependencies · MIT</p>
+      <p class="eyebrow">Local-first · MIT</p>
       <h1>Orchestrate AI coding engines<br /><span class="grad">with guardrails.</span></h1>
       <p class="lede">
-        VibeFlow is a local-first CLI and web UI that drives Claude Code, Codex, and GitHub
-        Copilot CLI as an orchestrator — with engine preflight, git source protection, work-unit
-        orchestration, and verification built in.
+        VibeFlow is a local-first CLI and web UI that drives Claude Code, Codex, GitHub
+        Copilot CLI, OpenCode, and Antigravity CLI as an orchestrator — with engine preflight,
+        git source protection, work-unit orchestration, and verification built in.
       </p>
 
       <div class="install">
@@ -121,7 +129,7 @@ const steps = [
       <h2 id="skill-h" class="section-h">Use VibeFlow as a skill</h2>
       <p class="lede" style="margin-bottom: 1.5rem;">
         <code class="step-cmd">vf init</code> seeds a <code class="step-cmd">vf</code> skill into your
-        repo and syncs it to Claude Code, Codex, and GitHub Copilot — one cross-engine skill, no
+        repo and syncs it to Claude Code, Codex, GitHub Copilot, OpenCode, and Antigravity — one cross-engine skill, no
         per-tool wiring. Activate it by typing <code class="step-cmd">&lt;your task&gt; + vf</code> in a
         prompt, or <code class="step-cmd">/vf</code> in a CLI tool. Run <code class="step-cmd">/vf</code>
         with no args and it grills you toward a spec from the chat context.
@@ -129,10 +137,10 @@ const steps = [
       <div class="terminal" role="img" aria-label="Terminal showing npx @magicpro97/vibeflow init and the /vf skill command">
         <div class="term-bar"><span></span><span></span><span></span></div>
         <pre><code><span class="prompt">$</span> npx @magicpro97/vibeflow init
-<span class="dim">Seeding the `vf` skill → .claude / .codex / copilot…</span>
+<span class="dim">Seeding the `vf` skill → .claude / .codex / copilot / .opencode / .agents…</span>
   <span class="ok">✓</span> vf skill written and synced to every engine
 
-<span class="dim"># then, inside Claude Code / Codex / Copilot:</span>
+<span class="dim"># then, inside Claude Code / Codex / Copilot / OpenCode:</span>
 <span class="prompt">&gt;</span> Refactor the auth middleware + vf
 <span class="prompt">&gt;</span> /vf            <span class="dim"># no args → grills you toward a spec</span></code></pre>
       </div>
@@ -154,6 +162,8 @@ const steps = [
   <span class="ok">✓</span> claude
   <span class="warn">•</span> codex <span class="dim">(optional)</span>
   <span class="ok">✓</span> copilot
+  <span class="warn">•</span> opencode <span class="dim">(optional)</span>
+  <span class="warn">•</span> antigravity <span class="dim">(optional)</span>
 
   git repo: <span class="ok">yes</span>
 
