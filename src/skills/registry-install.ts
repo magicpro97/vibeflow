@@ -262,7 +262,7 @@ export function registryInstall(
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const backup = join(catalog, ".backup", ts, fmName);
     mkdirSync(dirname(backup), { recursive: true });
-    _cpSync(dstDir, backup, { recursive: true });
+    _cpSync(dstDir, backup, { recursive: true, dereference: false });
     rmSync(dstDir, { recursive: true, force: true });
     out("vf", c.dim(`Backed up "${fmName}" → .backup/${ts}/`));
   } else if (existing && onCollision === "rename") {
@@ -273,7 +273,7 @@ export function registryInstall(
 
     // Copy skill dir to new name
     const renamedDst = join(catalog, slug);
-    _cpSync(skillDir, renamedDst, { recursive: true });
+    _cpSync(skillDir, renamedDst, { recursive: true, dereference: false });
 
     // Rewrite SKILL.md name: frontmatter
     const newFmText = fmText.replace(/^name:\s*.+$/m, `name: ${slug}`);
@@ -293,7 +293,7 @@ export function registryInstall(
   }
 
   if (!existing || onCollision !== "rename") {
-    _cpSync(skillDir, join(catalog, finalName), { recursive: true });
+    _cpSync(skillDir, join(catalog, finalName), { recursive: true, dereference: false });
   }
 
   const finalDir = join(catalog, finalName);

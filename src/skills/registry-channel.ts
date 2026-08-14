@@ -218,7 +218,10 @@ function spawnGit(
 }
 function planClone(url: string, cacheDir: string, ref: string): GitOp[] {
   return [
-    { cmd: "git", args: ["clone", "--filter=blob:none", "--no-checkout", url, cacheDir] },
+    {
+      cmd: "git",
+      args: ["clone", "--filter=blob:none", "--no-checkout", "--depth", "1", url, cacheDir],
+    },
     { cmd: "git", args: ["-C", cacheDir, "fetch", "origin", ref] },
   ];
 }
@@ -241,6 +244,13 @@ export function registryAdd(
 ): number {
   if (!isValidRegistryName(name)) {
     out("vf", c.red(`Invalid registry name "${name}". Use lowercase-hyphen/dot syntax.`), {
+      level: "error",
+    });
+    return 2;
+  }
+  // Trust boundary: only allow https:// URLs to prevent file:///, ssh://, and other scheme attacks
+  if (!url.startsWith("https://")) {
+    out("vf", c.red(`Invalid registry URL "${url}". Only https:// URLs are allowed.`), {
       level: "error",
     });
     return 2;

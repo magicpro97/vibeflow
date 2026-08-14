@@ -119,11 +119,17 @@ export function claudeHookConfig(): string {
   return JSON.stringify(config, null, 2);
 }
 
+/** Shell-escape a path for safe embedding in a shell string.
+ *  Wraps in single quotes; escapes embedded single quotes via '\''. */
+function shellEscape(path: string): string {
+  return `'${path.replace(/'/g, "'\\''")}'`;
+}
+
 /** Codex native hooks: PreToolUse blocks Bash/shell only. */
 export function codexHookConfig(): string {
   const cmd = cliPath();
   const runtime = hookRuntime();
-  const delegate = `${runtime} "${cmd}" hook`;
+  const delegate = `${runtime} ${shellEscape(cmd)} hook`;
   const config = {
     hooks: {
       PreToolUse: [{ command: delegate }],
@@ -141,7 +147,7 @@ export function codexHookConfig(): string {
  *  re-review: the previous `vf hook` substring never appeared in real generated configs
  *  because generators emit `node "<abs>" hook`, not `vf hook`). */
 function hookCommand(): string {
-  return `${hookRuntime()} "${cliPath()}" hook # vibeflow-guardrail`;
+  return `${hookRuntime()} ${shellEscape(cliPath())} hook # vibeflow-guardrail`;
 }
 
 /** Copilot `.github/hooks/copilot.json` — NATIVE enforcement via preToolUse (fail-closed).

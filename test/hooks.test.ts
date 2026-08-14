@@ -147,9 +147,9 @@ describe("adapters: copilot native enforcement (issue #79)", () => {
     expect(typeof entry.powershell).toBe("string");
     expect(typeof entry.timeoutSec).toBe("number");
     expect(entry.timeoutSec).toBeGreaterThanOrEqual(30);
-    // bash + powershell must include runtime + quoted path to survive spaces (e.g. C:\Program Files\...)
-    expect(entry.bash).toMatch(/^(bun|node) "[^"]+"\s+hook/);
-    expect(entry.powershell).toMatch(/^(bun|node) "[^"]+"\s+hook/);
+    // bash + powershell must include runtime + single-quoted path to survive spaces and shell metachars
+    expect(entry.bash).toMatch(/^(bun|node) '[^']+'\s+hook/);
+    expect(entry.powershell).toMatch(/^(bun|node) '[^']+'\s+hook/);
   });
 
   test("engineEnforcement: copilot is now native (per preToolUse fail-closed semantics)", () => {
@@ -305,9 +305,9 @@ describe("adapters: hook delegation survives spaces and shell metachars in the p
     expect(pre).toBeDefined();
     expect(post).toBeDefined();
     if (!pre || !post) return; // satisfy TS — asserted above
-    // command string: "bun|node \"/path/to/cli.js\" hook"
-    expect(pre.command).toMatch(/^(bun|node) "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
-    expect(post.command).toMatch(/^(bun|node) "[^"]*[/\\\\]dist[/\\\\]cli\.js" hook$/);
+    // command string: "bun|node '/path/to/cli.js' hook"
+    expect(pre.command).toMatch(/^(bun|node) '[^']*[/\\]dist[/\\]cli\.js' hook$/);
+    expect(post.command).toMatch(/^(bun|node) '[^']*[/\\]dist[/\\]cli\.js' hook$/);
   });
 
   test('git pre-commit pipes through a quoted `node "<abs>" hook`', () => {
