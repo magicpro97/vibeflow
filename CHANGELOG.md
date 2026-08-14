@@ -1,5 +1,105 @@
 # Changelog
 
+## [0.15.0](https://github.com/magicpro97/vibeflow/compare/v0.14.0...v0.15.0) (2026-08-14)
+
+
+### Features
+
+* **ci:** block merge on unresolved review threads ([#751](https://github.com/magicpro97/vibeflow/issues/751)) ([359a956](https://github.com/magicpro97/vibeflow/commit/359a956804080985c8333f69d1534ffd33559f43))
+* **curator:** add registry release fan-out proposals for dependent lock updates ([#761](https://github.com/magicpro97/vibeflow/issues/761)) ([f674114](https://github.com/magicpro97/vibeflow/commit/f674114654ee3330814fcc383d5268dcb11c5af1))
+* **curator:** add scheduled CI curator report workflow with issue deduplication ([#737](https://github.com/magicpro97/vibeflow/issues/737)) ([879ca48](https://github.com/magicpro97/vibeflow/commit/879ca48bbf275280d36e5c4f983fd206e61e0319))
+* **curator:** create configurable draft issue and PR proposals from curator findings ([#738](https://github.com/magicpro97/vibeflow/issues/738)) ([e97084a](https://github.com/magicpro97/vibeflow/commit/e97084ab82a3ac503981156e16b24f456fb0832c))
+* **curator:** enforce scan scope semantics ([#744](https://github.com/magicpro97/vibeflow/issues/744)) ([d3bb2a6](https://github.com/magicpro97/vibeflow/commit/d3bb2a6ecfa10274a020a06a2aff79639aa2bede))
+* **curator:** sync shared finding markers via Git notes ([#745](https://github.com/magicpro97/vibeflow/issues/745)) ([9550fb4](https://github.com/magicpro97/vibeflow/commit/9550fb4721dc0a248a099796c61de1ec8faebbfb))
+* **hooks:** enforce review evidence before push ([#752](https://github.com/magicpro97/vibeflow/issues/752)) ([c1f56a4](https://github.com/magicpro97/vibeflow/commit/c1f56a496dbb587c9977915fc382419ee773aec8))
+* **plan:** add interactive plan review revisions ([#645](https://github.com/magicpro97/vibeflow/issues/645)) ([f192e7d](https://github.com/magicpro97/vibeflow/commit/f192e7deabb4ceb673c6583ec0ef2febd834c466))
+* **plan:** add threaded plan review comments ([#646](https://github.com/magicpro97/vibeflow/issues/646)) ([6e9adb6](https://github.com/magicpro97/vibeflow/commit/6e9adb6222f2a5bbd89af77231efda39494be64d))
+* **policy:** add granular skill CI status checks ([#719](https://github.com/magicpro97/vibeflow/issues/719)) ([20c2be1](https://github.com/magicpro97/vibeflow/commit/20c2be1dd588cbc242b21f540267d5d8844539d4))
+* **policy:** define machine-readable team skill policy and domain gates ([#711](https://github.com/magicpro97/vibeflow/issues/711)) ([409dc2c](https://github.com/magicpro97/vibeflow/commit/409dc2cdba8295ad4381773207887a2cd9ee5ef6)), closes [#673](https://github.com/magicpro97/vibeflow/issues/673)
+* **policy:** derive workflow checks from changed paths ([#717](https://github.com/magicpro97/vibeflow/issues/717)) ([412f38f](https://github.com/magicpro97/vibeflow/commit/412f38fc9d0d48bc083735b4bd78dd8dbfc7b3a7))
+* **policy:** enforce skill quality gates in CI ([#716](https://github.com/magicpro97/vibeflow/issues/716)) ([0169824](https://github.com/magicpro97/vibeflow/commit/0169824b847c6f190e03356fa84dc5937101803d))
+* **policy:** enforce waiver owner and expiry ([#721](https://github.com/magicpro97/vibeflow/issues/721)) ([8d55b93](https://github.com/magicpro97/vibeflow/commit/8d55b933d6b6c493bcac88c60cdb3c4297e140eb))
+* **policy:** record skill lifecycle audit evidence ([#720](https://github.com/magicpro97/vibeflow/issues/720)) ([bc23e61](https://github.com/magicpro97/vibeflow/commit/bc23e610862bc58f2f52d0bb2cf0876fc4639410))
+* **policy:** require staged impact evidence for protected changes ([#718](https://github.com/magicpro97/vibeflow/issues/718)) ([af50ba1](https://github.com/magicpro97/vibeflow/commit/af50ba16553ccac3ef8e5d19cc1d5716a0632e34))
+* **review:** add commit-anchored self-review evidence gate ([#750](https://github.com/magicpro97/vibeflow/issues/750)) ([a85413c](https://github.com/magicpro97/vibeflow/commit/a85413c6c944f70a54d4e209b1dc162c9f3b92c0))
+* **skills:** add canonical domain skill ownership and dependency metadata ([#707](https://github.com/magicpro97/vibeflow/issues/707)) ([2b8686d](https://github.com/magicpro97/vibeflow/commit/2b8686d4e6346c747e9629f008063068d8dd34b4)), closes [#665](https://github.com/magicpro97/vibeflow/issues/665)
+* **skills:** add deterministic eval suites ([#705](https://github.com/magicpro97/vibeflow/issues/705)) ([67d219e](https://github.com/magicpro97/vibeflow/commit/67d219e4ff78c44401535e2952e4332695584c73))
+* **skills:** add domain ownership metadata ([#725](https://github.com/magicpro97/vibeflow/issues/725)) ([db1a2d7](https://github.com/magicpro97/vibeflow/commit/db1a2d7a784b9c2d25d5394e3d451e40e3f0bf83))
+* **skills:** add fact ownership registry ([#726](https://github.com/magicpro97/vibeflow/issues/726)) ([03d181a](https://github.com/magicpro97/vibeflow/commit/03d181a130d79f6e38afca876f168a6041422394))
+* **skills:** add fact ownership registry for domain invariants ([#709](https://github.com/magicpro97/vibeflow/issues/709)) ([7567904](https://github.com/magicpro97/vibeflow/commit/756790442f4b39f1bf86ed97a337cc9eeaf99a32)), closes [#666](https://github.com/magicpro97/vibeflow/issues/666)
+* **skills:** add git registry channels ([#696](https://github.com/magicpro97/vibeflow/issues/696)) ([954f65d](https://github.com/magicpro97/vibeflow/commit/954f65d828444902d4c44b3cdce45f8569ca5957))
+* **skills:** add lifecycle metadata ([#722](https://github.com/magicpro97/vibeflow/issues/722)) ([eb218b3](https://github.com/magicpro97/vibeflow/commit/eb218b3f1289191ee71371cc691be6efde984cdc))
+* **skills:** add owner/repo shorthand for registry add ([#763](https://github.com/magicpro97/vibeflow/issues/763)) ([#768](https://github.com/magicpro97/vibeflow/issues/768)) ([00ecad5](https://github.com/magicpro97/vibeflow/commit/00ecad54a9bd0aa0935554a71b78363c1e77a2d2))
+* **skills:** add project adapters that extend pinned common skills ([6e53aae](https://github.com/magicpro97/vibeflow/commit/6e53aae9b4f30c7b078f636404585d8900fd7f06))
+* **skills:** add project adapters that extend pinned common skills without content duplication ([235422c](https://github.com/magicpro97/vibeflow/commit/235422c06a7e80593dc12231a8fbef97e9cc96a2))
+* **skills:** add registry lock integrity and mirror verification CI checks ([ed211d5](https://github.com/magicpro97/vibeflow/commit/ed211d58997aecd8331006d3c5a4d0e953ba6967))
+* **skills:** add registry lock integrity and mirror verification CI checks ([23854a5](https://github.com/magicpro97/vibeflow/commit/23854a534703e64123ac85559003c9b74aea75fb))
+* **skills:** add scope, domain, owner, stale indicators to skill panel DTO ([#735](https://github.com/magicpro97/vibeflow/issues/735)) ([7d00485](https://github.com/magicpro97/vibeflow/commit/7d00485c9165c033c82f4d8162df8e87fa2f1bb4))
+* **skills:** add skill impact analysis for domain facts and protected paths ([#712](https://github.com/magicpro97/vibeflow/issues/712)) ([99683aa](https://github.com/magicpro97/vibeflow/commit/99683aaea8881d218eab11897ef501ed8255af93)), closes [#667](https://github.com/magicpro97/vibeflow/issues/667)
+* **skills:** add skills settings fieldset with auto-resolve, mirror mode, and target engines ([#736](https://github.com/magicpro97/vibeflow/issues/736)) ([787bd5e](https://github.com/magicpro97/vibeflow/commit/787bd5eec66059017017058a79ea4f08172c0a3b))
+* **skills:** analyze domain fact impact ([#727](https://github.com/magicpro97/vibeflow/issues/727)) ([a8a4fba](https://github.com/magicpro97/vibeflow/commit/a8a4fbad85f2a5825627fda7872e7adfe9c279d9))
+* **skills:** approve skill acquisitions before dispatch ([#682](https://github.com/magicpro97/vibeflow/issues/682)) ([#753](https://github.com/magicpro97/vibeflow/issues/753)) ([8feccbc](https://github.com/magicpro97/vibeflow/commit/8feccbcaca68aadc0176f396fcb0d289747853e1))
+* **skills:** audit duplicate skill patterns ([#728](https://github.com/magicpro97/vibeflow/issues/728)) ([c4affed](https://github.com/magicpro97/vibeflow/commit/c4affedc5e12bcb7cd6f5997ba9d7f440cd0400d))
+* **skills:** coordinate dependent evaluations ([#732](https://github.com/magicpro97/vibeflow/issues/732)) ([98f04cb](https://github.com/magicpro97/vibeflow/commit/98f04cbaa5d97f3eae0066ffd09e60cc66d8ccc7))
+* **skills:** create telemetry for considered, used, missing, and failed skill resolution ([#708](https://github.com/magicpro97/vibeflow/issues/708)) ([3c4675f](https://github.com/magicpro97/vibeflow/commit/3c4675fe8c111e0d5264251bd92e37fe5e19d04e)), closes [#663](https://github.com/magicpro97/vibeflow/issues/663)
+* **skills:** enforce creator quality contract ([d8632d3](https://github.com/magicpro97/vibeflow/commit/d8632d3c17bc59d0ce734bc883e706b8fcee1d3d))
+* **skills:** enforce creator quality contract ([6bd4a8d](https://github.com/magicpro97/vibeflow/commit/6bd4a8d87ef97eb62ea2fe7f5cab3b8373bd8bf9))
+* **skills:** filter semantic review candidates ([#734](https://github.com/magicpro97/vibeflow/issues/734)) ([a4407a6](https://github.com/magicpro97/vibeflow/commit/a4407a6c1ba6ef54fe5c4db647df76a0959a998d))
+* **skills:** gate registry installs with security scan ([#698](https://github.com/magicpro97/vibeflow/issues/698)) ([56a9c94](https://github.com/magicpro97/vibeflow/commit/56a9c948f8195a82c3736977da7d59e9929bb810))
+* **skills:** install pinned registry skills safely ([#697](https://github.com/magicpro97/vibeflow/issues/697)) ([acd518d](https://github.com/magicpro97/vibeflow/commit/acd518d481c231d1a7e309f5907a6a20d31c5d3d))
+* **skills:** make vendor registries immutable ([#713](https://github.com/magicpro97/vibeflow/issues/713)) ([d2f0198](https://github.com/magicpro97/vibeflow/commit/d2f01987c87ae6535b2b316121a7a28190e0d6f4))
+* **skills:** optimize skill descriptions with trigger precision and recall evaluation ([#710](https://github.com/magicpro97/vibeflow/issues/710)) ([a6908de](https://github.com/magicpro97/vibeflow/commit/a6908de7395916df31ca11ae1f98f2622aa92451)), closes [#659](https://github.com/magicpro97/vibeflow/issues/659)
+* **skills:** propose skill consolidation ([#729](https://github.com/magicpro97/vibeflow/issues/729)) ([c786361](https://github.com/magicpro97/vibeflow/commit/c786361d3bdf0ce04a48e70a453364b05956797a))
+* **skills:** propose updates from run patterns ([#731](https://github.com/magicpro97/vibeflow/issues/731)) ([68883fd](https://github.com/magicpro97/vibeflow/commit/68883fd33c29a3ab22544875d00ec49a8a0cc186))
+* **skills:** record resolution telemetry ([#723](https://github.com/magicpro97/vibeflow/issues/723)) ([8d6914c](https://github.com/magicpro97/vibeflow/commit/8d6914c544a22365c051dee03dbbc6c051205e49))
+* **skills:** require local review proof for registry verification ([#715](https://github.com/magicpro97/vibeflow/issues/715)) ([4ac3d50](https://github.com/magicpro97/vibeflow/commit/4ac3d502aadaa3ae936a2f6bcebfd61424fd63e8))
+* **skills:** resolve existing domains before draft ([#730](https://github.com/magicpro97/vibeflow/issues/730)) ([8ad843a](https://github.com/magicpro97/vibeflow/commit/8ad843aa746a8ff576f569cc0373c1d5e1f05807))
+* **skills:** scan curator findings ([#733](https://github.com/magicpro97/vibeflow/issues/733)) ([fbdde86](https://github.com/magicpro97/vibeflow/commit/fbdde86a30c28fb8fc72679d702e15a906173ea6))
+* **skills:** security-scan gate before promoting a skill to verified ([#647](https://github.com/magicpro97/vibeflow/issues/647)) ([1a18bbe](https://github.com/magicpro97/vibeflow/commit/1a18bbe2710e195129d1f5f3d72942505e076a40)), closes [#632](https://github.com/magicpro97/vibeflow/issues/632)
+* **skills:** show registry provenance in skill panel ([#700](https://github.com/magicpro97/vibeflow/issues/700)) ([6bc14a0](https://github.com/magicpro97/vibeflow/commit/6bc14a0aa135669400948fe5adc7f340224c0bc5))
+* **skills:** support common, organization, project, adapter scopes ([#701](https://github.com/magicpro97/vibeflow/issues/701)) ([c36984f](https://github.com/magicpro97/vibeflow/commit/c36984f3b0063af3824c4778e73ee24dec0ebc09))
+* **skills:** sync required pinned skills to mirrors ([#699](https://github.com/magicpro97/vibeflow/issues/699)) ([723b4b9](https://github.com/magicpro97/vibeflow/commit/723b4b9ce695a37b23e51c3ac192644b88bab559))
+* **skills:** verify source freshness ([#724](https://github.com/magicpro97/vibeflow/issues/724)) ([9d2ac83](https://github.com/magicpro97/vibeflow/commit/9d2ac830fa0851a157afff6ba2a6bb6e24267962))
+* **superpowers:** add dry-default sync command for cross-engine Superpowers install ([#770](https://github.com/magicpro97/vibeflow/issues/770)) ([f4aadc9](https://github.com/magicpro97/vibeflow/commit/f4aadc9813624237c1326e21b9c46d11e780745f))
+* **ui:** add curator settings and findings ([#740](https://github.com/magicpro97/vibeflow/issues/740)) ([8724977](https://github.com/magicpro97/vibeflow/commit/872497798423511347a26dbe944b4984b25a176d))
+* **ui:** add curator workflow setup preview ([#746](https://github.com/magicpro97/vibeflow/issues/746)) ([41ad51b](https://github.com/magicpro97/vibeflow/commit/41ad51b7bfb9a3bea636fc5a97facdc4c10f4b3e))
+* **ui:** add policy change approval preview ([#742](https://github.com/magicpro97/vibeflow/issues/742)) ([28cc5cf](https://github.com/magicpro97/vibeflow/commit/28cc5cf054872f7bf1f6e524eceaa3d1444886a3))
+* **ui:** add read-only domain facts impact view ([#741](https://github.com/magicpro97/vibeflow/issues/741)) ([555d93d](https://github.com/magicpro97/vibeflow/commit/555d93d8675643911477057a3670a35858e837f5))
+* **ui:** add read-only registry release proposal API ([#766](https://github.com/magicpro97/vibeflow/issues/766)) ([2f87e9c](https://github.com/magicpro97/vibeflow/commit/2f87e9ce14c44b49b5d26d377d2ba0c34c21c454))
+* **ui:** add registry release proposal review UX ([#767](https://github.com/magicpro97/vibeflow/issues/767)) ([be4c8a0](https://github.com/magicpro97/vibeflow/commit/be4c8a054c4f5f8c77f1cae9d113a239ed1aed5c))
+* **ui:** add registry update preview ([#739](https://github.com/magicpro97/vibeflow/issues/739)) ([d291e7e](https://github.com/magicpro97/vibeflow/commit/d291e7e45a441b7490cce0e503ddeab6d42b7120))
+* **ui:** add skill management panel ([#648](https://github.com/magicpro97/vibeflow/issues/648)) ([10a3ccd](https://github.com/magicpro97/vibeflow/commit/10a3ccdcb0a96148c0625b3bbfc17cc09070fa4b))
+* **ui:** add workflow diff preview ([#644](https://github.com/magicpro97/vibeflow/issues/644)) ([26facf8](https://github.com/magicpro97/vibeflow/commit/26facf8e4af513d975af5191d6cac48965748276))
+* **ui:** visualize workflows as dependency pipelines ([#643](https://github.com/magicpro97/vibeflow/issues/643)) ([efad38d](https://github.com/magicpro97/vibeflow/commit/efad38d49556bd2c757185a4525fc4a15a0988ac))
+* **verify:** add opt-in Docker sandbox ([#754](https://github.com/magicpro97/vibeflow/issues/754)) ([d52e1a3](https://github.com/magicpro97/vibeflow/commit/d52e1a32e839eee46f02193b4a98f3e676cf8586))
+* **verify:** bridge methodology checkpoints to hard gates ([#764](https://github.com/magicpro97/vibeflow/issues/764)) ([#769](https://github.com/magicpro97/vibeflow/issues/769)) ([bbe2764](https://github.com/magicpro97/vibeflow/commit/bbe2764974f3e90256d4a96c07c449ceb74e3f3c))
+
+
+### Bug Fixes
+
+* **hooks,server,registry:** 7 security findings from pre-release review ([#771](https://github.com/magicpro97/vibeflow/issues/771)) ([9984ecc](https://github.com/magicpro97/vibeflow/commit/9984ecc42b94f8f43793345c6dee95a82ccfbc9d))
+* **hooks:** allow no-checklist evidence pushes ([#758](https://github.com/magicpro97/vibeflow/issues/758)) ([7e38b30](https://github.com/magicpro97/vibeflow/commit/7e38b301375f4ea4c47eab904f288e474fce2fde))
+* **hooks:** avoid full verify during pre-push ([#755](https://github.com/magicpro97/vibeflow/issues/755)) ([3cbb770](https://github.com/magicpro97/vibeflow/commit/3cbb770c2496c95e88ffc58c613a9abb5f960071))
+* **hooks:** wire Codex native Bash guardrails ([#634](https://github.com/magicpro97/vibeflow/issues/634)) ([#638](https://github.com/magicpro97/vibeflow/issues/638)) ([d0f86fa](https://github.com/magicpro97/vibeflow/commit/d0f86fa6f6917d114217e949caea0a3f4b860d5d))
+* **skills:** enforce path traversal check and catalogDir inject seam in verify-lock ([ccfd2b1](https://github.com/magicpro97/vibeflow/commit/ccfd2b1079f3d0f6c42b1e1eb51219ccf51f3b73))
+* **skills:** honor quality gate test seams ([6ca31b1](https://github.com/magicpro97/vibeflow/commit/6ca31b147021be511b7ac9bd38f5884b45515f49))
+* **skills:** isolate registry git commands from cwd ([#757](https://github.com/magicpro97/vibeflow/issues/757)) ([104ecd7](https://github.com/magicpro97/vibeflow/commit/104ecd7d224fe0c54b1107d33f9e67bd04797041))
+* **skills:** preserve adapter inheritance and preambles ([4496765](https://github.com/magicpro97/vibeflow/commit/44967651403bfd27afaccfd40d5797e2563e626c))
+* **skills:** resolve adapter typescript types ([70b343f](https://github.com/magicpro97/vibeflow/commit/70b343fea60c344f9af92003f749b4f87ea1ef32))
+* **test:** isolate high-risk cwd fixtures ([#756](https://github.com/magicpro97/vibeflow/issues/756)) ([c172aa0](https://github.com/magicpro97/vibeflow/commit/c172aa00cc9464c57672cb8c97fa3219b3310e41))
+
+
+### Continuous Integration
+
+* run UI vite build before coverage:check so local matches CI ([#714](https://github.com/magicpro97/vibeflow/issues/714)) ([22e6182](https://github.com/magicpro97/vibeflow/commit/22e618275075e1b4f6e104e9276acacf3f48c6e1))
+
+
+### Tests
+
+* **server:** preserve workflow state across suite ([#706](https://github.com/magicpro97/vibeflow/issues/706)) ([0ff9339](https://github.com/magicpro97/vibeflow/commit/0ff9339fbcfa2a4d816e7256adf67fd32d7cfe28))
+* **skills:** add 100% line coverage for adapter and registry modules ([65117d1](https://github.com/magicpro97/vibeflow/commit/65117d12c96937e58f85df41cfe1ffa16ee88f14))
+* **skills:** preserve verify fixtures after quality gate ([42da608](https://github.com/magicpro97/vibeflow/commit/42da60875ebb1a06e7a0b023b7c49d4e50526e6d))
+
 ## [0.14.0](https://github.com/magicpro97/vibeflow/compare/v0.13.0...v0.14.0) (2026-07-19)
 
 
