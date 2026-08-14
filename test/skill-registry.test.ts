@@ -391,6 +391,20 @@ describe("registryAdd", () => {
     expect(code).toBe(0);
   });
 
+  test("rejects malformed URL (no scheme)", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "not-a-url", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
+  test("rejects empty URL", () => {
+    const repo = tmpRepo();
+    const { spawn } = fakeGit();
+    const code = registryAdd(repo, "", "evil", "v1", { spawnSync: spawn });
+    expect(code).toBe(2);
+  });
+
   test("rejects duplicate name", () => {
     const repo = tmpRepo();
     const lock: RegistryLock = {
