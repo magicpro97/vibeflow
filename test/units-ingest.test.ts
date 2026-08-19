@@ -8,6 +8,7 @@ import type { makeReviewer } from "../src/commands/dispatch-reviewer.js";
 import { normalizeUnit } from "../src/commands/dispatch.js";
 import { type UnitsIngestInject, unitsIngest } from "../src/commands/units-ingest.js";
 import { units } from "../src/commands/units.js";
+import { isVerifiableEvidence, policyGates } from "../src/gates.js";
 
 const sha256 = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 const git = (dir: string, ...args: string[]) =>
@@ -401,9 +402,171 @@ describe("units ingest RED contract", () => {
       expect(state(dir).work_units[0]).toMatchObject({
         gates: { test: "fail" },
         resources: { agents: 1, tokens: 12, cost_usd: 0.03, wall_seconds: 1 },
-        evidence: expect.arrayContaining([expect.stringContaining("gate test: red")]),
+        evidence: expect.arrayContaining(['vf units ingest → "gate test: red"']),
       });
     });
+  });
+
+  test("successful retry normalizes eligible legacy failure and passes policy", () =>
+    withTemp(async (dir, e) => {
+      const measured = 'bun test --timeout 30000 → "exit 1: exact failure bytes"';
+      const reason = "gate test: exact failure";
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            run: ((command) =>
+              command.includes("test")
+                ? { status: 1, stdout: "exact failure bytes" }
+                : { status: 0, stdout: "ok" }) as UnitsIngestInject["run"],
+            gate: (({ run }) => {
+              run?.("bunx biome check src test", dir);
+              run?.("bun test --timeout 30000", dir);
+              return { pass: false, failedGate: "test", detail: "exact failure" };
+            }) as UnitsIngestInject["gate"],
+          },
+        ),
+      ).toBe(1);
+      const s = state(dir);
+      const normalized = `vf units ingest → ${JSON.stringify(reason)}`;
+      const at = s.work_units[0].evidence_at[measured];
+      expect(s.work_units[0].evidence).toContain(measured);
+      s.work_units[0].evidence = s.work_units[0].evidence.map((item: string) =>
+        item === normalized ? reason : item,
+      );
+      s.work_units[0].evidence_at[reason] = at;
+      delete s.work_units[0].evidence_at[normalized];
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      expect(await ingest(dir, e)).toBe(0);
+      const result = state(dir);
+      expect(result.work_units[0].status).toBe("done");
+      expect(result.work_units[0].evidence.filter((item: string) => item === measured)).toEqual([
+        measured,
+      ]);
+      expect(result.work_units[0].evidence).not.toContain(reason);
+      expect(result.work_units[0].evidence_at).toMatchObject({ [measured]: at, [normalized]: at });
+      expect(result.work_units[0].evidence_at[reason]).toBeUndefined();
+      expect(result.work_units[0].evidence).toContain('bun run --cwd src/ui build → "exit 0: ok"');
+      expect(policyGates(result, { base: dir }).ok).toBeTrue();
+    }));
+
+  test("legacy matcher accepts only complete mapped shapes", async () => {
+    const rows: Array<[string, boolean]> = [
+      ['bun test --timeout 30000 → "exit -1: x"', true],
+      ['bun test --timeout 30000 → "exit 1: "', true],
+      ['bun test --timeout 30000 → "exit 2: \\"x\\""', true],
+      ['bun test --timeout 30000 → "exit 1: x"\n', false],
+      ['bun test --timeout 30000 → "exit 1: x\ry"', false],
+      ['bun test --timeout 30000 → "exit 1: x\ny"', false],
+      ['bun test --timeout 30000 → "exit 1: x"garbage', false],
+      ['bun test --timeout 30000 → "exit 1: x', false],
+      ['bun test --timeout 30000 → "exit 1: "x""', false],
+      ['bun test --timeout 30000 → "exit 0: x"', false],
+      ['bunx biome check src test → "exit 1: file.ts:1"', false],
+    ];
+    for (const [measured, eligible] of rows)
+      await withTemp(async (dir, e) => {
+        const s = state(dir);
+        const reason = "gate test: historical";
+        const at = "2026-01-01T00:00:00.000Z";
+        Object.assign(s.work_units[0], {
+          status: "blocked",
+          gates: { build: "pass", lint: "pass", test: "fail", review: "pending" },
+          evidence: [measured, reason],
+          evidence_at: { [measured]: at, [reason]: at },
+        });
+        writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+        expect(await ingest(dir, e)).toBe(eligible ? 0 : 1);
+        expect(state(dir).work_units[0].evidence.includes(reason)).toBe(!eligible);
+      });
+  });
+
+  test("persists complete long controller reason", () =>
+    withTemp(async (dir, e) => {
+      const reason = `review: ${"x".repeat(450)}`;
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            reviewer: (() => async () => ({ pass: false, reason: "x".repeat(450) })) as any,
+          },
+        ),
+      ).toBe(1);
+      const persisted = `vf units ingest → ${JSON.stringify(reason)}`;
+      expect(
+        state(dir).work_units[0].evidence.filter((item: string) => item === persisted),
+      ).toEqual([persisted]);
+      expect(persisted).toBe(`vf units ingest → "${reason}"`);
+      expect(isVerifiableEvidence(persisted)).toBeTrue();
+    }));
+
+  test("done repair changes evidence fields only", () =>
+    withTemp(async (dir, e) => {
+      expect(await ingest(dir, e)).toBe(0);
+      const s = state(dir);
+      const unit = s.work_units[0];
+      Object.assign(unit, {
+        depends_on: ["prior"],
+        upstreamHandoffs: [{ unit: "prior", summary: "ready" }],
+        acceptance_criteria: [{ id: "AC1", criterion: "works" }],
+        goal_score: 0.8,
+        riskClass: "feature",
+        security: { consent: "run", verdict: "pass", notes: "checked" },
+      });
+      const oldCommit = unit.evidence.find((item: string) => item.startsWith("commit "));
+      const oldAt = { ...unit.evidence_at };
+      const before = structuredClone(unit);
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      commit(dir, "repair");
+      rewriteRaw(e, validRaw());
+      expect(await ingest(dir, e)).toBe(0);
+      const repaired = state(dir).work_units[0];
+      for (const key of Object.keys(before))
+        if (key !== "evidence" && key !== "evidence_at") expect(repaired[key]).toEqual(before[key]);
+      expect(repaired.evidence).toContain(oldCommit);
+      expect(repaired.evidence).toContain(`commit ${git(dir, "rev-parse", "HEAD")}`);
+      expect(repaired.evidence_at).toMatchObject(oldAt);
+    }));
+
+  test("leaves structurally ineligible legacy rows unchanged", async () => {
+    const rows: Array<[string, string, string | undefined, boolean]> = [
+      ["unrelated", 'bun test --timeout 30000 → "exit 1: x"', "2026-01-01T00:00:00.000Z", true],
+      ["gate test:", 'bun test --timeout 30000 → "exit 1: x"', "2026-01-01T00:00:00.000Z", true],
+      [
+        "gate test: wrong command",
+        'bunx biome check src → "exit 1: x"',
+        "2026-01-01T00:00:00.000Z",
+        true,
+      ],
+      ["gate test: missing timestamp", 'bun test --timeout 30000 → "exit 1: x"', undefined, true],
+      [
+        "gate test: nonfinal",
+        'bun test --timeout 30000 → "exit 1: x"',
+        "2026-01-01T00:00:00.000Z",
+        false,
+      ],
+    ];
+    for (const [reason, measured, at, final] of rows)
+      await withTemp(async (dir, e) => {
+        const s = state(dir);
+        Object.assign(s.work_units[0], {
+          status: "blocked",
+          gates: { build: "pass", lint: "pass", test: "fail", review: "pending" },
+          evidence: final ? [measured, reason] : [measured, reason, "later free text"],
+          evidence_at: at
+            ? { [measured]: at, [reason]: at }
+            : { [measured]: "2026-01-01T00:00:00.000Z" },
+        });
+        writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+        expect(await ingest(dir, e)).toBe(1);
+        expect(state(dir).work_units[0].evidence).toContain(reason);
+      });
   });
 
   test("final mutation returning null exits 1", () =>

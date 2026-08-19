@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseEngineSummary } from "../dispatch/prompt.js";
-import { policyGates } from "../gates.js";
+import { isVerifiableEvidence, policyGates } from "../gates.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import { thresholdFor } from "../orchestrator/investigate.js";
 import { type GateRunner, defaultRun, scopedGate } from "../orchestrator/scoped-gate.js";
@@ -149,7 +149,19 @@ function measuredEvidence(command: string, status: number | null, stdout: string
     .replace(/"/g, '\\"')
     .trim()}"`;
 }
-
+function normalizeLegacyGateReason(unit: WorkUnit) {
+  const evidence = [...(unit.evidence ?? [])];
+  const reason = evidence.at(-1);
+  const measured = evidence.at(-2);
+  const gate = reason?.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as "build" | "lint" | "test";
+  const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expected = gate === "build" ? "(?:bun run --cwd src/ui build|bunx tsc --noEmit)" : gate === "lint" ? escaped(`bunx biome check ${(unit.scope ?? []).join(" ")}`) : gate === "test" ? "bun test --timeout 30000" : "";
+  const measuredShape = expected && new RegExp(`^${expected} → "exit (?:-1|[1-9]\\d*): (?:\\\\"|[^"\\r\\n])*"(?![\\s\\S])`);
+  const at = unit.evidence_at;
+  if (!reason || !measured || !measuredShape || unit.status !== "blocked" || isVerifiableEvidence(reason) || unit.gates?.[gate] !== "fail" || !measuredShape.test(measured) || !at?.[reason] || at[reason] !== at[measured]) return unit;
+  const normalized = `vf units ingest → ${JSON.stringify(reason)}`; evidence[evidence.length - 1] = normalized;
+  const evidence_at = { ...at, [normalized]: at[reason] }; delete evidence_at[reason]; return { ...unit, evidence, evidence_at };
+}
 export async function unitsIngest(
   base: string,
   rest: string[],
@@ -168,9 +180,10 @@ export async function unitsIngest(
   ) => {
     try {
       if (!unit || !name) return 1;
-      const evidence = [...new Set([...(unit.evidence ?? []), ...freshEvidence, reason])];
+      const persistedReason = `vf units ingest → ${JSON.stringify(reason)}`;
+      const evidence = [...new Set([...(unit.evidence ?? []), ...freshEvidence, persistedReason])];
       const evidence_at = { ...(unit.evidence_at ?? {}) };
-      for (const item of [...freshEvidence, reason])
+      for (const item of [...freshEvidence, persistedReason])
         if (!evidence_at[item]) evidence_at[item] = new Date().toISOString();
       return mutate(base, "update", {
         name,
@@ -341,12 +354,13 @@ export async function unitsIngest(
         if (!review.pass) failure = `review: ${review.reason}`;
         else {
           const freshEvidence = [`commit ${commit}`, ...outputs, ...reviewerEvidence];
-          const evidence = [...new Set([...(unit.evidence ?? []), ...freshEvidence])];
-          const evidence_at = { ...(unit.evidence_at ?? {}) };
+          const normalizedUnit = normalizeLegacyGateReason(unit);
+          const evidence = [...new Set([...(normalizedUnit.evidence ?? []), ...freshEvidence])];
+          const evidence_at = { ...(normalizedUnit.evidence_at ?? {}) };
           for (const item of freshEvidence)
             if (!evidence_at[item]) evidence_at[item] = new Date().toISOString();
           candidate = {
-            ...unit,
+            ...normalizedUnit,
             name,
             status: "done",
             confidence: summary.confidence,
