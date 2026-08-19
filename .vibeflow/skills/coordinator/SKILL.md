@@ -23,6 +23,8 @@ bounded work, verifies real outcomes, and keeps the brief current.
 
 ## 0. Activation
 
+### When to use
+
 Use for `vf coord`, `vf init`, multi-agent implementation, or any non-trivial
 delegated change that needs scope, verification, and trace control.
 
@@ -44,6 +46,8 @@ Before any non-trivial action:
 If §1 is ambiguous or §2 conflicts with the task, stop and ask the user.
 
 ## 2. Steps and task contract
+
+### Steps
 
 For each non-trivial task:
 

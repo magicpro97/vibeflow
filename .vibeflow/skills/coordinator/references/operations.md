@@ -1,6 +1,6 @@
 # Coordinator Operations
 
-Load this file only for recovery and publish details.
+Load this file only for recovery and commit details.
 
 ## Brief corruption
 
