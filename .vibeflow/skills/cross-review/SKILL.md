@@ -1,189 +1,134 @@
 ---
 name: cross-review
 description: "Review a plan, commit, or work unit through 4 lenses — Correctness, Design, Risk, Test — before merge. Trigger on every non-trivial change (more than two files or any new logic path) as the cross-review gate in the coordinator loop."
+triggers:
+  - cross-review
+  - code review
+  - review plan
+  - review commit
+  - pre-merge
+capabilities:
+  - correctness-review
+  - design-review
+  - risk-review
+  - test-review
 ---
 
 # Cross-Review
 
-A cross-review is the gate before merge. It uses a DIFFERENT engine than the
-implementer (codex reviews claude, claude reviews codex) and reads the diff
-through 4 lenses. A green CI gate is not a substitute — tests don't catch
-design bugs, security regressions, or scope creep.
+Cross-review is the pre-merge gate. Use a different engine than the implementer.
+Review the current HEAD and current diff, not a stale summary.
 
-## 1. When to trigger
+## When to use
 
-- Any change touching > 2 files.
-- Any new logic path (new function, new branch, new error handler).
-- Any plan/commit that the implementer self-reports as "done."
-- Before merge, always. The review is in the loop, not after it.
+- change touches more than 2 files
+- new logic path, branch, handler, or contract
+- implementer claims the task is done
+- any merge-ready non-trivial unit
 
-Skip for: typo fixes, one-line config changes, re-running a flaky test.
+Skip typo fixes, one-line config edits, and flaky-test reruns.
 
-## 1b. Step 0 — prove you understand the change first
+## When not to use
 
-Before applying any lens, the reviewer states in 3–6 sentences: what the change
-does, how the main changed pieces fit together, and the single riskiest area.
-A reviewer who cannot summarize the change cannot review it.
+Do not run the full gate for a read-only status check or an unchanged artifact.
+Do not use review to settle a product-direction dispute; route that to `plan-debate`.
 
-Why this is step zero, not a formality: empirical study of modern code review
-(Bacchelli & Bird, *Expectations, Outcomes, and Challenges of Modern Code Review*,
-ICSE 2013) found that **code and change understanding is the key aspect of
-review**, and that review's durable value is as much knowledge transfer and
-alternative solutions as defect-finding. A review that only lists bugs throws
-away most of its value. So the report also ends with an "Alternatives & what's
-good" note (see §3).
+## Steps
 
-## 2. The 4 lenses
+1. Summarize the change in 2-4 sentences, including the riskiest area.
+2. For every `BLOCKER` or `HIGH`, fact-check on current HEAD:
+   - re-read the actual file
+   - rerun the exact command or repro if relevant
+   - confirm the issue still exists now
+3. Run the four lenses.
+4. Grade must-have coverage as `PASS`, `FAIL`, or `UNKNOWN`.
+5. Check that confirmed findings do not contradict questions or the final verdict,
+   and that stated totals match listed items.
+6. Report only the top findings in the compact schema below.
 
-### Lens 1 — Correctness
-Does the code do what it claims?
+## Four lenses
 
-Checklist:
-- [ ] The claimed behavior matches the diff (read the commit message + plan).
-- [ ] **Spec-vs-code**: for every behavior the plan/commit/PR body claims, find it
-  in the diff function-by-function. A claimed change that is missing, partial, or
-  contradicted by the code is a BLOCKER. `grep`/`rg` any claimed new symbol — **0
-  hits = the claim is a lie = BLOCKER** (the single highest-value finding in a
-  strict review; PR descriptions often describe an intended-but-unmerged change).
-- [ ] Edge cases: empty input, null/undefined, concurrent access, timeout.
-- [ ] Off-by-one: boundaries, array indices, loop conditions.
-- [ ] Error paths: do failures propagate or silently swallow?
-- [ ] Return values: does every branch return what the caller expects?
+### Correctness
 
-### Lens 2 — Design
-Is the shape right?
+- claimed behavior matches code
+- edge cases, error paths, and return values hold
+- every branch return matches its declared output type
+- spec-vs-code claims are checked against real files
+- if a claimed symbol or behavior cannot be found, first verify exact path,
+  name, version, rename history, or generated location
+- until that mapping is verified, missing hits are `UNKNOWN`, not an automatic lie
+- search semantic predecessors and callers, not only the proposed new symbol
 
-Checklist:
-- [ ] Single responsibility: one function, one job. No "and" in the name.
-- [ ] Coupling: does this change add a new import dependency that isn't needed?
-- [ ] Naming: do names describe the intent or the implementation? (e.g. `save()` not `writeToFile()`).
-- [ ] Abstraction level: are high-level and low-level operations mixed in one
-  function?
-- [ ] Interface bloat: exported things that nothing imports = dead code.
+### Design
 
-### Lens 3 — Risk
-What breaks if this is wrong?
+- responsibility and abstraction level are coherent
+- coupling or interface bloat is justified
+- naming matches intent
 
-Checklist:
-- [ ] Security: user input, auth bypass, secret exposure, injection surface.
-- [ ] **Authz on new paths**: every new read/write endpoint checks permission;
-  for a cross-tenant/multi-tenant change, name WHICH LAYER owns isolation (app
-  vs gateway/mTLS) before rating — if there's no network backstop, app-layer
-  validation is the ONLY control and a gap is a BLOCKER, not defense-in-depth.
-- [ ] **PII/EUII in logs**: is any personal/identifying data written to logs or
-  error messages? (Microsoft Eng Playbook reviewer-guidance: "Are we logging any
-  PII information?") Mask it.
-- [ ] Data loss: does this delete, overwrite, or migrate data? Is the migration
-  reversible?
-- [ ] Irreversibility: can this be rolled back? If not, flag as HIGH severity.
-- [ ] Blast radius: how many callers/consumers does this change affect?
-- [ ] Concurrency: shared state, race windows, lock ordering.
+### Risk
 
-### Lens 4 — Test
-Are the tests real?
+- security, authz, logging, data loss, rollback, blast radius, concurrency
+- for multi-tenant paths, identify which layer owns isolation
 
-Checklist:
-- [ ] Assert behavior, not trivia: `expect(result).toBe(expected)` not
-  `expect(true).toBe(true)`.
-- [ ] Cover failure paths: error handler tested, not just happy path.
-- [ ] Edge-case coverage: the specific edge cases from Lens 1 have test cases.
-- [ ] Branch coverage trap: "100% line coverage" ≠ "all branches tested."
-  Spot-check the new code's branches.
-- [ ] Test isolation: no shared mutable state between tests.
+### Test
 
-## 3. How to report findings
+- tests assert behavior, not trivia
+- failure paths and edge cases are covered
+- branch coverage claims are spot-checked
+- test isolation holds
 
-Every finding combines a **severity** with a **Conventional Comments label** so the
-author can tell a real problem from a suggestion from a nitpick at a glance
-(grammar from conventionalcomments.org; Google eng-practices "label comment
-severity"):
+## Must-have coverage
 
-```
-[SEVERITY] <label>(<decoration>): <file:line> — <one-line description>
-FIX: <concrete fix suggestion, one sentence>
-```
+Use the task contract, brief, or plan:
 
-- **label** ∈ `issue` (a real problem) · `suggestion` (a concrete improvement) ·
-  `nitpick` (trivial, always non-blocking) · `question` (you're unsure — ask,
-  don't assert) · `praise` (call out good work) · `thought`/`note` (observation).
-- **decoration** ∈ `(blocking)` must-fix before merge · `(non-blocking)` may defer ·
-  `(if-minor)`. Pair every `issue` with a `FIX:`. Use `question` when unsure rather
-  than asserting a false `issue`.
+- `PASS` if all must-haves are present and no non-goal was violated
+- `FAIL` if a must-have is missing or contradicted, or a non-goal was broken
+- `UNKNOWN` if the artifact does not prove the answer
 
-Severity levels:
-| Level | Meaning | Action |
-|-------|---------|--------|
-| **BLOCKER** | Data loss, security, irreversibility, a lied-about claim | Must fix before merge |
-| **HIGH** | Wrong behavior, broken edge case | Fix before merge |
-| **MEDIUM** | Design smell, naming, coupling | Fix in follow-up PR |
-| **LOW** | Style nit, dead import | Optional |
+## Finding rules
 
-A `(blocking)` decoration ⇔ BLOCKER/HIGH; `nitpick`/LOW ⇒ `(non-blocking)`. Never
-block merge on what the formatter/linter already enforces.
+Each finding should have:
 
-Report format:
-```
-## Cross-Review — <artifact name>
-Engine: <reviewing engine> reviewing <implementer engine>
-Lenses checked: [x] Correctness [x] Design [x] Risk [x] Test
+- severity: `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`
+- label: `issue`, `suggestion`, `question`, `nitpick`, `praise`, or `note`
+- classification: `plan-blocker`, `introduced-defect`, `implementation-detail`, or `adjacent-issue`
+- one-line evidence anchor such as `file:line`, command output, or repro
+
+Use `question(...)` when unsure. Do not turn uncertainty into a blocking claim.
+For unsupported counts, thresholds, or matrices, do not invent an exact replacement.
+State the gap and ask the question.
+
+If the real disagreement is about direction rather than a provable defect,
+escalate to `plan-debate`.
+
+## Output schema
+
+Keep the report to the top 7 findings.
+
+```md
+## Cross-Review — <artifact>
+Engine: <reviewer> reviewing <implementer>
+Lenses: Correctness, Design, Risk, Test
+Must-have coverage: <PASS | FAIL | UNKNOWN>
 
 ### Understanding
-<3–6 sentence summary of what the change does + its riskiest area — proves you read it>
+<2-4 sentence summary + riskiest area>
 
 ### Findings
-[BLOCKER] issue(blocking): src/workflow/dispatch.ts:42 — dispatchAll runs promises sequentially
-FIX: Use Promise.all or a proper work-queue with bounded concurrency.
-
-[HIGH] issue(blocking): src/state/ledger.ts:88 — addEvidence overwrites existing evidence array
-FIX: Spread the existing array: evidence: [...prev, newEntry].
-
-[MEDIUM] suggestion(non-blocking): src/cli/orchestrate.ts:15 — function name `run` is too generic
-FIX: Rename to `orchestrateWorkUnits`.
-
-[LOW] nitpick(non-blocking): src/util/x.ts:3 — unused import
-FIX: Remove it.
-
-### Alternatives & what's good
-<at least one alternative-solution thought AND one genuine praise — review value is
-knowledge transfer, not just defect lists (Bacchelli & Bird, ICSE 2013)>
+[HIGH] issue(blocking): path:line — summary
+CLASS: introduced-defect
+EVIDENCE: <file:line | command | repro>
+FIX: <one line>
 
 ### Verdict
-[ ] APPROVE — merge when CI is green
-[x] CHANGES REQUESTED — fix BLOCKER + HIGH before re-review
-[ ] REJECT — fundamental design issue, re-plan
+APPROVE | CHANGES REQUESTED | RE-PLAN
 ```
 
-## 4. Pitfalls
+Prefer one-line `FIX:` items. Put out-of-scope pre-existing problems in
+`adjacent-issue`; do not block the merge on them unless the current change makes
+them worse or depends on them being solved.
 
-- **Approving on a green CI gate without reading the diff.** CI proves the
-  code compiles and existing tests pass. It does not prove the new code is
-  correct, well-designed, or safe. Read the diff.
-- **Same-engine review.** An engine reviewing its own work is blind to its
-  own patterns. Always cross-engine.
-- **Nitpicking without severity.** "I would have named it differently" is
-  LOW, not HIGH. Don't block merge on style preferences unless they violate
-  a documented convention.
-- **Missing the blast-radius check.** A 3-line change to a shared utility
-  can break 40 callers. Check `rg <function-name>` before approving.
-- **Accepting "100% coverage" at face value.** Branch coverage lies. Look
-  at the new code's branches and verify each has a test that exercises it.
-- **Review fatigue on large diffs.** If the diff is > 500 lines, ask the
-  implementer to split it. Review quality drops hard beyond 200-300 lines.
-  (SmartBear/Cisco study: defect detection falls off past ~400 LOC; keep each
-  focused pass under 200-400 LOC and under 60 minutes.)
-- **Treating a finding as fact before reproducing it on HEAD.** A finding is a
-  hypothesis until it reproduces against the CURRENT source. Before blocking on
-  "this serialize is lossy" or "this is a 2×N read," run a 3-line repro (a
-  throwaway `node -e` that calls the actual function on the actual input) or
-  re-read HEAD-of-branch — diffs and self-reports go stale. Several "confirmed"
-  bugs evaporate this way. Convergence (2+ engines independently flag it) raises
-  the prior, but YOU confirm before it goes on the must-fix list.
-- **Blocking on out-of-scope adjacent issues.** If the problem isn't introduced
-  by this change, file it as a separate task; don't hold the merge hostage.
-- **Letting "I'll clean it up later" slide.** Cleanup deferred past the current
-  change usually never happens (Google eng-practices pushback). Either fix in
-  this change or require a filed ticket + `TODO(#id)` in code — never a bare TODO.
+## Verification
 
-For the full industry basis (Google eng-practices, SmartBear/Cisco numbers,
-Microsoft Eng Playbook, Bacchelli & Bird ICSE2013, Conventional Comments, OWASP),
-see `references/world-class-standard.md`.
+Approve only when must-have coverage is `PASS`, every blocking claim is confirmed
+on current HEAD, and the repository's deterministic confidence gate passes.
