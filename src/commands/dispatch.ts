@@ -129,17 +129,36 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
         : undefined,
     scope: input.scope,
     spec: input.spec,
+    depends_on: Array.isArray(input.depends_on)
+      ? [
+          ...new Set(
+            input.depends_on
+              .filter((name): name is string => typeof name === "string")
+              .map((name) => name.trim())
+              .filter(Boolean),
+          ),
+        ]
+      : input.depends_on,
+    upstreamHandoffs: input.upstreamHandoffs,
+    acceptance_criteria: input.acceptance_criteria,
+    goal_score:
+      typeof input.goal_score === "number" && Number.isFinite(input.goal_score)
+        ? input.goal_score
+        : undefined,
     // Persist the linked canary (ADR-005) across updates — else any `vf units
     // update` would silently strip it via normalizeUnit and reopen the gate.
     canary: input.canary,
     // Persist the Type-B drift fingerprint + verified SHA across updates too.
     impl_fingerprint: input.impl_fingerprint,
     verified_sha: input.verified_sha,
+    security: input.security,
     gates: {
       build: g.build ?? "pending",
       lint: g.lint ?? "pending",
       test: g.test ?? "pending",
       review: g.review ?? "pending",
+      security: g.security,
+      goal_eval: g.goal_eval,
     },
     resources: {
       agents: Math.max(0, Math.round(Number(r.agents) || 0)),

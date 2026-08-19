@@ -1,0 +1,744 @@
+import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { makeReviewer } from "../src/commands/dispatch-reviewer.js";
+import { normalizeUnit } from "../src/commands/dispatch.js";
+import { type UnitsIngestInject, unitsIngest } from "../src/commands/units-ingest.js";
+import { units } from "../src/commands/units.js";
+
+const sha256 = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
+const git = (dir: string, ...args: string[]) =>
+  execFileSync("git", args, {
+    cwd: dir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+const state = (dir: string) =>
+  JSON.parse(readFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), "utf8"));
+
+type Evidence = { dir: string; rawPath: string; usagePath: string };
+const contractHash = "a".repeat(64);
+
+function repo(name = "unit") {
+  const dir = mkdtempSync(join(tmpdir(), "vf-ingest-"));
+  mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+  writeFileSync(
+    join(dir, ".vibeflow", "WORKFLOW_STATE.json"),
+    JSON.stringify({
+      goal: "test",
+      totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      work_units: [
+        {
+          name,
+          status: "pending",
+          confidence: 0,
+          scope: ["src", "test"],
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+    }),
+  );
+  git(dir, "init", "-q");
+  git(dir, "config", "user.email", "test@example.invalid");
+  git(dir, "config", "user.name", "Test");
+  writeFileSync(join(dir, ".gitignore"), ".vibeflow/\n");
+  mkdirSync(join(dir, "src"));
+  mkdirSync(join(dir, "test"));
+  writeFileSync(join(dir, "src", "work.ts"), "export const work = 1;\n");
+  writeFileSync(join(dir, "test", "work.test.ts"), "export {};\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-s", "-m", "base");
+  writeFileSync(join(dir, "src", "work.ts"), "export const work = 2;\n");
+  writeFileSync(join(dir, "test", "work.test.ts"), "export const work = 2;\n");
+  git(dir, "add", "src/work.ts", "test/work.test.ts");
+  git(dir, "commit", "-q", "-s", "-m", "work");
+  return dir;
+}
+
+function validRaw() {
+  return 'worker output\n```json\n{"skills_used":["typescript"],"files_changed":["src/work.ts","test/work.test.ts"],"commands_run":["bun test test/work.test.ts"],"tests_run":["test/work.test.ts"],"confidence":0.9,"uncertainty":"none"}\n```\n```yaml\nresult: done\nfiles: [src/work.ts]\nproof: [test]\nopen: []\n```\n';
+}
+
+function evidence(raw = validRaw(), patch: Record<string, unknown> = {}): Evidence {
+  const dir = mkdtempSync(join(tmpdir(), "vf-ingest-evidence-"));
+  const rawPath = join(dir, "result.txt");
+  const usagePath = join(dir, "usage.json");
+  writeFileSync(rawPath, raw);
+  writeFileSync(
+    usagePath,
+    JSON.stringify({
+      status: "succeeded",
+      exit_code: 0,
+      timed_out: false,
+      result_file: rawPath,
+      contract_hash: contractHash,
+      stdout_sha256: sha256(raw),
+      duration_seconds: 1,
+      hermes_usage: { total_tokens: 12, estimated_cost_usd: 0.03, completed: true, failed: false },
+      ...patch,
+    }),
+  );
+  return { dir, rawPath, usagePath };
+}
+
+function rewriteRaw(e: Evidence, raw: string) {
+  writeFileSync(e.rawPath, raw);
+  const usage = JSON.parse(readFileSync(e.usagePath, "utf8"));
+  usage.result_file = e.rawPath;
+  usage.stdout_sha256 = sha256(raw);
+  writeFileSync(e.usagePath, JSON.stringify(usage));
+}
+
+const passing: UnitsIngestInject = {
+  gate: (() => ({ pass: true })) as UnitsIngestInject["gate"],
+  run: (() => ({ status: 0, stdout: "ok" })) as UnitsIngestInject["run"],
+  reviewer: ((..._args: Parameters<typeof makeReviewer>) =>
+    async () => ({ pass: true })) as unknown as UnitsIngestInject["reviewer"],
+};
+
+async function ingest(
+  dir: string,
+  e: Evidence,
+  patch: Record<string, string | boolean> = {},
+  inject = passing,
+) {
+  return unitsIngest(
+    dir,
+    ["unit"],
+    {
+      producer: "hermes",
+      raw: e.rawPath,
+      usage: e.usagePath,
+      commit: git(dir, "rev-parse", "HEAD"),
+      "contract-hash": contractHash,
+      ...patch,
+    },
+    inject,
+  );
+}
+
+function withTemp<T>(fn: (dir: string, e: Evidence) => Promise<T> | T) {
+  const dir = repo();
+  const e = evidence();
+  return Promise.resolve(fn(dir, e)).finally(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(e.dir, { recursive: true, force: true });
+  });
+}
+
+let commitSequence = 2;
+function commit(
+  dir: string,
+  message: string,
+  signed = true,
+  paths = ["src/work.ts", "test/work.test.ts"],
+) {
+  commitSequence++;
+  writeFileSync(join(dir, "src", "work.ts"), `export const work = ${commitSequence};\n`);
+  writeFileSync(join(dir, "test", "work.test.ts"), `export const work = ${commitSequence};\n`);
+  git(dir, "add", ...paths);
+  git(dir, "commit", "-q", ...(signed ? ["-s"] : []), "-m", message);
+}
+
+describe("units ingest RED contract", () => {
+  test("depends-on canonicalizes and normalization round-trips handoffs, acceptance, finite score", () => {
+    const dir = repo();
+    const before = process.cwd();
+    try {
+      process.chdir(dir);
+      expect(units("add", ["next"], { "depends-on": " a, b ,a,, b " })).toBe(0);
+      expect(units("update", ["next"], { spec: "unrelated" })).toBe(0);
+      expect(
+        state(dir).work_units.find((u: { name: string }) => u.name === "next").depends_on,
+      ).toEqual(["a", "b"]);
+      const preserved = normalizeUnit({
+        name: "x",
+        upstreamHandoffs: [{ unit: "a", summary: "ready" }],
+        acceptance_criteria: [{ id: "a", criterion: "works" }],
+        goal_score: 0.8,
+        security: { consent: "run", verdict: "pass", notes: "checked" },
+        gates: { build: "pass", security: "pass", goal_eval: "pass" } as never,
+      } as any);
+      expect(preserved.upstreamHandoffs).toEqual([{ unit: "a", summary: "ready" }]);
+      expect(preserved.acceptance_criteria).toEqual([{ id: "a", criterion: "works" }]);
+      expect(preserved.goal_score).toBe(0.8);
+      expect((preserved as any).security).toEqual({
+        consent: "run",
+        verdict: "pass",
+        notes: "checked",
+      });
+      expect(preserved.gates).toMatchObject({ security: "pass", goal_eval: "pass" });
+      expect(
+        normalizeUnit({ name: "x", goal_score: Number.POSITIVE_INFINITY }).goal_score,
+      ).toBeUndefined();
+    } finally {
+      process.chdir(before);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("accepts bounded wrapper stdout, reviews commit range, persists complete done outcome", () =>
+    withTemp(async (dir, e) => {
+      const commitId = git(dir, "rev-parse", "HEAD");
+      let diff = "";
+      const code = await ingest(
+        dir,
+        e,
+        {},
+        {
+          ...passing,
+          reviewer: ((...args: Parameters<typeof makeReviewer>) => {
+            const opts = args[2];
+            return async () => {
+              diff = opts?.diffReader?.([], dir) ?? "";
+              return { pass: true };
+            };
+          }) as unknown as UnitsIngestInject["reviewer"],
+        },
+      );
+      expect(code).toBe(0);
+      expect(diff).toBe("src/work.ts\ntest/work.test.ts\n");
+      expect(diff).not.toContain("diff --git");
+      expect(diff).not.toContain("export const work = 2");
+      expect(state(dir).work_units[0]).toMatchObject({
+        status: "done",
+        confidence: 0.9,
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        resources: { agents: 1, tokens: 12, cost_usd: 0.03, wall_seconds: 1 },
+      });
+      expect(state(dir).work_units[0].evidence).toContain(`commit ${commitId}`);
+      expect(
+        readFileSync(join(dir, ".vibeflow", "workunits", "unit", "evidence", "hermes.raw"), "utf8"),
+      ).toBe(validRaw());
+    }));
+
+  test("ancestor commit remains reviewable after HEAD advances", () =>
+    withTemp(async (dir, e) => {
+      const commitId = git(dir, "rev-parse", "HEAD");
+      const oldBytes = readFileSync(join(dir, "src", "work.ts"), "utf8");
+      writeFileSync(join(dir, "src", "work.ts"), "export const work = 99;\n");
+      git(dir, "add", "src/work.ts");
+      git(dir, "commit", "-q", "-s", "-m", "later");
+      let gateCwd = "";
+      expect(
+        await ingest(
+          dir,
+          e,
+          { commit: commitId },
+          {
+            ...passing,
+            gate: ((input: { cwd: string }) => {
+              gateCwd = input.cwd;
+              expect(readFileSync(join(input.cwd, "src", "work.ts"), "utf8")).toBe(oldBytes);
+              return { pass: true };
+            }) as UnitsIngestInject["gate"],
+          },
+        ),
+      ).toBe(0);
+      expect(gateCwd).not.toBe(dir);
+    }));
+
+  test("builds detached snapshot before scoped gate", () =>
+    withTemp(async (dir, e) => {
+      const calls: Array<[string, string]> = [];
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            run: ((command, cwd) => {
+              calls.push([command, cwd]);
+              return { status: 0, stdout: "built" };
+            }) as UnitsIngestInject["run"],
+            gate: ((input: { cwd: string }) => {
+              expect(calls).toEqual([["bun run --cwd src/ui build", input.cwd]]);
+              return { pass: true };
+            }) as UnitsIngestInject["gate"],
+          },
+        ),
+      ).toBe(0);
+      expect(calls[0]?.[1]).not.toBe(dir);
+      expect(state(dir).work_units[0].evidence).toContain(
+        'bun run --cwd src/ui build → "exit 0: built"',
+      );
+    }));
+
+  test("blocks on snapshot build failure before gate or review", () =>
+    withTemp(async (dir, e) => {
+      let gateCalled = false;
+      let reviewerCalled = false;
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            run: (() => ({
+              status: 1,
+              stdout: "Bun banner\nUI build exploded",
+            })) as UnitsIngestInject["run"],
+            gate: (() => {
+              gateCalled = true;
+              return { pass: true };
+            }) as UnitsIngestInject["gate"],
+            reviewer: ((..._args: Parameters<typeof makeReviewer>) => {
+              reviewerCalled = true;
+              return async () => ({ pass: true });
+            }) as unknown as UnitsIngestInject["reviewer"],
+          },
+        ),
+      ).toBe(1);
+      expect(gateCalled).toBeFalse();
+      expect(reviewerCalled).toBeFalse();
+      expect(state(dir).work_units[0]).toMatchObject({
+        status: "blocked",
+        confidence: 0,
+        gates: { build: "fail", lint: "pending", test: "pending", review: "pending" },
+      });
+      expect(state(dir).work_units[0].evidence).toContain(
+        'bun run --cwd src/ui build → "exit 1: Bun banner UI build exploded"',
+      );
+    }));
+
+  test("canonical reviewer needs exact-commit name-status paths", () =>
+    withTemp(async (dir, e) => {
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            gate: (() => ({ pass: true })) as UnitsIngestInject["gate"],
+          },
+        ),
+      ).toBe(0);
+    }));
+
+  test("keeps measured metadata and trusted reviewer evidence", () =>
+    withTemp(async (dir, e) => {
+      const s = state(dir);
+      s.work_units[0] = {
+        ...s.work_units[0],
+        evidence: ["commit 1234567890abcdef", "commit fedcba0987654321"],
+        evidence_at: { "commit 1234567890abcdef": "2000-01-01T00:00:00.000Z" },
+      };
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      let outcome: unknown;
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            reviewer: ((..._args: Parameters<typeof makeReviewer>) =>
+              async (_unit: any, value: any) => {
+                outcome = value;
+                return { pass: true };
+              }) as unknown as UnitsIngestInject["reviewer"],
+          },
+        ),
+      ).toBe(0);
+      expect(state(dir).work_units[0]).toMatchObject({
+        skills_used: ["typescript"],
+        evidence_at: { "commit 1234567890abcdef": "2000-01-01T00:00:00.000Z" },
+      });
+      expect(state(dir).work_units[0].evidence_at["commit fedcba0987654321"]).toBeUndefined();
+      expect(outcome).toMatchObject({ commit: git(dir, "rev-parse", "HEAD") });
+      expect(JSON.stringify(outcome)).not.toContain("commands_run");
+    }));
+
+  test("persists reviewer acceptance evidence without mutating ledger review input", () =>
+    withTemp(async (dir, e) => {
+      const acceptance = 'acceptance AC1: bun test → "ok"';
+      let reviewedEvidence: string[] | undefined;
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            reviewer: ((..._args: Parameters<typeof makeReviewer>) =>
+              async (reviewUnit: { evidence?: string[] }) => {
+                reviewedEvidence = reviewUnit.evidence;
+                reviewUnit.evidence = [...(reviewUnit.evidence ?? []), acceptance];
+                return { pass: true };
+              }) as unknown as UnitsIngestInject["reviewer"],
+          },
+        ),
+      ).toBe(0);
+      expect(reviewedEvidence).toBeUndefined();
+      expect(state(dir).work_units[0].evidence).toContain(acceptance);
+      expect(state(dir).work_units[0].evidence_at[acceptance]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    }));
+
+  test("retains block evidence and fails when final mutation returns null", async () => {
+    await withTemp(async (dir, e) => {
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            gate: (() => ({
+              pass: false,
+              failedGate: "test",
+              detail: "red",
+            })) as UnitsIngestInject["gate"],
+          },
+        ),
+      ).toBe(1);
+      expect(state(dir).work_units[0]).toMatchObject({
+        gates: { test: "fail" },
+        resources: { agents: 1, tokens: 12, cost_usd: 0.03, wall_seconds: 1 },
+        evidence: expect.arrayContaining([expect.stringContaining("gate test: red")]),
+      });
+    });
+  });
+
+  test("final mutation returning null exits 1", () =>
+    withTemp((dir, e) =>
+      expect(ingest(dir, e, {}, { ...passing, mutate: () => null } as any)).resolves.toBe(1),
+    ));
+
+  test("copies validated raw bytes once and rejects destination symlink", async () => {
+    await withTemp(async (dir, e) => {
+      const validated = readFileSync(e.rawPath);
+      let reads = 0;
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            read: (p) => {
+              const bytes = readFileSync(p);
+              if (++reads === 1) writeFileSync(e.rawPath, "mutated after validation");
+              return bytes;
+            },
+          },
+        ),
+      ).toBe(0);
+      expect(
+        readFileSync(join(dir, ".vibeflow", "workunits", "unit", "evidence", "hermes.raw")),
+      ).toEqual(validated);
+    });
+    await withTemp(async (dir, e) => {
+      const outside = join(e.dir, "outside");
+      writeFileSync(outside, "sentinel");
+      const evidenceDir = join(dir, ".vibeflow", "workunits", "unit", "evidence");
+      mkdirSync(evidenceDir, { recursive: true });
+      symlinkSync(outside, join(evidenceDir, "hermes.raw"));
+      expect(await ingest(dir, e)).toBe(1);
+      expect(readFileSync(outside, "utf8")).toBe("sentinel");
+    });
+  });
+
+  test("rejection matrix has named cases and blocks every row", async () => {
+    const cases: Array<[string, (dir: string, e: Evidence) => Promise<number>]> = [
+      [
+        "missing state",
+        async (d, e) => {
+          rmSync(join(d, ".vibeflow", "WORKFLOW_STATE.json"));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "missing unit",
+        (d, e) =>
+          unitsIngest(d, ["none"], {
+            producer: "hermes",
+            raw: e.rawPath,
+            usage: e.usagePath,
+            commit: git(d, "rev-parse", "HEAD"),
+          }),
+      ],
+      ["unknown producer", (d, e) => ingest(d, e, { producer: "codex" })],
+      ["relative evidence", (d, e) => ingest(d, e, { raw: "result.txt" })],
+      ["non-normalized evidence", (d, e) => ingest(d, e, { raw: `${e.dir}/x/../result.txt` })],
+      ["missing evidence", (d, e) => ingest(d, e, { raw: join(e.dir, "none") })],
+      [
+        "directory evidence",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.result_file = e.dir;
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e, { raw: e.dir });
+        },
+      ],
+      ["equal paths", (d, e) => ingest(d, e, { usage: e.rawPath })],
+      [
+        "symlink",
+        (d, e) => {
+          const link = join(e.dir, "link");
+          symlinkSync(e.rawPath, link);
+          return ingest(d, e, { raw: link });
+        },
+      ],
+      ["uppercase commit", (d, e) => ingest(d, e, { commit: "A".repeat(40) })],
+      ["missing commit", (d, e) => ingest(d, e, { commit: "a".repeat(40) })],
+      [
+        "non-ancestor commit",
+        (d, e) =>
+          ingest(d, e, {
+            commit: git(d, "commit-tree", git(d, "rev-parse", "HEAD^{tree}"), "-m", "other"),
+          }),
+      ],
+      [
+        "dirty tree",
+        async (d, e) => {
+          writeFileSync(join(d, "dirty.txt"), "dirty\n");
+          return ingest(d, e);
+        },
+      ],
+      [
+        "empty diff",
+        async (d, e) => {
+          git(d, "commit", "-q", "--allow-empty", "-s", "-m", "empty");
+          return ingest(d, e);
+        },
+      ],
+      [
+        "no committed test",
+        async (d, e) => {
+          writeFileSync(join(d, "src", "work.ts"), "export const sourceOnly = true;\n");
+          git(d, "add", "src/work.ts");
+          git(d, "commit", "-q", "-s", "-m", "source only");
+          return ingest(d, e);
+        },
+      ],
+      [
+        "scope escape",
+        async (d, e) => {
+          mkdirSync(join(d, "docs"));
+          writeFileSync(join(d, "docs", "escape.md"), "x\n");
+          writeFileSync(join(d, "test", "work.test.ts"), "export const escaped = true;\n");
+          git(d, "add", "docs/escape.md", "test/work.test.ts");
+          git(d, "commit", "-q", "-s", "-m", "escape");
+          return ingest(d, e);
+        },
+      ],
+      [
+        "ancestor-file scope escape",
+        async (d, e) => {
+          const s = state(d);
+          s.work_units[0].scope = ["src/work.ts", "test"];
+          writeFileSync(join(d, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+          git(d, "rm", "-rq", "src");
+          writeFileSync(join(d, "src"), "ancestor file\n");
+          writeFileSync(join(d, "test", "work.test.ts"), "export const escaped = true;\n");
+          git(d, "add", "src", "test/work.test.ts");
+          git(d, "commit", "-q", "-s", "-m", "ancestor escape");
+          return ingest(d, e);
+        },
+      ],
+      [
+        "missing expected contract hash",
+        (d, e) =>
+          unitsIngest(
+            d,
+            ["unit"],
+            {
+              producer: "hermes",
+              raw: e.rawPath,
+              usage: e.usagePath,
+              commit: git(d, "rev-parse", "HEAD"),
+            },
+            passing,
+          ),
+      ],
+      [
+        "mismatched expected contract hash",
+        (d, e) => ingest(d, e, { "contract-hash": "b".repeat(64) }),
+      ],
+      [
+        "missing DCO",
+        async (d, e) => {
+          commit(d, "unsigned", false);
+          return ingest(d, e);
+        },
+      ],
+      [
+        "malformed usage",
+        async (d, e) => {
+          writeFileSync(e.usagePath, "{");
+          return ingest(d, e);
+        },
+      ],
+      [
+        "timed-out usage",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.timed_out = true;
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "incomplete Hermes usage",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.hermes_usage.completed = false;
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "failed Hermes usage",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.hermes_usage.failed = true;
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "result-file mismatch",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.result_file = join(e.dir, "other.txt");
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "stdout hash mismatch",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.stdout_sha256 = "0".repeat(64);
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "negative resource",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.duration_seconds = -1;
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "nonfinite resource",
+        async (d, e) => {
+          const u = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          u.hermes_usage.total_tokens = "NaN";
+          writeFileSync(e.usagePath, JSON.stringify(u));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "malformed summary",
+        async (d, e) => {
+          rewriteRaw(e, "result: done\n");
+          return ingest(d, e);
+        },
+      ],
+      [
+        "invalid summary",
+        async (d, e) => {
+          rewriteRaw(e, validRaw().replace('"confidence":0.9', '"confidence":2'));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "out-of-scope summary",
+        async (d, e) => {
+          rewriteRaw(e, validRaw().replace("src/work.ts", "docs/escape.md"));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "summary omits committed path",
+        async (d, e) => {
+          rewriteRaw(e, validRaw().replace(',"test/work.test.ts"', ""));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "source parent symlink into repository",
+        async (d, e) => {
+          const source = join(d, ".vibeflow", "result.txt");
+          const link = join(e.dir, "repository-link");
+          writeFileSync(source, validRaw());
+          symlinkSync(join(d, ".vibeflow"), link);
+          e.rawPath = join(link, "result.txt");
+          const usage = JSON.parse(readFileSync(e.usagePath, "utf8"));
+          usage.result_file = e.rawPath;
+          usage.stdout_sha256 = sha256(validRaw());
+          writeFileSync(e.usagePath, JSON.stringify(usage));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "bounded result not done",
+        async (d, e) => {
+          rewriteRaw(e, validRaw().replace("result: done", "result: failed"));
+          return ingest(d, e);
+        },
+      ],
+      [
+        "measured gate failure",
+        (d, e) =>
+          ingest(
+            d,
+            e,
+            {},
+            {
+              ...passing,
+              gate: (() => ({
+                pass: false,
+                failedGate: "test",
+                detail: "red",
+              })) as UnitsIngestInject["gate"],
+            },
+          ),
+      ],
+      [
+        "reviewer failure",
+        (d, e) =>
+          ingest(
+            d,
+            e,
+            {},
+            {
+              ...passing,
+              reviewer: ((..._args: Parameters<typeof makeReviewer>) =>
+                async () => ({
+                  pass: false,
+                  reason: "no",
+                })) as unknown as UnitsIngestInject["reviewer"],
+            },
+          ),
+      ],
+      [
+        "policy failure",
+        async (d, e) => {
+          const s = state(d);
+          s.work_units[0].knowledge_heavy = true;
+          writeFileSync(join(d, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+          return ingest(d, e);
+        },
+      ],
+    ];
+    expect(cases.length).toBe(37);
+    for (const [name, run] of cases)
+      await withTemp(async (dir, e) => {
+        expect(await run(dir, e)).toBe(1);
+        if (name !== "missing state" && name !== "missing unit")
+          expect(state(dir).work_units[0].status).toBe("blocked");
+      });
+  }, 25000);
+});

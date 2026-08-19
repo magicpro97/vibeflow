@@ -23,7 +23,7 @@ export function units(
   // returns null to exercise the "No such work unit" race
   // condition path in the evidence-add branch.
   inject: { mutateUnits?: typeof mutateUnits } = {},
-): number {
+): number | Promise<number> {
   const mu = inject.mutateUnits ?? mutateUnits;
   const state = readState();
   if (!state) {
@@ -36,6 +36,8 @@ export function units(
   // (the ai-init-workflow-state-writer omits the key on no-phases intake).
   if (!Array.isArray(state.work_units)) state.work_units = [];
   switch (sub) {
+    case "ingest":
+      return import("./units-ingest.js").then(({ unitsIngest }) => unitsIngest(cwd(), rest, flags));
     case undefined:
     case "status": {
       if (state.work_units.length === 0) {
@@ -168,6 +170,8 @@ export function units(
           .map((s) => s.trim())
           .filter(Boolean);
       }
+      if (typeof flags["depends-on"] === "string")
+        addPatch.depends_on = dependencyNames(flags["depends-on"]);
       const next = mutateUnits(cwd(), "add", addPatch);
       if (!next) {
         out("vf", c.red(`Could not add "${name}" — a unit with that name already exists.`), {
@@ -202,6 +206,8 @@ export function units(
           .map((s) => s.trim())
           .filter(Boolean);
       }
+      if (typeof flags["depends-on"] === "string")
+        patch.depends_on = dependencyNames(flags["depends-on"]);
       const next = mutateUnits(cwd(), "update", patch);
       if (!next) {
         out("vf", c.red(`No such work unit: ${name}`), {
@@ -262,6 +268,17 @@ export function units(
       });
       return 2;
   }
+}
+
+function dependencyNames(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function gateColor(s: string): string {
