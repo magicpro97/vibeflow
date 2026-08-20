@@ -369,9 +369,9 @@ export async function unitsIngest(
             evidence,
             evidence_at,
           };
+          if (unit.status === "done") candidate = { ...normalizedUnit, evidence, evidence_at };
           if (!policyGates({ ...state, work_units: [candidate] }, { base: wt }).ok)
             failure = "policy gate failed";
-          else if (unit.status === "done") candidate = { ...normalizedUnit, evidence, evidence_at };
         }
       }
     }

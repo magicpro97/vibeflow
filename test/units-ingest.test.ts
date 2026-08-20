@@ -515,7 +515,7 @@ describe("units ingest RED contract", () => {
       const sentinel: Required<Omit<WorkUnit, "evidence" | "evidence_at">> = {
         name: "unit",
         status: "done",
-        confidence: 0.73,
+        confidence: 0.9,
         riskClass: "feature",
         owner_agent: "owner",
         skills_used: ["old-skill"],
@@ -589,6 +589,65 @@ describe("units ingest RED contract", () => {
         expect(after.evidence_at?.[item]).toBe(at as string);
       for (const item of [oldCommit, `commit ${git(dir, "rev-parse", "HEAD")}`])
         expect(after.evidence?.filter((value: string) => value === item)).toHaveLength(1);
+      expect(policyGates({ ...state(dir), work_units: [after] }, { base: dir }).ok).toBeTrue();
+    }));
+
+  test("blocks policy-invalid preserved done repair without replacing raw", () =>
+    withTemp(async (dir, e) => {
+      expect(await ingest(dir, e)).toBe(0);
+      const rawPath = join(dir, ".vibeflow", "workunits", "unit", "evidence", "hermes.raw");
+      const priorRaw = readFileSync(rawPath);
+      commit(dir, "invalid done repair");
+      const s = state(dir);
+      const prior = s.work_units[0];
+      prior.confidence = 0.73;
+      const priorEvidence = [...prior.evidence];
+      const priorEvidenceAt = { ...prior.evidence_at };
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      expect(policyGates(state(dir), { base: dir }).ok).toBeFalse();
+      rewriteRaw(
+        e,
+        validRaw()
+          .replace('"skills_used":["typescript"]', '"skills_used":["attempted-skill"]')
+          .replace('"confidence":0.9', '"confidence":0.99'),
+      );
+      const usage = JSON.parse(readFileSync(e.usagePath, "utf8"));
+      Object.assign(usage, { duration_seconds: 9 });
+      Object.assign(usage.hermes_usage, { total_tokens: 99, estimated_cost_usd: 9.99 });
+      writeFileSync(e.usagePath, JSON.stringify(usage));
+      const reviewerEvidence = 'acceptance attempted: bun test → "ok"';
+      expect(
+        await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            reviewer: (() => async (unit: WorkUnit) => {
+              unit.evidence = [...(unit.evidence ?? []), reviewerEvidence];
+              return { pass: true };
+            }) as unknown as UnitsIngestInject["reviewer"],
+          },
+        ),
+      ).toBe(1);
+      const reloaded = state(dir);
+      const after = reloaded.work_units[0];
+      expect(after).toMatchObject({
+        status: "blocked",
+        confidence: 0,
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        resources: { agents: 1, tokens: 99, cost_usd: 9.99, wall_seconds: 9 },
+      });
+      expect(reloaded.totals.done).toBe(0);
+      expect(readFileSync(rawPath)).toEqual(priorRaw);
+      for (const item of priorEvidence) expect(after.evidence).toContain(item);
+      for (const [item, at] of Object.entries(priorEvidenceAt))
+        expect(after.evidence_at[item]).toBe(at);
+      expect(after.evidence).toContain('bun run --cwd src/ui build → "exit 0: ok"');
+      expect(after.evidence).toContain('vf units ingest → "policy gate failed"');
+      expect(after.evidence).not.toContain(`commit ${git(dir, "rev-parse", "HEAD")}`);
+      expect(after.evidence).not.toContain(reviewerEvidence);
+      expect(after.skills_used).toEqual(prior.skills_used);
     }));
 
   test("legacy normalization preserves independent normalized collisions", async () => {
