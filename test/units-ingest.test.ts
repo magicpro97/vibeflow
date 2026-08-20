@@ -454,6 +454,117 @@ describe("units ingest RED contract", () => {
       expect(policyGates(result, { base: dir }).ok).toBeTrue();
     }));
 
+  test("preserves buried legacy retry history", () =>
+    withTemp(async (dir, e) => {
+      const measured = 'bun test --timeout 30000 → "exit 1: old bytes"';
+      const reason = "gate test: old reason";
+      const canonical = `vf units ingest → ${JSON.stringify(reason)}`;
+      const legacy = `vf units ingest legacy → ${JSON.stringify(reason)}`;
+      const policy = 'vf units ingest → "policy gate failed"';
+      const oldAt = "2026-01-01T00:00:00.000Z";
+      const newAt = "2026-01-02T00:00:00.000Z";
+      const policyAt = "2026-01-03T00:00:00.000Z";
+      const original = [measured, reason, canonical, policy];
+      const s = state(dir);
+      Object.assign(s.work_units[0], {
+        status: "blocked",
+        knowledge_heavy: true,
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        evidence: original,
+        evidence_at: { [measured]: oldAt, [reason]: oldAt, [canonical]: newAt, [policy]: policyAt },
+      });
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      const rawPath = join(dir, ".vibeflow", "workunits", "unit", "evidence", "hermes.raw");
+      mkdirSync(join(rawPath, ".."), { recursive: true });
+      writeFileSync(rawPath, "validated old raw");
+      const attempted = git(dir, "rev-parse", "HEAD");
+      const reviewerEvidence = 'acceptance attempted: bun test → "ok"';
+      const inject = {
+        ...passing,
+        reviewer: (() => async (unit: WorkUnit) => {
+          unit.evidence = [...(unit.evidence ?? []), reviewerEvidence];
+          return { pass: true };
+        }) as unknown as UnitsIngestInject["reviewer"],
+      };
+      expect(await ingest(dir, e, {}, inject)).toBe(1);
+      let row = state(dir).work_units[0];
+      expect(row.evidence.slice(0, 4)).toEqual([measured, legacy, canonical, policy]);
+      expect(row.evidence).toHaveLength(5);
+      expect(row.evidence_at).toMatchObject({
+        [measured]: oldAt,
+        [legacy]: oldAt,
+        [canonical]: newAt,
+        [policy]: policyAt,
+      });
+      expect(row.evidence_at[reason]).toBeUndefined();
+      expect(row.evidence).not.toContain(`commit ${attempted}`);
+      expect(row.evidence).not.toContain(reviewerEvidence);
+      expect(readFileSync(rawPath, "utf8")).toBe("validated old raw");
+      const repaired = state(dir);
+      repaired.work_units[0].knowledge_heavy = false;
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(repaired));
+      expect(await ingest(dir, e, {}, inject)).toBe(0);
+      row = state(dir).work_units[0];
+      expect(row.status).toBe("done");
+      expect(row.evidence.slice(0, 4)).toEqual([measured, legacy, canonical, policy]);
+      expect(row.evidence_at).toMatchObject({
+        [measured]: oldAt,
+        [legacy]: oldAt,
+        [canonical]: newAt,
+      });
+      expect(row.evidence.filter((item: string) => item === `commit ${attempted}`)).toHaveLength(1);
+      expect(row.evidence.filter((item: string) => item === reviewerEvidence)).toHaveLength(1);
+    }));
+
+  test("buried legacy migration rejects wrapper and replacement collisions", async () => {
+    const measured = 'bun test --timeout 30000 → "exit 1: old bytes"';
+    const reason = "gate test: old reason";
+    const canonical = `vf units ingest → ${JSON.stringify(reason)}`;
+    const legacy = `vf units ingest legacy → ${JSON.stringify(reason)}`;
+    const oldAt = "2026-01-01T00:00:00.000Z";
+    const newAt = "2026-01-02T00:00:00.000Z";
+    const cases = [
+      { extra: [legacy], map: { [legacy]: "2025-01-01T00:00:00.000Z" } },
+      { extra: [], map: { [legacy]: "2025-01-01T00:00:00.000Z" } },
+      { extra: ["unrelated"], map: {}, wrapper: `vf units ingest → "gate test: other"` },
+      { extra: ["unrelated"], map: {}, wrapper: "arbitrary later evidence" },
+    ];
+    for (const item of cases)
+      await withTemp(async (dir, e) => {
+        const wrapper = item.wrapper ?? canonical;
+        const evidence = [measured, reason, wrapper, ...item.extra];
+        const evidence_at = { [measured]: oldAt, [reason]: oldAt, [wrapper]: newAt, ...item.map };
+        const s = state(dir);
+        Object.assign(s.work_units[0], {
+          status: "blocked",
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+          evidence,
+          evidence_at,
+        });
+        writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+        expect(
+          await ingest(
+            dir,
+            e,
+            {},
+            {
+              ...passing,
+              gate: (() => ({
+                pass: false,
+                failedGate: "test",
+                detail: "fresh",
+              })) as UnitsIngestInject["gate"],
+            },
+          ),
+        ).toBe(1);
+        const row = state(dir).work_units[0];
+        expect(row.evidence.slice(0, evidence.length)).toEqual(evidence);
+        expect(
+          Object.fromEntries(Object.keys(evidence_at).map((key) => [key, row.evidence_at[key]])),
+        ).toEqual(evidence_at);
+      });
+  });
+
   test("legacy matcher accepts only complete mapped shapes", async () => {
     const rows: Array<[string, boolean]> = [
       ['bun test --timeout 30000 → "exit -1: x"', true],

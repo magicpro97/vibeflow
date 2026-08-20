@@ -1,20 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import {
-  constants,
-  closeSync,
-  fstatSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+// biome-ignore format: production file ceiling
+import { constants, closeSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseEngineSummary } from "../dispatch/prompt.js";
@@ -150,15 +137,20 @@ function measuredEvidence(command: string, status: number | null, stdout: string
 }
 // biome-ignore format: production file ceiling
 function normalizeLegacyGateReason(unit: WorkUnit) {
-  const evidence = [...(unit.evidence ?? [])]; const reason = evidence.at(-1);
-  const measured = evidence.at(-2);
+  const evidence = [...(unit.evidence ?? [])]; const at = unit.evidence_at;
+  const rawIndex = evidence.findIndex((reason, index) => {
+    const gate = reason.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as "build" | "lint" | "test";
+    const measured = evidence[index - 1]; const canonical = `vf units ingest → ${JSON.stringify(reason)}`;
+    return !!gate && index < evidence.length - 1 && evidence.indexOf(canonical, index + 1) > index && !!at?.[canonical] && !!measured && !!at?.[reason] && at[reason] === at[measured];
+  });
+  const index = rawIndex >= 0 ? rawIndex : evidence.length - 1; const reason = evidence[index];
+  const measured = evidence[index - 1];
   const gate = reason?.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as "build" | "lint" | "test";
   const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const expected = gate === "build" ? "(?:bun run --cwd src/ui build|bunx tsc --noEmit)" : gate === "lint" ? escaped(`bunx biome check ${(unit.scope ?? []).join(" ")}`) : gate === "test" ? "bun test --timeout 30000" : "";
   const measuredShape = expected && new RegExp(`^${expected} → "exit (?:-1|[1-9]\\d*): (?:\\\\"|[^"\\r\\n])*"(?![\\s\\S])`);
-  const at = unit.evidence_at;
-  if (!reason || !measured || !measuredShape || unit.status !== "blocked" || isVerifiableEvidence(reason) || unit.gates?.[gate] !== "fail" || !measuredShape.test(measured) || !at?.[reason] || at[reason] !== at[measured]) return unit;
-  const normalized = `vf units ingest → ${JSON.stringify(reason)}`; if (evidence.includes(normalized) || Object.hasOwn(at, normalized)) return unit; evidence[evidence.length - 1] = normalized;
+  if (!reason || !measured || !measuredShape || unit.status !== "blocked" || isVerifiableEvidence(reason) || (rawIndex < 0 && unit.gates?.[gate] !== "fail") || !measuredShape.test(measured) || !at?.[reason] || at[reason] !== at[measured]) return unit;
+  const normalized = `${rawIndex >= 0 ? "vf units ingest legacy" : "vf units ingest"} → ${JSON.stringify(reason)}`; if (evidence.includes(normalized) || Object.hasOwn(at, normalized)) return unit; evidence[index] = normalized;
   const evidence_at = { ...at, [normalized]: at[reason] }; delete evidence_at[reason]; return { ...unit, evidence, evidence_at };
 }
 export async function unitsIngest(
@@ -170,6 +162,7 @@ export async function unitsIngest(
   const state = readState(base);
   const name = rest[0]?.trim();
   const unit = state?.work_units?.find((u) => u.name === name);
+  const normalizedUnit = unit ? normalizeLegacyGateReason(unit) : unit;
   const mutate = inject.mutate ?? mutateUnits;
   const block = (
     reason: string,
@@ -180,8 +173,10 @@ export async function unitsIngest(
     try {
       if (!unit || !name) return 1;
       const persistedReason = `vf units ingest → ${JSON.stringify(reason)}`;
-      const evidence = [...new Set([...(unit.evidence ?? []), ...freshEvidence, persistedReason])];
-      const evidence_at = { ...(unit.evidence_at ?? {}) };
+      const evidence = [
+        ...new Set([...(normalizedUnit?.evidence ?? []), ...freshEvidence, persistedReason]),
+      ];
+      const evidence_at = { ...(normalizedUnit?.evidence_at ?? {}) };
       for (const item of [...freshEvidence, persistedReason])
         if (!evidence_at[item]) evidence_at[item] = new Date().toISOString();
       return mutate(base, "update", {
@@ -199,7 +194,7 @@ export async function unitsIngest(
       return 1;
     }
   };
-  if (!state || !unit || !name) return 1;
+  if (!state || !unit || !normalizedUnit || !name) return 1;
   const rawArg = typeof flags.raw === "string" ? flags.raw : "";
   const usageArg = typeof flags.usage === "string" ? flags.usage : "";
   const commit = typeof flags.commit === "string" ? flags.commit : "";
@@ -353,7 +348,6 @@ export async function unitsIngest(
         if (!review.pass) failure = `review: ${review.reason}`;
         else {
           const freshEvidence = [`commit ${commit}`, ...outputs, ...reviewerEvidence];
-          const normalizedUnit = normalizeLegacyGateReason(unit);
           const evidence = [...new Set([...(normalizedUnit.evidence ?? []), ...freshEvidence])];
           const evidence_at = { ...(normalizedUnit.evidence_at ?? {}) };
           for (const item of freshEvidence)
