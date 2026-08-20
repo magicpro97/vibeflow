@@ -464,7 +464,7 @@ describe("units ingest RED contract", () => {
       const oldAt = "2026-01-01T00:00:00.000Z";
       const newAt = "2026-01-02T00:00:00.000Z";
       const policyAt = "2026-01-03T00:00:00.000Z";
-      const original = [measured, reason, canonical, policy];
+      const original = [measured, reason, canonical, measured, policy];
       const s = state(dir);
       Object.assign(s.work_units[0], {
         status: "blocked",
@@ -482,20 +482,26 @@ describe("units ingest RED contract", () => {
       const inject = {
         ...passing,
         reviewer: (() => async (unit: WorkUnit) => {
-          unit.evidence = [...(unit.evidence ?? []), reviewerEvidence];
+          unit.evidence = [...(unit.evidence ?? []), reviewerEvidence, reviewerEvidence];
           return { pass: true };
         }) as unknown as UnitsIngestInject["reviewer"],
       };
       expect(await ingest(dir, e, {}, inject)).toBe(1);
       let row = state(dir).work_units[0];
-      expect(row.evidence.slice(0, 4)).toEqual([measured, legacy, canonical, policy]);
-      expect(row.evidence).toHaveLength(5);
-      expect(row.evidence_at).toMatchObject({
+      const buildEvidence = 'bun run --cwd src/ui build → "exit 0: ok"';
+      const buildAt = row.evidence_at[buildEvidence];
+      expect(buildAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      const blockedEvidence = [measured, legacy, canonical, measured, policy, buildEvidence];
+      const blockedEvidenceAt = {
         [measured]: oldAt,
         [legacy]: oldAt,
         [canonical]: newAt,
         [policy]: policyAt,
-      });
+        [buildEvidence]: buildAt,
+      };
+      expect(row.status).toBe("blocked");
+      expect(row.evidence).toEqual(blockedEvidence);
+      expect(row.evidence_at).toEqual(blockedEvidenceAt);
       expect(row.evidence_at[reason]).toBeUndefined();
       expect(row.evidence).not.toContain(`commit ${attempted}`);
       expect(row.evidence).not.toContain(reviewerEvidence);
@@ -505,15 +511,18 @@ describe("units ingest RED contract", () => {
       writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(repaired));
       expect(await ingest(dir, e, {}, inject)).toBe(0);
       row = state(dir).work_units[0];
+      const commitEvidence = `commit ${attempted}`;
+      const commitAt = row.evidence_at[commitEvidence];
+      const reviewerAt = row.evidence_at[reviewerEvidence];
+      expect(commitAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(reviewerAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(row.status).toBe("done");
-      expect(row.evidence.slice(0, 4)).toEqual([measured, legacy, canonical, policy]);
-      expect(row.evidence_at).toMatchObject({
-        [measured]: oldAt,
-        [legacy]: oldAt,
-        [canonical]: newAt,
+      expect(row.evidence).toEqual([...blockedEvidence, commitEvidence, reviewerEvidence]);
+      expect(row.evidence_at).toEqual({
+        ...blockedEvidenceAt,
+        [commitEvidence]: commitAt,
+        [reviewerEvidence]: reviewerAt,
       });
-      expect(row.evidence.filter((item: string) => item === `commit ${attempted}`)).toHaveLength(1);
-      expect(row.evidence.filter((item: string) => item === reviewerEvidence)).toHaveLength(1);
     }));
 
   test("buried legacy migration rejects wrapper and replacement collisions", async () => {
@@ -562,6 +571,44 @@ describe("units ingest RED contract", () => {
         expect(
           Object.fromEntries(Object.keys(evidence_at).map((key) => [key, row.evidence_at[key]])),
         ).toEqual(evidence_at);
+      });
+  });
+
+  test("buried legacy migration requires every timestamp", async () => {
+    const measured = 'bun test --timeout 30000 → "exit 1: old bytes"';
+    const reason = "gate test: old reason";
+    const canonical = `vf units ingest → ${JSON.stringify(reason)}`;
+    const legacy = `vf units ingest legacy → ${JSON.stringify(reason)}`;
+    const oldAt = "2026-01-01T00:00:00.000Z";
+    const newAt = "2026-01-02T00:00:00.000Z";
+    for (const omitted of [measured, reason, canonical])
+      await withTemp(async (dir, e) => {
+        const evidence = [measured, reason, canonical];
+        const evidence_at: Record<string, string> = {
+          [measured]: oldAt,
+          [reason]: oldAt,
+          [canonical]: newAt,
+        };
+        delete evidence_at[omitted];
+        const s = state(dir);
+        Object.assign(s.work_units[0], {
+          status: "blocked",
+          gates: { build: "pass", lint: "pass", test: "fail", review: "pending" },
+          evidence,
+          evidence_at,
+        });
+        writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+        expect(await ingest(dir, e, { producer: "codex" })).toBe(1);
+        const row = state(dir).work_units[0];
+        const diagnostic = 'vf units ingest → "producer must be hermes"';
+        expect(row.evidence_at[diagnostic]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+        expect(row.evidence).toEqual([...evidence, diagnostic]);
+        expect(row.evidence_at).toEqual({
+          ...evidence_at,
+          [diagnostic]: row.evidence_at[diagnostic],
+        });
+        expect(row.evidence).not.toContain(legacy);
+        expect(row.evidence_at[legacy]).toBeUndefined();
       });
   });
 

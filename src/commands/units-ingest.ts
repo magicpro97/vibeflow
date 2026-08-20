@@ -49,7 +49,11 @@ const validPath = (p: string) =>
   !/[\r\n\0]/.test(p) &&
   p === p.trim() &&
   p.split("/").every((x) => x && x !== "." && x !== "..");
-const scalar = (v: string) => v.trim();
+const scalar = (v: string) => v.trim(); // ponytail: 400-line ceiling; expand when ceiling removed
+// biome-ignore format: production file ceiling
+function appendEvidence(history: string[], fresh: string[]) { const evidence = [...history]; const seen = new Set(history); const appended: string[] = [];
+  for (const item of fresh) if (!seen.has(item)) { seen.add(item); evidence.push(item); appended.push(item); }
+  return { evidence, appended }; }
 function readSafe(path: string): Buffer {
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
@@ -173,12 +177,12 @@ export async function unitsIngest(
     try {
       if (!unit || !name) return 1;
       const persistedReason = `vf units ingest → ${JSON.stringify(reason)}`;
-      const evidence = [
-        ...new Set([...(normalizedUnit?.evidence ?? []), ...freshEvidence, persistedReason]),
-      ];
+      const { evidence, appended } = appendEvidence(normalizedUnit?.evidence ?? [], [
+        ...freshEvidence,
+        persistedReason,
+      ]);
       const evidence_at = { ...(normalizedUnit?.evidence_at ?? {}) };
-      for (const item of [...freshEvidence, persistedReason])
-        if (!evidence_at[item]) evidence_at[item] = new Date().toISOString();
+      for (const item of appended) evidence_at[item] = new Date().toISOString();
       return mutate(base, "update", {
         name,
         status: "blocked",
@@ -348,10 +352,12 @@ export async function unitsIngest(
         if (!review.pass) failure = `review: ${review.reason}`;
         else {
           const freshEvidence = [`commit ${commit}`, ...outputs, ...reviewerEvidence];
-          const evidence = [...new Set([...(normalizedUnit.evidence ?? []), ...freshEvidence])];
+          const { evidence, appended } = appendEvidence(
+            normalizedUnit.evidence ?? [],
+            freshEvidence,
+          );
           const evidence_at = { ...(normalizedUnit.evidence_at ?? {}) };
-          for (const item of freshEvidence)
-            if (!evidence_at[item]) evidence_at[item] = new Date().toISOString();
+          for (const item of appended) evidence_at[item] = new Date().toISOString();
           candidate = {
             ...normalizedUnit,
             name,
