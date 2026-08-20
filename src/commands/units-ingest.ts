@@ -51,9 +51,7 @@ const validPath = (p: string) =>
   p.split("/").every((x) => x && x !== "." && x !== "..");
 const scalar = (v: string) => v.trim(); // ponytail: 400-line ceiling; expand when ceiling removed
 // biome-ignore format: production file ceiling
-function appendEvidence(history: string[], fresh: string[]) { const evidence = [...history]; const seen = new Set(history); const appended: string[] = [];
-  for (const item of fresh) if (!seen.has(item)) { seen.add(item); evidence.push(item); appended.push(item); }
-  return { evidence, appended }; }
+function appendEvidence(history: string[], fresh: string[]) { const evidence = [...history]; const seen = new Set(history); const appended: string[] = []; for (const item of fresh) if (!seen.has(item)) { seen.add(item); evidence.push(item); appended.push(item); } return { evidence, appended }; }
 function readSafe(path: string): Buffer {
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
@@ -182,7 +180,8 @@ export async function unitsIngest(
         persistedReason,
       ]);
       const evidence_at = { ...(normalizedUnit?.evidence_at ?? {}) };
-      for (const item of appended) evidence_at[item] = new Date().toISOString();
+      for (const item of appended)
+        if (!Object.hasOwn(evidence_at, item)) evidence_at[item] = new Date().toISOString();
       return mutate(base, "update", {
         name,
         status: "blocked",
@@ -357,7 +356,8 @@ export async function unitsIngest(
             freshEvidence,
           );
           const evidence_at = { ...(normalizedUnit.evidence_at ?? {}) };
-          for (const item of appended) evidence_at[item] = new Date().toISOString();
+          for (const item of appended)
+            if (!Object.hasOwn(evidence_at, item)) evidence_at[item] = new Date().toISOString();
           candidate = {
             ...normalizedUnit,
             name,

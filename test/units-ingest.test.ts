@@ -147,6 +147,40 @@ function commit(
 }
 
 describe("units ingest RED contract", () => {
+  test("preserves key-only timestamp for appended block diagnostic", () =>
+    withTemp(async (dir, e) => {
+      const diagnostic = 'vf units ingest → "producer must be hermes"';
+      const keyOnlyAt = "2025-01-01T00:00:00.000Z";
+      const s = state(dir);
+      s.work_units[0].evidence_at = { [diagnostic]: keyOnlyAt };
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      expect(await ingest(dir, e, { producer: "codex" })).toBe(1);
+      const row = state(dir).work_units[0];
+      expect(row.status).toBe("blocked");
+      expect(row.evidence).toEqual([diagnostic]);
+      expect(row.evidence_at).toEqual({ [diagnostic]: keyOnlyAt });
+    }));
+
+  test("preserves key-only timestamp for appended success commit", () =>
+    withTemp(async (dir, e) => {
+      const commitEvidence = `commit ${git(dir, "rev-parse", "HEAD")}`;
+      const keyOnlyAt = "2025-02-02T00:00:00.000Z";
+      const s = state(dir);
+      s.work_units[0].evidence_at = { [commitEvidence]: keyOnlyAt };
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      expect(await ingest(dir, e)).toBe(0);
+      const row = state(dir).work_units[0];
+      const buildEvidence = 'bun run --cwd src/ui build → "exit 0: ok"';
+      const buildAt = row.evidence_at[buildEvidence];
+      expect(buildAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(row.status).toBe("done");
+      expect(row.evidence).toEqual([commitEvidence, buildEvidence]);
+      expect(row.evidence_at).toEqual({
+        [commitEvidence]: keyOnlyAt,
+        [buildEvidence]: buildAt,
+      });
+    }));
+
   test("depends-on canonicalizes and normalization round-trips handoffs, acceptance, finite score", () => {
     const dir = repo();
     const before = process.cwd();
