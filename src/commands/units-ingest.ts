@@ -25,7 +25,6 @@ import { type GateRunner, defaultRun, scopedGate } from "../orchestrator/scoped-
 import { mutateUnits, readState, sanitizeUnitName } from "./_shared.js";
 import type { WorkUnit } from "./_shared.js";
 import { makeReviewer } from "./dispatch-reviewer.js";
-
 type Usage = {
   status?: unknown;
   exit_code?: unknown;
@@ -149,9 +148,9 @@ function measuredEvidence(command: string, status: number | null, stdout: string
     .replace(/"/g, '\\"')
     .trim()}"`;
 }
+// biome-ignore format: production file ceiling
 function normalizeLegacyGateReason(unit: WorkUnit) {
-  const evidence = [...(unit.evidence ?? [])];
-  const reason = evidence.at(-1);
+  const evidence = [...(unit.evidence ?? [])]; const reason = evidence.at(-1);
   const measured = evidence.at(-2);
   const gate = reason?.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as "build" | "lint" | "test";
   const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -159,7 +158,7 @@ function normalizeLegacyGateReason(unit: WorkUnit) {
   const measuredShape = expected && new RegExp(`^${expected} → "exit (?:-1|[1-9]\\d*): (?:\\\\"|[^"\\r\\n])*"(?![\\s\\S])`);
   const at = unit.evidence_at;
   if (!reason || !measured || !measuredShape || unit.status !== "blocked" || isVerifiableEvidence(reason) || unit.gates?.[gate] !== "fail" || !measuredShape.test(measured) || !at?.[reason] || at[reason] !== at[measured]) return unit;
-  const normalized = `vf units ingest → ${JSON.stringify(reason)}`; evidence[evidence.length - 1] = normalized;
+  const normalized = `vf units ingest → ${JSON.stringify(reason)}`; if (evidence.includes(normalized) || Object.hasOwn(at, normalized)) return unit; evidence[evidence.length - 1] = normalized;
   const evidence_at = { ...at, [normalized]: at[reason] }; delete evidence_at[reason]; return { ...unit, evidence, evidence_at };
 }
 export async function unitsIngest(
@@ -372,6 +371,7 @@ export async function unitsIngest(
           };
           if (!policyGates({ ...state, work_units: [candidate] }, { base: wt }).ok)
             failure = "policy gate failed";
+          else if (unit.status === "done") candidate = { ...normalizedUnit, evidence, evidence_at };
         }
       }
     }

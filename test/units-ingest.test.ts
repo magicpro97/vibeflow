@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { WorkUnit } from "../src/commands/_shared.js";
 import type { makeReviewer } from "../src/commands/dispatch-reviewer.js";
 import { normalizeUnit } from "../src/commands/dispatch.js";
 import { type UnitsIngestInject, unitsIngest } from "../src/commands/units-ingest.js";
@@ -509,30 +510,128 @@ describe("units ingest RED contract", () => {
   test("done repair changes evidence fields only", () =>
     withTemp(async (dir, e) => {
       expect(await ingest(dir, e)).toBe(0);
+      commit(dir, "repair");
       const s = state(dir);
-      const unit = s.work_units[0];
-      Object.assign(unit, {
+      const sentinel: Required<Omit<WorkUnit, "evidence" | "evidence_at">> = {
+        name: "unit",
+        status: "done",
+        confidence: 0.73,
+        riskClass: "feature",
+        owner_agent: "owner",
+        skills_used: ["old-skill"],
+        knowledge_heavy: false,
+        knowledge_heavy_source: "risk",
+        skills_injected: ["required"],
+        skills_required: ["required"],
+        skill_waiver: { reason: "waived", at: "2026-01-02T00:00:00.000Z", by: "lead" },
+        scope: ["src", "test"],
+        spec: "frozen",
+        gates: {
+          build: "pass",
+          lint: "pass",
+          test: "pass",
+          review: "pass",
+          security: "pending",
+          goal_eval: "pending",
+        },
+        goal_score: 0.95,
+        resources: { agents: 3, tokens: 777, cost_usd: 7.77, wall_seconds: 77 },
         depends_on: ["prior"],
         upstreamHandoffs: [{ unit: "prior", summary: "ready" }],
-        acceptance_criteria: [{ id: "AC1", criterion: "works" }],
-        goal_score: 0.8,
-        riskClass: "feature",
-        security: { consent: "run", verdict: "pass", notes: "checked" },
-      });
+        acceptance_criteria: [
+          { id: "AC1", criterion: "works", verification: "bun test", priority: "MUST" },
+        ],
+        canary: {
+          file: "src/work.ts",
+          author: "test@example.invalid",
+          linkedAt: "2026-01-03T00:00:00.000Z",
+        },
+        impl_fingerprint: { removed: null },
+        verified_sha: git(dir, "rev-parse", "HEAD"),
+        security: {
+          consent: "skip",
+          verdict: "skipped",
+          notes: "checked",
+          items_checked: 2,
+          items_failed: [],
+        },
+      };
+      const acceptance = 'acceptance AC1: bun test → "ok"';
+      const unit = {
+        ...sentinel,
+        evidence: [...s.work_units[0].evidence, acceptance],
+        evidence_at: { ...s.work_units[0].evidence_at, [acceptance]: "2026-01-04T00:00:00.000Z" },
+      };
+      s.work_units[0] = unit;
       const oldCommit = unit.evidence.find((item: string) => item.startsWith("commit "));
       const oldAt = { ...unit.evidence_at };
       const before = structuredClone(unit);
       writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
-      commit(dir, "repair");
-      rewriteRaw(e, validRaw());
+      rewriteRaw(
+        e,
+        validRaw()
+          .replace('"skills_used":["typescript"]', '"skills_used":["new-skill"]')
+          .replace('"confidence":0.9', '"confidence":0.91'),
+      );
+      const usage = JSON.parse(readFileSync(e.usagePath, "utf8"));
+      Object.assign(usage, { duration_seconds: 2 });
+      Object.assign(usage.hermes_usage, { total_tokens: 34, estimated_cost_usd: 0.56 });
+      writeFileSync(e.usagePath, JSON.stringify(usage));
       expect(await ingest(dir, e)).toBe(0);
-      const repaired = state(dir).work_units[0];
-      for (const key of Object.keys(before))
-        if (key !== "evidence" && key !== "evidence_at") expect(repaired[key]).toEqual(before[key]);
-      expect(repaired.evidence).toContain(oldCommit);
-      expect(repaired.evidence).toContain(`commit ${git(dir, "rev-parse", "HEAD")}`);
-      expect(repaired.evidence_at).toMatchObject(oldAt);
+      const after = state(dir).work_units[0] as WorkUnit;
+      const strip = ({ evidence: _e, evidence_at: _a, ...rest }: WorkUnit) => rest;
+      expect(strip(after)).toEqual(strip(before));
+      expect(strip(before)).toEqual(strip(after));
+      expect(Object.hasOwn(after, "canary")).toBeTrue();
+      expect(after.canary).toEqual(before.canary);
+      expect(after.evidence_at).toMatchObject(oldAt);
+      for (const [item, at] of Object.entries(oldAt))
+        expect(after.evidence_at?.[item]).toBe(at as string);
+      for (const item of [oldCommit, `commit ${git(dir, "rev-parse", "HEAD")}`])
+        expect(after.evidence?.filter((value: string) => value === item)).toHaveLength(1);
     }));
+
+  test("legacy normalization preserves independent normalized collisions", async () => {
+    for (const collision of ["evidence", "key"] as const)
+      await withTemp(async (dir, e) => {
+        const s = state(dir);
+        const measured = 'bun test --timeout 30000 → "exit 1: old bytes"';
+        const reason = "gate test: old reason";
+        const normalized = `vf units ingest → ${JSON.stringify(reason)}`;
+        const at = "2026-01-01T00:00:00.000Z";
+        const collisionAt = "2025-05-05T05:05:05.000Z";
+        const evidence =
+          collision === "evidence" ? [normalized, measured, reason] : [measured, reason];
+        const evidence_at = {
+          [measured]: at,
+          [reason]: at,
+          untouched: "2024-04-04T04:04:04.000Z",
+          ...(collision === "key" ? { [normalized]: collisionAt } : {}),
+        };
+        Object.assign(s.work_units[0], {
+          status: "blocked",
+          gates: { build: "pass", lint: "pass", test: "fail", review: "pending" },
+          evidence,
+          evidence_at,
+        });
+        const rawPath = join(dir, ".vibeflow", "workunits", "unit", "evidence", "hermes.raw");
+        mkdirSync(join(rawPath, ".."), { recursive: true });
+        writeFileSync(rawPath, "raw sentinel");
+        writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+        expect(await ingest(dir, e)).toBe(1);
+        const row = state(dir).work_units[0];
+        expect(readFileSync(rawPath, "utf8")).toBe("raw sentinel");
+        expect(row.evidence.filter((item: string) => item === normalized)).toHaveLength(
+          collision === "evidence" ? 1 : 0,
+        );
+        expect(row.evidence).toContain(reason);
+        expect(row.evidence).toContain(measured);
+        for (const [item, timestamp] of Object.entries(evidence_at))
+          expect(row.evidence_at[item]).toBe(timestamp);
+        if (collision === "evidence") expect(row.evidence_at[normalized]).toBeUndefined();
+        else expect(row.evidence_at[normalized]).toBe(collisionAt);
+      });
+  });
 
   test("leaves structurally ineligible legacy rows unchanged", async () => {
     const rows: Array<[string, string, string | undefined, boolean]> = [
