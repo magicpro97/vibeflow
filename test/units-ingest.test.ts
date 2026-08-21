@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -158,29 +158,25 @@ function commit(
 }
 
 describe("units ingest RED contract", () => {
-  test("coverage: persistRaw blocks when evidence destination is unwritable", () =>
+  test("coverage: persistRaw cleans up and blocks when its injected writer fails", () =>
     withTemp(async (dir, e) => {
-      const evidenceDir = join(dir, ".vibeflow", "workunits", "unit", "evidence");
-      let code = -1;
-      try {
-        code = await ingest(
-          dir,
-          e,
-          {},
-          {
-            ...passing,
-            reviewer: ((..._args: Parameters<typeof makeReviewer>) =>
-              async () => {
-                mkdirSync(evidenceDir, { recursive: true });
-                chmodSync(evidenceDir, 0o500);
-                return { pass: true };
-              }) as unknown as UnitsIngestInject["reviewer"],
-          },
-        );
-      } finally {
-        chmodSync(evidenceDir, 0o700);
-      }
+      let temp = "";
+      const code = await ingest(
+        dir,
+        e,
+        {},
+        {
+          ...passing,
+          writeRaw: ((path: string, data: string | NodeJS.ArrayBufferView, options?: unknown) => {
+            temp = path;
+            writeFileSync(path, data, options as Parameters<typeof writeFileSync>[2]);
+            throw new Error("writer failed");
+          }) as typeof writeFileSync,
+        },
+      );
       expect(code).toBe(1);
+      expect(temp).toContain(".hermes.raw.");
+      expect(existsSync(temp)).toBe(false);
       expect(state(dir).work_units[0]).toMatchObject({ status: "blocked" });
     }));
 

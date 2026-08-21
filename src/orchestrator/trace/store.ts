@@ -17,6 +17,14 @@ export interface TraceStoreOptions {
   now?: () => string;
   eventId?: () => string;
 }
+export interface TraceStore {
+  readConversation(id: string): Promise<InternalTraceStoreRecord[]>;
+  append(
+    correlation: TraceCorrelation,
+    input: TraceAppendInput,
+    native?: string | null,
+  ): Promise<StoredTraceEvent>;
+}
 
 const decodeText = (buffer: Buffer): string => {
   try {
@@ -90,8 +98,7 @@ export function traceJournalPath(dir: string, id: string): string {
   );
 }
 
-export const TraceStore = class TraceStore {
-  constructor(options: TraceStoreOptions);
+export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class TraceStore {
   constructor(
     private readonly options: TraceStoreOptions,
     private readonly root: string = "",
@@ -301,5 +308,3 @@ export const TraceStore = class TraceStore {
     });
   }
 };
-
-export type TraceStore = InstanceType<typeof TraceStore>;

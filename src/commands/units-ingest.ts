@@ -9,8 +9,7 @@ import { isVerifiableEvidence, policyGates } from "../gates.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import { thresholdFor } from "../orchestrator/investigate.js";
 import { type GateRunner, defaultRun, scopedGate } from "../orchestrator/scoped-gate.js";
-import { mutateUnits, readState, sanitizeUnitName } from "./_shared.js";
-import type { WorkUnit } from "./_shared.js";
+import { type WorkUnit, mutateUnits, readState, sanitizeUnitName } from "./_shared.js";
 import { makeReviewer } from "./dispatch-reviewer.js";
 type Usage = {
   status?: unknown;
@@ -35,6 +34,7 @@ export type UnitsIngestInject = {
   run?: GateRunner;
   reviewer?: typeof makeReviewer;
   mutate?: typeof mutateUnits;
+  writeRaw?: typeof writeFileSync;
 };
 const hash = (raw: Buffer) => createHash("sha256").update(raw).digest("hex");
 const inside = (child: string, parent: string) => {
@@ -105,7 +105,7 @@ function sourcePath(path: string, root: string) {
   if (inside(canonical, root)) throw new Error("evidence source inside repository");
   return canonical;
 }
-function persistRaw(base: string, name: string, raw: Buffer) {
+function persistRaw(base: string, name: string, raw: Buffer, writeRaw = writeFileSync) {
   const root = realpathSync(base);
   let cursor = root;
   for (const part of [".vibeflow", "workunits", sanitizeUnitName(name), "evidence"]) {
@@ -123,7 +123,7 @@ function persistRaw(base: string, name: string, raw: Buffer) {
   if (!inside(realpathSync(cursor), root)) throw new Error("destination outside repository");
   const temp = join(cursor, `.hermes.raw.${randomBytes(16).toString("hex")}`);
   try {
-    writeFileSync(temp, raw, { flag: "wx", mode: 0o600 });
+    writeRaw(temp, raw, { flag: "wx", mode: 0o600 });
     renameSync(temp, dest);
   } catch (error) {
     rmSync(temp, { force: true });
@@ -392,7 +392,7 @@ export async function unitsIngest(
   if (failure || !candidate)
     return block(failure || "ingest failed", finalGates, finalResources, outputs);
   try {
-    persistRaw(base, name, raw);
+    persistRaw(base, name, raw, inject.writeRaw);
     return mutate(base, "update", candidate) ? 0 : 1;
   } catch {
     return block("final mutation failed");
