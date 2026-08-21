@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { type LogEvent, Logbus } from "../../src/logbus.js";
 import {
@@ -511,6 +511,29 @@ test("makes private durable entries in order and cleans up observed resources", 
   const realLock = lockfile.lock.bind(lockfile);
   const record = (operation: Operation["operation"], allocation: Allocation) =>
     operations.push({ ...allocation, operation, index: operations.length });
+  const assertDurableAllocation = (path: string, creation = false) => {
+    const fsync = operations.find(
+      (entry) => entry.path === path && entry.creation === creation && entry.operation === "fsync",
+    );
+    if (!fsync) throw new Error(`durability fsync not observed for ${path}`);
+    const allocation = operations.filter(({ generation: value }) => value === fsync.generation);
+    const open = allocation.find(({ operation }) => operation === "open");
+    const close = allocation.find(({ operation }) => operation === "close");
+    if (!open || !close) throw new Error(`durability allocation incomplete for ${path}`);
+    expect(open.index).toBeLessThan(fsync.index);
+    expect(fsync.index).toBeLessThan(close.index);
+    return { fsync, close };
+  };
+  const assertShapeDurability = (requestedRoot: string) => {
+    const physicalRoot = fs.realpathSync(requestedRoot);
+    const conversations = join(physicalRoot, "conversations");
+    const journal = traceJournalPath(physicalRoot, "safe");
+    const root = assertDurableAllocation(physicalRoot);
+    const directory = assertDurableAllocation(conversations);
+    const createdJournal = assertDurableAllocation(journal, true);
+    expect(createdJournal.close.index).toBeLessThan(directory.fsync.index);
+    return root;
+  };
   const openSpy = spyOn(fs, "openSync").mockImplementation(((path, flags, mode) => {
     const fd = realOpen(path, flags, mode);
     const allocation = {
@@ -560,7 +583,7 @@ test("makes private durable entries in order and cleans up observed resources", 
   });
   try {
     const store = new TraceStore(options(dir));
-    expect(fs.realpathSync(dir)).toBe(fs.realpathSync(fs.realpathSync(dir)));
+    expect(resolve(dir)).toBe(fs.realpathSync(dir));
     await store.readConversation("safe");
     await store.readConversation("safe");
 
@@ -571,7 +594,7 @@ test("makes private durable entries in order and cleans up observed resources", 
     symlinkSync(physicalAncestor, aliasAncestor, "dir");
     const aliasDir = join(aliasAncestor, "ordinary", "store");
     const aliasStore = new TraceStore(options(aliasDir));
-    expect(fs.realpathSync(aliasDir)).not.toBe(aliasDir);
+    expect(resolve(aliasDir)).not.toBe(fs.realpathSync(aliasDir));
     expect(fs.lstatSync(aliasDir).isDirectory()).toBe(true);
     expect(fs.lstatSync(join(aliasDir, "..")).isDirectory()).toBe(true);
     await aliasStore.readConversation("safe");
@@ -609,6 +632,8 @@ test("makes private durable entries in order and cleans up observed resources", 
         allocation.find(({ operation }) => operation === "close")?.index ?? -1,
       );
     }
+    assertShapeDurability(dir);
+    assertShapeDurability(aliasDir);
     const rootOperations = operations.filter(({ path }) => path === realDir);
     const durabilityFsync = rootOperations.find(({ operation }) => operation === "fsync");
     const validationClose = rootOperations.find(
