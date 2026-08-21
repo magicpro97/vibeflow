@@ -138,7 +138,7 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
               .filter(Boolean),
           ),
         ]
-      : input.depends_on,
+      : undefined,
     upstreamHandoffs: input.upstreamHandoffs,
     acceptance_criteria: input.acceptance_criteria,
     goal_score:

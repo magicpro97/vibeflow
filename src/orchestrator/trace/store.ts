@@ -90,9 +90,12 @@ export function traceJournalPath(dir: string, id: string): string {
   );
 }
 
-export class TraceStore {
-  private readonly root: string;
-  constructor(private readonly options: TraceStoreOptions) {
+export const TraceStore = class TraceStore {
+  constructor(options: TraceStoreOptions);
+  constructor(
+    private readonly options: TraceStoreOptions,
+    private readonly root: string = "",
+  ) {
     const requested = resolve(options.dir);
     this.ensureDirectory(requested, resolve(requested, ".."), false);
     this.root = fs.realpathSync(requested);
@@ -297,4 +300,6 @@ export class TraceStore {
       return stored_event;
     });
   }
-}
+};
+
+export type TraceStore = InstanceType<typeof TraceStore>;

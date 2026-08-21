@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkUnit } from "../src/commands/_shared.js";
@@ -147,6 +158,135 @@ function commit(
 }
 
 describe("units ingest RED contract", () => {
+  test("coverage: persistRaw blocks when evidence destination is unwritable", () =>
+    withTemp(async (dir, e) => {
+      const evidenceDir = join(dir, ".vibeflow", "workunits", "unit", "evidence");
+      let code = -1;
+      try {
+        code = await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            reviewer: ((..._args: Parameters<typeof makeReviewer>) =>
+              async () => {
+                mkdirSync(evidenceDir, { recursive: true });
+                chmodSync(evidenceDir, 0o500);
+                return { pass: true };
+              }) as unknown as UnitsIngestInject["reviewer"],
+          },
+        );
+      } finally {
+        chmodSync(evidenceDir, 0o700);
+      }
+      expect(code).toBe(1);
+      expect(state(dir).work_units[0]).toMatchObject({ status: "blocked" });
+    }));
+
+  test("coverage: node_modules must resolve to directory", async () => {
+    await withTemp(async (dir, e) => {
+      writeFileSync(join(dir, ".git", "info", "exclude"), "node_modules\n", { flag: "a" });
+      mkdirSync(join(dir, "node_modules"));
+      let linked = false;
+      let canonicalTarget = "";
+      const code = await ingest(
+        dir,
+        e,
+        {},
+        {
+          ...passing,
+          run: ((_: string, cwd: string) => {
+            const target = join(cwd, "node_modules");
+            linked = lstatSync(target).isSymbolicLink();
+            canonicalTarget = realpathSync(target);
+            return { status: 0, stdout: "ok" };
+          }) as UnitsIngestInject["run"],
+        },
+      );
+      expect(code).toBe(0);
+      expect(linked).toBeTrue();
+      expect(canonicalTarget).toBe(realpathSync(join(dir, "node_modules")));
+    });
+    await withTemp(async (dir, e) => {
+      writeFileSync(join(dir, ".git", "info", "exclude"), "node_modules\n", { flag: "a" });
+      writeFileSync(join(dir, "node_modules"), "not directory");
+      expect(await ingest(dir, e)).toBe(1);
+      expect(
+        state(dir).work_units[0].evidence.some((item: string) =>
+          item.includes("node_modules must be directory"),
+        ),
+      ).toBeTrue();
+    });
+  });
+
+  test("coverage: stage and cleanup catches block stage boom", () =>
+    withTemp(async (dir, e) => {
+      const held = `${dir}.git-held`;
+      let code = -1;
+      try {
+        code = await ingest(
+          dir,
+          e,
+          {},
+          {
+            ...passing,
+            run: (() => {
+              renameSync(join(dir, ".git"), held);
+              throw new Error("stage boom");
+            }) as UnitsIngestInject["run"],
+          },
+        );
+      } finally {
+        renameSync(held, join(dir, ".git"));
+      }
+      expect(code).toBe(1);
+      expect(state(dir).work_units[0].evidence.join("\n")).toContain("stage boom");
+    }));
+
+  test("coverage: directory scope resolves newly introduced tree", () =>
+    withTemp(async (dir, e) => {
+      const s = state(dir);
+      s.work_units[0].scope = ["feature"];
+      writeFileSync(join(dir, ".vibeflow", "WORKFLOW_STATE.json"), JSON.stringify(s));
+      mkdirSync(join(dir, "feature"));
+      writeFileSync(join(dir, "feature", "work.ts"), "export const work = 3;\n");
+      writeFileSync(join(dir, "feature", "work.test.ts"), "export {};\n");
+      git(dir, "add", "feature");
+      git(dir, "commit", "-q", "-s", "-m", "feature tree");
+      rewriteRaw(
+        e,
+        validRaw()
+          .replace('"src/work.ts","test/work.test.ts"', '"feature/work.ts","feature/work.test.ts"')
+          .replace("src/work.ts", "feature/work.ts")
+          .replace("test/work.test.ts", "feature/work.test.ts"),
+      );
+      expect(await ingest(dir, e)).toBe(0);
+    }));
+
+  test("coverage: block mutation false and throw return 1", async () => {
+    await withTemp(async (dir, e) => {
+      expect(await ingest(dir, e, { producer: "other" }, { ...passing, mutate: () => null })).toBe(
+        1,
+      );
+    });
+    await withTemp(async (dir, e) => {
+      expect(
+        await ingest(
+          dir,
+          e,
+          { producer: "other" },
+          {
+            ...passing,
+            mutate: () => {
+              throw new Error("no");
+            },
+          },
+        ),
+      ).toBe(1);
+    });
+  });
+
   test("preserves key-only timestamp for appended block diagnostic", () =>
     withTemp(async (dir, e) => {
       const diagnostic = 'vf units ingest → "producer must be hermes"';

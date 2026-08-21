@@ -568,11 +568,13 @@ describe("normalizeUnit round-trips skills-first fields (anti-regression)", () =
       // intentionally malformed inputs that the whitelist must drop
       knowledge_heavy_source: "bogus" as never,
       skills_injected: "notarray" as never,
+      depends_on: "notarray" as never,
       skill_waiver: { at: "2026-06-09" } as never, // missing string `reason`
     });
     const u = (readState(dir) as WorkflowState).work_units.find((x) => x.name === "auth");
     expect(u?.knowledge_heavy_source).toBeUndefined();
     expect(u?.skills_injected).toBeUndefined();
+    expect(u?.depends_on).toBeUndefined();
     expect(u?.skill_waiver).toBeUndefined();
   });
 
