@@ -482,12 +482,14 @@ describe("makeCheapReviewerFromBridge", () => {
   const origEnv = process.env.VIBEFLOW_AI;
 
   afterEach(() => {
-    if (origEnv === undefined) process.env.VIBEFLOW_AI = undefined;
+    // biome-ignore lint/performance/noDelete: restore a truly-absent env var to its original state
+    if (origEnv === undefined) delete process.env.VIBEFLOW_AI;
     else process.env.VIBEFLOW_AI = origEnv;
   });
 
   test("returns undefined when VIBEFLOW_AI not set", () => {
-    process.env.VIBEFLOW_AI = undefined;
+    // biome-ignore lint/performance/noDelete: genuinely unset so absent bridge behavior is covered
+    delete process.env.VIBEFLOW_AI;
     expect(makeCheapReviewerFromBridge("test")).toBeUndefined();
   });
 
@@ -622,7 +624,8 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
 
   test("no bridge env -> exits 0 with warning when reviewer requested", () => {
     const orig = process.env.VIBEFLOW_AI;
-    process.env.VIBEFLOW_AI = undefined;
+    // biome-ignore lint/performance/noDelete: genuinely unset so absent bridge behavior is covered
+    delete process.env.VIBEFLOW_AI;
     try {
       scaffold("a", { owns: ["f1"] });
       scaffold("b", { owns: ["f1"] });
@@ -632,7 +635,8 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
       expect(code).toBe(0);
       expect(lines.some((l) => l.includes("VIBEFLOW_AI"))).toBe(true);
     } finally {
-      if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+      // biome-ignore lint/performance/noDelete: restore a truly-absent env var to its original state
+      if (orig === undefined) delete process.env.VIBEFLOW_AI;
       else process.env.VIBEFLOW_AI = orig;
     }
   });
