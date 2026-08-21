@@ -175,8 +175,9 @@ export async function writeInitArtifacts(params: {
   }
 
   // Phase 1.6: Tool provisioning — auto-install every enabled-but-missing tool
-  // (issue #333), write MCP config once, and build per-tool index.
-  if (!dry) {
+  // (issue #333), write MCP config once, and build per-tool index. --no-tools
+  // skips this phase only.
+  if (!dry && !flags["no-tools"]) {
     const syncSpawner: StepSpawner =
       inject.syncSpawner ??
       ((cmd, args) => {

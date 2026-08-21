@@ -1137,6 +1137,10 @@ describe("commands.units subcommand branches", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("units: ingest delegates to unitsIngest when name is missing", async () => {
+    expect(await units("ingest", [])).toBe(1);
+  });
+
   test("units: no state returns 1 (line 1454-1458)", () => {
     const empty = freshDir("vf-units-empty-");
     const o = process.cwd();

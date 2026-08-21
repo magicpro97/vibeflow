@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyIntake, mutateUnits, orchestrate, run, workflow } from "../src/commands.js";
@@ -163,6 +163,16 @@ describe("orchestrate source-protection gate", () => {
     const code = await orchestrate({ engine: "claude", dry: true }, dir, { git: runner });
     expect(code).toBe(0);
     expect(calls.length).toBe(0); // protection never engaged
+  });
+
+  test("a hand-edited non-array depends_on cannot crash wave dispatch", async () => {
+    mutateUnits(dir, "add", { name: "auth" });
+    const path = join(dir, CTX_DIR, "WORKFLOW_STATE.json");
+    const state = JSON.parse(readFileSync(path, "utf8"));
+    state.work_units[0].depends_on = "notarray";
+    writeFileSync(path, JSON.stringify(state));
+    expect(await orchestrate({ engine: "claude", dry: true }, dir)).toBe(0);
+    expect(readState(dir)?.work_units[0]?.depends_on).toEqual([]);
   });
 });
 
@@ -568,11 +578,13 @@ describe("normalizeUnit round-trips skills-first fields (anti-regression)", () =
       // intentionally malformed inputs that the whitelist must drop
       knowledge_heavy_source: "bogus" as never,
       skills_injected: "notarray" as never,
+      depends_on: "notarray" as never,
       skill_waiver: { at: "2026-06-09" } as never, // missing string `reason`
     });
     const u = (readState(dir) as WorkflowState).work_units.find((x) => x.name === "auth");
     expect(u?.knowledge_heavy_source).toBeUndefined();
     expect(u?.skills_injected).toBeUndefined();
+    expect(u?.depends_on).toBeUndefined();
     expect(u?.skill_waiver).toBeUndefined();
   });
 

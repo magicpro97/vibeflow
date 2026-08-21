@@ -105,7 +105,12 @@ export function readState(base: string = cwd()): WorkflowState | null {
   // having the merged content land in the default-goal pre-fill.
   assertInsideBase(p, base);
   try {
-    return JSON.parse(readFileSync(p, "utf8")) as WorkflowState;
+    const state = JSON.parse(readFileSync(p, "utf8")) as WorkflowState;
+    if (Array.isArray(state.work_units))
+      for (const unit of state.work_units)
+        if (unit && typeof unit === "object" && unit.depends_on !== undefined)
+          unit.depends_on = strArray(unit.depends_on);
+    return state;
   } catch {
     return null;
   }
