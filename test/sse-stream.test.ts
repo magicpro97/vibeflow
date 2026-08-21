@@ -2,23 +2,89 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getLogbus, installLogbus, out } from "../src/logbus.js";
+import { getLogbus, installLogbus, out, setLogbusForTests } from "../src/logbus.js";
+import type { Logbus } from "../src/logbus.js";
 import { startServer } from "../src/server.js";
+
+type DurableEvent = { seq: number; text: string };
+
+async function waitForDurableSequence(
+  bus: Pick<Logbus, "currentFile">,
+  target: number,
+  seams: {
+    read?: (path: string) => string;
+    now?: () => number;
+    pause?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<DurableEvent[]> {
+  const read = seams.read ?? ((path: string) => readFileSync(path, "utf8"));
+  const now = seams.now ?? Date.now;
+  const pause = seams.pause ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const deadline = now() + 6_000;
+  let lastObserved: number | undefined;
+  while (true) {
+    const events = read(bus.currentFile())
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as DurableEvent);
+    for (const event of events)
+      if (lastObserved === undefined || event.seq > lastObserved) lastObserved = event.seq;
+    if (events.some(({ seq }) => seq === target)) return events;
+    if (now() >= deadline)
+      throw new Error(
+        `durable sequence timeout: target=${target} lastObserved=${lastObserved ?? "none"}`,
+      );
+    await pause(20);
+  }
+}
 
 describe("M3 SSE stream endpoint", () => {
   let dir: string;
   let cleanupDir: () => void;
+  let previousBus: Logbus | null;
+  let ownedBus: Logbus;
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "vf-sse-"));
     cleanupDir = () => rmSync(dir, { recursive: true, force: true });
-    installLogbus({ dir });
+    previousBus = getLogbus();
+    ownedBus = installLogbus({ dir });
   });
 
   afterAll(async () => {
-    const bus = getLogbus();
-    if (bus) await bus.close();
-    cleanupDir();
+    try {
+      await ownedBus.close();
+    } finally {
+      setLogbusForTests(previousBus);
+      cleanupDir();
+    }
+  });
+
+  test("waits for exact durable sequence across delayed snapshots and reports bounded timeout", async () => {
+    const snapshots = [
+      '{"seq":41,"text":"prior"}\n',
+      '{"seq":41,"text":"prior"}\n{"seq":42,"text":"target"}\n',
+    ];
+    let reads = 0;
+    const events = await waitForDurableSequence({ currentFile: () => "unused" }, 42, {
+      read: () => snapshots[Math.min(reads++, snapshots.length - 1)] ?? "",
+      now: () => 0,
+      pause: async () => {},
+    });
+    expect(snapshots[0]).not.toContain('"seq":42');
+    expect(reads).toBeGreaterThan(1);
+    expect(events).toContainEqual({ seq: 42, text: "target" });
+
+    let now = 0;
+    await expect(
+      waitForDurableSequence({ currentFile: () => "unused" }, 99, {
+        read: () => '{"seq":41,"text":"prior"}\n',
+        now: () => now,
+        pause: async (ms) => {
+          now += ms;
+        },
+      }),
+    ).rejects.toThrow("durable sequence timeout: target=99 lastObserved=41");
   });
 
   test("subscribe receives events synchronously; unsubscribe stops them", () => {
@@ -47,36 +113,35 @@ describe("M3 SSE stream endpoint", () => {
   });
 
   test("/api/logs/recent returns events filtered by since seq", async () => {
-    out("vf", "recent-one");
-    out("vf", "recent-two");
-    out("vf", "recent-three");
-
-    // Wait for async file writes to complete
-    await new Promise((r) => setTimeout(r, 100));
-
-    const bus = getLogbus();
-    if (!bus) throw new Error("bus must be installed");
-    const content = readFileSync(bus.currentFile(), "utf8");
-    const parsed: Array<{ seq: number; text: string }> = content
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => JSON.parse(l) as { seq: number; text: string });
-    const recentTwo = parsed.find((p) => p.text === "recent-two");
-    if (!recentTwo) throw new Error("recent-two not found in log");
-    const sinceSeq = recentTwo.seq;
-
-    const { server, url } = await startServer(0);
+    const marker = `v8.24-${crypto.randomUUID()}`;
+    const captured: DurableEvent[] = [];
+    const unsubscribe = ownedBus.subscribe((event) => {
+      if (event.text.startsWith(marker)) captured.push({ seq: event.seq, text: event.text });
+    });
+    let server: Awaited<ReturnType<typeof startServer>>["server"] | undefined;
     try {
-      const resp = await fetch(`${url}/api/logs/recent?since=${sinceSeq}&limit=10`);
+      out("vf", `${marker}-recent-one`);
+      out("vf", `${marker}-recent-two`);
+      out("vf", `${marker}-recent-three`);
+      expect(captured.map(({ text }) => text)).toEqual([
+        `${marker}-recent-one`,
+        `${marker}-recent-two`,
+        `${marker}-recent-three`,
+      ]);
+      const recentTwo = captured[1];
+      const recentThree = captured[2];
+      if (!recentTwo || !recentThree) throw new Error("marker events not captured");
+      await waitForDurableSequence(ownedBus, recentThree.seq);
+
+      const started = await startServer(0);
+      server = started.server;
+      const resp = await fetch(`${started.url}/api/logs/recent?since=${recentTwo.seq}&limit=10`);
       expect(resp.status).toBe(200);
-      const data = (await resp.json()) as {
-        events: Array<{ seq: number; text: string }>;
-      };
-      expect(data.events.length).toBeGreaterThanOrEqual(2);
-      expect(data.events[0]?.text).toBe("recent-two");
-      expect(data.events[1]?.text).toBe("recent-three");
+      const data = (await resp.json()) as { events: DurableEvent[] };
+      expect(data.events.map(({ seq, text }) => ({ seq, text }))).toEqual([recentTwo, recentThree]);
     } finally {
-      server.stop();
+      unsubscribe();
+      server?.stop();
     }
   });
 

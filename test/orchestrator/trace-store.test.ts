@@ -486,12 +486,22 @@ console.log(JSON.stringify({key:${JSON.stringify(key)},event_id:stored.event_id,
 }, 20_000);
 
 test("makes private durable entries in order and cleans up observed resources", async () => {
-  const parent = await mkdtemp(join(tmpdir(), "trace-order-"));
+  const parent = fs.realpathSync(await mkdtemp(join(tmpdir(), "trace-order-")));
   chmodSync(parent, 0o755);
   const dir = join(parent, "store");
   const actions: string[] = [];
-  const opened = new Map<number, { path: string; creation: boolean }>();
+  type Allocation = {
+    fd: number;
+    generation: number;
+    path: string;
+    creation: boolean;
+    locked: boolean;
+  };
+  type Operation = Allocation & { operation: "open" | "fsync" | "close"; index: number };
+  const operations: Operation[] = [];
+  const opened = new Map<number, Allocation>();
   const journalOpens: Array<{ creation: boolean; locked: boolean }> = [];
+  let generation = 0;
   let outstanding = 0;
   let locked = false;
   let released = false;
@@ -499,34 +509,42 @@ test("makes private durable entries in order and cleans up observed resources", 
   const realClose = fs.closeSync;
   const realFsync = fs.fsyncSync;
   const realLock = lockfile.lock.bind(lockfile);
+  const record = (operation: Operation["operation"], allocation: Allocation) =>
+    operations.push({ ...allocation, operation, index: operations.length });
   const openSpy = spyOn(fs, "openSync").mockImplementation(((path, flags, mode) => {
     const fd = realOpen(path, flags, mode);
-    opened.set(fd, {
+    const allocation = {
+      fd,
+      generation: ++generation,
       path: String(path),
       creation: typeof flags === "number" && (flags & fs.constants.O_EXCL) !== 0,
-    });
-    if (String(path).endsWith(".jsonl"))
-      journalOpens.push({
-        creation: typeof flags === "number" && (flags & fs.constants.O_EXCL) !== 0,
-        locked,
-      });
+      locked,
+    };
+    opened.set(fd, allocation);
+    record("open", allocation);
+    if (allocation.path.endsWith(".jsonl"))
+      journalOpens.push({ creation: allocation.creation, locked: allocation.locked });
     outstanding++;
-    actions.push(`open:${String(path)}:${locked}`);
+    actions.push(`open:${allocation.path}:${locked}`);
     return fd;
   }) as typeof fs.openSync);
   const closeSpy = spyOn(fs, "closeSync").mockImplementation((fd) => {
     const instance = opened.get(fd);
-    if (instance?.creation) actions.push("close:created-journal");
-    actions.push(`close:${instance?.path}`);
+    if (!instance) throw new Error(`close of unobserved fd ${fd}`);
+    if (instance.creation) actions.push("close:created-journal");
+    actions.push(`close:${instance.path}`);
     const result = realClose(fd);
+    record("close", instance);
     opened.delete(fd);
     outstanding--;
     return result;
   });
   const fsyncSpy = spyOn(fs, "fsyncSync").mockImplementation((fd) => {
     const instance = opened.get(fd);
-    if (instance?.creation) actions.push("fsync:created-journal");
-    actions.push(`fsync:${instance?.path}`);
+    if (!instance) throw new Error(`fsync of unobserved fd ${fd}`);
+    if (instance.creation) actions.push("fsync:created-journal");
+    actions.push(`fsync:${instance.path}`);
+    record("fsync", instance);
     return realFsync(fd);
   });
   const lockSpy = spyOn(lockfile, "lock").mockImplementation(async (...args) => {
@@ -542,13 +560,30 @@ test("makes private durable entries in order and cleans up observed resources", 
   });
   try {
     const store = new TraceStore(options(dir));
+    expect(fs.realpathSync(dir)).toBe(fs.realpathSync(fs.realpathSync(dir)));
     await store.readConversation("safe");
     await store.readConversation("safe");
+
+    const physicalAncestor = join(parent, "physical");
+    const ordinaryParent = join(physicalAncestor, "ordinary");
+    mkdirSync(ordinaryParent, { recursive: true, mode: 0o700 });
+    const aliasAncestor = join(parent, "alias");
+    symlinkSync(physicalAncestor, aliasAncestor, "dir");
+    const aliasDir = join(aliasAncestor, "ordinary", "store");
+    const aliasStore = new TraceStore(options(aliasDir));
+    expect(fs.realpathSync(aliasDir)).not.toBe(aliasDir);
+    expect(fs.lstatSync(aliasDir).isDirectory()).toBe(true);
+    expect(fs.lstatSync(join(aliasDir, "..")).isDirectory()).toBe(true);
+    await aliasStore.readConversation("safe");
+
     const conversations = join(dir, "conversations");
     const journal = traceJournalPath(dir, "safe");
     expect(fs.lstatSync(dir).mode & 0o777).toBe(0o700);
     expect(fs.lstatSync(conversations).mode & 0o777).toBe(0o700);
     expect(fs.lstatSync(journal).mode & 0o777).toBe(0o600);
+    expect(fs.lstatSync(aliasDir).mode & 0o777).toBe(0o700);
+    expect(fs.lstatSync(join(aliasDir, "conversations")).mode & 0o777).toBe(0o700);
+    expect(fs.lstatSync(traceJournalPath(aliasDir, "safe")).mode & 0o777).toBe(0o600);
     const index = (value: string) => actions.findIndex((action) => action === value);
     const realDir = fs.realpathSync(dir);
     for (const value of [
@@ -560,8 +595,36 @@ test("makes private durable entries in order and cleans up observed resources", 
       "close:created-journal",
     ])
       expect(index(value)).toBeGreaterThanOrEqual(0);
+    const durabilityGenerations = new Set(
+      operations
+        .filter(({ operation }) => operation === "fsync")
+        .map(({ generation }) => generation),
+    );
+    for (const allocationGeneration of durabilityGenerations) {
+      const allocation = operations.filter(({ generation }) => generation === allocationGeneration);
+      expect(allocation.find(({ operation }) => operation === "open")?.index).toBeLessThan(
+        allocation.find(({ operation }) => operation === "fsync")?.index ?? -1,
+      );
+      expect(allocation.find(({ operation }) => operation === "fsync")?.index).toBeLessThan(
+        allocation.find(({ operation }) => operation === "close")?.index ?? -1,
+      );
+    }
+    const rootOperations = operations.filter(({ path }) => path === realDir);
+    const durabilityFsync = rootOperations.find(({ operation }) => operation === "fsync");
+    const validationClose = rootOperations.find(
+      ({ operation, index: operationIndex }) =>
+        operation === "close" && operationIndex < (durabilityFsync?.index ?? -1),
+    );
+    if (!validationClose || !durabilityFsync) throw new Error("root generations not observed");
+    expect(validationClose.index).toBeLessThan(durabilityFsync.index);
+    expect(validationClose.generation).not.toBe(durabilityFsync.generation);
+    expect(durabilityFsync.index).toBeLessThan(
+      rootOperations.find(
+        ({ operation, generation }) =>
+          operation === "close" && generation === durabilityFsync.generation,
+      )?.index ?? -1,
+    );
     expect(index(`fsync:${parent}`)).toBeLessThan(index(`close:${parent}`));
-    expect(index(`fsync:${realDir}`)).toBeLessThan(index(`close:${realDir}`));
     expect(index("fsync:created-journal")).toBeLessThan(index("close:created-journal"));
     expect(index("close:created-journal")).toBeLessThan(
       actions.findIndex(
