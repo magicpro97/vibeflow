@@ -271,7 +271,7 @@ export const orchestrationApprovalToken = (
 });
 
 const orchestrationPassed = (output: OrchestrationResultSnapshot): boolean => {
-  if (output.units.length === 0) return output.reviews.length === 0;
+  if (output.units.length === 0) return false;
   if (output.units.length !== output.reviews.length) return false;
   const units = new Map(output.units.map((unit) => [unit.name, unit]));
   const reviews = new Map(output.reviews.map((review) => [review.unit, review]));

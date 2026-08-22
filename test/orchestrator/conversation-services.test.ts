@@ -626,7 +626,10 @@ describe("injected workflow services", () => {
       }),
       execute: async () => {
         executions += 1;
-        return { units: [], reviews: [] };
+        return {
+          units: [{ name: "unit-a", status: "done" }],
+          reviews: [{ unit: "unit-a", pass: true, reason: "approved" }],
+        };
       },
       cancel: async (command) => {
         cancelled += 1;
@@ -752,7 +755,7 @@ describe("injected workflow services", () => {
         reviews: [{ unit: "unit-a", pass: true, reason: "/private/review.json" }],
       }),
     ).toMatchObject({ status: "completed" });
-    expect(await execute({ units: [], reviews: [] })).toMatchObject({ status: "completed" });
+    expect(await execute({ units: [], reviews: [] })).toMatchObject({ status: "failed" });
     expect(run.creates.every(({ content }) => !String(content).includes("/private/"))).toBe(true);
   });
 
@@ -1327,7 +1330,10 @@ test("bootstrap creates one shared authority set and registers every built-in po
             engines_available: [],
             models_valid: true,
           }),
-          execute: async () => ({ units: [], reviews: [] }),
+          execute: async () => ({
+            units: [{ name: "unit-a", status: "done" }],
+            reviews: [{ unit: "unit-a", pass: true, reason: "approved" }],
+          }),
         },
       },
     });
