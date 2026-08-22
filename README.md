@@ -66,7 +66,9 @@ vf                # open the local web UI — intake wizard + live dashboard
 vf doctor         # check required and optional tools (--probe for a live engine round-trip)
 vf init           # scan repo + generate canonical context + engine files (--engine, --no-ask, --dry-run)
 vf run claude     # dispatch one engine: claude | codex | copilot | opencode | antigravity (--yes to launch)
-vf ask src/x.ts:10-20 "what does this do?"   # inline code Q&A (--engine, --resume)
+vf ask src/x.ts:10-20 "what does this do?"   # file-range Q&A (--engine, native --resume, --conversation)
+vf chat "explain the release flow"           # persisted traced conversation (--policy, --participant, --json)
+vf brainstorm "compare API designs"          # debate preview; add --yes to dispatch (--resume, --no-baseline)
 vf orchestrate    # plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
 vf units status   # work-unit board: status, gates, owner, confidence
 vf skills list    # skills: list | search | resolve | sync | draft | crystallize | curator scan | registry
@@ -83,6 +85,13 @@ The web UI is where you **initialize a workflow**: fill in goal, engines, doc/ta
 file types, and expected result, then **Generate workflow** (writes the canonical context +
 engine files) and **Write dispatch prompt** for the chosen engine. Prefer the terminal? Use
 `vf init --interactive` for the same questions, or `vf init` for a non-interactive scaffold.
+
+The top-bar conversation workspace uses the same runtime as `vf chat` and `vf brainstorm`:
+create or resume a conversation, follow ordered trace replay and live deltas, resolve
+approvals, control operations, inspect decision matrices, and preview opaque artifacts.
+Public result ids stay distinct from the opaque fetch references carried by artifact trace events.
+See the [conversation guide](./docs/USER_GUIDE.md#conversation-workspace) and
+[exact CLI/API contract](./docs/COMMAND_REFERENCE.md#conversations).
 
 ## Using VibeFlow as a skill
 
