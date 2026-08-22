@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { RoleSpec } from "../src/agents/role.js";
+import { type ResolvedRole, type RoleSpec, isReadOnlyRole } from "../src/agents/role.js";
 
 const SPEC: RoleSpec = {
   name: "cli-engine",
@@ -16,5 +16,17 @@ describe("RoleSpec", () => {
     expect(SPEC.description.length).toBeGreaterThan(0);
     expect(SPEC.body.length).toBeGreaterThan(50);
     expect(SPEC.tools.length).toBeGreaterThan(0);
+  });
+
+  test("read-only authority requires both sandbox and non-mutating tool intents", () => {
+    const resolved: ResolvedRole = {
+      spec: { ...SPEC, tools: ["read", "grep"], sandbox: "read-only" },
+      source: "builtin",
+      resolved_hash: "a".repeat(64),
+      metadata: {},
+    };
+    expect(isReadOnlyRole(resolved.spec)).toBe(true);
+    expect(isReadOnlyRole({ ...resolved.spec, tools: ["read", "bash"] })).toBe(false);
+    expect(isReadOnlyRole({ ...resolved.spec, sandbox: "workspace-write" })).toBe(false);
   });
 });

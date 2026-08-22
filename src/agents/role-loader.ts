@@ -21,6 +21,12 @@ export interface ParsedAgentRole {
   errors: string[];
 }
 
+const ROLE_REF_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isRoleRef(value: string): boolean {
+  return ROLE_REF_RE.test(value);
+}
+
 /** Validate a frontmatter data block as a RoleSpec. Returns null on invalid.
  *  Exported as a test seam: `parseAgentRole` always passes a string `body`, so
  *  the non-string-body branch is only reachable via a direct call. */
@@ -99,6 +105,16 @@ export function parseAgentRole(text: string): ParsedAgentRole {
     return { role: null, errors };
   }
   return { role, errors };
+}
+
+/** Fail-closed counterpart used where a malformed exact shadow must not be ignored. */
+export function parseAgentRoleStrict(text: string): RoleSpec {
+  const parsed = parseAgentRole(text);
+  if (!parsed.role) {
+    throw new Error(parsed.errors.join("; ") || "invalid role");
+  }
+  if (!isRoleRef(parsed.role.name)) throw new Error("invalid role name");
+  return parsed.role;
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { ProjectProfile } from "../scanner.js";
-import type { RoleSpec } from "./role.js";
+import { type RoleSpec, conversationRoleSpecs } from "./role.js";
 
 /** Shared helpers used by role body templates. */
 export interface RoleContext {
@@ -318,10 +318,11 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       model: "haiku",
       sandbox: "workspace-write",
     },
+    ...conversationRoleSpecs(),
   ];
 }
 
-/** Names of the 6 default roles. Stable order = spec order. */
+/** Legacy workflow roles. Kept separate so workflow auto-detection is unchanged. */
 export const ROLE_NAMES = [
   "cli-engine",
   "web-ui",
@@ -331,9 +332,20 @@ export const ROLE_NAMES = [
   "doc-writer",
 ] as const;
 
-export type RoleName = (typeof ROLE_NAMES)[number];
+export const CONVERSATION_ROLE_NAMES = [
+  "direct",
+  "brainstorm-participant",
+  "brainstorm-skeptic",
+  "brainstorm-domain-expert",
+  "brainstorm-evaluator",
+] as const;
 
-/** Return the 6 default role specs, rendered with the given project context. */
+export const ALL_ROLE_NAMES = [...ROLE_NAMES, ...CONVERSATION_ROLE_NAMES] as const;
+
+export type RoleName = (typeof ROLE_NAMES)[number];
+export type CanonicalRoleName = (typeof ALL_ROLE_NAMES)[number];
+
+/** Return the canonical role specs, rendered with the given project context. */
 export function listRoleSpecs(ctx: RoleContext = defaultRoleContext()): RoleSpec[] {
   return buildSpecs(ctx);
 }

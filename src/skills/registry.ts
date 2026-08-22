@@ -1,5 +1,5 @@
 // biome-ignore format: entire-file — tight formatting keeps file ≤400 lines
-import { existsSync, readFileSync } from "node:fs";
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { SkillScope } from "../core.js";
 import type { Skill, SkillMatch, SkillRequires, SkillStatus } from "../core.js";
@@ -39,6 +39,58 @@ const VALID_STATUS: SkillStatus[] = [
   "deprecated",
   "unverified",
 ];
+
+export const MAX_SKILL_FILE_BYTES = 1024 * 1024;
+// biome-ignore format: compact descriptor stats keep this capped module within 400 lines
+type SkillFileStats = ReturnType<typeof fstatSync> & {
+  dev: bigint; ino: bigint; nlink: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint;
+};
+
+function skillFileStats(fd: number): SkillFileStats {
+  return fstatSync(fd, { bigint: true }) as SkillFileStats;
+}
+
+function sameSkillFile(left: SkillFileStats, right: SkillFileStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+/** Descriptor-backed, bounded snapshot used by discovery and authority materialization. */
+export function readSkillFileSnapshot(path: string): string {
+  let fd: number | undefined;
+  try {
+    fd = openSync(
+      path,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
+    const before = skillFileStats(fd);
+    const entry = lstatSync(path, { bigint: true }) as SkillFileStats;
+    // biome-ignore format: compact fail-closed descriptor identity check
+    if (
+      !before.isFile() || entry.isSymbolicLink() || !entry.isFile() ||
+      before.nlink !== 1n || entry.nlink !== 1n || !sameSkillFile(before, entry)
+    ) throw new Error("unsafe skill file");
+    if (before.size > BigInt(MAX_SKILL_FILE_BYTES)) throw new Error("skill file exceeds 1 MiB");
+    const bytes = Buffer.alloc(MAX_SKILL_FILE_BYTES + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) break;
+      offset += count;
+    }
+    if (offset > MAX_SKILL_FILE_BYTES) throw new Error("skill file exceeds 1 MiB");
+    const after = skillFileStats(fd);
+    const finalEntry = lstatSync(path, { bigint: true }) as SkillFileStats;
+    // biome-ignore format: compact fail-closed descriptor stability check
+    if (
+      !sameSkillFile(before, after) || before.size !== after.size ||
+      before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs ||
+      !sameSkillFile(after, finalEntry) || finalEntry.isSymbolicLink()
+    ) throw new Error("skill file changed during read");
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, offset));
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
 
 /** Where a skill came from. ONLY skills that live under the repo's own local skill roots
  * (`local`) are allowed to declare themselves `verified`. Anything sourced from external
@@ -132,17 +184,12 @@ function parseScope(data: Record<string, unknown>): SkillScope | undefined {
  * keeps the "external/unknown skills are never auto-verified" invariant intact even if a
  * file claims `status: verified` (or tries to inject one via prototype pollution).
  */
-export function parseSkill(
+export function parseSkillText(
+  text: string,
   skillMdPath: string,
   dir: string,
   opts: ParseSkillOpts = {},
 ): Skill | null {
-  let text: string;
-  try {
-    text = readFileSync(skillMdPath, "utf8");
-  } catch {
-    return null;
-  }
   const { data } = parseFrontmatter(text);
   // `data` has a null prototype (see frontmatter.ts) — reading `data.status` can only
   // ever return an OWN key, never an inherited one. Read it via hasOwnProperty to be safe.
@@ -199,6 +246,18 @@ export function parseSkill(
     dir,
     path: skillMdPath,
   };
+}
+
+export function parseSkill(
+  skillMdPath: string,
+  dir: string,
+  opts: ParseSkillOpts = {},
+): Skill | null {
+  try {
+    return parseSkillText(readSkillFileSnapshot(skillMdPath), skillMdPath, dir, opts);
+  } catch {
+    return null;
+  }
 }
 /** #552: collect every non-deprecated skill's mcp block into a {name → UserMcpServer} map,
  *  ready to merge into the engine MCP fan-out (same shape as settings.mcpServers).
@@ -260,15 +319,14 @@ export function repoSkills(skills: Skill[]): Skill[] {
 /** #543: resolve the skills injected for one dispatch unit: always-on repo skills unioned
  *  with keyword matches (repo first, deduped). `matchedNames` is the keyword-only subset
  *  (used for the knowledge-gap flag); `skillsRequired` is the verified subset of the union. */
-export function selectDispatchSkills(
-  allSkills: Skill[],
-  unitText: string,
-): {
+export interface DispatchSkillSelection {
   skillNames: string[];
   alwaysNames: string[];
   matchedNames: string[];
   skillsRequired: string[];
-} {
+}
+
+export function selectDispatchSkills(allSkills: Skill[], unitText: string): DispatchSkillSelection {
   const skillMatches = matchSkillsForTask(allSkills, unitText);
   const alwaysOn = repoSkills(allSkills);
   const alwaysNames = alwaysOn.map((s) => s.name);
