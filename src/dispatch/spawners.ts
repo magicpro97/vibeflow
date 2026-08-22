@@ -240,8 +240,10 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
         while (stdoutReader) {
           const { done, value } = await stdoutReader.read();
           if (done) {
+            const tail = stdoutDecoder.decode();
+            stdout += tail;
             const projected = projectPublicEngineFrames(
-              publicStdout,
+              publicStdout + tail,
               undefined,
               true,
               [],
@@ -269,8 +271,10 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
         while (stderrReader) {
           const { done, value } = await stderrReader.read();
           if (done) {
+            const tail = stderrDecoder.decode();
+            stderr += tail;
             const projected = projectPublicEngineFrames(
-              publicStderr,
+              publicStderr + tail,
               undefined,
               true,
               [],

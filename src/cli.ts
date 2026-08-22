@@ -180,12 +180,14 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
       if (key === "r" || key === "R") {
         if (restarting) return;
         restarting = true;
-        // Tear down the old server in the background (don't wait on keep-alive sockets).
+        // Force-close the old server before rebinding so restart cannot race the old listener.
         const prev = server;
-        prev.stop();
-        // Clear the screen and bring up a fresh server immediately.
-        process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
-        startServer(Number.isFinite(port) ? port : 0, { host, conversation })
+        void prev
+          .stop(true)
+          .then(() => {
+            process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+            return startServer(Number.isFinite(port) ? port : 0, { host, conversation });
+          })
           .then((next) => {
             ({ server, url } = next);
             writeUiPort(url);

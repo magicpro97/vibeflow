@@ -662,6 +662,7 @@ describe("server", () => {
       "startServerResilient(\n    Number.isFinite(port) ? port : 0,\n    host,\n    conversation,\n  )",
     );
     expect(src).toContain("startServer(Number.isFinite(port) ? port : 0, { host, conversation })");
+    expect(src).toMatch(/void prev\s*\.stop\(true\)\s*\.then\(\(\) => \{/);
   });
 
   test("serves the Vue app and state endpoints on loopback", async () => {
@@ -675,7 +676,7 @@ describe("server", () => {
       const state = await fetch(`${url}/state`);
       expect(state.status).toBe(200);
     } finally {
-      server.stop();
+      await server.stop(true);
       rmSync(fixture.dir, { recursive: true, force: true });
     }
   });
@@ -693,7 +694,7 @@ describe("server", () => {
     // Non-allowlisted extensions are not served even if the file exists.
     const ts = await fetch(`${url}/assets/probe.ts`);
     expect(ts.status).toBe(404);
-    server.stop();
+    await server.stop(true);
   });
 
   test("POST /api/init generates a workflow and rejects a missing CSRF token", async () => {
@@ -728,7 +729,7 @@ describe("server", () => {
         body: "{}",
       });
       expect(forbidden.status).toBe(403);
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1189,7 +1190,7 @@ describe("server write endpoints", () => {
       // attachments mirrored into the saved ledger
       expect(readState(dir)?.attachments?.some((a) => a.name === "spec.md")).toBe(true);
 
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1346,7 +1347,7 @@ describe("server orchestration endpoints", () => {
       expect(Array.isArray(orchJson.state.work_units)).toBe(true);
       expect(readFileSync(statePath, "utf8")).toBe(stateBefore); // ledger byte-identical
 
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1398,7 +1399,7 @@ describe("server preflight + settings endpoints", () => {
         expect(typeof r.level).toBe("string");
         expect(typeof r.detail).toBe("string");
       }
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1455,7 +1456,7 @@ describe("server preflight + settings endpoints", () => {
 
       // round-trip: the change persisted to SETTINGS.json on disk
       expect(readSettings(dir).tools.codegraph).toBe(true);
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1471,7 +1472,7 @@ describe("server preflight + settings endpoints", () => {
       expect(html).toContain('id="app"');
       expect(html).toContain('name="vf-token"');
     } finally {
-      server.stop();
+      await server.stop(true);
       rmSync(fixture.dir, { recursive: true, force: true });
     }
   });
