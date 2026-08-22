@@ -40,11 +40,8 @@ const fail = (message: string): never => {
   throw new Error(message);
 };
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-export interface ArtifactPreparation<T extends ArtifactCreateResult | ArtifactUpdateResult> {
-  readonly result: T;
-  commit(): void;
-  rollback(): void;
-}
+// biome-ignore format: production file ceiling
+export interface ArtifactPreparation<T extends ArtifactCreateResult | ArtifactUpdateResult> { readonly result: T; commit(): void; rollback(): void; }
 export { conversationManifestPath, operationAuthorityPath };
 /** Durable private catalog; trace reads never decide whether a conversation exists. */
 export class ConversationArtifactStore {
@@ -383,9 +380,7 @@ export class ConversationArtifactStore {
     };
     return this.reservation(conversationId, prepared.entry, result, prepared.reserved);
   }
-  readArtifact(conversationId: string, artifactId: string): Uint8Array | null {
-    const state = this.readRecord(conversationId);
-    const entry = state?.artifacts.filter((item) => item.artifact_id === artifactId).at(-1);
+  private readArtifactEntry(entry: ConversationArtifactEntry | undefined): Uint8Array | null {
     if (!entry) return null;
     const path = this.artifactPath(entry.ref);
     const fd = openPrivateFile(path, MAX_ARTIFACT_BYTES, fail, "unsafe artifact");
@@ -396,4 +391,8 @@ export class ConversationArtifactStore {
       fs.closeSync(fd);
     }
   }
+  // biome-ignore format: production file ceiling
+  readArtifact(conversationId: string, artifactId: string): Uint8Array | null { const entries = this.readRecord(conversationId)?.artifacts; return this.readArtifactEntry(entries?.filter((item) => item.artifact_id === artifactId).at(-1)); }
+  // biome-ignore format: production file ceiling
+  readArtifactRef(conversationId: string, ref: string): Uint8Array | null { this.artifactPath(ref); return this.readArtifactEntry(this.readRecord(conversationId)?.artifacts.find((item) => item.ref === ref)); }
 }

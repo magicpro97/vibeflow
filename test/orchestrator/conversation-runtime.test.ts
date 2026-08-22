@@ -6251,6 +6251,8 @@ test("subscriber replay failure deactivates the cursor instead of delivering a g
 test("artifact content is durable, idempotent, opaque, updateable, and rejected after terminal", async () => {
   let context!: ConversationContext;
   let artifactId = "";
+  let originalRef = "";
+  let updatedRef = "";
   let conflict = false;
   const policy: ConversationPolicy = {
     name: "artifacts",
@@ -6271,6 +6273,7 @@ test("artifact content is durable, idempotent, opaque, updateable, and rejected 
       };
       const created = await value.createArtifact(request);
       artifactId = created.artifact_id;
+      originalRef = created.ref;
       expect(await value.createArtifact(request)).toEqual(created);
       try {
         await value.createArtifact({ ...request, content: "conflicting content" });
@@ -6284,6 +6287,7 @@ test("artifact content is durable, idempotent, opaque, updateable, and rejected 
         content: "version two",
         idempotency_key: "artifact:update",
       });
+      updatedRef = updated.ref;
       return {
         operation_id: value.correlation.operation_id,
         status: "completed",
@@ -6301,6 +6305,13 @@ test("artifact content is durable, idempotent, opaque, updateable, and rejected 
     expect(new TextDecoder().decode(restarted.readArtifact("conversation-1", artifactId))).toBe(
       "version two",
     );
+    expect(new TextDecoder().decode(restarted.readArtifactRef("conversation-1", originalRef))).toBe(
+      "version one",
+    );
+    expect(new TextDecoder().decode(restarted.readArtifactRef("conversation-1", updatedRef))).toBe(
+      "version two",
+    );
+    expect(restarted.readArtifactRef("another-conversation", updatedRef)).toBeNull();
     const artifacts = (await runtime.events("conversation-1", 0))?.filter(
       (event) => event.event.type === "artifact_created" || event.event.type === "artifact_updated",
     );
