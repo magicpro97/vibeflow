@@ -247,6 +247,7 @@ describe("AgentBinding materialization", () => {
     expect(out.resolved.engine).toBe("claude");
     expect(out.resolved.model).toBe("claude-sonnet-4-5");
     expect(out.resolved.sessionMode).toBe("replay");
+    expect(out.resolved.env_policy.selectedEngine).toBe("claude");
     expect(out.spawn).toMatchObject({
       engine: "claude",
       model: "claude-sonnet-4-5",
