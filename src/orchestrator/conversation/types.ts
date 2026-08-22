@@ -320,7 +320,7 @@ export type OperationCancelResult =
 
 export interface ConversationOrchestrationResult {
   operation_id: string;
-  status: "completed" | "aborted" | "failed" | "awaiting_approval";
+  status: "completed" | "stopped" | "aborted" | "failed" | "awaiting_approval";
   artifact_refs: string[];
 }
 

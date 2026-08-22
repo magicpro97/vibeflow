@@ -1090,7 +1090,7 @@ test("accepted completion cannot contradict a concurrent durable STOPPED termina
     await runtime.stop(accepted.conversation_id);
     const stoppedLength = (await traceStore.readConversation(accepted.conversation_id)).length;
     release();
-    expect((await accepted.completion).result.status).toBe("aborted");
+    expect((await accepted.completion).result.status).toBe("stopped");
     expect((await runtime.snapshot(accepted.conversation_id))?.lifecycle).toBe("STOPPED");
     expect((await traceStore.readConversation(accepted.conversation_id)).length).toBe(
       stoppedLength,
@@ -3740,7 +3740,7 @@ test("remote STOPPED closes a shared paused gate and rejects its deferred attemp
           setTimeout(() => reject(new Error("deferred attempt hung after remote stop")), 1000),
         ),
       ]),
-    ).resolves.toMatchObject({ result: { status: "aborted" } });
+    ).resolves.toMatchObject({ result: { status: "stopped" } });
     expect(adapter.starts).toHaveLength(0);
     expect((await runtime.snapshot(accepted.conversation_id))?.lifecycle).toBe("STOPPED");
   } finally {

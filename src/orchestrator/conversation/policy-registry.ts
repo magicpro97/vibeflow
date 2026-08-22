@@ -104,18 +104,24 @@ export const conversationTransitionEpoch = (records: readonly InternalTraceStore
           stored.event.payload.lifecycle === "PAUSED"),
     ).length - 1,
   );
-export const isTerminalLifecycle = (value: string): boolean =>
+export const isTerminalLifecycle = (value: string): value is TerminalLifecycle =>
   ["COMPLETED", "STOPPED", "FAILED", "ABORTED"].includes(value);
+export const terminalResultStatus = (
+  lifecycle: TerminalLifecycle,
+): ConversationOrchestrationResult["status"] => {
+  if (lifecycle === "COMPLETED") return "completed";
+  if (lifecycle === "STOPPED") return "stopped";
+  if (lifecycle === "FAILED") return "failed";
+  return "aborted";
+};
 export const conversationTerminal = (
   status: ConversationOrchestrationResult["status"],
-): TerminalLifecycle | null =>
-  status === "completed"
-    ? "COMPLETED"
-    : status === "aborted"
-      ? "ABORTED"
-      : status === "failed"
-        ? "FAILED"
-        : null;
+): TerminalLifecycle | null => {
+  if (status === "completed") return "COMPLETED";
+  if (status === "aborted") return "ABORTED";
+  if (status === "failed") return "FAILED";
+  return null;
+};
 export { projectOrchestrationResult } from "./boundary-projection.js";
 const bindingAuthority = (
   participantId: string,

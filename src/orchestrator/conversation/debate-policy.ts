@@ -2,18 +2,19 @@ import { type EvaluatorOutput, decideRound } from "../consensus.js";
 import {
   debateBlindEvaluatorPrompt,
   debateFullEvaluatorPrompt,
-  debateParticipantPrompt,
   parseDebateEvaluatorOutput,
   parseDebateParticipantOutput,
 } from "../debate.js";
 import type { StoredTraceEvent } from "../trace/types.js";
 import { persistBaselineResult, projectBaselineComparison } from "./baseline.js";
 import { projectDecisionMatrix } from "./debate-projection.js";
+import { debateMessagePrompt } from "./message-delivery.js";
 import type {
   ConversationContext,
   ConversationOrchestrationResult,
   ConversationPolicy,
   DryRunResult,
+  MessageRequest,
   PolicyAttempt,
 } from "./types.js";
 
@@ -106,7 +107,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
     const evaluatorIndices = context.bindings
       .map((binding, index) => (binding.role.spec.name === "brainstorm-evaluator" ? index : -1))
       .filter((index) => index >= 0);
-    const responderIndices = context.bindings
+    const responders = context.bindings
       .map((binding, index) => (binding.role.spec.name !== "brainstorm-evaluator" ? index : -1))
       .filter((index) => index >= 0);
     if (evaluatorIndices.length !== 1) {
@@ -117,7 +118,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
       );
       return failed(context);
     }
-    if (responderIndices.length < 2) {
+    if (responders.length < 2) {
       await coordinatorError(
         context,
         "insufficient_participants",
@@ -132,7 +133,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
       return failed(context);
     }
     const journal: StoredTraceEvent[] = [];
-    journal.push(await persistBaselineResult(context, responderIndices[0] as number));
+    journal.push(await persistBaselineResult(context, responders[0] as number));
     if (context.signal.aborted) return failed(context, "aborted");
 
     const transcript: TranscriptRound[] = [];
@@ -145,7 +146,8 @@ export class DebateConversationPolicy implements ConversationPolicy {
           event: { type: "round_boundary", payload: { round_id: roundId, phase: "start" } },
         }),
       );
-      const participants = await this.runParticipants(context, responderIndices, round, prior);
+      const messages = await context.messages();
+      const participants = await this.runParticipants(context, responders, round, prior, messages);
       if (!participants) return failed(context, context.signal.aborted ? "aborted" : "failed");
       for (const participant of participants) {
         journal.push(
@@ -238,7 +240,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
       prior = positions;
       if (decision.outcome !== "continue") break;
     }
-    return this.publishArtifacts(context, responderIndices, journal, transcript);
+    return this.publishArtifacts(context, responders, journal, transcript);
   }
 
   private async runParticipants(
@@ -246,6 +248,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
     indices: readonly number[],
     round: number,
     prior: readonly { claim: string | null; evidence: readonly string[] }[],
+    messages: readonly MessageRequest[],
   ): Promise<ParticipantRoundResult[] | null> {
     const launched = indices.map((bindingIndex) => {
       const participantId = context.participantIds[bindingIndex] as string;
@@ -253,7 +256,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
         participantId,
         bindingIndex,
         purpose: "participant",
-        promptInput: debateParticipantPrompt(context.topic, round, prior),
+        promptInput: debateMessagePrompt(context.topic, round, prior, messages, participantId),
       });
       return { participantId, attempt };
     });
@@ -333,16 +336,16 @@ export class DebateConversationPolicy implements ConversationPolicy {
 
   private async publishArtifacts(
     context: ConversationContext,
-    responderIndices: readonly number[],
+    responders: readonly number[],
     journal: readonly StoredTraceEvent[],
     transcript: readonly TranscriptRound[],
   ): Promise<ConversationOrchestrationResult> {
     const matrix = projectDecisionMatrix(journal);
     const comparison = projectBaselineComparison({
       enabled: context.baselineEnabled,
-      nonEvaluatorParticipantCount: responderIndices.length,
+      nonEvaluatorParticipantCount: responders.length,
       selectedEngineAvailable:
-        context.bindingReadiness[responderIndices[0] as number]?.engine_available ?? false,
+        context.bindingReadiness[responders[0] as number]?.engine_available ?? false,
       decisionMatrix: matrix,
       records: journal,
     });

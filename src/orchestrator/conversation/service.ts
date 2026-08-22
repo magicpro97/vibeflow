@@ -16,6 +16,7 @@ import {
   isTerminalLifecycle,
   messageRevisionKey,
   projectOrchestrationResult,
+  terminalResultStatus,
 } from "./policy-registry.js";
 import { ConversationRuntime, type ConversationRuntimeOptions } from "./runtime.js";
 import type {
@@ -168,12 +169,7 @@ export class ConversationOrchestrator implements ConversationService {
         : { operation_id: operationId, status: "failed" as const, artifact_refs: [] };
     const state = await this.snapshot(manifest.conversation_id);
     if (state && isTerminalLifecycle(state.lifecycle)) {
-      const status =
-        state.lifecycle === "COMPLETED"
-          ? "completed"
-          : state.lifecycle === "FAILED"
-            ? "failed"
-            : "aborted";
+      const status = terminalResultStatus(state.lifecycle);
       return {
         operation_id: operationId,
         status,
@@ -209,7 +205,11 @@ export class ConversationOrchestrator implements ConversationService {
       );
       return effective === requested
         ? result
-        : { operation_id: operationId, status: "aborted", artifact_refs: [] };
+        : {
+            operation_id: operationId,
+            status: effective === "STOPPED" ? "stopped" : "aborted",
+            artifact_refs: [],
+          };
     } catch {
       await this.runtime.terminal(
         manifest.conversation_id,
