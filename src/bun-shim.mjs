@@ -6,6 +6,10 @@
  * Supports: spawn, spawnSync, which, file, write, serve
  */
 
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+
 // Install polyfill only when NOT running under Bun
 if (typeof globalThis.Bun === "undefined") {
   // Lazy-require Node.js modules — safe under both runtimes
@@ -102,31 +106,113 @@ if (typeof globalThis.Bun === "undefined") {
     },
 
     serve(opts) {
+      const sockets = new Set();
+      const activeRequests = new Set();
       const server = http.createServer(async (req, res) => {
-        const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-        const h = new Headers();
-        for (const [k, v] of Object.entries(req.headers)) {
-          if (typeof v === "string") h.set(k, v);
-          else if (Array.isArray(v)) for (const x of v) h.append(k, x);
-        }
-        let body;
-        if (req.method !== "GET" && req.method !== "HEAD") {
-          body = await new Promise((resolve) => {
-            const c = [];
-            req.on("data", (x) => c.push(x));
-            req.on("end", () => resolve(Buffer.concat(c)));
-          });
-        }
-        const request = new Request(url, { method: req.method, headers: h, body });
-        const response = await opts.fetch(request);
-        let respBody;
+        let settleRequest;
+        const requestDone = new Promise((resolve) => {
+          settleRequest = resolve;
+        });
+        activeRequests.add(requestDone);
+        const controller = new AbortController();
+        let reader;
+        const abort = () => {
+          if (!controller.signal.aborted) controller.abort();
+          if (reader) void reader.cancel().catch(() => {});
+        };
+        req.once("aborted", abort);
+        req.once("error", abort);
+        const abortOnPrematureResponseClose = () => {
+          if (!res.writableEnded) abort();
+        };
+        const abortOnPrematureSocketClose = () => {
+          if (!res.writableEnded) abort();
+        };
+        res.once("close", abortOnPrematureResponseClose);
+        req.socket.once("close", abortOnPrematureSocketClose);
         try {
-          respBody = await response.text();
-        } catch {
-          respBody = "";
+          let url;
+          try {
+            url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+          } catch {
+            res.writeHead(400, { connection: "close", "content-type": "text/plain" });
+            res.end("Bad Request");
+            return;
+          }
+          const h = new Headers();
+          for (const [k, v] of Object.entries(req.headers)) {
+            if (typeof v === "string") h.set(k, v);
+            else if (Array.isArray(v)) for (const x of v) h.append(k, x);
+          }
+          let body;
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(Buffer.from(chunk));
+            body = Buffer.concat(chunks);
+          }
+          if (controller.signal.aborted) return;
+          const request = new Request(url, {
+            method: req.method,
+            headers: h,
+            body,
+            signal: controller.signal,
+          });
+          const response = await opts.fetch(request);
+          if (controller.signal.aborted || res.destroyed) {
+            await response.body?.cancel();
+            return;
+          }
+          const responseHeaders = Object.fromEntries(response.headers);
+          const cookies =
+            response.headers.getSetCookie?.() ??
+            splitSetCookieHeader(response.headers.get("set-cookie"));
+          if (cookies.length) responseHeaders["set-cookie"] = cookies;
+          res.writeHead(response.status, responseHeaders);
+          if (!response.body) {
+            res.end();
+            return;
+          }
+          reader = response.body.getReader();
+          while (!res.destroyed) {
+            const next = await reader.read();
+            if (next.done) break;
+            if (res.write(next.value)) continue;
+            const writable = await new Promise((resolve) => {
+              const settle = (value) => {
+                res.off("drain", drained);
+                res.off("close", closed);
+                resolve(value);
+              };
+              const drained = () => settle(true);
+              const closed = () => settle(false);
+              res.once("drain", drained);
+              res.once("close", closed);
+              if (res.destroyed) settle(false);
+            });
+            if (!writable) break;
+          }
+          if (!res.destroyed) res.end();
+        } catch (error) {
+          if (!controller.signal.aborted && !res.destroyed) res.destroy(error);
+        } finally {
+          req.off("aborted", abort);
+          req.off("error", abort);
+          res.off("close", abortOnPrematureResponseClose);
+          req.socket.off("close", abortOnPrematureSocketClose);
+          if (reader) {
+            try {
+              reader.releaseLock();
+            } catch {
+              // A concurrent disconnect may still be settling reader.cancel().
+            }
+          }
+          settleRequest();
+          activeRequests.delete(requestDone);
         }
-        res.writeHead(response.status, Object.fromEntries(response.headers));
-        res.end(respBody);
+      });
+      server.on("connection", (socket) => {
+        sockets.add(socket);
+        socket.once("close", () => sockets.delete(socket));
       });
       const hostname = opts.hostname ?? "127.0.0.1";
       server.listen(opts.port ?? 0, hostname);
@@ -134,12 +220,41 @@ if (typeof globalThis.Bun === "undefined") {
         get port() {
           return server.address()?.port ?? opts.port ?? 0;
         },
-        stop() {
-          server.close();
+        async stop(closeActiveConnections = false) {
+          const stopped = new Promise((resolve) => {
+            try {
+              server.close(() => resolve());
+            } catch {
+              resolve();
+            }
+          });
+          if (closeActiveConnections) {
+            if (typeof server.closeAllConnections === "function") server.closeAllConnections();
+            else for (const socket of sockets) socket.destroy();
+          }
+          await stopped;
+          while (activeRequests.size) await Promise.allSettled([...activeRequests]);
         },
       };
     },
   };
+}
+
+function splitSetCookieHeader(raw) {
+  if (!raw) return [];
+  const cookies = [];
+  let start = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    if (raw[index] !== ",") continue;
+    const next = raw.slice(index + 1).match(/^\s*([!#$%&'*+\-.^_\x60|~0-9A-Za-z]+)\s*=/);
+    if (!next) continue;
+    const cookie = raw.slice(start, index).trim();
+    if (cookie) cookies.push(cookie);
+    start = index + 1;
+  }
+  const tail = raw.slice(start).trim();
+  if (tail) cookies.push(tail);
+  return cookies;
 }
 
 function streamReader(nodeStream) {

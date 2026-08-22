@@ -73,7 +73,7 @@ export function startServer(
     conversation?: ConversationHttpAuthority;
   } = {},
 ): Promise<{
-  server: { stop: () => void };
+  server: { stop: (closeActiveConnections?: boolean) => Promise<void> };
   url: string;
 }> {
   const token = randomUUID();
@@ -833,7 +833,11 @@ export function startServer(
     `${c.cyan("VibeFlow UI")} → ${c.bold(`http://${displayHost}:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
   );
   return Promise.resolve({
-    server: { stop: () => server.stop() },
+    server: {
+      stop: async (closeActiveConnections) => {
+        await server.stop(closeActiveConnections);
+      },
+    },
     url: `http://${displayHost}:${server.port}`,
   });
 }

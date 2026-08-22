@@ -187,7 +187,7 @@ describe("conversation namespace", () => {
       });
       expect(created.status).toBe(202);
     } finally {
-      first.server.stop();
+      await first.server.stop(true);
     }
 
     const second = await startServer(0, { conversation: shared });
@@ -208,7 +208,7 @@ describe("conversation namespace", () => {
       expect(starts).toBe(1);
       expect(pauses).toBe(1);
     } finally {
-      second.server.stop();
+      await second.server.stop(true);
     }
   });
 
@@ -224,7 +224,7 @@ describe("conversation namespace", () => {
     } catch (error) {
       observed = error;
     } finally {
-      running?.server.stop();
+      await running?.server.stop(true);
     }
     expect(observed).toBeInstanceOf(Error);
     expect((observed as Error).message).toContain("conversation authority host mismatch");
@@ -237,7 +237,7 @@ describe("conversation namespace", () => {
         sessions: new ConversationSessionAuthority({ loopback: true }),
       }),
     });
-    running.server.stop();
+    await running.server.stop(true);
   });
 });
 
