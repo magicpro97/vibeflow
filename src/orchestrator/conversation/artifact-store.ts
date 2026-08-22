@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import type { InternalResumeBinding } from "../../dispatch/session-types.js";
+import { hasArtifactUpdateAuthority } from "./artifact-authority.js";
 import {
   type BindingAuthoritySnapshot,
   type ConversationArtifactEntry,
@@ -249,9 +250,7 @@ export class ConversationArtifactStore {
         if (state.artifacts.some((artifact) => artifact.artifact_id === candidateId))
           throw new Error("artifact identity conflict");
       } else if (
-        !state.artifacts.some(
-          (artifact) => artifact.artifact_id === candidateId && artifact.ref === previousRef,
-        )
+        !hasArtifactUpdateAuthority(state, candidateId, previousRef, (id) => this.readUnlocked(id))
       ) {
         throw new Error("artifact update authority mismatch");
       }

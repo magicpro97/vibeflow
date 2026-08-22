@@ -9,6 +9,39 @@ import type {
   ArtifactUpdateResult,
 } from "./types.js";
 
+interface ArtifactUpdateAuthorityRecord {
+  readonly manifest: {
+    readonly conversation_id: string;
+    readonly parent_conversation_id: string | null;
+  };
+  readonly artifacts: readonly { readonly artifact_id: string; readonly ref: string }[];
+}
+
+const MAX_ARTIFACT_ANCESTRY = 64;
+
+export function hasArtifactUpdateAuthority(
+  current: ArtifactUpdateAuthorityRecord,
+  artifactId: string,
+  previousRef: string,
+  read: (conversationId: string) => ArtifactUpdateAuthorityRecord | null,
+): boolean {
+  const seen = new Set<string>();
+  let expectedId = current.manifest.conversation_id;
+  let record: ArtifactUpdateAuthorityRecord | null = current;
+  let authorized = false;
+  for (let depth = 0; record && depth < MAX_ARTIFACT_ANCESTRY; depth++) {
+    if (record.manifest.conversation_id !== expectedId || seen.has(expectedId)) return false;
+    seen.add(expectedId);
+    authorized ||= record.artifacts.some(
+      (artifact) => artifact.artifact_id === artifactId && artifact.ref === previousRef,
+    );
+    expectedId = record.manifest.parent_conversation_id ?? "";
+    if (!expectedId) return authorized;
+    record = read(expectedId);
+  }
+  return false;
+}
+
 interface ArtifactAuthorityOptions {
   effects: ConversationEffectWriter;
   store: ConversationArtifactStore;

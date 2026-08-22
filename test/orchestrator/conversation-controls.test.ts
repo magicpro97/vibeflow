@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AttemptHandle, EngineSessionResult } from "../../src/dispatch/session-types.js";
+import { hasArtifactUpdateAuthority } from "../../src/orchestrator/conversation/artifact-authority.js";
 import {
   type BindingAuthoritySnapshot,
   ConversationArtifactStore,
@@ -33,6 +34,31 @@ import type {
 } from "../../src/orchestrator/trace/types.js";
 
 const ROLE_HASH = "a".repeat(64);
+
+test("artifact update authority follows only a complete bounded acyclic revision ancestry", () => {
+  const ref = `vf-artifact-${"a".repeat(64)}`;
+  const artifact = { artifact_id: "plan", ref };
+  const child = {
+    manifest: { conversation_id: "child", parent_conversation_id: "parent" },
+    artifacts: [],
+  };
+  const parent = {
+    manifest: { conversation_id: "parent", parent_conversation_id: null as string | null },
+    artifacts: [artifact],
+  };
+  const records = new Map([
+    ["child", child],
+    ["parent", parent],
+  ]);
+  const read = (id: string) => records.get(id) ?? null;
+
+  expect(hasArtifactUpdateAuthority(child, "plan", ref, read)).toBe(true);
+  expect(hasArtifactUpdateAuthority(child, "other", ref, read)).toBe(false);
+  parent.manifest.parent_conversation_id = "child";
+  expect(hasArtifactUpdateAuthority(child, "plan", ref, read)).toBe(false);
+  records.delete("parent");
+  expect(hasArtifactUpdateAuthority(child, "plan", ref, read)).toBe(false);
+});
 const manifestBinding = () => ({
   participant_id: "participant-1",
   input: { roleRef: "direct", engine: "codex" as const, sessionMode: "fresh" as const },
