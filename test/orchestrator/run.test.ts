@@ -242,6 +242,65 @@ describe("orchestrateUnits — quota-skip abort", () => {
     expect(units.every((u) => u !== undefined)).toBe(true);
     expect(reviews.every((r) => r !== undefined)).toBe(true);
   });
+
+  test("aborts an already-running dispatcher through the shared operation signal", async () => {
+    let releaseQuota!: () => void;
+    const activeStarted = new Promise<void>((resolve) => {
+      releaseQuota = resolve;
+    });
+    let activeObservedAbort = false;
+    const dispatcher = async (u: WorkUnit, signal?: AbortSignal) => {
+      if (u.name === "quota-hit") {
+        await activeStarted;
+        return {
+          status: "blocked" as const,
+          confidence: 0,
+          evidence: ["skipped: upstream rate limit (quota)"],
+        };
+      }
+      releaseQuota();
+      if (signal) {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        activeObservedAbort = signal.aborted;
+      }
+      return { status: "blocked" as const, confidence: 0, evidence: ["cancelled"] };
+    };
+
+    await orchestrateUnits({
+      units: [unit("quota-hit"), unit("already-running")],
+      dispatcher,
+      reviewer: passReviewer,
+      concurrency: 2,
+    });
+
+    expect(activeObservedAbort).toBe(true);
+  });
+
+  test("links an external caller signal into the active dispatcher exactly once", async () => {
+    const caller = new AbortController();
+    let observedReason: unknown;
+    const running = orchestrateUnits({
+      units: [unit("caller-cancelled")],
+      signal: caller.signal,
+      dispatcher: async (_unit, signal) => {
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        observedReason = signal?.reason;
+        return { status: "blocked" as const, confidence: 0, evidence: ["cancelled"] };
+      },
+      reviewer: passReviewer,
+    });
+
+    caller.abort("operation cancelled");
+    await running;
+
+    expect(observedReason).toBe("operation cancelled");
+  });
 });
 
 describe("orchestrateUnits — self-reported confidence cap (issue #349)", () => {

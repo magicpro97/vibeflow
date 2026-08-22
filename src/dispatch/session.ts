@@ -248,7 +248,7 @@ export function createEngineSessionAdapter(
           };
         }
         if (observed?.acknowledged) acknowledge();
-        for (const frame of projected.frames) emitChunk(stream, frame);
+        for (const frame of projected.frames) emitChunk(frame.stream, frame.content);
       };
       const resetIdle = () => {
         if (idleTimer) clearTimeout(idleTimer);

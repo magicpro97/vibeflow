@@ -107,7 +107,7 @@ export interface UnitOutcome {
   security?: SecurityCheckpointResult;
 }
 
-export type UnitDispatcher = (unit: WorkUnit) => Promise<UnitOutcome>;
+export type UnitDispatcher = (unit: WorkUnit, signal?: AbortSignal) => Promise<UnitOutcome>;
 export type Reviewer = (
   unit: WorkUnit,
   outcome: UnitOutcome,
@@ -215,6 +215,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   applyGateDiff?: (cwd: string, scope: string[]) => { diff: string; ok: boolean };
   /** #546: active logbus for engine-stdout wire. Absent ⇒ no-op. */
   logbus?: Logbus;
+  signal?: AbortSignal;
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   const resumeBindings = new Map(opts.units.map((unit) => [unit.name, readMarker(unit.name)]));
@@ -235,6 +236,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   }
   const security = opts.security;
   const controller = new AbortController();
+  const caller = opts.signal;
+  const signal = caller ? AbortSignal.any([caller, controller.signal]) : controller.signal;
   const units = (await runParallel(
     opts.units,
     async (u, i) => {
@@ -245,7 +248,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
         // Catch dispatcher throw → per-unit blocked so siblings complete.
         let outcome: UnitOutcome;
         try {
-          outcome = await opts.dispatcher(u);
+          outcome = await opts.dispatcher(u, signal);
         } catch (err) {
           const msg = (err as Error).message ?? String(err);
           try {
@@ -340,12 +343,9 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
     opts.concurrency ?? DEFAULT_CONCURRENCY,
     opts.interUnitDelayMs,
     undefined,
-    controller.signal,
+    signal,
   )) as U[];
-  // When the abort signal fires (an upstream rate limit), lanes stop pulling
-  // not-yet-started items, leaving sparse holes in `units`/`reviews`. Drop the
-  // holes so downstream consumers (e.g. reviews.map in orchestrate) never read
-  // `undefined.unit`. The skipped units simply don't appear in the result.
+  // Drop sparse holes left by aborted lanes before downstream consumers inspect results.
   const denseUnits = units.filter((u): u is U => u !== undefined);
   const denseReviews = reviews.filter(
     (r): r is OrchestrationResult["reviews"][number] => r !== undefined,

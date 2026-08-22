@@ -34,6 +34,7 @@ export interface DispatchSessionRuntimeOptions {
   resumeSessionId?: string;
   bridgeCommand?: string;
   processSpawner?: EngineProcessSpawner;
+  signal?: AbortSignal;
   onStdoutChunk?: (text: string) => void;
   onStderrChunk?: (text: string) => void;
   sessionAdapter?: EngineSessionAdapter;
@@ -52,11 +53,12 @@ function failureResult(
   options: DispatchSessionRuntimeOptions,
   attemptId: string,
   error: unknown,
+  privateValues: readonly string[] = [],
 ): DispatchResult {
   const reason = sanitizePublicText(
     error instanceof Error ? error.message : String(error),
     options.resumeSessionId ? [options.resumeSessionId] : [],
-    [options.prompt],
+    [options.prompt, ...privateValues],
   );
   return registerPrivateDispatchValues(
     {
@@ -67,7 +69,7 @@ function failureResult(
       raw: "",
       reason,
     },
-    [options.prompt, options.resumeSessionId ?? ""],
+    [options.prompt, ...privateValues, options.resumeSessionId ?? ""],
   );
 }
 
@@ -137,6 +139,7 @@ export async function runDispatchWithSessionRuntime(
     sessionMode: sessionMode(options),
     additionalSkillRefs: [...options.skillNames],
   };
+  let renderedPrompt: string | undefined;
   try {
     const binding = (options.materializeBinding ?? materializeWorkflowAgentBinding)(bindingInput, {
       repoRoot: options.base,
@@ -144,6 +147,7 @@ export async function runDispatchWithSessionRuntime(
       taskText: options.prompt,
       ...(isolation ? { isolation } : {}),
     });
+    renderedPrompt = binding.spawn.rendered_prompt;
     const handle = (
       options.sessionAdapter ??
       createEngineSessionAdapter({
@@ -156,7 +160,7 @@ export async function runDispatchWithSessionRuntime(
     ).start({
       attemptId,
       spawn: binding.spawn,
-      signal: new AbortController().signal,
+      signal: options.signal ?? new AbortController().signal,
       ...(options.mode === "cli" && options.resumeSessionId
         ? { nativeSessionId: options.resumeSessionId }
         : {}),
@@ -184,7 +188,12 @@ export async function runDispatchWithSessionRuntime(
     if (resumeBinding) registerDispatchResumeBinding(result, resumeBinding);
     return result;
   } catch (error) {
-    return failureResult(options, attemptId, error);
+    return failureResult(
+      options,
+      attemptId,
+      renderedPrompt ? new Error(`${options.engine} session dispatch failed`) : error,
+      renderedPrompt ? [renderedPrompt] : [],
+    );
   } finally {
     if (isolation) await releaseIsolationLease(isolation).catch(() => {});
   }

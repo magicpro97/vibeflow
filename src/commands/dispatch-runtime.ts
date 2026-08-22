@@ -72,6 +72,7 @@ export function makeResearcher(
     DispatchSessionRuntimeOptions,
     "adapterOptions" | "materializeBinding" | "processSpawner" | "sessionAdapter"
   >,
+  signal?: AbortSignal,
 ): AsyncResearcher {
   const repoRoot = base ?? process.cwd();
   return async (round, question) => {
@@ -88,6 +89,7 @@ export function makeResearcher(
       skillNames: [],
       adapterOptions: { timeoutMs: 180_000 },
       ...(processSpawner ? { processSpawner } : {}),
+      ...(signal ? { signal } : {}),
       ...sessionRuntime,
     });
     const confidence = result.summary?.confidence ?? 0;
@@ -158,11 +160,11 @@ export function makeDispatcher(
     "adapterOptions" | "materializeBinding" | "processSpawner" | "sessionAdapter"
   >,
 ): UnitDispatcher {
-  return async (u) => {
+  return async (u, signal) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
     const unitDir = join(base, unitRel);
     // Quota latch: once an upstream HIGH-confidence limit is seen, skip not-yet-started units
-    // rather than burning more of a shared account (the run.ts loop has no abort seam in scope).
+    // rather than burning more of a shared account.
     if (prot?.quota.limited) {
       const outcome = skippedByQuota();
       outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
@@ -267,6 +269,7 @@ export function makeDispatcher(
         wtPath,
         skillNames,
         ...(processSpawner ? { processSpawner } : {}),
+        ...(signal ? { signal } : {}),
         onStdoutChunk: emitStdout,
         onStderrChunk: emitStderr,
         ...sessionRuntime,
@@ -300,7 +303,15 @@ export function makeDispatcher(
             `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
           ),
         );
-        const research = makeResearcher(engine, ctx, mode, processSpawner, base, sessionRuntime);
+        const research = makeResearcher(
+          engine,
+          ctx,
+          mode,
+          processSpawner,
+          base,
+          sessionRuntime,
+          signal,
+        );
         const outcome = await investigateUnit(
           { name: u.name, confidence, owner_agent: u.owner_agent },
           { riskClass, research },

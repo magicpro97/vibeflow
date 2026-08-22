@@ -1277,6 +1277,82 @@ describe("native resume evidence and history reconciliation", () => {
     expect(chunks.join("")).toContain("[opaque-native-session]");
   });
 
+  test("OpenCode buffers earlier public frames until a future non-UUID session id is known", async () => {
+    const nativeId = "opencode-future-session";
+    const chunks: string[] = [];
+    const adapter = createEngineSessionAdapter({
+      spawn: () =>
+        completedProcess([
+          `ordinary output mentioned ${nativeId} before control\n`,
+          `${JSON.stringify({ type: "step_start", sessionID: nativeId })}\n`,
+        ]),
+      writeEvidence: async () => "evidence/opencode-future-id.json",
+    });
+    const handle = adapter.start(
+      request("opencode", {
+        attemptId: "attempt-opencode-future-id",
+        onChunk: (chunk) => chunks.push(chunk.content),
+        spawn: spawnProjection("opencode", { rendered_tools: [], sandbox: null }),
+      }),
+    );
+
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()?.nativeSessionId).toBe(nativeId);
+    expect(chunks.join("")).not.toContain(nativeId);
+    expect(result.output).not.toContain(nativeId);
+    expect(chunks.join("")).toContain("[opaque-native-session]");
+  });
+
+  test("OpenCode buffers stderr until a future stdout session id can redact it", async () => {
+    const nativeId = "opencode-future-stderr-session";
+    let releaseStdout!: () => void;
+    const stdoutReady = new Promise<void>((resolve) => {
+      releaseStdout = resolve;
+    });
+    const chunks: Array<{ stream: "stdout" | "stderr"; content: string }> = [];
+    const process = completedProcess();
+    process.stdout = new ReadableStream({
+      async start(controller) {
+        await stdoutReady;
+        controller.enqueue(
+          new TextEncoder().encode(
+            `${JSON.stringify({ type: "step_start", sessionID: nativeId })}\n`,
+          ),
+        );
+        controller.close();
+      },
+    });
+    process.stderr = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(`stderr mentioned ${nativeId}\n`));
+        controller.close();
+        setTimeout(releaseStdout, 0);
+      },
+    });
+    const adapter = createEngineSessionAdapter({
+      spawn: () => process,
+      writeEvidence: async () => "evidence/opencode-future-stderr-id.json",
+    });
+    const handle = adapter.start(
+      request("opencode", {
+        attemptId: "attempt-opencode-future-stderr-id",
+        onChunk: (chunk) => chunks.push(chunk),
+        spawn: spawnProjection("opencode", { rendered_tools: [], sandbox: null }),
+      }),
+    );
+
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()?.nativeSessionId).toBe(nativeId);
+    expect(chunks.map((chunk) => chunk.content).join("")).not.toContain(nativeId);
+    expect(result.output).not.toContain(nativeId);
+    expect(chunks).toContainEqual({
+      stream: "stderr",
+      content: "stderr mentioned [opaque-native-session]\n",
+    });
+  });
+
   test.each([
     ["claude", CLAUDE_UUID, { type: "result", session_id: CLAUDE_UUID }],
     ["codex", CODEX_UUID, { type: "thread.started", thread_id: CODEX_UUID }],
@@ -1374,6 +1450,33 @@ describe("native resume evidence and history reconciliation", () => {
     await handle.completion;
 
     expect(emittedBeforeClose).toContain("[redacted-oversize]");
+  });
+
+  test("an oversized split Claude result still captures its bounded protocol identity", async () => {
+    const envelope = `${JSON.stringify({
+      type: "result",
+      result: "x".repeat(70 * 1024),
+      session_id: CLAUDE_UUID,
+    })}\n`;
+    const chunks: string[] = [];
+    const adapter = createEngineSessionAdapter({
+      spawn: () => completedProcess([envelope.slice(0, 68 * 1024), envelope.slice(68 * 1024)]),
+      writeEvidence: async () => "evidence/oversized-claude-protocol.json",
+    });
+    const handle = adapter.start(
+      request("claude", {
+        attemptId: "attempt-oversized-claude-protocol",
+        onChunk: (chunk) => chunks.push(chunk.content),
+      }),
+    );
+
+    const result = await handle.completion;
+
+    expect(result.ok).toBe(true);
+    expect(result.nativeSessionStatus).toBe("captured");
+    expect(handle.readResumeBinding()?.nativeSessionId).toBe(CLAUDE_UUID);
+    expect(chunks.join("")).not.toContain(CLAUDE_UUID);
+    expect(result.output).toContain("[redacted-oversize]");
   });
 
   test("bounds retained stdout while delivering many public frames before stream close", async () => {
@@ -2291,6 +2394,71 @@ describe("dispatch session runtime integration", () => {
     expect(result.reason).not.toContain(CLAUDE_UUID);
     expect(result.reason).toContain("[opaque-native-session]");
     expect(JSON.stringify(result)).not.toContain(CLAUDE_UUID);
+  });
+
+  test("adapter-start failures redact the materialized wrapper as private prompt authority", async () => {
+    const wrapper = "PRIVATE_ROLE_INSTRUCTIONS";
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt: "private assigned topic",
+      mode: "cli",
+      unit: "wrapped-adapter-failure",
+      base: process.cwd(),
+      skillNames: [],
+      materializeBinding: (_binding, options) =>
+        ({
+          resolved: {} as never,
+          spawn: spawnProjection("claude", {
+            rendered_prompt: `${wrapper}\n${options.taskText}`,
+          }),
+        }) as MaterializedAgentBinding,
+      sessionAdapter: {
+        start() {
+          throw new Error(`adapter rejected ${wrapper}`);
+        },
+        async reconcileHistory() {
+          throw new Error("unused");
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).not.toContain(wrapper);
+    expect(result.reason).toBe("claude session dispatch failed");
+  });
+
+  test("dispatch runtime passes the caller-owned abort signal to the session adapter", async () => {
+    const caller = new AbortController();
+    let observedSignal: AbortSignal | undefined;
+    const runtimeOptions = {
+      engine: "claude",
+      prompt: "cancellable workflow",
+      mode: "cli",
+      unit: "caller-signal",
+      base: process.cwd(),
+      skillNames: [],
+      signal: caller.signal,
+      materializeBinding: (_binding: AgentBinding, options: MaterializeAgentBindingOptions) =>
+        ({
+          resolved: {} as never,
+          spawn: spawnProjection("claude", { rendered_prompt: options.taskText }),
+        }) as MaterializedAgentBinding,
+      sessionAdapter: {
+        start(request) {
+          observedSignal = request.signal;
+          return completedHandle(request.attemptId, "claude", CLAUDE_UUID);
+        },
+        async reconcileHistory() {
+          throw new Error("unused");
+        },
+      },
+    } as Parameters<typeof runDispatchWithSessionRuntime>[0];
+
+    await runDispatchWithSessionRuntime(runtimeOptions);
+    caller.abort("caller cancelled");
+
+    expect(observedSignal).toBe(caller.signal);
+    expect(observedSignal?.aborted).toBe(true);
   });
 
   test("adapter timeout owns and kills the underlying workflow process", async () => {

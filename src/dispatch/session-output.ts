@@ -6,12 +6,23 @@ import type { EngineSessionAdapterOptions } from "./session-types.js";
 
 const OUTPUT_TRUNCATION = "[redacted-oversize]\n";
 const RETAINED_STDOUT_BYTES = TRACE_LIMITS.maxTextBytes - Buffer.byteLength(OUTPUT_TRUNCATION);
+type PublicStream = "stdout" | "stderr";
+interface PublicFrame {
+  readonly stream: PublicStream;
+  readonly content: string;
+}
 
 /** Bounded internal state for public output retention and raw protocol observation. */
 export class SessionStdoutState {
   readonly #retained = Buffer.alloc(RETAINED_STDOUT_BYTES);
   readonly #publicBuffers = { stdout: "", stderr: "" };
   readonly #discardingOversize = { stdout: false, stderr: false };
+  #protocolBuffer = "";
+  #discardingOversizeProtocol = false;
+  readonly #openCodeFlushed = { stdout: false, stderr: false };
+  #pendingOpenCodeFrames: PublicFrame[] = [];
+  #pendingOpenCodeBytes = 0;
+  #pendingOpenCodeTruncated = false;
   readonly #protocol: EngineSessionAdapterOptions["protocol"];
   readonly #engine: Engine;
   #start = 0;
@@ -24,20 +35,17 @@ export class SessionStdoutState {
   }
 
   consume(
-    stream: "stdout" | "stderr",
+    stream: PublicStream,
     content: string,
     flush: boolean,
     nativeSessionId: string | undefined,
     privateValues: readonly string[],
   ): {
-    frames: string[];
+    frames: PublicFrame[];
     observation?: { acknowledged: boolean; nativeSessionId?: string };
   } {
     const buffered = this.#publicBuffers[stream] + content;
-    const observation =
-      stream === "stdout"
-        ? this.#observe(buffered, content, flush, this.#discardingOversize.stdout)
-        : undefined;
+    const observation = stream === "stdout" ? this.#observe(content, flush) : undefined;
     const projected = projectPublicEngineFrames(
       buffered,
       nativeSessionId ?? observation?.nativeSessionId,
@@ -47,10 +55,59 @@ export class SessionStdoutState {
     );
     this.#publicBuffers[stream] = projected.remainder;
     this.#discardingOversize[stream] = projected.discardingOversize;
-    if (stream === "stdout") {
-      for (const frame of projected.frames) this.#retainPublicFrame(frame);
+    const frames = this.#releaseOpenCodeFrames(
+      stream,
+      projected.frames,
+      nativeSessionId ?? observation?.nativeSessionId,
+      flush,
+      privateValues,
+    );
+    for (const frame of frames) {
+      if (frame.stream === "stdout") this.#retainPublicFrame(frame.content);
     }
-    return { frames: projected.frames, ...(observation ? { observation } : {}) };
+    return { frames, ...(observation ? { observation } : {}) };
+  }
+
+  #releaseOpenCodeFrames(
+    stream: PublicStream,
+    frames: readonly string[],
+    nativeSessionId: string | undefined,
+    flush: boolean,
+    privateValues: readonly string[],
+  ): PublicFrame[] {
+    const projected = frames.map((content) => ({ stream, content }));
+    if (this.#engine !== "opencode") return projected;
+    if (flush) this.#openCodeFlushed[stream] = true;
+    for (const frame of projected) {
+      if (this.#pendingOpenCodeTruncated) continue;
+      const bytes = Buffer.byteLength(frame.content);
+      if (this.#pendingOpenCodeBytes + bytes > RETAINED_STDOUT_BYTES) {
+        const retainedStream =
+          frame.stream === "stdout" ||
+          this.#pendingOpenCodeFrames.some((pending) => pending.stream === "stdout")
+            ? "stdout"
+            : frame.stream;
+        this.#pendingOpenCodeFrames = [{ stream: retainedStream, content: OUTPUT_TRUNCATION }];
+        this.#pendingOpenCodeBytes = Buffer.byteLength(OUTPUT_TRUNCATION);
+        this.#pendingOpenCodeTruncated = true;
+        continue;
+      }
+      this.#pendingOpenCodeFrames.push(frame);
+      this.#pendingOpenCodeBytes += bytes;
+    }
+    if (!nativeSessionId && !(this.#openCodeFlushed.stdout && this.#openCodeFlushed.stderr)) {
+      return [];
+    }
+    const released = this.#pendingOpenCodeFrames;
+    this.#pendingOpenCodeFrames = [];
+    this.#pendingOpenCodeBytes = 0;
+    this.#pendingOpenCodeTruncated = false;
+    return nativeSessionId
+      ? released.map((frame) => ({
+          ...frame,
+          content: sanitizePublicEngineText(frame.content, [nativeSessionId], privateValues),
+        }))
+      : released;
   }
 
   #retainPublicFrame(content: string): void {
@@ -77,23 +134,60 @@ export class SessionStdoutState {
   }
 
   #observe(
-    buffered: string,
     content: string,
     flush: boolean,
-    discardingOversize: boolean,
-  ): { acknowledged: boolean; nativeSessionId?: string } {
+  ): {
+    acknowledged: boolean;
+    nativeSessionId?: string;
+  } {
     const incremental =
       this.#protocol === "bridge" || this.#engine === "copilot" || this.#engine === "antigravity";
-    let input = incremental ? content : buffered;
-    if (!incremental && discardingOversize) {
+    if (incremental) return observeSessionStdout(this.#protocol, this.#engine, content);
+
+    let input = this.#protocolBuffer + content;
+    this.#protocolBuffer = "";
+    if (this.#discardingOversizeProtocol) {
       const discardedThrough = input.indexOf("\n");
-      if (discardedThrough < 0) return { acknowledged: false };
+      if (discardedThrough < 0) {
+        if (flush) this.#discardingOversizeProtocol = false;
+        return { acknowledged: false };
+      }
       input = input.slice(discardedThrough + 1);
+      this.#discardingOversizeProtocol = false;
     }
-    const end = incremental || flush ? input.length : input.lastIndexOf("\n") + 1;
-    return end > 0
-      ? observeSessionStdout(this.#protocol, this.#engine, input.slice(0, end))
-      : { acknowledged: false };
+
+    let acknowledged = false;
+    let nativeSessionId: string | undefined;
+    const observeRecord = (record: string) => {
+      if (Buffer.byteLength(record) > TRACE_LIMITS.maxRecordBytes) return;
+      const observed = observeSessionStdout(this.#protocol, this.#engine, record);
+      acknowledged ||= observed.acknowledged;
+      if (
+        observed.nativeSessionId &&
+        (this.#engine === "claude" || nativeSessionId === undefined)
+      ) {
+        nativeSessionId = observed.nativeSessionId;
+      }
+    };
+
+    let start = 0;
+    let newline = input.indexOf("\n", start);
+    while (newline >= 0) {
+      observeRecord(input.slice(start, newline + 1));
+      start = newline + 1;
+      newline = input.indexOf("\n", start);
+    }
+    const remainder = input.slice(start);
+    if (flush) observeRecord(remainder);
+    else if (Buffer.byteLength(remainder) > TRACE_LIMITS.maxRecordBytes) {
+      this.#discardingOversizeProtocol = true;
+    } else {
+      this.#protocolBuffer = remainder;
+    }
+    return {
+      acknowledged,
+      ...(nativeSessionId ? { nativeSessionId } : {}),
+    };
   }
 
   publicOutput(nativeIds: readonly string[], privateValues: readonly string[]): string {
