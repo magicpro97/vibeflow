@@ -16,6 +16,7 @@ if (typeof globalThis.Bun === "undefined") {
   const cp = require("node:child_process");
   const fs = require("node:fs");
   const http = require("node:http");
+  const { Readable } = require("node:stream");
 
   globalThis.Bun = {
     which(cmd) {
@@ -116,6 +117,7 @@ if (typeof globalThis.Bun === "undefined") {
         activeRequests.add(requestDone);
         const controller = new AbortController();
         let reader;
+        let request;
         const abort = () => {
           if (!controller.signal.aborted) controller.abort();
           if (reader) void reader.cancel().catch(() => {});
@@ -146,15 +148,14 @@ if (typeof globalThis.Bun === "undefined") {
           }
           let body;
           if (req.method !== "GET" && req.method !== "HEAD") {
-            const chunks = [];
-            for await (const chunk of req) chunks.push(Buffer.from(chunk));
-            body = Buffer.concat(chunks);
+            body = Readable.toWeb(req);
           }
           if (controller.signal.aborted) return;
-          const request = new Request(url, {
+          request = new Request(url, {
             method: req.method,
             headers: h,
             body,
+            ...(body ? { duplex: "half" } : {}),
             signal: controller.signal,
           });
           const response = await opts.fetch(request);
@@ -170,6 +171,7 @@ if (typeof globalThis.Bun === "undefined") {
             response.headers.getSetCookie?.() ??
             splitSetCookieHeader(response.headers.get("set-cookie"));
           if (cookies.length) responseHeaders["set-cookie"] = cookies;
+          if (request.body && !req.complete) responseHeaders.connection = "close";
           res.writeHead(response.status, responseHeaders);
           if (!response.body) {
             res.end();
@@ -208,7 +210,9 @@ if (typeof globalThis.Bun === "undefined") {
             } catch {
               // A concurrent disconnect may still be settling reader.cancel().
             }
+            reader = undefined;
           }
+          await disposeUnreadRequestBody(request, req, res);
           settleRequest();
           activeRequests.delete(requestDone);
         }
@@ -241,6 +245,30 @@ if (typeof globalThis.Bun === "undefined") {
       };
     },
   };
+}
+
+async function disposeUnreadRequestBody(request, req, res) {
+  if (!request?.body || req.complete || req.destroyed) return;
+  await responseSettled(res);
+  if (req.complete || req.destroyed) return;
+  // Cancelling Readable.toWeb(req) can resume a final queued chunk after its
+  // controller closes (ERR_INVALID_STATE on Node 18/24). Destroy the source
+  // stream after the response is flushed instead.
+  req.pause();
+  req.destroy();
+}
+
+function responseSettled(res) {
+  if (res.writableFinished || res.destroyed) return Promise.resolve();
+  return new Promise((resolve) => {
+    const settle = () => {
+      res.off("finish", settle);
+      res.off("close", settle);
+      resolve();
+    };
+    res.once("finish", settle);
+    res.once("close", settle);
+  });
 }
 
 function splitSetCookieHeader(raw) {
