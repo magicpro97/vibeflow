@@ -775,6 +775,63 @@ if (playwright) {
         await server.stop(true);
       }
     });
+
+    test("survives a late text response after disconnect on exact Node 18.0.0", async () => {
+      const node18 = process.env.VF_NODE18_BIN;
+      test.skip(!node18, "set VF_NODE18_BIN to the exact Node 18.0.0 binary");
+      const probe = spawnSync(node18, ["--experimental-fetch", "--input-type=module"], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        input: `
+            import "./src/bun-shim.mjs";
+            import http from "node:http";
+            if (process.versions.node !== "18.0.0") {
+              throw new Error(\`expected Node 18.0.0, received \${process.versions.node}\`);
+            }
+            const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const until = async (condition) => {
+              for (let attempt = 0; attempt < 400; attempt += 1) {
+                if (condition()) return;
+                await wait(5);
+              }
+              throw new Error("probe timed out");
+            };
+            let entered = false;
+            let aborted = false;
+            const server = Bun.serve({
+              hostname: "127.0.0.1",
+              port: 0,
+              fetch(request) {
+                entered = true;
+                return new Promise((resolve) => {
+                  request.signal.addEventListener(
+                    "abort",
+                    () => {
+                      aborted = true;
+                      resolve(new Response("late"));
+                    },
+                    { once: true },
+                  );
+                });
+              },
+            });
+            await until(() => server.port > 0);
+            const client = http.request({ host: "127.0.0.1", path: "/", port: server.port });
+            client.on("error", () => undefined);
+            client.end();
+            await until(() => entered);
+            client.destroy();
+            await until(() => aborted);
+            await server.stop(true);
+            console.log(JSON.stringify({ aborted, stopped: true, version: process.versions.node }));
+          `,
+        timeout: 10_000,
+      });
+      expect(probe.status, probe.stderr || probe.stdout).toBe(0);
+      expect(probe.stdout.trim()).toBe(
+        JSON.stringify({ aborted: true, stopped: true, version: "18.0.0" }),
+      );
+    });
   });
 
   test.describe("generic conversation workspace", () => {

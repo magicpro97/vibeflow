@@ -159,6 +159,9 @@ if (typeof globalThis.Bun === "undefined") {
           });
           const response = await opts.fetch(request);
           if (controller.signal.aborted || res.destroyed) {
+            // Node 18's fetch-backed text body closes on its next microtask. Cancelling
+            // in the same turn races that close and can crash with ERR_INVALID_STATE.
+            await new Promise((resolve) => queueMicrotask(resolve));
             await response.body?.cancel();
             return;
           }
