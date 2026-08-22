@@ -10,15 +10,26 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
-// Install polyfill only when NOT running under Bun
-if (typeof globalThis.Bun === "undefined") {
-  // Lazy-require Node.js modules — safe under both runtimes
-  const cp = require("node:child_process");
-  const fs = require("node:fs");
-  const http = require("node:http");
-  const { Readable } = require("node:stream");
+/**
+ * Install the Node.js Bun compatibility surface on a target global.
+ *
+ * The target guard deliberately runs before resolving the default Node
+ * dependencies. Bun imports this module too, so its native global must remain
+ * untouched and no compatibility dependency should be loaded in that runtime.
+ */
+export function installNodeBunShim(target = globalThis, deps = undefined) {
+  if (typeof target.Bun !== "undefined") return target.Bun;
 
-  globalThis.Bun = {
+  // Lazy-require Node.js modules — safe under both runtimes
+  const resolvedDeps = deps ?? {
+    cp: require("node:child_process"),
+    fs: require("node:fs"),
+    http: require("node:http"),
+    Readable: require("node:stream").Readable,
+  };
+  const { cp, fs, http, Readable } = resolvedDeps;
+
+  const shim = {
     which(cmd) {
       const isWin = process.platform === "win32";
       const r = cp.spawnSync(
@@ -245,7 +256,13 @@ if (typeof globalThis.Bun === "undefined") {
       };
     },
   };
+
+  target.Bun = shim;
+  return shim;
 }
+
+// Preserve the historical import side effect for Node.js callers.
+installNodeBunShim();
 
 async function disposeUnreadRequestBody(request, req, res) {
   if (!request?.body || req.complete || req.destroyed) return;
