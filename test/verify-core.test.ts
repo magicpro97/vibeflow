@@ -119,6 +119,12 @@ describe("authoritative verify core", () => {
     const skippedReview = structuredClone(baseline);
     skippedReview.review_evidence = gateResult("skipped", "review was not evaluated");
     expect(verifyGateManifestOk(skippedReview)).toBe(false);
+    const bogusBlocking = structuredClone(baseline);
+    bogusBlocking.toolchain.status = "bogus" as never;
+    expect(verifyGateManifestOk(bogusBlocking)).toBe(false);
+    const bogusNonBlocking = structuredClone(baseline);
+    bogusNonBlocking.advisory_e2e.status = "bogus" as never;
+    expect(verifyGateManifestOk(bogusNonBlocking)).toBe(false);
   });
 
   test("callers cannot replace the authoritative ledger policy", () => {

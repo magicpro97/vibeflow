@@ -1,35 +1,120 @@
-import { type PlanService, policyDryRun } from "./services.js";
+import {
+  type PlanArtifact,
+  type PlanArtifactLocator,
+  type PlanService,
+  policyDryRun,
+} from "./services.js";
 import type {
+  ApprovalDecision,
   ConversationContext,
   ConversationOrchestrationResult,
   ConversationPolicy,
   DryRunResult,
 } from "./types.js";
 
-/** Conversation adapter for the existing structured planner service. */
+export interface PlanWorkflowPolicies {
+  orchestrate: ConversationPolicy & Required<Pick<ConversationPolicy, "continueAfterApproval">>;
+  review: ConversationPolicy;
+  verify: ConversationPolicy;
+}
+
+const failed = (context: ConversationContext): ConversationOrchestrationResult => ({
+  operation_id: context.correlation.operation_id,
+  status: context.signal.aborted ? "aborted" : "failed",
+  artifact_refs: [],
+});
+
+const mergeRefs = (
+  context: ConversationContext,
+  status: ConversationOrchestrationResult["status"],
+  ...refs: readonly string[][]
+): ConversationOrchestrationResult => ({
+  operation_id: context.correlation.operation_id,
+  status,
+  artifact_refs: status === "failed" || status === "aborted" ? [] : [...new Set(refs.flat())],
+});
+
+/** Durable plan → approval → units → human review → verify workflow policy. */
 export class PlanConversationPolicy implements ConversationPolicy {
   readonly name = "plan";
 
-  constructor(private readonly plans: PlanService) {}
+  constructor(
+    private readonly plans: PlanService,
+    private readonly locatePlan?: PlanArtifactLocator,
+    private readonly workflow?: PlanWorkflowPolicies,
+  ) {}
 
   dryRun(context: ConversationContext): Promise<DryRunResult> {
-    return Promise.resolve(policyDryRun(context));
+    return this.workflow?.orchestrate.dryRun(context) ?? Promise.resolve(policyDryRun(context));
+  }
+
+  private async persistRevision(context: ConversationContext): Promise<PlanArtifact> {
+    const previous = await this.locatePlan?.(context);
+    if (!previous) return this.plans.createPlan(context);
+    if (previous.revision_id === context.correlation.revision_id) return previous;
+    const messages = await context.messages();
+    return this.plans.updatePlan(context, {
+      revision_id: context.correlation.revision_id,
+      content: messages.at(-1)?.content ?? context.topic,
+      reason: "conversation revision",
+    });
   }
 
   async execute(context: ConversationContext): Promise<ConversationOrchestrationResult> {
     try {
-      const plan = await this.plans.createPlan(context);
-      return {
-        operation_id: context.correlation.operation_id,
-        status: "completed",
-        artifact_refs: [plan.ref],
-      };
+      if (context.signal.aborted) return failed(context);
+      const plan = await this.persistRevision(context);
+      if (context.signal.aborted) return failed(context);
+      if (!this.workflow) return mergeRefs(context, "completed", [plan.ref]);
+      const requested = await this.workflow.orchestrate.execute(context);
+      if (context.signal.aborted) return failed(context);
+      if (requested.operation_id !== context.correlation.operation_id) return failed(context);
+      return mergeRefs(context, requested.status, [plan.ref], requested.artifact_refs);
     } catch {
-      return {
-        operation_id: context.correlation.operation_id,
-        status: context.signal.aborted ? "aborted" : "failed",
-        artifact_refs: [],
-      };
+      return failed(context);
     }
   }
+
+  continueAfterApproval = async (
+    context: ConversationContext,
+    decision: ApprovalDecision,
+  ): Promise<ConversationOrchestrationResult> => {
+    try {
+      if (context.signal.aborted) return failed(context);
+      const plan = await this.locatePlan?.(context);
+      if (context.signal.aborted || !plan || !this.workflow) return failed(context);
+      const executed = await this.workflow.orchestrate.continueAfterApproval(context, decision);
+      if (context.signal.aborted) return failed(context);
+      if (executed.operation_id !== context.correlation.operation_id) return failed(context);
+      if (executed.status !== "completed") {
+        return mergeRefs(context, executed.status, executed.artifact_refs);
+      }
+      const reviewed = await this.workflow.review.execute(context);
+      if (context.signal.aborted) return failed(context);
+      if (
+        reviewed.operation_id !== context.correlation.operation_id ||
+        reviewed.status !== "completed"
+      ) {
+        return failed(context);
+      }
+      const verified = await this.workflow.verify.execute(context);
+      if (context.signal.aborted) return failed(context);
+      if (
+        verified.operation_id !== context.correlation.operation_id ||
+        verified.status !== "completed"
+      ) {
+        return failed(context);
+      }
+      return mergeRefs(
+        context,
+        "completed",
+        [plan.ref],
+        executed.artifact_refs,
+        reviewed.artifact_refs,
+        verified.artifact_refs,
+      );
+    } catch {
+      return failed(context);
+    }
+  };
 }

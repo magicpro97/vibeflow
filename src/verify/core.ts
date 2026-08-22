@@ -89,13 +89,15 @@ export function gateResult(
 
 export function verifyGateManifestOk(gates: VerifyGateManifest): boolean {
   const nonBlocking = new Set<VerifyGateName>(VERIFY_NON_BLOCKING_GATES);
-  return VERIFY_GATE_ORDER.every(
-    (name) =>
-      nonBlocking.has(name) ||
-      (name === "review_evidence"
-        ? gates[name].status !== "fail" && gates[name].status !== "skipped"
-        : gates[name].status !== "fail"),
-  );
+  const known = new Set<VerifyGateStatus>(["pass", "fail", "warn", "skipped"]);
+  return VERIFY_GATE_ORDER.every((name) => {
+    const status = gates?.[name]?.status;
+    if (!status || !known.has(status)) return false;
+    if (nonBlocking.has(name)) return true;
+    return name === "review_evidence"
+      ? status !== "fail" && status !== "skipped"
+      : status !== "fail";
+  });
 }
 
 function exactConfidence(state: WorkflowState | null): number {

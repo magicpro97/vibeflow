@@ -24,7 +24,7 @@ import {
   type RuntimeCreateRequest,
   type RuntimePreviewRequest,
 } from "./policy-registry.js";
-import { ReviewConversationPolicy } from "./review-policy.js";
+import { ReviewConversationPolicy, createReviewEvidenceAuthority } from "./review-policy.js";
 import {
   type ConversationDomainRole,
   type ConversationEngineReadiness,
@@ -42,6 +42,7 @@ import {
   type PlanArtifact,
   type PlanArtifactLocator,
   type PlanLibrary,
+  type ReviewEvidenceAuthority,
   type ReviewLibrary,
   type VerifyLibrary,
 } from "./services.js";
@@ -85,6 +86,8 @@ export interface ConversationBootstrapOptions {
   readiness?: () => readonly ConversationEngineReadiness[];
   domainRoles?: readonly ConversationDomainRole[];
   registeredRoles?: readonly string[];
+  /** Unit-test seam. Production always uses the canonical current-HEAD evidence checker. */
+  reviewEvidenceAuthority?: ReviewEvidenceAuthority;
   /** Unit-test seam. Production callers omit this and use the canonical binder. */
   bindingFactory?: BindingFactory;
 }
@@ -257,7 +260,10 @@ export function createConversationBootstrap(
   });
   const locatePlan = persistedPlanLocator(artifactStore);
   const plan = new InjectedPlanService({ ...options.libraries.plan, locate: locatePlan });
-  const review = new InjectedReviewService(options.libraries.review);
+  const review = new InjectedReviewService(
+    options.libraries.review,
+    options.reviewEvidenceAuthority ?? createReviewEvidenceAuthority(repoRoot),
+  );
   const verify = new InjectedVerifyService(options.libraries.verify);
   const serviceHolder: { current?: ConversationOrchestrator } = {};
   const orchestrate = new InjectedOrchestrateService(
@@ -271,13 +277,21 @@ export function createConversationBootstrap(
     },
     options.actor,
   );
+  const reviewPolicy = new ReviewConversationPolicy(review, locatePlan);
+  const verifyPolicy = new VerifyConversationPolicy(verify, locatePlan);
+  const orchestratePolicy = new OrchestrateConversationPolicy(orchestrate);
+  const planPolicy = new PlanConversationPolicy(plan, locatePlan, {
+    orchestrate: orchestratePolicy,
+    review: reviewPolicy,
+    verify: verifyPolicy,
+  });
   const policies = new ConversationPolicyRegistry([
     new DirectConversationPolicy(),
     new DebateConversationPolicy(),
-    new PlanConversationPolicy(plan),
-    new ReviewConversationPolicy(review, locatePlan),
-    new VerifyConversationPolicy(verify, locatePlan),
-    new OrchestrateConversationPolicy(orchestrate),
+    planPolicy,
+    reviewPolicy,
+    verifyPolicy,
+    orchestratePolicy,
   ]);
   const binder = options.bindingFactory ?? {
     materialize: materializeAgentBinding,

@@ -5,6 +5,12 @@ import {
   type VerifyGateResult,
 } from "../../verify/core.js";
 import type { OrchestrationResult } from "../run.js";
+import { TRACE_LIMITS, utf8Bytes } from "../trace/limits.js";
+import {
+  type OrchestrationResultSnapshot,
+  orchestrationArtifactSummary,
+  snapshotOrchestrationResult,
+} from "./orchestrate-policy.js";
 import type {
   ApprovalDecision,
   ApprovalToken,
@@ -59,6 +65,14 @@ export interface OrchestrateService {
   cancel(command: OperationCancelCommand): Promise<OperationCancelResult>;
 }
 
+export {
+  InjectedReviewService,
+  type ReviewEvidenceAuthority,
+  type ReviewLibrary,
+  type ReviewLibraryResult,
+  type ReviewWorktreeCheck,
+} from "./review-service.js";
+
 export type PlanArtifactLocator = (
   context: ConversationContext,
 ) => Promise<PlanArtifact | null> | PlanArtifact | null;
@@ -88,6 +102,10 @@ const assertPlan = (value: PlanArtifact | null): PlanArtifact => {
   return value;
 };
 
+const assertActive = (context: ConversationContext): void => {
+  if (context.signal.aborted) throw new Error("operation aborted");
+};
+
 /** Injected adapter over the existing planner library; context remains the sole artifact writer. */
 export class InjectedPlanService implements PlanService {
   constructor(
@@ -97,9 +115,11 @@ export class InjectedPlanService implements PlanService {
   ) {}
 
   async createPlan(context: ConversationContext): Promise<PlanArtifact> {
+    assertActive(context);
     const output = await this.options.create({ context });
+    assertActive(context);
     assertContent(output.content, "plan");
-    const revisionId = output.revision_id ?? context.correlation.revision_id;
+    const revisionId = context.correlation.revision_id;
     if (!revisionId) throw new Error("plan revision is missing");
     const created = await context.createArtifact({
       artifact_type: "plan",
@@ -113,11 +133,18 @@ export class InjectedPlanService implements PlanService {
   }
 
   async updatePlan(context: ConversationContext, revision: PlanRevision): Promise<PlanArtifact> {
-    if (!revision?.revision_id || !revision.content.trim())
+    assertActive(context);
+    if (
+      !revision?.revision_id ||
+      revision.revision_id !== context.correlation.revision_id ||
+      !revision.content.trim()
+    )
       throw new Error("invalid plan revision");
     if (!this.options.update || !this.options.locate) throw new Error("plan update is unavailable");
     const previous = assertPlan(await this.options.locate(context));
+    assertActive(context);
     const output = await this.options.update({ context, revision, previous });
+    assertActive(context);
     assertContent(output.content, "plan");
     const updated = await context.updateArtifact({
       artifact_id: previous.artifact_id,
@@ -138,73 +165,6 @@ export class InjectedPlanService implements PlanService {
   }
 }
 
-export interface ReviewLibraryResult {
-  reviewed_head: string;
-  reviewer: string;
-  outcome: "approved" | "changes_requested";
-  evidence_refs: readonly string[];
-}
-
-export interface ReviewLibrary {
-  currentHead(): Promise<string> | string;
-  review(input: {
-    context: ConversationContext;
-    artifact: PlanArtifact;
-    mode: "human-only";
-    head_sha: string;
-  }): Promise<ReviewLibraryResult>;
-}
-
-const validReview = (value: ReviewLibraryResult): boolean =>
-  Boolean(
-    value?.reviewed_head &&
-      value.reviewer &&
-      (value.outcome === "approved" || value.outcome === "changes_requested") &&
-      Array.isArray(value.evidence_refs) &&
-      value.evidence_refs.length > 0 &&
-      value.evidence_refs.every((ref) => typeof ref === "string" && ref.length > 0),
-  );
-
-/** Keeps legacy review HUMAN-ONLY and pins its evidence to one immutable HEAD. */
-export class InjectedReviewService implements ReviewService {
-  constructor(private readonly library: ReviewLibrary) {}
-
-  async requestReview(
-    context: ConversationContext,
-    artifact: PlanArtifact,
-  ): Promise<ReviewResolution> {
-    assertPlan(artifact);
-    const head = await this.library.currentHead();
-    if (!head) throw new Error("review HEAD is unavailable");
-    const resolution = await this.library.review({
-      context,
-      artifact,
-      mode: "human-only",
-      head_sha: head,
-    });
-    const finalHead = await this.library.currentHead();
-    if (finalHead !== head || resolution.reviewed_head !== head) {
-      throw new Error("review HEAD changed");
-    }
-    if (!validReview(resolution)) throw new Error("invalid human review resolution");
-    const stored = await context.createArtifact({
-      artifact_type: "transcript",
-      content: `${JSON.stringify({ artifact_id: artifact.artifact_id, ...resolution })}\n`,
-      idempotency_key: hashKey("review-policy:resolution", [
-        context.correlation.operation_id,
-        artifact.ref,
-        head,
-      ]),
-    });
-    return {
-      artifact_id: artifact.artifact_id,
-      reviewer: resolution.reviewer,
-      outcome: resolution.outcome,
-      evidence_refs: [stored.ref],
-    };
-  }
-}
-
 export interface VerifyLibrary {
   run(input: {
     context: ConversationContext;
@@ -212,26 +172,59 @@ export interface VerifyLibrary {
   }): Promise<PolicyVerifyReport>;
 }
 
-const verifyStatus = new Set(["pass", "fail", "warn", "skipped"]);
-const validVerifyReport = (value: unknown): value is PolicyVerifyReport => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+const verifyStatus = new Set<VerifyGateResult["status"]>(["pass", "fail", "warn", "skipped"]);
+const verifyGateKeys = new Set(["status", "details", "evidence_refs"]);
+
+const denseVerifyRefs = (value: unknown): value is string[] => {
+  if (!Array.isArray(value) || value.length > TRACE_LIMITS.maxArrayItems) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (
+      !Object.hasOwn(value, index) ||
+      typeof value[index] !== "string" ||
+      utf8Bytes(value[index]) > TRACE_LIMITS.maxReferenceBytes
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const projectVerifyReport = (value: unknown): PolicyVerifyReport => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("verify did not return the full structured verify report");
+  }
   const report = value as Record<string, unknown>;
   if (
     Object.keys(report).length !== POLICY_VERIFY_GATE_NAMES.length ||
-    POLICY_VERIFY_GATE_NAMES.some((name) => !(name in report))
+    POLICY_VERIFY_GATE_NAMES.some((name) => !Object.hasOwn(report, name))
   ) {
-    return false;
+    throw new Error("verify did not return the full structured verify report");
   }
-  return POLICY_VERIFY_GATE_NAMES.every((name) => {
-    const gate = report[name] as Partial<VerifyGateResult> | undefined;
-    return (
-      gate !== undefined &&
-      verifyStatus.has(String(gate.status)) &&
-      typeof gate.details === "string" &&
-      Array.isArray(gate.evidence_refs) &&
-      gate.evidence_refs.every((ref) => typeof ref === "string")
-    );
-  });
+  const projected = {} as PolicyVerifyReport;
+  for (const name of POLICY_VERIFY_GATE_NAMES) {
+    const gate = report[name] as Record<string, unknown> | null;
+    if (
+      !gate ||
+      typeof gate !== "object" ||
+      Array.isArray(gate) ||
+      Object.keys(gate).length !== verifyGateKeys.size ||
+      Object.keys(gate).some((key) => !verifyGateKeys.has(key)) ||
+      typeof gate.status !== "string" ||
+      !verifyStatus.has(gate.status as VerifyGateResult["status"]) ||
+      typeof gate.details !== "string" ||
+      utf8Bytes(gate.details) > TRACE_LIMITS.maxTextBytes ||
+      !denseVerifyRefs(gate.evidence_refs)
+    ) {
+      throw new Error("verify did not return the full structured verify report");
+    }
+    const evidenceRefs = Object.freeze([...gate.evidence_refs]) as string[];
+    projected[name] = Object.freeze({
+      status: gate.status as VerifyGateResult["status"],
+      details: gate.details,
+      evidence_refs: evidenceRefs,
+    });
+  }
+  return Object.freeze(projected);
 };
 
 export class InjectedVerifyService implements VerifyService {
@@ -242,10 +235,10 @@ export class InjectedVerifyService implements VerifyService {
     artifact: PlanArtifact,
   ): Promise<PolicyVerifyReport> {
     assertPlan(artifact);
-    const report = await this.library.run({ context, artifact });
-    if (!validVerifyReport(report))
-      throw new Error("verify did not return the full structured verify report");
-    return Object.freeze(structuredClone(report));
+    if (context.signal.aborted) throw new Error("operation aborted");
+    const report = structuredClone(await this.library.run({ context, artifact })) as unknown;
+    if (context.signal.aborted) throw new Error("operation aborted");
+    return projectVerifyReport(report);
   }
 }
 
@@ -254,7 +247,7 @@ export interface OrchestrateLibrary {
   execute(input: {
     context: ConversationContext;
     approval: ApprovalDecision;
-  }): Promise<OrchestrationResult | ConversationOrchestrationResult>;
+  }): Promise<OrchestrationResult>;
   cancel?(command: OperationCancelCommand): Promise<OperationCancelResult>;
 }
 
@@ -270,13 +263,16 @@ export const orchestrationApprovalToken = (
   actor,
 });
 
-const conversationResult = (value: unknown): value is ConversationOrchestrationResult =>
-  Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof (value as ConversationOrchestrationResult).operation_id === "string" &&
-      Array.isArray((value as ConversationOrchestrationResult).artifact_refs),
+const orchestrationPassed = (output: OrchestrationResultSnapshot): boolean => {
+  if (output.units.length === 0) return output.reviews.length === 0;
+  if (output.units.length !== output.reviews.length) return false;
+  const units = new Map(output.units.map((unit) => [unit.name, unit]));
+  const reviews = new Map(output.reviews.map((review) => [review.unit, review]));
+  if (units.size !== output.units.length || reviews.size !== output.reviews.length) return false;
+  return [...units].every(
+    ([name, unit]) => unit.status === "done" && reviews.get(name)?.pass === true,
   );
+};
 
 /** Structured facade over the existing work-unit runner; it never launches a nested vf process. */
 export class InjectedOrchestrateService implements OrchestrateService {
@@ -293,6 +289,12 @@ export class InjectedOrchestrateService implements OrchestrateService {
     context: ConversationContext,
     approval: ApprovalDecision | null,
   ): Promise<ConversationOrchestrationResult> {
+    const aborted = (): ConversationOrchestrationResult => ({
+      operation_id: context.correlation.operation_id,
+      status: "aborted",
+      artifact_refs: [],
+    });
+    if (context.signal.aborted) return aborted();
     const token = orchestrationApprovalToken(context, this.actor);
     if (!approval) {
       await context.emit({
@@ -302,6 +304,7 @@ export class InjectedOrchestrateService implements OrchestrateService {
           payload: { token, description: "Execute the current VibeFlow work units" },
         },
       });
+      if (context.signal.aborted) return aborted();
       return {
         operation_id: context.correlation.operation_id,
         status: "awaiting_approval",
@@ -322,28 +325,24 @@ export class InjectedOrchestrateService implements OrchestrateService {
         artifact_refs: [],
       };
     }
-    const output = await this.library.execute({ context, approval });
-    if (conversationResult(output)) {
-      if (output.operation_id !== context.correlation.operation_id) {
-        throw new Error("orchestration result correlation mismatch");
-      }
-      return structuredClone(output);
-    }
+    const untrusted = await this.library.execute({ context, approval });
+    if (context.signal.aborted) return aborted();
+    const output = snapshotOrchestrationResult(untrusted);
+    if (context.signal.aborted) return aborted();
     const summary = await context.createArtifact({
       artifact_type: "tests",
-      content: `${JSON.stringify(output)}\n`,
+      content: orchestrationArtifactSummary(output),
       idempotency_key: hashKey("orchestrate-policy:result", [
         context.correlation.operation_id,
         approval.approval_id,
       ]),
     });
-    const passed =
-      output.units.every((unit) => unit.status === "done") &&
-      output.reviews.every((review) => review.pass);
+    const passed = orchestrationPassed(output);
+    const status = context.signal.aborted ? "aborted" : passed ? "completed" : "failed";
     return {
       operation_id: context.correlation.operation_id,
-      status: context.signal.aborted ? "aborted" : passed ? "completed" : "failed",
-      artifact_refs: [summary.ref],
+      status,
+      artifact_refs: status === "completed" ? [summary.ref] : [],
     };
   }
 
