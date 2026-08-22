@@ -33,7 +33,7 @@ export class ConversationSubscribers {
     listener: ConversationListener,
     replay: () => Promise<PublicStoredTraceEvent[] | null>,
     afterSeq: number,
-  ): Unsubscribe {
+  ): Unsubscribe & { readonly replayReady: Promise<void> } {
     const subscriber: Subscriber = {
       listener,
       lastSeq: afterSeq,
@@ -44,7 +44,21 @@ export class ConversationSubscribers {
     const set = this.values.get(id) ?? new Set<Subscriber>();
     set.add(subscriber);
     this.values.set(id, set);
-    void replay().then(
+    const deactivate = () => {
+      if (!subscriber.active) return;
+      subscriber.active = false;
+      subscriber.pending = [];
+      subscriber.replaying = false;
+      set.delete(subscriber);
+      if (!set.size) this.values.delete(id);
+    };
+    let replayResult: Promise<PublicStoredTraceEvent[] | null>;
+    try {
+      replayResult = replay();
+    } catch (error) {
+      replayResult = Promise.reject(error);
+    }
+    const replayReady = replayResult.then(
       (events) => {
         if (!subscriber.active) return;
         subscriber.pending = Array.from(events ?? []).concat(subscriber.pending);
@@ -64,18 +78,14 @@ export class ConversationSubscribers {
         }
         subscriber.replaying = false;
       },
-      () => {
-        subscriber.active = false;
-        subscriber.pending = [];
-        subscriber.replaying = false;
-        set.delete(subscriber);
-        if (!set.size) this.values.delete(id);
+      (error) => {
+        deactivate();
+        throw error;
       },
     );
-    return () => {
-      subscriber.active = false;
-      set.delete(subscriber);
-      if (!set.size) this.values.delete(id);
-    };
+    // The SSE adapter observes this same promise. Keep a local rejection handler so
+    // non-SSE callers are not required to consume the optional readiness seam.
+    void replayReady.catch(() => undefined);
+    return Object.assign(deactivate, { replayReady });
   }
 }
