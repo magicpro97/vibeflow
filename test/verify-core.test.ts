@@ -11,6 +11,7 @@ import {
   evaluateVerifyCore,
   gateResult,
   persistImplementationFingerprints,
+  verifyGateManifestOk,
 } from "../src/verify/core.js";
 
 function state(confidences: number[] = [1]): WorkflowState {
@@ -103,6 +104,21 @@ describe("authoritative verify core", () => {
     expect(result.confidence).toBe(1);
     expect(result.gates.toolchain.status).toBe("fail");
     expect(result.ok).toBe(false);
+  });
+
+  test("publishes the same blocking decision for structured policy consumers", () => {
+    const baseline = report().gates;
+    expect(verifyGateManifestOk(baseline)).toBe(true);
+    for (const name of VERIFY_GATE_ORDER) {
+      const gates = structuredClone(baseline);
+      gates[name] = gateResult("fail", `${name} failed`);
+      expect(verifyGateManifestOk(gates), name).toBe(
+        ["skill", "advisory_e2e", "marker_result", "journal_result"].includes(name),
+      );
+    }
+    const skippedReview = structuredClone(baseline);
+    skippedReview.review_evidence = gateResult("skipped", "review was not evaluated");
+    expect(verifyGateManifestOk(skippedReview)).toBe(false);
   });
 
   test("callers cannot replace the authoritative ledger policy", () => {

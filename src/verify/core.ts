@@ -27,6 +27,13 @@ export const VERIFY_GATE_ORDER = [
 export type VerifyGateName = (typeof VERIFY_GATE_ORDER)[number];
 export type VerifyGateStatus = "pass" | "fail" | "warn" | "skipped";
 
+export const VERIFY_NON_BLOCKING_GATES = [
+  "skill",
+  "advisory_e2e",
+  "marker_result",
+  "journal_result",
+] as const satisfies readonly VerifyGateName[];
+
 export interface VerifyGateResult {
   status: VerifyGateStatus;
   details: string;
@@ -78,6 +85,17 @@ export function gateResult(
   evidenceRefs: readonly string[] = [],
 ): VerifyGateResult {
   return { status, details, evidence_refs: [...evidenceRefs] };
+}
+
+export function verifyGateManifestOk(gates: VerifyGateManifest): boolean {
+  const nonBlocking = new Set<VerifyGateName>(VERIFY_NON_BLOCKING_GATES);
+  return VERIFY_GATE_ORDER.every(
+    (name) =>
+      nonBlocking.has(name) ||
+      (name === "review_evidence"
+        ? gates[name].status !== "fail" && gates[name].status !== "skipped"
+        : gates[name].status !== "fail"),
+  );
 }
 
 function exactConfidence(state: WorkflowState | null): number {
@@ -204,21 +222,8 @@ export function evaluateVerifyCore(input: VerifyCoreInput): VerifyCoreReport {
     marker_result: external(input.markerResult, "marker write not requested"),
     journal_result: external(input.journalResult, "journal write not requested"),
   };
-  const nonBlocking = new Set<VerifyGateName>([
-    "skill",
-    "advisory_e2e",
-    "marker_result",
-    "journal_result",
-  ]);
-  const blockingPassed = VERIFY_GATE_ORDER.every(
-    (name) =>
-      nonBlocking.has(name) ||
-      (name === "review_evidence"
-        ? gates[name].status !== "fail" && gates[name].status !== "skipped"
-        : gates[name].status !== "fail"),
-  );
   return {
-    ok: policy.failures.length === 0 && blockingPassed,
+    ok: policy.failures.length === 0 && verifyGateManifestOk(gates),
     confidence,
     gates,
     toolchain: input.toolchain.map((gate) => ({ ...gate })),
