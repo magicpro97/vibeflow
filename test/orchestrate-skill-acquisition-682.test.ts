@@ -13,6 +13,7 @@ import { preDispatchAcquisition } from "../src/commands/orchestrate-acquisition.
 import { productionAcquisitionInstall } from "../src/commands/orchestrate-acquisition.js";
 import { type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
+import type { EngineProcessSpawner } from "../src/dispatch/session-types.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
 import type { SkillAcquisitionProposal } from "../src/skills/acquisition.js";
 import { registryCacheDir, writeRegistryLock } from "../src/skills/registry-channel.js";
@@ -112,6 +113,26 @@ const okGit: GitRunner = (args) => {
 const okSpawner: AsyncSpawner = async () => ({
   status: 0,
   stdout: JSON.stringify({ result: '```json\n{ "confidence": 1.0 }\n```' }),
+});
+const okProcessSpawner: EngineProcessSpawner = () => ({
+  stdin: { write: () => {}, end: () => {} },
+  stdout: new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          JSON.stringify({
+            type: "result",
+            session_id: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+            result: '```json\n{ "confidence": 1.0 }\n```',
+          }),
+        ),
+      );
+      controller.close();
+    },
+  }),
+  stderr: new ReadableStream({ start: (controller) => controller.close() }),
+  exited: Promise.resolve(0),
+  kill: () => {},
 });
 
 describe("preDispatchAcquisition (#682 adapter)", () => {
@@ -369,7 +390,7 @@ describe("orchestrate/run acquisition wiring (#682)", () => {
     const spawns = 0;
     let installed = false;
     const code = await orchestrate({ yes: true, engine: "claude" }, repo, {
-      spawner: okSpawner,
+      sessionRuntime: { processSpawner: okProcessSpawner },
       git: okGit,
       gate: () => ({ pass: true }),
       acquisitionReadDeps: { homedir: () => home },
@@ -391,7 +412,7 @@ describe("orchestrate/run acquisition wiring (#682)", () => {
     writeStateFixture(repo);
     let installs = 0;
     const code = await orchestrate({ yes: true, engine: "claude" }, repo, {
-      spawner: okSpawner,
+      sessionRuntime: { processSpawner: okProcessSpawner },
       git: okGit,
       gate: () => ({ pass: true }),
       acquisitionReadDeps: { homedir: () => home },
@@ -411,7 +432,7 @@ describe("orchestrate/run acquisition wiring (#682)", () => {
     writeStateFixture(repo);
     let installs = 0;
     const code = await orchestrate({ yes: true, engine: "claude" }, repo, {
-      spawner: okSpawner,
+      sessionRuntime: { processSpawner: okProcessSpawner },
       git: okGit,
       gate: () => ({ pass: true }),
       acquisitionReadDeps: { homedir: () => home },
@@ -435,7 +456,7 @@ describe("orchestrate/run acquisition wiring (#682)", () => {
     );
     writeStateFixture(repo);
     const code = await orchestrate({ yes: true, engine: "claude" }, repo, {
-      spawner: okSpawner,
+      sessionRuntime: { processSpawner: okProcessSpawner },
       git: okGit,
       gate: () => ({ pass: true }),
       acquisitionReadDeps: { homedir: () => home },

@@ -8,6 +8,7 @@ import type {
   SessionMode,
   SessionProvenance,
   SessionTraceMetadata,
+  SpawnOptionsInput,
   SpawnOptionsProjection,
 } from "../dispatch/session-types.js";
 import { createSpawnOptionsProjection } from "../dispatch/session-types.js";
@@ -53,6 +54,15 @@ export interface MaterializedAgentBinding {
   resolved: ResolvedAgentBinding;
   spawn: SpawnOptionsProjection;
 }
+
+export interface PreviewAgentBinding {
+  readonly resolved: ResolvedAgentBinding;
+  readonly engineAvailable: boolean;
+  readonly modelValid: boolean;
+}
+const canonicalPreviewBindings = new WeakSet<object>();
+export const isCanonicalPreviewAgentBinding = (value: PreviewAgentBinding): boolean =>
+  canonicalPreviewBindings.has(value);
 
 const SESSION_MODES = new Set<SessionMode>(["exact", "replay", "fresh"]);
 
@@ -128,13 +138,13 @@ function assertAdmission(
   }
 }
 
-function assertEngineReady(engine: Engine, repoRoot: string): void {
-  const probeOptions: PreflightOpts = { probe: true, skipCache: true, cacheKey: repoRoot };
+function engineReady(engine: Engine, repoRoot: string, execution = true): boolean {
+  const probeOptions: PreflightOpts = execution
+    ? { probe: true, skipCache: true, cacheKey: repoRoot }
+    : { probe: false, cacheKey: repoRoot };
   const readiness = preflightAll([engine], probeOptions);
   const exact = readiness.length === 1 ? readiness[0] : undefined;
-  if (!exact || exact.engine !== engine || exact.level !== "ready") {
-    throw new Error(`conversation binding requires a verified engine: ${engine}`);
-  }
+  return exact?.engine === engine && exact.level === "ready";
 }
 
 function validateLease(isolation: IsolationLeaseProjection): ValidatedIsolationLease {
@@ -145,41 +155,56 @@ function validateLease(isolation: IsolationLeaseProjection): ValidatedIsolationL
   }
 }
 
-/** Resolve all role/skill authority before a conversation attempt can be spawned. */
-export function materializeAgentBinding(
+function resolveBindingAuthority(
   binding: AgentBinding,
   options: MaterializeAgentBindingOptions,
-): MaterializedAgentBinding {
+  purpose: "conversation" | "preview" | "workflow" = "conversation",
+): { resolved: ResolvedAgentBinding; spawnInput: SpawnOptionsInput } {
   assertBindingInput(binding);
   assertModelOverride(binding.modelOverride);
   const canonicalRepoRoot = realpathSync(resolve(options.repoRoot));
-  assertEngineReady(binding.engine, canonicalRepoRoot);
   const validatedIsolation = options.isolation ? validateLease(options.isolation) : undefined;
   const role = resolveRoleOverlay(binding.roleRef, { repoRoot: canonicalRepoRoot });
-  const skillResolution = materializeDiscoveredDispatchSkills(options.taskText, {
-    repoRoot: canonicalRepoRoot,
-    additionalSkillRefs: binding.additionalSkillRefs,
-  });
-  assertAdmission(
-    binding,
-    role,
-    skillResolution.skills,
-    options,
-    canonicalRepoRoot,
-    validatedIsolation,
+  const exactWorkflowSelection =
+    purpose === "workflow" && binding.additionalSkillRefs !== undefined;
+  const skillResolution = materializeDiscoveredDispatchSkills(
+    exactWorkflowSelection ? "" : options.taskText,
+    {
+      repoRoot: canonicalRepoRoot,
+      additionalSkillRefs: binding.additionalSkillRefs,
+    },
   );
+  const skills = exactWorkflowSelection
+    ? (binding.additionalSkillRefs?.map((ref) => {
+        const name = ref.split("@")[0]?.toLowerCase();
+        const resolved = skillResolution.skills.find((skill) => skill.ref.toLowerCase() === name);
+        if (!resolved) throw new Error(`workflow skill selection was not materialized: ${ref}`);
+        return resolved;
+      }) ?? [])
+    : skillResolution.skills;
+  if (purpose === "workflow") {
+    if (!Number.isInteger(options.phase) || options.phase < 1) {
+      throw new Error("workflow phase must be a positive integer");
+    }
+    if (validatedIsolation && validatedIsolation.repoRoot !== canonicalRepoRoot) {
+      throw new Error("isolation lacks the associated canonical repository");
+    }
+  } else {
+    assertAdmission(binding, role, skills, options, canonicalRepoRoot, validatedIsolation);
+  }
 
-  const prompt = renderPrompt(role, skillResolution.skills, options.taskText);
+  const prompt =
+    purpose === "workflow" ? options.taskText : renderPrompt(role, skills, options.taskText);
   const rendered = renderRoleForSpawn(binding.engine, role.spec, {
     modelOverride: binding.modelOverride,
     prompt,
   });
-  const sandbox = role.spec.sandbox ?? null;
-  if (rendered.sandbox !== sandbox) {
+  const sandbox = purpose === "workflow" ? rendered.sandbox : (role.spec.sandbox ?? null);
+  if (purpose === "conversation" && rendered.sandbox !== sandbox) {
     throw new Error(`${binding.engine} cannot enforce the resolved role sandbox`);
   }
 
-  const skillHashes = skillResolution.skills.map((skill) => skill.resolved_hash);
+  const skillHashes = skills.map((skill) => skill.resolved_hash);
   const provenance: SessionProvenance = {
     roleSource: role.source,
     roleHash: role.resolved_hash,
@@ -193,7 +218,7 @@ export function materializeAgentBinding(
   const isolation = options.isolation ?? null;
   const resolved: ResolvedAgentBinding = {
     role,
-    skills: skillResolution.skills,
+    skills,
     engine: binding.engine,
     model: rendered.model,
     sessionMode: binding.sessionMode,
@@ -204,17 +229,80 @@ export function materializeAgentBinding(
     provenance,
     trace_metadata: traceMetadata,
   };
-  const spawn = createSpawnOptionsProjection({
-    engine: binding.engine,
-    model: rendered.model,
-    sessionMode: binding.sessionMode,
-    rendered_prompt: rendered.rendered_prompt,
-    rendered_tools: rendered.rendered_tools,
-    sandbox: rendered.sandbox,
-    env_policy: envPolicy,
-    isolation,
-    provenance,
-    trace_metadata: traceMetadata,
+  return {
+    resolved,
+    spawnInput: {
+      engine: binding.engine,
+      model: rendered.model,
+      sessionMode: binding.sessionMode,
+      rendered_prompt: rendered.rendered_prompt,
+      rendered_tools: rendered.rendered_tools,
+      sandbox: rendered.sandbox,
+      env_policy: envPolicy,
+      isolation,
+      provenance,
+      trace_metadata: traceMetadata,
+    },
+  };
+}
+
+const modelCredential =
+  /(?:^|[._/@:+-])(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|A[KS]IA[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[\w-]{20,})(?=$|[._/@:+-])|(?:^|[._/@:+-])(?:token|secret|password|credential|api[_-]?key|access[_-]?key)(?:$|[._/@:+-])/i;
+const localModelPath =
+  /^(?:[A-Za-z]:[\\/]|[\\/]|\.{1,2}[\\/]|(?:src|test|tests|docs|lib|dist|build|private|artifacts?|evidence|coverage|scripts?|config)[\\/])/i;
+const modelValidForPreview = (model: string | null): boolean =>
+  model === null ||
+  (Buffer.byteLength(model, "utf8") <= 200 &&
+    /^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/.test(model) &&
+    !model.includes("..") &&
+    !model.includes("//") &&
+    !localModelPath.test(model) &&
+    !modelCredential.test(model));
+
+/** Resolve read-only authority and readiness without returning executable spawn authority. */
+export function previewAgentBinding(
+  binding: AgentBinding,
+  options: MaterializeAgentBindingOptions,
+): PreviewAgentBinding {
+  const authority = resolveBindingAuthority(binding, options, "preview");
+  const preview = Object.freeze({
+    resolved: authority.resolved,
+    engineAvailable: engineReady(binding.engine, realpathSync(resolve(options.repoRoot)), false),
+    modelValid: modelValidForPreview(authority.resolved.model),
   });
-  return { resolved, spawn };
+  canonicalPreviewBindings.add(preview);
+  return preview;
+}
+
+/** Resolve all role/skill authority before a conversation attempt can be spawned. */
+export function materializeAgentBinding(
+  binding: AgentBinding,
+  options: MaterializeAgentBindingOptions,
+): MaterializedAgentBinding {
+  const canonicalRepoRoot = realpathSync(resolve(options.repoRoot));
+  if (!engineReady(binding.engine, canonicalRepoRoot)) {
+    throw new Error(`conversation binding requires a verified engine: ${binding.engine}`);
+  }
+  const authority = resolveBindingAuthority(binding, options);
+  return {
+    resolved: authority.resolved,
+    spawn: createSpawnOptionsProjection(authority.spawnInput),
+  };
+}
+
+/**
+ * Materialize a workflow dispatch after the orchestrator's trusted engine gate has admitted it.
+ * Workflow prompts are already complete executable documents, so this path binds provenance
+ * without wrapping or re-selecting their skills. Conversation admission remains on
+ * {@link materializeAgentBinding} and cannot opt into these compatibility rules.
+ */
+export function materializeWorkflowAgentBinding(
+  binding: AgentBinding,
+  options: MaterializeAgentBindingOptions,
+): MaterializedAgentBinding {
+  const authority = resolveBindingAuthority(binding, options, "workflow");
+  return {
+    resolved: authority.resolved,
+    spawn: createSpawnOptionsProjection(authority.spawnInput),
+  };
 }

@@ -8,6 +8,7 @@ import {
   sanitizePublicText as sanitizeTraceText,
 } from "../orchestrator/trace/public-sanitize.js";
 import { parseEngineSessionId, parseEngineSummary } from "./prompt.js";
+import type { InternalResumeBinding } from "./session-types.js";
 import type { DispatchResult, EngineSummary } from "./types.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -26,6 +27,7 @@ const NATIVE_ID_PATTERNS: Record<Engine, RegExp> = {
 };
 
 const dispatchPrivateValues = new WeakMap<object, readonly string[]>();
+const dispatchResumeBindings = new WeakMap<object, Readonly<InternalResumeBinding>>();
 
 export function isSafeNativeSessionId(engine: Engine, value: string): boolean {
   return NATIVE_ID_PATTERNS[engine].test(value);
@@ -267,15 +269,43 @@ export function registerPrivateDispatchValues(
   return result;
 }
 
+/** Internal-only native resume channel; the binding is never part of the result DTO. */
+export function readDispatchResumeBinding(
+  result: DispatchResult,
+): Readonly<InternalResumeBinding> | undefined {
+  return dispatchResumeBindings.get(result);
+}
+
+export function registerDispatchResumeBinding(
+  result: DispatchResult,
+  binding: InternalResumeBinding,
+): DispatchResult {
+  if (binding.attemptId !== result.attemptId || binding.engine !== result.engine) {
+    throw new Error("dispatch resume binding must match the dispatch result");
+  }
+  registerCapturedDispatchResumeBinding(result, binding.nativeSessionId);
+  return result;
+}
+
+function registerCapturedDispatchResumeBinding(
+  result: DispatchResult,
+  nativeSessionId: string,
+): void {
+  if (!result.attemptId) throw new Error("captured resume binding requires an attempt id");
+  requireSafeNativeSessionId(result.engine, nativeSessionId);
+  dispatchResumeBindings.set(
+    result,
+    Object.freeze({ attemptId: result.attemptId, engine: result.engine, nativeSessionId }),
+  );
+}
+
 export function buildPublicDispatchResult(
   opts: { engine: Engine; mode: DispatchResult["mode"]; prompt: string },
   processResult: { status: number; stdout: string; timedOut?: boolean },
   failReason: string,
   warning: string | undefined,
-  attemptId = randomUUID(),
+  attemptId: string = randomUUID(),
 ): DispatchResult {
-  // DispatchResult is a legacy internal workflow seam: its sessionId feeds resume storage,
-  // while every persisted/public projection below removes the raw identity.
   const ok = processResult.status === 0;
   const sessionId = captureSafeNativeSessionId(opts.engine, processResult.stdout);
   const nativeIds = sessionId ? [sessionId] : [];
@@ -288,11 +318,12 @@ export function buildPublicDispatchResult(
     summary: publicEngineSummary(parseEngineSummary(processResult.stdout), sessionId, [
       opts.prompt,
     ]),
-    sessionId,
     reason: ok ? undefined : processResult.timedOut ? "timeout" : failReason,
     warning: warning ? sanitizePublicText(warning, nativeIds, [opts.prompt]) : undefined,
   };
-  return registerPrivateDispatchValues(result, [opts.prompt]);
+  registerPrivateDispatchValues(result, [opts.prompt]);
+  if (sessionId) registerCapturedDispatchResumeBinding(result, sessionId);
+  return result;
 }
 
 export function persistPublicDispatchEvidence(unitDir: string, result: DispatchResult): string {
@@ -304,16 +335,17 @@ export function persistPublicDispatchEvidence(unitDir: string, result: DispatchR
   const path = join(unitDir, rel);
   const legacyRel = `evidence/${result.engine}.result.json`;
   const legacyPath = join(unitDir, legacyRel);
-  const nativeIds = result.sessionId ? [result.sessionId] : [];
+  const resumeBinding = readDispatchResumeBinding(result);
+  const nativeIds = resumeBinding ? [resumeBinding.nativeSessionId] : [];
   const privateValues = dispatchPrivateValues.get(result) ?? [];
-  const { attemptId: _attemptId, sessionId: _sessionId, ...publicResult } = result;
+  const { attemptId: _attemptId, ...publicResult } = result;
   const evidence = sanitizePublicValue(
     {
       attempt_id: attemptId,
       ...publicResult,
       raw: result.raw,
       summary: result.summary,
-      nativeSessionStatus: result.sessionId ? "captured" : "unavailable",
+      nativeSessionStatus: resumeBinding ? "captured" : "unavailable",
     },
     nativeIds,
     privateValues,

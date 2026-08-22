@@ -6,6 +6,8 @@ import {
   type AgentBinding,
   type MaterializeAgentBindingOptions,
   materializeAgentBinding,
+  materializeWorkflowAgentBinding,
+  previewAgentBinding,
 } from "../src/agents/binding.js";
 import type { Skill } from "../src/core.js";
 import { filterEnv } from "../src/dispatch/env-filter.js";
@@ -15,11 +17,18 @@ import {
   releaseIsolationLease,
 } from "../src/dispatch/isolation.js";
 import { isCanonicalSpawnOptionsProjection } from "../src/dispatch/session-types.js";
+import { ConversationArtifactStore } from "../src/orchestrator/conversation/artifact-store.js";
+import { DirectConversationPolicy } from "../src/orchestrator/conversation/direct-policy.js";
+import { ConversationPolicyRegistry } from "../src/orchestrator/conversation/policy-registry.js";
+import { ConversationOrchestrator } from "../src/orchestrator/conversation/service.js";
+import { DurableArtifactRegistry } from "../src/orchestrator/trace/artifacts.js";
+import { TraceStore } from "../src/orchestrator/trace/store.js";
 import * as canonicalPreflight from "../src/preflight.js";
 import { discoverSkills } from "../src/skills/discovery.js";
 
 const realPreflightAll = canonicalPreflight.preflightAll;
 let bindingProbeReady = true;
+const bindingProbeOptions: Array<Parameters<typeof realPreflightAll>[1]> = [];
 mock.module("../src/preflight.js", () => ({
   ...canonicalPreflight,
   preflightAll: (
@@ -27,10 +36,12 @@ mock.module("../src/preflight.js", () => ({
     options: Parameters<typeof realPreflightAll>[1],
   ) => {
     if (!options?.cacheKey?.includes("vf-binding-")) return realPreflightAll(engines, options);
+    bindingProbeOptions.push(options);
     return engines.map((engine) => ({
       engine,
       level:
-        bindingProbeReady && options.probe === true && options.skipCache === true
+        bindingProbeReady &&
+        (options.probe === false || (options.probe === true && options.skipCache === true))
           ? ("ready" as const)
           : ("probe-failed" as const),
       detail: "hermetic binding preflight",
@@ -43,6 +54,7 @@ const roots: string[] = [];
 const originalSkillsHome = process.env.VF_SKILLS_HOME;
 afterEach(() => {
   bindingProbeReady = true;
+  bindingProbeOptions.length = 0;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   if (originalSkillsHome === undefined) Reflect.deleteProperty(process.env, "VF_SKILLS_HOME");
   else process.env.VF_SKILLS_HOME = originalSkillsHome;
@@ -120,6 +132,83 @@ function skillFile(root: string, relativeRoot: string, name: string, body: strin
 }
 
 describe("AgentBinding materialization", () => {
+  test("workflow materialization preserves the executable prompt and selected skill names exactly", () => {
+    const root = repo();
+    skillFile(root, join(".agents", "skills"), "fabricated", "disk authority");
+    const prompt = "  byte-exact workflow prompt\r\nwith trailing whitespace  \n";
+    const out = materializeWorkflowAgentBinding(
+      {
+        roleRef: "dispatch-runner",
+        engine: "claude",
+        sessionMode: "fresh",
+        additionalSkillRefs: ["fabricated"],
+      },
+      options(root, { phase: 2, taskText: prompt }),
+    );
+    expect(out.spawn.rendered_prompt).toBe(prompt);
+    expect(out.resolved.skills.map((skill) => skill.ref)).toEqual(["fabricated"]);
+    expect(out.resolved.isolation).toBeNull();
+    expect(bindingProbeOptions).toEqual([]);
+  });
+
+  test("workflow admits a default repo skill without opt-in isolation while conversation stays strict", () => {
+    const root = repo();
+    const dir = join(root, ".agents", "skills", "repo-law");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      [
+        "---",
+        "name: repo-law",
+        "description: Always-on repository law",
+        "status: verified",
+        "type: repo",
+        "---",
+        "",
+        "repo law body",
+      ].join("\n"),
+    );
+    const binding: AgentBinding = {
+      roleRef: "dispatch-runner",
+      engine: "claude",
+      sessionMode: "fresh",
+    };
+    const workflow = materializeWorkflowAgentBinding(
+      binding,
+      options(root, { phase: 2, taskText: "ordinary workflow task" }),
+    );
+    expect(workflow.resolved.skills.map((skill) => skill.ref)).toEqual(["repo-law"]);
+    expect(workflow.spawn.rendered_prompt).toBe("ordinary workflow task");
+    expect(() =>
+      materializeAgentBinding(binding, options(root, { phase: 2, taskText: "ordinary task" })),
+    ).toThrow(/live canonical isolation/i);
+  });
+
+  test.each(["opencode", "antigravity"] as const)(
+    "workflow keeps %s compatibility without weakening conversation admission",
+    (engine) => {
+      const root = repo();
+      const binding: AgentBinding = {
+        roleRef: "dispatch-runner",
+        engine,
+        sessionMode: "fresh",
+      };
+      const workflow = materializeWorkflowAgentBinding(
+        binding,
+        options(root, { phase: 2, taskText: `workflow-${engine}` }),
+      );
+      expect(workflow.spawn.rendered_prompt).toBe(`workflow-${engine}`);
+      expect(workflow.spawn.rendered_tools).toEqual([]);
+      expect(workflow.spawn.sandbox).toBeNull();
+      expect(() =>
+        materializeAgentBinding(
+          { ...binding, roleRef: "direct" },
+          options(root, { phase: 2, taskText: "conversation" }),
+        ),
+      ).toThrow(/cannot enforce/i);
+    },
+  );
+
   test("preserves session mode, applies model override, and projects renderer authority", () => {
     const out = materializeAgentBinding(
       direct({ modelOverride: "claude-sonnet-4-5" }),
@@ -194,6 +283,119 @@ describe("AgentBinding materialization", () => {
         ],
       } as unknown as MaterializeAgentBindingOptions),
     ).toThrow(/verified engine/i);
+  });
+
+  test("read-only preview resolves unavailable engine authority without minting spawn authority", () => {
+    const root = repo();
+    bindingProbeReady = false;
+    const preview = previewAgentBinding(direct(), options(root));
+    expect(preview.engineAvailable).toBe(false);
+    expect(preview.modelValid).toBe(true);
+    expect(preview.resolved.engine).toBe("claude");
+    expect(preview.resolved.role.spec.name).toBe("direct");
+    expect("spawn" in preview).toBe(false);
+    expect(Object.isFrozen(preview)).toBe(true);
+    expect(() => materializeAgentBinding(direct(), options(root))).toThrow(/verified engine/i);
+  });
+
+  test("preview readiness never performs a live provider probe", () => {
+    const preview = previewAgentBinding(direct(), options(repo()));
+    expect(preview.engineAvailable).toBe(true);
+    expect(bindingProbeOptions.at(-1)).toMatchObject({ probe: false });
+    expect(bindingProbeOptions.at(-1)?.skipCache).not.toBe(true);
+  });
+
+  test("preview reports an unavailable engine even when it cannot enforce execution sandbox", async () => {
+    const root = repo();
+    const isolation = containerLease(root);
+    bindingProbeReady = false;
+    try {
+      const preview = previewAgentBinding(
+        direct({ engine: "antigravity", sessionMode: "fresh" }),
+        options(root, { phase: 2, isolation }),
+      );
+      expect(preview.engineAvailable).toBe(false);
+      expect(preview.modelValid).toBe(true);
+      expect(preview.resolved).toMatchObject({ engine: "antigravity", sandbox: "read-only" });
+      expect("spawn" in preview).toBe(false);
+    } finally {
+      await releaseIsolationLease(isolation);
+    }
+  });
+
+  test("service dry-run reports unavailable readiness without materializing or launching", async () => {
+    const root = repo();
+    const isolation = containerLease(root);
+    bindingProbeReady = false;
+    const preview = previewAgentBinding(
+      direct({ engine: "antigravity", sessionMode: "fresh" }),
+      options(root, { phase: 2, isolation }),
+    );
+    const registry = new DurableArtifactRegistry({ dir: join(root, "opaque") });
+    const trace = new TraceStore({
+      dir: join(root, "trace"),
+      artifactRegistry: registry,
+      eventId: () => "00000000-0000-4000-8000-000000000001",
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    let starts = 0;
+    const service = new ConversationOrchestrator({
+      traceStore: trace,
+      artifactRegistry: registry,
+      artifactStore: new ConversationArtifactStore({ dir: join(root, "manifests") }),
+      sessionAdapter: {
+        start() {
+          starts += 1;
+          throw new Error("dry-run launched an engine");
+        },
+        async reconcileHistory() {
+          throw new Error("dry-run reconciled an engine");
+        },
+      },
+      policies: new ConversationPolicyRegistry([new DirectConversationPolicy()]),
+      id: (kind) => `${kind}-preview`,
+      now: () => "2026-08-22T00:00:00.000Z",
+      async resolveDryRunRequest(request) {
+        return {
+          topic: request.topic,
+          policy: request.policy ?? "direct",
+          maxRounds: 1,
+          repoRoot: root,
+          phase: 2,
+          bindings: [
+            {
+              participantId: "participant-preview",
+              input: direct({ engine: "antigravity", sessionMode: "fresh" }),
+              preview,
+            },
+          ],
+        };
+      },
+      async rehydrateBinding() {
+        throw new Error("dry-run rehydrated a binding");
+      },
+    });
+    try {
+      expect(await service.dryRun({ topic: "Preview", policy: "direct" })).toEqual({
+        participants: [
+          {
+            participant_id: "participant-preview",
+            role_ref: "direct",
+            engine: "antigravity",
+            model: null,
+            engine_available: false,
+            model_valid: true,
+          },
+        ],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      });
+      expect(starts).toBe(0);
+      expect(await service.events("conversation-preview", 0)).toBeNull();
+    } finally {
+      await releaseIsolationLease(isolation);
+    }
   });
 
   test("Phase 2 repo overlay requires verified engine and a live canonical isolation lease", async () => {

@@ -17,6 +17,7 @@ import {
   runDispatchAsync,
   writeDispatchPrompt,
 } from "../src/dispatch.js";
+import { readDispatchResumeBinding } from "../src/dispatch/public-redaction.js";
 
 const CLAUDE_UUID = "50c1c208-9518-44e7-9fc5-d63b0bfcbec2";
 const CODEX_UUID = "019f278f-d7ff-77d3-9c44-7459bbf08d19";
@@ -1697,8 +1698,8 @@ describe("parseSessionId codex (#618 PR2b-2)", () => {
   });
 });
 
-describe("parseSessionId (#618)", () => {
-  test("runDispatch captures session_id from claude JSON envelope", () => {
+describe("internal dispatch resume binding (#618)", () => {
+  test("runDispatch never exposes the captured native session id structurally", () => {
     const envelope = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -1712,17 +1713,27 @@ describe("parseSessionId (#618)", () => {
       stderr: "",
     });
     const r = runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
-    expect(r.sessionId).toBe(CLAUDE_UUID);
+    const dispatchResultHasSessionId: "sessionId" extends keyof typeof r ? true : false = false;
+    expect(dispatchResultHasSessionId).toBe(false);
+    expect("sessionId" in r).toBe(false);
+    expect(Object.keys(r)).not.toContain("sessionId");
+    expect(JSON.stringify(r)).not.toContain(CLAUDE_UUID);
+    const binding = readDispatchResumeBinding(r);
+    expect(binding?.attemptId).toBe(r.attemptId);
+    expect(binding?.engine).toBe("claude");
+    expect(binding?.nativeSessionId).toBe(CLAUDE_UUID);
+    expect(Object.isFrozen(binding)).toBe(true);
   });
 
-  test("runDispatch leaves sessionId undefined when no envelope", () => {
+  test("runDispatch without a native envelope has no session identity property", () => {
     const spawner = (_c: string, _a: string[], _i: string) => ({
       status: 0,
       stdout: "plain text no json",
       stderr: "",
     });
     const r = runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
-    expect(r.sessionId).toBeUndefined();
+    expect("sessionId" in r).toBe(false);
+    expect(readDispatchResumeBinding(r)).toBeUndefined();
   });
 });
 

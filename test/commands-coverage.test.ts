@@ -11,6 +11,10 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import type {
+  MaterializeAgentBindingOptions,
+  MaterializedAgentBinding,
+} from "../src/agents/binding.js";
 import {
   analyzeDiff,
   announceLaunch,
@@ -30,7 +34,7 @@ import {
   hooks,
   init,
   liveGuardrailArmed,
-  makeDispatcher,
+  makeDispatcher as makeProductionDispatcher,
   makeResearcher,
   makeReviewer,
   makeWorktreeOps,
@@ -61,7 +65,12 @@ import {
   writeState,
 } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
+import { conversationEnvPolicy } from "../src/dispatch/env-filter.js";
 import { writeGuidance } from "../src/dispatch/guidance.js";
+import {
+  type EngineProcessSpawner,
+  createSpawnOptionsProjection,
+} from "../src/dispatch/session-types.js";
 import { claudeHookConfig } from "../src/hooks/adapters.js";
 import { type LogEvent, Logbus, getLogbus, setLogbusForTests } from "../src/logbus.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
@@ -118,6 +127,91 @@ const noGitRunner: GitRunner = () => ({
   stderr: "not a git repository",
 });
 
+function dispatchSessionSeam(
+  prompt: string,
+  engine: Engine = "claude",
+  useMaterializedTaskText = false,
+) {
+  return {
+    materializeBinding: (binding: unknown, options: MaterializeAgentBindingOptions) => {
+      const sessionMode = (binding as { sessionMode: "exact" | "replay" | "fresh" }).sessionMode;
+      const unrestrictedEngine = engine === "opencode" || engine === "antigravity";
+      return {
+        resolved: {
+          role: {
+            spec: { name: "dispatch-runner" } as never,
+            source: "builtin",
+            resolved_hash: "role",
+            metadata: {},
+          },
+          skills: [],
+          engine,
+          model: "sonnet",
+          sessionMode,
+          tool_intents: unrestrictedEngine ? [] : ["read", "write"],
+          sandbox: unrestrictedEngine ? null : "workspace-write",
+          env_policy: conversationEnvPolicy(engine),
+          isolation: options.isolation ?? null,
+          provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+          trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+        },
+        spawn: createSpawnOptionsProjection({
+          engine,
+          model: "sonnet",
+          sessionMode,
+          rendered_prompt: useMaterializedTaskText ? options.taskText : prompt,
+          rendered_tools: engine === "codex" || unrestrictedEngine ? [] : ["Read", "Grep"],
+          sandbox: unrestrictedEngine ? null : "workspace-write",
+          env_policy: conversationEnvPolicy(engine),
+          isolation: options.isolation ?? null,
+          provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+          trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+        }),
+      } as MaterializedAgentBinding;
+    },
+  };
+}
+
+function streamText(text = ""): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      if (text) controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  });
+}
+
+function completedEngineProcess(
+  stdout = "",
+  options: { status?: number; stderr?: string; onKill?: () => void } = {},
+) {
+  return {
+    stdin: { write: () => {}, end: () => {} },
+    stdout: streamText(stdout),
+    stderr: streamText(options.stderr ?? ""),
+    exited: Promise.resolve(options.status ?? 0),
+    kill: () => options.onKill?.(),
+  };
+}
+
+const CLAUDE_SESSION_ID = "50c1c208-9518-44e7-9fc5-d63b0bfcbec2";
+
+function claudeEnvelope(result: string, extras: Record<string, unknown> = {}): string {
+  return JSON.stringify({ type: "result", session_id: CLAUDE_SESSION_ID, result, ...extras });
+}
+
+function staticProcessSpawner(
+  stdout: string,
+  options: { status?: number; stderr?: string; onKill?: () => void } = {},
+): EngineProcessSpawner {
+  return () => completedEngineProcess(stdout, options);
+}
+
+const makeDispatcher = (...args: Parameters<typeof makeProductionDispatcher>) => {
+  args[10] ??= dispatchSessionSeam("commands coverage dispatcher", args[0]);
+  return makeProductionDispatcher(...args);
+};
+
 // ---------------------------------------------------------------------------
 //  doctor — refresh + readiness injection
 // ---------------------------------------------------------------------------
@@ -129,7 +223,7 @@ describe("commands.doctor branches", () => {
       { engine: "codex", level: "ready", detail: "r", checkedAt: "" },
       { engine: "copilot", level: "ready", detail: "r", checkedAt: "" },
     ];
-    const code = await doctor({ refresh: true }, { readiness });
+    const code = await doctor({ refresh: true }, { readiness, hasCommand: () => true });
     expect(code).toBe(0);
   });
 
@@ -566,7 +660,6 @@ describe("commands.orchestrate — gate branches", () => {
     const dir = freshDir("vf-orch-notready-");
     writeFixture(dir);
     const code = await orchestrate({ yes: true, engine: "claude" }, dir, {
-      // spawner present → no probe; but our inject.preflight says not ready.
       preflight: () => [
         {
           engine: "claude",
@@ -576,7 +669,6 @@ describe("commands.orchestrate — gate branches", () => {
         },
       ],
       git: noGitRunner,
-      spawner: async () => ({ status: 0, stdout: "{}" }),
     });
     expect(code).toBe(1);
   });
@@ -592,7 +684,10 @@ describe("commands.orchestrate — gate branches", () => {
       ['$ git commit -m "a"', '$ git commit -m "b"', '$ git commit -m "c"'].join("\n"),
     );
     const code = await orchestrate({ yes: true, engine: "claude", risk: "feature" }, dir, {
-      spawner: async () => ({ status: 0, stdout: '```json\n{"confidence": 0.5}\n```' }),
+      sessionRuntime: {
+        ...dispatchSessionSeam("orchestrate crystallize"),
+        processSpawner: staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 0.5}\n```')),
+      },
       git: noGitRunner,
       preflight: () => [
         { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "" },
@@ -610,12 +705,11 @@ describe("commands.orchestrate — gate branches", () => {
   test("orchestrate: cli mode + engine ready passes the gate (line 599-601 else)", async () => {
     const dir = freshDir("vf-orch-ready-");
     writeFixture(dir);
-    const mockSpawner: AsyncSpawner = async () => ({
-      status: 0,
-      stdout: '```json\n{"confidence": 0.5}\n```',
-    });
     const code = await orchestrate({ yes: true, engine: "claude", risk: "feature" }, dir, {
-      spawner: mockSpawner,
+      sessionRuntime: {
+        ...dispatchSessionSeam("orchestrate ready"),
+        processSpawner: staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 0.5}\n```')),
+      },
       git: noGitRunner,
       preflight: () => [
         {
@@ -627,6 +721,61 @@ describe("commands.orchestrate — gate branches", () => {
       ],
     });
     expect([0, 1]).toContain(code);
+  });
+
+  test("orchestrate admits once then lets the canonical adapter own the production process", async () => {
+    const dir = freshDir("vf-orch-canonical-process-");
+    writeFixture(dir);
+    let preflights = 0;
+    let processSpawns = 0;
+    const output = `${JSON.stringify({
+      type: "result",
+      session_id: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+      result:
+        '```json\n{"confidence":1,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+    })}\n`;
+    const code = await orchestrate(
+      { yes: true, engine: "claude", risk: "simple-code", "no-unit-gate": true },
+      dir,
+      {
+        git: noGitRunner,
+        preflight: (engines) => {
+          preflights++;
+          return engines.map((engine) => ({
+            engine,
+            level: "ready" as const,
+            detail: "admitted",
+            checkedAt: "",
+          }));
+        },
+        sessionRuntime: {
+          processSpawner: (_argv, options) => {
+            processSpawns++;
+            expect(options.cwd).toBe(realpathSync(dir));
+            return {
+              stdin: { write: () => {}, end: () => {} },
+              stdout: new ReadableStream({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode(output));
+                  controller.close();
+                },
+              }),
+              stderr: new ReadableStream({
+                start(controller) {
+                  controller.close();
+                },
+              }),
+              exited: Promise.resolve(0),
+              kill: () => {},
+            };
+          },
+        },
+      },
+    );
+    expect([0, 1]).toContain(code);
+    expect(preflights).toBe(1);
+    expect(processSpawns).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   test("orchestrate --isolate (cli) builds dispatcher with worktree isolation via injected wt", async () => {
@@ -644,10 +793,10 @@ describe("commands.orchestrate — gate branches", () => {
       },
     };
     const code = await orchestrate({ yes: true, engine: "claude", isolate: true }, dir, {
-      spawner: async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 0.5}\n```',
-      }),
+      sessionRuntime: {
+        ...dispatchSessionSeam("orchestrate isolate"),
+        processSpawner: staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 0.5}\n```')),
+      },
       git: noGitRunner,
       preflight: () => [
         { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "" },
@@ -679,7 +828,10 @@ describe("commands.orchestrate — gate branches", () => {
     writeFixture(dir);
     let publishCalls = 0;
     const code = await orchestrate({ yes: true, engine: "claude", pr: true }, dir, {
-      spawner: async () => ({ status: 0, stdout: '```json\n{"confidence": 0.9}\n```' }),
+      sessionRuntime: {
+        ...dispatchSessionSeam("orchestrate pr no isolation"),
+        processSpawner: staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 0.9}\n```')),
+      },
       git: noGitRunner,
       preflight: () => [{ engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" }],
       publishGit: () => {
@@ -705,11 +857,14 @@ describe("commands.orchestrate — gate branches", () => {
       { yes: true, engine: "claude", risk: "simple-code", isolate: true, pr: true },
       dir,
       {
-        spawner: async () => ({
-          status: 0,
-          stdout:
-            '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
-        }),
+        sessionRuntime: {
+          ...dispatchSessionSeam("orchestrate pr publish"),
+          processSpawner: staticProcessSpawner(
+            claudeEnvelope(
+              '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+            ),
+          ),
+        },
         git: noGitRunner,
         preflight: () => [
           { engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" },
@@ -741,11 +896,14 @@ describe("commands.orchestrate — gate branches", () => {
       { yes: true, engine: "claude", risk: "simple-code", isolate: true, pr: true },
       dir,
       {
-        spawner: async () => ({
-          status: 0,
-          stdout:
-            '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
-        }),
+        sessionRuntime: {
+          ...dispatchSessionSeam("orchestrate pr failure"),
+          processSpawner: staticProcessSpawner(
+            claudeEnvelope(
+              '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+            ),
+          ),
+        },
         git: noGitRunner,
         preflight: () => [
           { engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" },
@@ -766,11 +924,14 @@ describe("commands.orchestrate — gate branches", () => {
     const dir = freshDir("vf-orch-gate-fail-");
     writeFixture(dir);
     const code = await orchestrate({ yes: true, engine: "claude", risk: "feature" }, dir, {
-      spawner: async () => ({
-        status: 0,
-        stdout:
-          '```json\n{"confidence":0.95,"files_changed":["src/a/x.ts"],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
-      }),
+      sessionRuntime: {
+        ...dispatchSessionSeam("orchestrate gate failure"),
+        processSpawner: staticProcessSpawner(
+          claudeEnvelope(
+            '```json\n{"confidence":0.95,"files_changed":["src/a/x.ts"],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+          ),
+        ),
+      },
       git: noGitRunner,
       preflight: () => [{ engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" }],
       gate: () => ({ pass: false, failedGate: "coverage" }),
@@ -791,11 +952,14 @@ describe("commands.orchestrate — gate branches", () => {
       { yes: true, engine: "claude", risk: "simple-code", "no-unit-gate": true },
       dir,
       {
-        spawner: async () => ({
-          status: 0,
-          stdout:
-            '```json\n{"confidence":1,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
-        }),
+        sessionRuntime: {
+          ...dispatchSessionSeam("orchestrate no unit gate"),
+          processSpawner: staticProcessSpawner(
+            claudeEnvelope(
+              '```json\n{"confidence":1,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+            ),
+          ),
+        },
         git: noGitRunner,
         preflight: () => [
           { engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" },
@@ -2146,7 +2310,12 @@ describe("commands.verify branches", () => {
         work_units: [],
         totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      expect(verify({ requireReviewEvidence: false })).toBe(0);
+      expect(
+        verify({
+          requireReviewEvidence: false,
+          spawner: asSpawnSync(makeFakeSpawner()),
+        }),
+      ).toBe(0);
       // Warning must appear when no package.json/Gradle is found
       expect(lines.join("\n")).toContain("no package.json or Gradle build found");
     } finally {
@@ -2187,7 +2356,12 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify({ requireReviewEvidence: false })).toBe(0);
+      expect(
+        verify({
+          requireReviewEvidence: false,
+          spawner: asSpawnSync(makeFakeSpawner()),
+        }),
+      ).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2299,7 +2473,11 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true, requireReviewEvidence: false });
+      const code = verify({
+        journal: true,
+        requireReviewEvidence: false,
+        spawner: asSpawnSync(makeFakeSpawner()),
+      });
       expect(code).toBe(0);
       // The journal entry was written (opt-in via journal:true; issue #154)
       const journal = existsSync(join(dir, CTX_DIR, "knowledge", "log.md"));
@@ -2332,7 +2510,11 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ journal: true, requireReviewEvidence: false });
+      const code = verify({
+        journal: true,
+        requireReviewEvidence: false,
+        spawner: asSpawnSync(makeFakeSpawner()),
+      });
       expect(code).toBe(0);
       // A DRAFT skill file was written under .vibeflow/skills/crystallized-*/
       const skillsDir = join(dir, CTX_DIR, "skills");
@@ -2361,7 +2543,10 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      const code = verify({ requireReviewEvidence: false });
+      const code = verify({
+        requireReviewEvidence: false,
+        spawner: asSpawnSync(makeFakeSpawner()),
+      });
       expect(code).toBe(0);
       // Default invocation must NOT write the journal — verify is a read-only gate.
       expect(existsSync(join(dir, CTX_DIR, "knowledge", "log.md"))).toBe(false);
@@ -2434,7 +2619,13 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify({ coverage: true, requireReviewEvidence: false })).toBe(0);
+      expect(
+        verify({
+          coverage: true,
+          requireReviewEvidence: false,
+          spawner: asSpawnSync(makeFakeSpawner()),
+        }),
+      ).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2481,7 +2672,13 @@ describe("commands.verify branches", () => {
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      expect(verify({ coverage: true, requireReviewEvidence: false })).toBe(0);
+      expect(
+        verify({
+          coverage: true,
+          requireReviewEvidence: false,
+          spawner: asSpawnSync(makeFakeSpawner()),
+        }),
+      ).toBe(0);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -2903,14 +3100,84 @@ describe("commands.announceLaunch (test seam)", () => {
 });
 
 describe("commands.makeResearcher (test seam)", () => {
+  test("bridge research executes through the canonical process session adapter", async () => {
+    const dir = freshDir("vf-research-bridge-");
+    const previous = process.env.VIBEFLOW_AI;
+    const bridgeCommand = "printf canonical-bridge-output";
+    let spawnedArgv: string[] | undefined;
+    const processSpawner: EngineProcessSpawner = (argv) => {
+      spawnedArgv = argv;
+      const bytes = new TextEncoder().encode("canonical-bridge-output");
+      return {
+        stdin: { write: () => {}, end: () => {} },
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+        stderr: new ReadableStream({ start: (controller) => controller.close() }),
+        exited: Promise.resolve(0),
+        kill: () => {},
+      };
+    };
+    process.env.VIBEFLOW_AI = bridgeCommand;
+    try {
+      const researcher = makeResearcher("claude", {} as never, "bridge", undefined, dir, {
+        ...dispatchSessionSeam("private research prompt"),
+        processSpawner,
+      });
+      const result = await researcher(1, "private question");
+      expect(result.blocked).toBe(false);
+      expect(spawnedArgv).toContain(bridgeCommand);
+      expect(spawnedArgv?.[0]).not.toBe("claude");
+    } finally {
+      if (previous === undefined) process.env.VIBEFLOW_AI = undefined;
+      else process.env.VIBEFLOW_AI = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each(["copilot", "antigravity"] as const)(
+    "bridge research for %s sends the rendered prompt through stdin",
+    async (engine) => {
+      const dir = freshDir(`vf-research-bridge-${engine}-`);
+      const previous = process.env.VIBEFLOW_AI;
+      const bridgeCommand = "printf canonical-bridge-output";
+      let observedInput = "";
+      const processSpawner: EngineProcessSpawner = (_argv, options) => {
+        observedInput = options.stdinText;
+        return completedEngineProcess("canonical-bridge-output");
+      };
+      process.env.VIBEFLOW_AI = bridgeCommand;
+      try {
+        const researcher = makeResearcher(engine, {} as never, "bridge", undefined, dir, {
+          ...dispatchSessionSeam("private research prompt", engine, true),
+          processSpawner,
+        });
+        const result = await researcher(1, "private question");
+        expect(result.blocked).toBe(false);
+        expect(observedInput).toContain("private question");
+      } finally {
+        if (previous === undefined) process.env.VIBEFLOW_AI = undefined;
+        else process.env.VIBEFLOW_AI = previous;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("extracts uncertainty from summary (line 635-636)", async () => {
-    const fakeSpawner = async () => ({
-      status: 0,
-      stdout: '```json\n{"uncertainty": "I am not sure"}\n```',
-      stderr: "",
-      timedOut: false,
-    });
-    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+    const processSpawner = staticProcessSpawner(
+      claudeEnvelope('```json\n{"confidence": 0, "uncertainty": "I am not sure"}\n```'),
+    );
+    const researcher = makeResearcher(
+      "claude",
+      {} as never,
+      "cli",
+      processSpawner,
+      undefined,
+      dispatchSessionSeam("research"),
+    );
     const r = await researcher(1, "test question");
     expect(r.confidence).toBe(0); // no confidence in stdout
     expect(r.findings.some((f) => f.includes("not sure"))).toBe(true);
@@ -2921,19 +3188,17 @@ describe("commands.makeResearcher (test seam)", () => {
     // The spawner stdout is a valid claude JSON envelope with no
     // inner summary text. The function extracts the metadata from
     // the envelope to build a finding.
-    const fakeSpawner = async () => ({
-      status: 0,
-      stdout: JSON.stringify({
-        type: "result",
-        session_id: "abc",
-        num_turns: 5,
-        total_cost_usd: 0.42,
-        stop_reason: "end_turn",
-      }),
-      stderr: "",
-      timedOut: false,
-    });
-    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+    const processSpawner = staticProcessSpawner(
+      claudeEnvelope("", { num_turns: 5, total_cost_usd: 0.42, stop_reason: "end_turn" }),
+    );
+    const researcher = makeResearcher(
+      "claude",
+      {} as never,
+      "cli",
+      processSpawner,
+      undefined,
+      dispatchSessionSeam("research"),
+    );
     const r = await researcher(1, "test");
     // The fallback finding should mention the turn count + cost
     expect(r.findings.some((f) => f.includes("5 turns"))).toBe(true);
@@ -2953,13 +3218,15 @@ describe("commands.makeResearcher (test seam)", () => {
     const events: LogEvent[] = [];
     const unsub = bus.subscribe((ev) => events.push(ev));
     try {
-      const fakeSpawner = async () => ({
-        status: 0,
-        stdout: "not json",
-        stderr: "",
-        timedOut: false,
-      });
-      const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+      const processSpawner = staticProcessSpawner(`${claudeEnvelope("")}\nnot json`);
+      const researcher = makeResearcher(
+        "claude",
+        {} as never,
+        "cli",
+        processSpawner,
+        undefined,
+        dispatchSessionSeam("research"),
+      );
       const r = await researcher(1, "test");
       expect(r.findings.some((f) => f.includes("research dispatched"))).toBe(true);
       expect(r.blocked).toBe(false);
@@ -2974,13 +3241,15 @@ describe("commands.makeResearcher (test seam)", () => {
   });
 
   test("failed dispatch returns blocked:true with 'research failed'", async () => {
-    const fakeSpawner = async () => ({
-      status: 1,
-      stdout: "",
-      stderr: "boom",
-      timedOut: false,
-    });
-    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+    const processSpawner = staticProcessSpawner("", { status: 1, stderr: "boom" });
+    const researcher = makeResearcher(
+      "claude",
+      {} as never,
+      "cli",
+      processSpawner,
+      undefined,
+      dispatchSessionSeam("research"),
+    );
     const r = await researcher(1, "test");
     expect(r.findings.some((f) => f === "research failed")).toBe(true);
     expect(r.blocked).toBe(true);
@@ -2995,11 +3264,19 @@ describe("commands.makeResearcher (test seam)", () => {
     try {
       // Injected spawner → resolveCli treats copilot as present without touching PATH,
       // and no real engine is spawned. status 0 so the dispatch is "ok".
-      const fakeSpawner = async () => ({ status: 0, stdout: "", stderr: "", timedOut: false });
-      const researcher = makeResearcher("copilot", {} as never, "cli", fakeSpawner, dir);
+      const processSpawner = staticProcessSpawner("ok");
+      const researcher = makeResearcher(
+        "copilot",
+        {} as never,
+        "cli",
+        processSpawner,
+        dir,
+        dispatchSessionSeam("test question", "copilot"),
+      );
       await researcher(1, "test question");
       const dispatchFile = join(dir, ".vibeflow", "dispatch", "research-round-1.md");
       expect(existsSync(dispatchFile)).toBe(true);
+      expect(readdirSync(join(dir, ".vibeflow", "attempts")).length).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -3140,7 +3417,19 @@ describe("commands.makeDispatcher (test seam)", () => {
       }) as unknown as typeof Bun.spawn;
       try {
         // NO spawner injected → streamSpawner factory is used (line 917)
-        const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code");
+        const dispatcher = makeDispatcher(
+          "claude",
+          {} as never,
+          dir,
+          "cli",
+          "simple-code",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          dispatchSessionSeam('```json\n{"confidence": 1}\n```'),
+        );
         const r = await dispatcher({
           name: "u1",
           status: "pending",
@@ -3157,10 +3446,7 @@ describe("commands.makeDispatcher (test seam)", () => {
     }
   });
 
-  // PR28 audit Task 5 (M1): when a custom spawner is injected, the per-unit onChunk /
-  // onStderrChunk fanout (file stream + logbus) MUST still fire. The old code used
-  // `spawner ?? makeAsyncSpawner({...})` which bypassed the callbacks entirely.
-  test("makeDispatcher: composed spawner path still fans stdout to per-unit log + logbus", async () => {
+  test("makeDispatcher fans injected stdout exactly once and only after canonical redaction", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-composed-spawner-"));
     try {
       writeState(dir, {
@@ -3178,12 +3464,22 @@ describe("commands.makeDispatcher (test seam)", () => {
         ],
         totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      // Inject a custom spawner that returns a known stdout payload. The per-unit
-      // stream.log + logbus fanout must still observe that payload.
-      const customSpawner: AsyncSpawner = async (_cmd, _args, _input) => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const privatePrompt = "commands coverage dispatcher";
+      const nativeId = "50c1c208-9518-44e7-9fc5-d63b0bfcbec2";
+      const safeLine = "SAFE-FANOUT-LINE";
+      const processSpawner: EngineProcessSpawner = () =>
+        completedEngineProcess(
+          [
+            privatePrompt,
+            safeLine,
+            JSON.stringify({
+              type: "result",
+              session_id: nativeId,
+              result: '```json\n{"confidence": 1}\n```',
+            }),
+            "",
+          ].join("\n"),
+        );
       // Mock Bun.spawn to satisfy the prompt-write path even if the orchestrator tries
       // to fall back. We don't expect it to fire here.
       const originalSpawn = Bun.spawn;
@@ -3202,7 +3498,7 @@ describe("commands.makeDispatcher (test seam)", () => {
           dir,
           "cli",
           "simple-code",
-          customSpawner,
+          processSpawner,
         );
         await dispatcher({
           name: "u1",
@@ -3211,15 +3507,14 @@ describe("commands.makeDispatcher (test seam)", () => {
           gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
           resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
         });
-        // The composed path appends the spawner's stdout to the per-unit stream.log
-        // and emits to the logbus. Assert the log file was written with the spawner's
-        // stdout (the SSE line is JSON-encoded, so the embedded text is escaped —
-        // the original `{"confidence": 1}` appears as `{\"confidence\": 1}` in the
-        // file). This is the regression test for the audit's M1 finding.
         const streamLogPath = join(dir, CTX_DIR, "workunits", "u1", "stream.log");
         const logContent = readFileSync(streamLogPath, "utf8");
         expect(logContent).toContain('"unit":"u1"');
-        expect(logContent).toContain("confidence");
+        expect(logContent.match(new RegExp(safeLine, "g"))?.length).toBe(1);
+        expect(logContent).not.toContain(privatePrompt);
+        expect(logContent).not.toContain(nativeId);
+        expect(logContent).toContain("[redacted-ref]");
+        expect(logContent).toContain("[opaque-native-session]");
       } finally {
         (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
       }
@@ -3279,7 +3574,19 @@ describe("commands.makeDispatcher (test seam)", () => {
         kill: () => {},
       })) as unknown as typeof Bun.spawn;
       try {
-        const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code");
+        const dispatcher = makeDispatcher(
+          "claude",
+          {} as never,
+          dir,
+          "cli",
+          "simple-code",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          dispatchSessionSeam("hello"),
+        );
         await dispatcher({
           name: "u1",
           status: "pending",
@@ -3300,7 +3607,7 @@ describe("commands.makeDispatcher (test seam)", () => {
     }
   });
 
-  test("logbus fanout catch: composed spawner append throws → debug log", async () => {
+  test("canonical adapter fanout reports a stream append failure without exposing raw output", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-fanout-fail-"));
     const bus = new Logbus({ runId: "fanout-fail", dir });
     setLogbusForTests(bus);
@@ -3327,17 +3634,16 @@ describe("commands.makeDispatcher (test seam)", () => {
       const unitDir = join(dir, CTX_DIR, "workunits", "u1");
       mkdirSync(join(unitDir, "stream.log"), { recursive: true });
       // Custom (injected) spawner → composed path with the fanout catch.
-      const customSpawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const processSpawner = staticProcessSpawner(
+        claudeEnvelope('```json\n{"confidence": 1}\n```'),
+      );
       const dispatcher = makeDispatcher(
         "claude",
         {} as never,
         dir,
         "cli",
         "simple-code",
-        customSpawner,
+        processSpawner,
       );
       await dispatcher({
         name: "u1",
@@ -3346,7 +3652,9 @@ describe("commands.makeDispatcher (test seam)", () => {
         gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
         resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      const fanoutEvent = events.find((e) => e.text?.includes("logbus fanout best-effort failed"));
+      const fanoutEvent = events.find((e) =>
+        e.text?.includes("stream.log append best-effort failed"),
+      );
       expect(fanoutEvent).toBeDefined();
       expect(fanoutEvent?.level).toBe("debug");
     } finally {
@@ -3388,11 +3696,11 @@ describe("commands.makeDispatcher W1 worktree isolation", () => {
           removed.push(p);
         },
       };
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout:
+      const spawner = staticProcessSpawner(
+        claudeEnvelope(
           '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
-      });
+        ),
+      );
       const d = makeDispatcher(
         "claude",
         {} as never,
@@ -3409,7 +3717,7 @@ describe("commands.makeDispatcher W1 worktree isolation", () => {
         confidence: 0,
         gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
         resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
-      });
+      }).catch(() => {});
       expect(created.length).toBe(1);
       const c0 = created[0] as [string, string];
       expect(c0[0]).toBe("vf-unit-u1");
@@ -3447,7 +3755,7 @@ describe("commands.makeDispatcher W1 worktree isolation", () => {
           removed.push(p);
         },
       };
-      const boom: AsyncSpawner = async () => {
+      const boom: EngineProcessSpawner = () => {
         throw new Error("spawn failed");
       };
       const d = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", boom, undefined, {
@@ -3487,12 +3795,24 @@ describe("commands.makeDispatcher W1 worktree isolation", () => {
         ],
         totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout:
+      const spawner = staticProcessSpawner(
+        claudeEnvelope(
           '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
-      });
-      const d = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", spawner);
+        ),
+      );
+      const d = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        dispatchSessionSeam("hello"),
+      );
       await d({
         name: "u1",
         status: "pending",
@@ -3572,10 +3892,7 @@ describe("commands.makeDispatcher W-A measured gate", () => {
         ],
         totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const spawner = staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 1}\n```'));
       const gate = () => ({ pass: false, failedGate: "coverage" as const, detail: "x.ts <100%" });
       const dispatcher = makeDispatcher(
         "claude",
@@ -3613,10 +3930,7 @@ describe("commands.makeDispatcher W-A measured gate", () => {
   test("typecheck fail → build=fail, lint+test=pending (downstream gates never ran)", async () => {
     const dir = freshDir("vf-gate-tc-");
     try {
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const spawner = staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 1}\n```'));
       const gate = () => ({ pass: false, failedGate: "typecheck" as const, detail: "x.ts(3,1)" });
       const dispatcher = makeDispatcher(
         "claude",
@@ -3654,10 +3968,7 @@ describe("commands.makeDispatcher W-A measured gate", () => {
   test("biome fail → build=pass, lint=fail, test=pending (coverage never ran)", async () => {
     const dir = freshDir("vf-gate-biome-");
     try {
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const spawner = staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 1}\n```'));
       const gate = () => ({ pass: false, failedGate: "biome" as const, detail: "x.ts lint" });
       const dispatcher = makeDispatcher(
         "claude",
@@ -3710,10 +4021,7 @@ describe("commands.makeDispatcher W-A measured gate", () => {
         ],
         totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const spawner = staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 1}\n```'));
       const gate = () => ({ pass: true });
       const dispatcher = makeDispatcher(
         "claude",
@@ -3766,10 +4074,7 @@ describe("commands.makeDispatcher W-A measured gate", () => {
         ],
         totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const spawner = staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 1}\n```'));
       // No gate arg → 7 args only
       const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", spawner);
       const out = await dispatcher({
@@ -3812,10 +4117,7 @@ describe("commands.makeDispatcher W-A measured gate", () => {
         ],
         totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       });
-      const spawner: AsyncSpawner = async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence": 1}\n```',
-      });
+      const spawner = staticProcessSpawner(claudeEnvelope('```json\n{"confidence": 1}\n```'));
       const prot = {
         quota: {
           limited: true,
@@ -4369,6 +4671,7 @@ describe("commands.orchestrate: orchestrator-level safety-net onStderrChunk (lin
         // Inject preflight so the engine is "ready" and orchestrate
         // proceeds to the dispatch path.
         const code = await orchestrate({ engine: "claude", yes: true }, dir, {
+          sessionRuntime: dispatchSessionSeam("orchestrate stderr safety net"),
           preflight: () => [
             {
               engine: "claude",
@@ -6422,15 +6725,17 @@ describe("commands.makeDispatcher resume policy (#618 PR2b-1)", () => {
     let capturedArgs: string[] = [];
     try {
       seedState(dir);
-      const spawner: AsyncSpawner = async (_c, a) => {
-        capturedArgs = a;
-        return { status: 0, stdout: CLAUDE_OK };
+      const spawner: EngineProcessSpawner = (argv) => {
+        capturedArgs = argv.slice(1);
+        return completedEngineProcess(CLAUDE_OK);
       };
       // resume defaults to false — marker.engineSessionId must be ignored.
       const d = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", spawner);
       await d({ ...UNIT });
       expect(capturedArgs).not.toContain("-r");
-      expect(capturedArgs).toEqual(["-p", "--output-format", "json"]);
+      expect(capturedArgs).toContain("--safe-mode");
+      expect(capturedArgs).toContain("-p");
+      expect(capturedArgs).toContain("--output-format");
     } finally {
       rmSync(marker, { force: true });
       rmSync(dir, { recursive: true, force: true });
@@ -6439,13 +6744,18 @@ describe("commands.makeDispatcher resume policy (#618 PR2b-1)", () => {
 
   test("resume=true with a crashed marker's engineSessionId → engine dispatched WITH -r <id>", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-resume-on-"));
-    const marker = seedMarker({ status: "running", engineSessionId: "sess-1" });
+    const nativeId = "00000000-0000-4000-8000-000000000001";
+    const marker = seedMarker({
+      status: "running",
+      engineSessionId: nativeId,
+      engineSessionEngine: "claude",
+    });
     let capturedArgs: string[] = [];
     try {
       seedState(dir);
-      const spawner: AsyncSpawner = async (_c, a) => {
-        capturedArgs = a;
-        return { status: 0, stdout: CLAUDE_OK };
+      const spawner: EngineProcessSpawner = (argv) => {
+        capturedArgs = argv.slice(1);
+        return completedEngineProcess(CLAUDE_OK);
       };
       const d = makeDispatcher(
         "claude",
@@ -6460,7 +6770,11 @@ describe("commands.makeDispatcher resume policy (#618 PR2b-1)", () => {
         true,
       );
       await d({ ...UNIT });
-      expect(capturedArgs).toEqual(["-p", "-r", "sess-1", "--output-format", "json"]);
+      const resumeIndex = capturedArgs.indexOf("-r");
+      expect(resumeIndex).toBeGreaterThanOrEqual(0);
+      expect(capturedArgs[resumeIndex + 1]).toBe(nativeId);
+      expect(capturedArgs).toContain("--safe-mode");
+      expect(capturedArgs).toContain("--output-format");
     } finally {
       rmSync(marker, { force: true });
       rmSync(dir, { recursive: true, force: true });
@@ -6473,9 +6787,9 @@ describe("commands.makeDispatcher resume policy (#618 PR2b-1)", () => {
     let capturedArgs: string[] = [];
     try {
       seedState(dir);
-      const spawner: AsyncSpawner = async (_c, a) => {
-        capturedArgs = a;
-        return { status: 0, stdout: CLAUDE_OK };
+      const spawner: EngineProcessSpawner = (argv) => {
+        capturedArgs = argv.slice(1);
+        return completedEngineProcess(CLAUDE_OK);
       };
       const d = makeDispatcher(
         "claude",

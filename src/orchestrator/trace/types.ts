@@ -45,6 +45,10 @@ export interface StoredTraceEvent extends TraceCorrelation {
 export interface InternalTraceStoreRecord {
   stored_event: StoredTraceEvent;
   native_session_id: string | null;
+  /** Internal journal transaction framing. Never enters the public projection. */
+  batch_id?: string;
+  batch_index?: number;
+  batch_size?: number;
 }
 declare const publicTextBrand: unique symbol;
 declare const opaqueArtifactIdBrand: unique symbol;

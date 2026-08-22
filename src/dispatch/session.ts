@@ -17,18 +17,14 @@ import {
 } from "./isolation.js";
 import { parseEngineSummary } from "./prompt.js";
 import {
-  captureSafeNativeSessionId,
-  projectPublicEngineFrames,
   publicEngineSummary,
   sanitizePublicEngineText,
   sanitizePublicValue,
 } from "./public-redaction.js";
-import {
-  assertSpawnProjection,
-  reconcileSessionHistory,
-  sessionInvocation,
-  stdoutAcknowledges,
-} from "./session-argv.js";
+// biome-ignore format: keep the canonical adapter under the 400-line production cap
+import { assertSpawnProjection, reconcileSessionHistory, sessionInvocation } from "./session-argv.js";
+import { SessionStdoutState } from "./session-output.js";
+import { bridgeSessionInvocation } from "./session-protocol.js";
 import { isCanonicalSpawnOptionsProjection } from "./session-types.js";
 import type {
   AttemptHandle,
@@ -140,7 +136,8 @@ export function createEngineSessionAdapter(
             throw new Error("spawn isolation lease is not live");
           }
         }
-        invocation = sessionInvocation(spawn, nativeSessionId);
+        // biome-ignore format: keep the canonical adapter under the 400-line production cap
+        invocation = config.protocol === "bridge" ? bridgeSessionInvocation(spawn) : sessionInvocation(spawn, nativeSessionId);
         env = filterEnv(sourceEnv, spawn.env_policy).env;
         inheritedPrivateValues = providerCredentialValues(env, spawn.engine);
         env.PWD = claimedLease?.cwd ?? process.cwd();
@@ -178,7 +175,9 @@ export function createEngineSessionAdapter(
           ...(cwd ? { cwd } : {}),
           env,
           stdinText: invocation.input,
-          detached: config.spawn === undefined && process.platform !== "win32",
+          detached:
+            (config.spawn === undefined || config.ownsProcessGroup === true) &&
+            process.platform !== "win32",
         });
       } catch (error) {
         const failure = normalizedAttemptError(error);
@@ -194,9 +193,7 @@ export function createEngineSessionAdapter(
         spawn.sessionMode === "exact" && nativeSessionId
           ? { attemptId, engine: spawn.engine, nativeSessionId }
           : undefined;
-      let stdout = "";
-      const publicBuffers = { stdout: "", stderr: "" };
-      const discardingOversize = { stdout: false, stderr: false };
+      const stdout = new SessionStdoutState(config.protocol, spawn.engine);
       const privateValues = [...initialPrivate, ...inheritedPrivateValues];
       let acknowledgementSeen = false;
       let acknowledged = false;
@@ -207,7 +204,9 @@ export function createEngineSessionAdapter(
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
       const { terminate: terminateProcess } = createProcessTerminator({
         process: processHandle,
-        killProcessGroup: config.spawn === undefined && process.platform !== "win32",
+        killProcessGroup:
+          (config.spawn === undefined || config.ownsProcessGroup === true) &&
+          process.platform !== "win32",
         graceMs: config.graceMs ?? 3000,
         onReason: (reason) => {
           terminationRequested = true;
@@ -231,6 +230,25 @@ export function createEngineSessionAdapter(
           callbackError ??= normalizedAttemptError(error);
           void terminateProcess(callbackReason());
         }
+      };
+      const consumeOutput = (stream: "stdout" | "stderr", content: string, flush: boolean) => {
+        const projected = stdout.consume(
+          stream,
+          content,
+          flush,
+          resumeBinding?.nativeSessionId,
+          privateValues,
+        );
+        const observed = projected.observation;
+        if (observed?.nativeSessionId && !resumeBinding) {
+          resumeBinding = {
+            attemptId,
+            engine: spawn.engine,
+            nativeSessionId: observed.nativeSessionId,
+          };
+        }
+        if (observed?.acknowledged) acknowledge();
+        for (const frame of projected.frames) emitChunk(stream, frame);
       };
       const resetIdle = () => {
         if (idleTimer) clearTimeout(idleTimer);
@@ -257,43 +275,13 @@ export function createEngineSessionAdapter(
           const { done, value } = await reader.read();
           if (done) {
             const tail = decoder.decode();
-            if (tail) {
-              if (kind === "stdout") stdout += tail;
-              publicBuffers[kind] += tail;
-            }
-            const projected = projectPublicEngineFrames(
-              publicBuffers[kind],
-              resumeBinding?.nativeSessionId,
-              true,
-              privateValues,
-              discardingOversize[kind],
-            );
-            for (const frame of projected.frames) emitChunk(kind, frame);
-            publicBuffers[kind] = "";
-            discardingOversize[kind] = projected.discardingOversize;
+            consumeOutput(kind, tail, true);
             break;
           }
           const content = decoder.decode(value, { stream: true });
           if (!content) continue;
           resetIdle();
-          if (kind === "stdout") {
-            stdout += content;
-            const captured = captureSafeNativeSessionId(spawn.engine, stdout);
-            if (captured && !resumeBinding) {
-              resumeBinding = { attemptId, engine: spawn.engine, nativeSessionId: captured };
-            }
-            if (stdoutAcknowledges(spawn.engine, stdout)) acknowledge();
-          }
-          const projected = projectPublicEngineFrames(
-            publicBuffers[kind] + content,
-            resumeBinding?.nativeSessionId,
-            false,
-            privateValues,
-            discardingOversize[kind],
-          );
-          publicBuffers[kind] = projected.remainder;
-          discardingOversize[kind] = projected.discardingOversize;
-          for (const frame of projected.frames) emitChunk(kind, frame);
+          consumeOutput(kind, content, false);
         }
       };
 
@@ -313,6 +301,7 @@ export function createEngineSessionAdapter(
       const completion = (async (): Promise<EngineSessionResult> => {
         try {
           const [exitCode] = await Promise.all([safeExit, drains]);
+          if (config.protocol === "bridge" && exitCode === 0 && !acknowledgementSeen) acknowledge();
           let state: EngineSessionResult["state"] =
             acknowledged && !callbackError && !terminalError && !terminationRequested
               ? "completed"
@@ -331,6 +320,7 @@ export function createEngineSessionAdapter(
                 ? undefined
                 : `engine exited ${exitCode}`);
           const nativeIds = resumeBinding?.nativeSessionId ? [resumeBinding.nativeSessionId] : [];
+          const output = stdout.publicOutput(nativeIds, privateValues);
           const reason = rawReason
             ? sanitizePublicEngineText(rawReason, nativeIds, privateValues)
             : undefined;
@@ -362,9 +352,9 @@ export function createEngineSessionAdapter(
             ok,
             state,
             lifecycle: [...lifecycle],
-            output: sanitizePublicEngineText(stdout, nativeIds, privateValues),
+            output,
             summary: publicEngineSummary(
-              parseEngineSummary(stdout),
+              parseEngineSummary(output),
               resumeBinding?.nativeSessionId,
               privateValues,
             ),
@@ -389,8 +379,6 @@ export function createEngineSessionAdapter(
         readEvidenceBinding: () => evidenceBinding,
       });
     },
-    reconcileHistory(request) {
-      return reconcileSessionHistory(request, config.historyRoots);
-    },
+    reconcileHistory: (request) => reconcileSessionHistory(request, config.historyRoots),
   };
 }

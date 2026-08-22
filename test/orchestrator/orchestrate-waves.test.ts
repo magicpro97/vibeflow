@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { orchestrate } from "../../src/commands.js";
 import type { WorkflowState } from "../../src/core.js";
 import type { WorkUnit } from "../../src/core/types.js";
-import type { AsyncSpawner } from "../../src/dispatch/types.js";
+import type { EngineProcessSpawner } from "../../src/dispatch/session-types.js";
 
 const SUMMARY =
   '```json\n{"skills_used":[],"files_changed":[],"commands_run":[],"tests_run":[],"confidence":0.9,"uncertainty":""}\n```';
@@ -36,11 +36,30 @@ function writeState(base: string, units: WorkUnit[]): void {
 }
 
 /** Injected spawner that records the prompt it was handed and returns a passing summary. */
-function recordingSpawner(seen: Array<{ name: string; prompt: string }>): AsyncSpawner {
-  return async (_cmd, _args, input) => {
-    const m = /^Work units: (.+)$/m.exec(input ?? "");
-    seen.push({ name: m?.[1]?.trim() ?? "", prompt: input ?? "" });
-    return { status: 0, stdout: SUMMARY };
+function recordingSpawner(seen: Array<{ name: string; prompt: string }>): EngineProcessSpawner {
+  return (_argv, options) => {
+    const m = /^Work units: (.+)$/m.exec(options.stdinText ?? "");
+    seen.push({ name: m?.[1]?.trim() ?? "", prompt: options.stdinText ?? "" });
+    return {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              JSON.stringify({
+                type: "result",
+                session_id: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+                result: SUMMARY,
+              }),
+            ),
+          );
+          controller.close();
+        },
+      }),
+      stderr: new ReadableStream({ start: (controller) => controller.close() }),
+      exited: Promise.resolve(0),
+      kill: () => {},
+    };
   };
 }
 
@@ -59,7 +78,7 @@ describe("orchestrate — wave-aware handoff (#612)", () => {
     writeState(dir, [unit("a"), unit("b")]);
     const seen: Array<{ name: string; prompt: string }> = [];
     await orchestrate({ yes: true, engine: "claude", concurrency: "1" }, dir, {
-      spawner: recordingSpawner(seen),
+      sessionRuntime: { processSpawner: recordingSpawner(seen) },
     });
     // Single wave ⇒ both units in one orchestrateUnits call, no upstream context injected.
     expect(seen.map((s) => s.name)).toEqual(["a", "b"]);
@@ -71,7 +90,7 @@ describe("orchestrate — wave-aware handoff (#612)", () => {
     writeState(dir, [unit("a"), unit("b", { depends_on: ["a"] })]);
     const seen: Array<{ name: string; prompt: string }> = [];
     await orchestrate({ yes: true, engine: "claude", concurrency: "1" }, dir, {
-      spawner: recordingSpawner(seen),
+      sessionRuntime: { processSpawner: recordingSpawner(seen) },
     });
     // Wave 0 = A, Wave 1 = B (serialized by the dependency).
     expect(seen.map((s) => s.name)).toEqual(["a", "b"]);
@@ -92,7 +111,7 @@ describe("orchestrate — wave-aware handoff (#612)", () => {
     ]);
     const seen: Array<{ name: string; prompt: string }> = [];
     await orchestrate({ yes: true, engine: "claude", concurrency: "1" }, dir, {
-      spawner: recordingSpawner(seen),
+      sessionRuntime: { processSpawner: recordingSpawner(seen) },
     });
     // a,b,c,d in dependency order.
     expect(seen.map((s) => s.name)).toEqual(["a", "b", "c", "d"]);
@@ -113,7 +132,7 @@ describe("orchestrate — wave-aware handoff (#612)", () => {
     ]);
     const seen: Array<{ name: string; prompt: string }> = [];
     await orchestrate({ yes: true, engine: "claude", concurrency: "1" }, dir, {
-      spawner: recordingSpawner(seen),
+      sessionRuntime: { processSpawner: recordingSpawner(seen) },
     });
     // Only B is dispatched (A was already complete).
     expect(seen.map((s) => s.name)).toEqual(["b"]);
@@ -125,7 +144,7 @@ describe("orchestrate — wave-aware handoff (#612)", () => {
     writeState(dir, [unit("e", { depends_on: ["ghost"] })]);
     const seen: Array<{ name: string; prompt: string }> = [];
     await orchestrate({ yes: true, engine: "claude", concurrency: "1" }, dir, {
-      spawner: recordingSpawner(seen),
+      sessionRuntime: { processSpawner: recordingSpawner(seen) },
     });
     expect(seen.map((s) => s.name)).toEqual(["e"]);
     expect(seen.every((s) => !s.prompt.includes("## Upstream context"))).toBe(true);
@@ -146,7 +165,7 @@ describe("orchestrate — antigravity concurrency clamp", () => {
     const seen: Array<{ name: string; prompt: string }> = [];
     try {
       await orchestrate({ yes: true, engine: "antigravity", concurrency: "100" }, dir, {
-        spawner: recordingSpawner(seen),
+        sessionRuntime: { processSpawner: recordingSpawner(seen) },
       });
       const concLine = logs.find((l) => l.includes("concurrency"));
       expect(concLine).toBeDefined();

@@ -207,6 +207,10 @@ export interface EngineSessionAdapterOptions {
   timeoutMs?: number;
   idleTimeoutMs?: number;
   graceMs?: number;
+  /** Bridge commands acknowledge at successful process exit rather than native session protocol. */
+  protocol?: "native" | "bridge";
+  /** The configured spawner creates a detached process group owned by this adapter. */
+  ownsProcessGroup?: boolean;
   evidenceRoot?: string;
   historyRoots?: Partial<Record<Engine, readonly string[]>>;
   writeEvidence?: (

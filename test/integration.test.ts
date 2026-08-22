@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { applyIntake, mutateUnits, orchestrate, run, workflow } from "../src/commands.js";
 import { CTX_DIR, type WorkflowState, readState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
+import type { EngineProcessSpawner } from "../src/dispatch/session-types.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
 import { writeSettings } from "../src/settings.js";
 
@@ -56,6 +57,54 @@ const okSpawner: AsyncSpawner = async () => ({
   status: 0,
   stdout: JSON.stringify({ result: '```json\n{ "confidence": 1.0 }\n```' }),
 });
+function claudeEnvelope(result: string, extras: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    type: "result",
+    session_id: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+    result,
+    ...extras,
+  });
+}
+function completedProcessSpawner(
+  stdout: string,
+  options: { status?: number; onStart?: () => void; onKill?: () => void; delayMs?: number } = {},
+): EngineProcessSpawner {
+  const { status = 0, onStart, onKill, delayMs = 0 } = options;
+  return () => {
+    onStart?.();
+    return {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: new ReadableStream({
+        start(controller) {
+          if (stdout) controller.enqueue(new TextEncoder().encode(stdout));
+          controller.close();
+        },
+      }),
+      stderr: new ReadableStream({ start: (controller) => controller.close() }),
+      exited: new Promise<number>((resolve) => setTimeout(() => resolve(status), delayMs)),
+      kill: () => onKill?.(),
+    };
+  };
+}
+const okProcessSpawner = completedProcessSpawner(
+  claudeEnvelope('```json\n{ "confidence": 1.0 }\n```'),
+);
+
+function timedOutProcessSpawner(): EngineProcessSpawner {
+  return () => {
+    let finish!: (status: number) => void;
+    const exited = new Promise<number>((resolve) => {
+      finish = resolve;
+    });
+    return {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: new ReadableStream({ start: (controller) => controller.close() }),
+      stderr: new ReadableStream({ start: (controller) => controller.close() }),
+      exited,
+      kill: () => finish(124),
+    };
+  };
+}
 
 function freshRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "vf-int-"));
@@ -77,13 +126,17 @@ describe("orchestrate source-protection gate", () => {
 
   test("--require-git refuses a non-git repo and never dispatches", async () => {
     let dispatched = false;
-    const spawner: AsyncSpawner = async () => {
+    const processSpawner: EngineProcessSpawner = () => {
       dispatched = true;
-      return { status: 0, stdout: "" };
+      return completedProcessSpawner(claudeEnvelope('```json\n{ "confidence": 1.0 }\n```'))([], {
+        env: {},
+        stdinText: "",
+        detached: false,
+      });
     };
     const { runner } = fakeGit({ isRepo: false });
     const code = await orchestrate({ engine: "claude", yes: true, "require-git": true }, dir, {
-      spawner,
+      sessionRuntime: { processSpawner },
       git: runner,
     });
     expect(code).toBe(1);
@@ -94,7 +147,7 @@ describe("orchestrate source-protection gate", () => {
   test("non-git WITHOUT --require-git warns and proceeds (no checkpoint)", async () => {
     const { runner } = fakeGit({ isRepo: false });
     const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-      spawner: okSpawner,
+      sessionRuntime: { processSpawner: okProcessSpawner },
       git: runner,
     });
     expect(code).toBe(0);
@@ -103,12 +156,15 @@ describe("orchestrate source-protection gate", () => {
 
   test("dirty tree WITHOUT --auto-wip refuses with a commit/stash message", async () => {
     let dispatched = false;
-    const spawner: AsyncSpawner = async () => {
+    const processSpawner: EngineProcessSpawner = () => {
       dispatched = true;
-      return { status: 0, stdout: "" };
+      return completedProcessSpawner("")([], { env: {}, stdinText: "", detached: false });
     };
     const { runner } = fakeGit({ dirty: true });
-    const code = await orchestrate({ engine: "claude", yes: true }, dir, { spawner, git: runner });
+    const code = await orchestrate({ engine: "claude", yes: true }, dir, {
+      sessionRuntime: { processSpawner },
+      git: runner,
+    });
     expect(code).toBe(1);
     expect(dispatched).toBe(false);
     expect(cap.out.join("\n").toLowerCase()).toContain("--auto-wip");
@@ -117,7 +173,7 @@ describe("orchestrate source-protection gate", () => {
   test("dirty tree WITH --auto-wip makes a WIP snapshot and records checkpoint evidence", async () => {
     const { runner, calls } = fakeGit({ dirty: true });
     const code = await orchestrate({ engine: "claude", yes: true, "auto-wip": true }, dir, {
-      spawner: okSpawner,
+      sessionRuntime: { processSpawner: okProcessSpawner },
       git: runner,
     });
     expect(code).toBe(0);
@@ -146,7 +202,7 @@ describe("orchestrate source-protection gate", () => {
   test("clean repo takes a (no-WIP) checkpoint and dispatches", async () => {
     const { runner, calls } = fakeGit({ dirty: false });
     const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-      spawner: okSpawner,
+      sessionRuntime: { processSpawner: okProcessSpawner },
       git: runner,
     });
     expect(code).toBe(0);
@@ -212,9 +268,15 @@ describe("orchestrate dry mode is read-only", () => {
 
   test("re-running a real dispatch records distinct immutable attempt evidence", async () => {
     const { runner } = fakeGit({ dirty: false });
-    await orchestrate({ engine: "claude", yes: true }, dir, { spawner: okSpawner, git: runner });
+    await orchestrate({ engine: "claude", yes: true }, dir, {
+      sessionRuntime: { processSpawner: okProcessSpawner },
+      git: runner,
+    });
     const { runner: runner2 } = fakeGit({ dirty: false });
-    await orchestrate({ engine: "claude", yes: true }, dir, { spawner: okSpawner, git: runner2 });
+    await orchestrate({ engine: "claude", yes: true }, dir, {
+      sessionRuntime: { processSpawner: okProcessSpawner },
+      git: runner2,
+    });
     const evidence =
       (readState(dir) as WorkflowState).work_units.find((u) => u.name === "auth")?.evidence ?? [];
     const resultPaths = evidence.filter((path) => path.includes("evidence/attempts/"));
@@ -238,9 +300,8 @@ describe("orchestrate failure + rollback", () => {
 
   test("a failed unit prints the recovery hint but KEEPS edits by default", async () => {
     const { runner, calls } = fakeGit({ dirty: false });
-    const failSpawner: AsyncSpawner = async () => ({ status: 1, stdout: "" });
     const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-      spawner: failSpawner,
+      sessionRuntime: { processSpawner: completedProcessSpawner("", { status: 1 }) },
       git: runner,
     });
     expect(code).toBe(1);
@@ -251,11 +312,13 @@ describe("orchestrate failure + rollback", () => {
   test("--rollback-on-fail hard-resets to the base ref on a failed unit", async () => {
     // dirty + auto-wip so the checkpoint records a baseRef to reset back to.
     const { runner, calls } = fakeGit({ dirty: true });
-    const failSpawner: AsyncSpawner = async () => ({ status: 1, stdout: "" });
     const code = await orchestrate(
       { engine: "claude", yes: true, "auto-wip": true, "rollback-on-fail": true },
       dir,
-      { spawner: failSpawner, git: runner },
+      {
+        sessionRuntime: { processSpawner: completedProcessSpawner("", { status: 1 }) },
+        git: runner,
+      },
     );
     expect(code).toBe(1);
     const reset = calls.find((a) => a[0] === "reset");
@@ -265,9 +328,11 @@ describe("orchestrate failure + rollback", () => {
 
   test("a timed-out dispatch blocks the unit with reason 'timeout' in evidence", async () => {
     const { runner } = fakeGit({ dirty: false });
-    const timeoutSpawner: AsyncSpawner = async () => ({ status: 124, stdout: "", timedOut: true });
     const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-      spawner: timeoutSpawner,
+      sessionRuntime: {
+        processSpawner: timedOutProcessSpawner(),
+        adapterOptions: { timeoutMs: 5, graceMs: 1 },
+      },
       git: runner,
     });
     expect(code).toBe(1);
@@ -306,17 +371,19 @@ describe("orchestrate quota stop", () => {
     const { runner } = fakeGit({ dirty: false });
     let n = 0;
     // First lane returns a typed 429 error envelope; later units must be skipped.
-    const quotaSpawner: AsyncSpawner = async () => {
+    const quotaSpawner: EngineProcessSpawner = () => {
       n++;
       if (n === 1) {
-        return { status: 1, stdout: JSON.stringify({ error: { type: "rate_limit_error" } }) };
+        return completedProcessSpawner(JSON.stringify({ error: { type: "rate_limit_error" } }), {
+          status: 1,
+        })([], { env: {}, stdinText: "", detached: false });
       }
-      // give the latch time: slow second call so the first result lands first
-      await new Promise((r) => setTimeout(r, 5));
-      return { status: 0, stdout: "" };
+      return completedProcessSpawner(claudeEnvelope('```json\n{ "confidence": 1.0 }\n```'), {
+        delayMs: 5,
+      })([], { env: {}, stdinText: "", detached: false });
     };
     const code = await orchestrate({ engine: "claude", yes: true, concurrency: "1" }, dir, {
-      spawner: quotaSpawner,
+      sessionRuntime: { processSpawner: quotaSpawner },
       git: runner,
     });
     expect(code).toBe(1);
@@ -510,7 +577,7 @@ describe("workflow command", () => {
       });
       const { runner } = fakeGit({ isRepo: false });
       const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-        spawner: okSpawner,
+        sessionRuntime: { processSpawner: okProcessSpawner },
         git: runner,
       });
       expect(code).toBe(1);

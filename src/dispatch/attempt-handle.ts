@@ -66,16 +66,21 @@ export function createProcessTerminator(input: {
     if (termination) return termination;
     input.onReason(reason);
     termination = (async () => {
+      let didExit = false;
+      const observedExit = input.process.exited.then(
+        () => {
+          didExit = true;
+          return true;
+        },
+        () => new Promise<true>(() => {}),
+      );
       kill("SIGTERM");
       if (input.graceMs <= 0) {
-        await input.process.exited.catch(() => null);
+        await Promise.resolve();
+        if (!didExit) kill("SIGKILL");
         return;
       }
       let graceTimer: ReturnType<typeof setTimeout> | undefined;
-      const observedExit = input.process.exited.then(
-        () => true,
-        () => new Promise<true>(() => {}),
-      );
       const graceElapsed = new Promise<false>((resolve) => {
         graceTimer = setTimeout(() => {
           kill("SIGKILL");

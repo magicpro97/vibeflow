@@ -95,10 +95,6 @@ export interface DispatchResult {
   reason?: string;
   /** Non-fatal advisory (e.g. an unverifiable Copilot CLI version). */
   warning?: string;
-  /** Internal workflow-only crash-resume identity. This legacy result is not a public DTO;
-   * persistence and marker-list projections must remove it. Task4 will migrate this field
-   * to the session adapter's internal binding channel. */
-  sessionId?: string;
 }
 
 export type Spawner = (

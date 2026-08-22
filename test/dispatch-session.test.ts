@@ -13,7 +13,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type {
+  AgentBinding,
+  MaterializeAgentBindingOptions,
+  MaterializedAgentBinding,
+} from "../src/agents/binding.js";
+import { runDispatchWithSessionRuntime } from "../src/commands/dispatch-session-runtime.js";
 import { engineCommand, persistDispatch, runDispatch } from "../src/dispatch.js";
+import { createProcessTerminator } from "../src/dispatch/attempt-handle.js";
 import { conversationEnvPolicy, filterEnv } from "../src/dispatch/env-filter.js";
 import {
   createDockerRuntimeInspector,
@@ -22,7 +29,12 @@ import {
   releaseIsolationLease,
   validateIsolationLease,
 } from "../src/dispatch/isolation.js";
-import { sanitizePublicText } from "../src/dispatch/public-redaction.js";
+import {
+  buildPublicDispatchResult,
+  readDispatchResumeBinding,
+  sanitizePublicText,
+} from "../src/dispatch/public-redaction.js";
+import type { AttemptHandle } from "../src/dispatch/session-types.js";
 import type {
   EngineProcess,
   EngineProcessSpawner,
@@ -151,6 +163,30 @@ function request(
     spawn: spawnProjection(engine),
     signal: new AbortController().signal,
     ...overrides,
+  };
+}
+
+function completedHandle(
+  attemptId: string,
+  engine: SpawnOptionsProjection["engine"],
+  nativeSessionId?: string,
+): AttemptHandle {
+  return {
+    attemptId,
+    completion: Promise.resolve({
+      attemptId,
+      engine,
+      ok: true,
+      state: "completed",
+      lifecycle: ["requested", "dispatched", "acknowledged", "completed"],
+      output: '{"type":"result","summary":"ok"}',
+      summary: { confidence: 1, files_changed: ["src/file.ts"] },
+      evidenceStatus: "persisted",
+      nativeSessionStatus: nativeSessionId ? "captured" : "unavailable",
+    }),
+    terminate: async () => {},
+    readResumeBinding: () => (nativeSessionId ? { attemptId, engine, nativeSessionId } : undefined),
+    readEvidenceBinding: () => ({ attemptId, internalRef: "internal/evidence" }),
   };
 }
 
@@ -382,7 +418,8 @@ describe("engine session execution projection", () => {
         stdout: '{"type":"result","session_id":"--dangerously-skip-permissions"}',
       }),
     });
-    expect(result.sessionId).toBeUndefined();
+    expect("sessionId" in result).toBe(false);
+    expect(readDispatchResumeBinding(result)).toBeUndefined();
   });
 
   test("Codex fails closed when rendered tool availability cannot be enforced", () => {
@@ -605,6 +642,32 @@ describe("engine session execution projection", () => {
 });
 
 describe("attempt lifecycle and cleanup", () => {
+  test("zero grace hard-kills and resolves when SIGTERM is ignored", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const child: EngineProcess = {
+      pid: 4244,
+      stdin: { write: () => {}, end: () => {} },
+      exited: new Promise<number>(() => {}),
+      kill: (signal = "SIGTERM") => {
+        signals.push(signal);
+      },
+    };
+    const terminator = createProcessTerminator({
+      process: child,
+      killProcessGroup: false,
+      graceMs: 0,
+      onReason: () => {},
+    });
+
+    const outcome = await Promise.race([
+      terminator.terminate().then(() => "resolved" as const),
+      Bun.sleep(20).then(() => "timed-out" as const),
+    ]);
+
+    expect(outcome).toBe("resolved");
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
   test("default process launcher retains a child whose stdin write fails for adapter cleanup", () => {
     const spawn = makeEngineProcessSpawner(
       () =>
@@ -1085,17 +1148,26 @@ describe("native resume evidence and history reconciliation", () => {
     const root = mkdtempSync(join(tmpdir(), "vf-legacy-evidence-"));
     temporaryPaths.push(root);
     const nativeId = CLAUDE_UUID;
-    const rel = persistDispatch(root, {
+    const result = buildPublicDispatchResult(
+      { engine: "claude", mode: "cli", prompt: "private workflow prompt" },
+      {
+        status: 0,
+        stdout: JSON.stringify({ type: "result", session_id: nativeId }),
+      },
+      "legacy dispatch failed",
+      undefined,
+      "legacy-attempt-1",
+    );
+    expect(readDispatchResumeBinding(result)).toEqual({
       attemptId: "legacy-attempt-1",
       engine: "claude",
-      mode: "cli",
-      ok: true,
-      raw: JSON.stringify({ type: "result", session_id: nativeId }),
-      sessionId: nativeId,
-      summary: { files_changed: [nativeId], uncertainty: `resume ${nativeId}` },
-      reason: `failed native ${nativeId}`,
-      warning: `warning native ${nativeId}`,
+      nativeSessionId: nativeId,
     });
+    result.raw = JSON.stringify({ type: "result", session_id: nativeId });
+    result.summary = { files_changed: [nativeId], uncertainty: `resume ${nativeId}` };
+    result.reason = `failed native ${nativeId}`;
+    result.warning = `warning native ${nativeId}`;
+    const rel = persistDispatch(root, result);
     const evidence = readFileSync(join(root, rel), "utf8");
     expect(evidence).not.toContain(nativeId);
     expect(evidence).not.toContain("sessionId");
@@ -1150,6 +1222,31 @@ describe("native resume evidence and history reconciliation", () => {
       }),
     ).completion;
     expect(chunks.join("")).not.toContain(nativeId);
+    expect(chunks.join("")).toContain("[opaque-native-session]");
+  });
+
+  test("a newly captured non-UUID native id redacts later text in the same frame", async () => {
+    const nativeId = "opencode-session-safe";
+    const chunks: string[] = [];
+    const adapter = createEngineSessionAdapter({
+      spawn: () =>
+        completedProcess([
+          `${JSON.stringify({ type: "step_start", sessionID: nativeId })} ordinary ${nativeId}\n`,
+        ]),
+      writeEvidence: async () => "evidence/opencode-same-frame.json",
+    });
+    const handle = adapter.start(
+      request("opencode", {
+        attemptId: "attempt-opencode-same-frame",
+        onChunk: (chunk) => chunks.push(chunk.content),
+        spawn: spawnProjection("opencode", { rendered_tools: [], sandbox: null }),
+      }),
+    );
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()?.nativeSessionId).toBe(nativeId);
+    expect(chunks.join("")).not.toContain(nativeId);
+    expect(result.output).not.toContain(nativeId);
     expect(chunks.join("")).toContain("[opaque-native-session]");
   });
 
@@ -1250,6 +1347,78 @@ describe("native resume evidence and history reconciliation", () => {
     await handle.completion;
 
     expect(emittedBeforeClose).toContain("[redacted-oversize]");
+  });
+
+  test("bounds retained stdout while delivering many public frames before stream close", async () => {
+    const encoder = new TextEncoder();
+    const fillerFrames = 384;
+    const summaryLine = `${JSON.stringify({
+      skills_used: [],
+      files_changed: ["src/late-result.ts"],
+      commands_run: [],
+      tests_run: ["bounded stdout regression"],
+      confidence: 0.97,
+      uncertainty: "",
+    })}\n`;
+    let closeStdout!: () => void;
+    let observeSummary!: () => void;
+    const summaryDelivered = new Promise<void>((resolve) => {
+      observeSummary = resolve;
+    });
+    const stdout = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < fillerFrames; index++) {
+          const label =
+            index === 0
+              ? "early-retention-sentinel"
+              : index === fillerFrames - 1
+                ? "late-retention-sentinel"
+                : `frame-${index}`;
+          controller.enqueue(encoder.encode(`${label}:${"🙂".repeat(1_024)}\n`));
+        }
+        controller.enqueue(
+          encoder.encode(`${JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID })}\n`),
+        );
+        controller.enqueue(encoder.encode(summaryLine));
+        closeStdout = () => controller.close();
+      },
+    });
+    let publicFrameCount = 0;
+    const adapter = createEngineSessionAdapter({
+      spawn: () => ({
+        ...completedProcess(),
+        stdout,
+      }),
+      writeEvidence: async () => "evidence/bounded-stdout.json",
+    });
+    const handle = adapter.start(
+      request("codex", {
+        attemptId: "attempt-bounded-stdout",
+        onChunk: (chunk) => {
+          publicFrameCount++;
+          if (chunk.content.includes('"confidence":0.97')) observeSummary();
+        },
+      }),
+    );
+
+    await Promise.race([
+      summaryDelivered,
+      Bun.sleep(1_000).then(() => {
+        throw new Error("public stdout stalled while the stream remained open");
+      }),
+    ]);
+    expect(handle.readResumeBinding()?.nativeSessionId).toBe(CODEX_UUID);
+    expect(publicFrameCount).toBe(fillerFrames + 2);
+
+    closeStdout();
+    const result = await handle.completion;
+    expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    expect(result.output).toStartWith("[redacted-oversize]\n");
+    expect(result.output).not.toContain("early-retention-sentinel");
+    expect(result.output).toContain("late-retention-sentinel");
+    expect(result.output).not.toContain("�");
+    expect(result.summary?.confidence).toBe(0.97);
+    expect(result.nativeSessionStatus).toBe("captured");
   });
 
   test("captures native identity internally but keeps status and immutable evidence opaque", async () => {
@@ -1883,6 +2052,7 @@ describe("workflow resume compatibility", () => {
     updateMarker(unit, {
       status: "running",
       engineSessionId: nativeId,
+      engineSessionEngine: "claude",
       evidence: [`safe-evidence-${nativeId}`],
     });
     try {
@@ -1892,6 +2062,7 @@ describe("workflow resume compatibility", () => {
       expect(JSON.stringify(publicMarker)).not.toContain(nativeId);
       expect(JSON.stringify(publicMarker)).not.toContain("engineSessionId");
       expect(JSON.stringify(publicMarker)).not.toContain("resumeStatus");
+      expect(JSON.stringify(publicMarker)).not.toContain("engineSessionEngine");
       expect(JSON.stringify(publicMarker)).not.toContain("safe-evidence-");
     } finally {
       cleanupMarker(unit);
@@ -1914,7 +2085,11 @@ describe("workflow resume compatibility", () => {
   test("orchestrator reads the old exact resume binding before writing a fresh marker", async () => {
     const unit = `session-resume-${process.pid}-${Date.now()}`;
     createMarker(unit, "claude");
-    updateMarker(unit, { status: "running", engineSessionId: CLAUDE_UUID });
+    updateMarker(unit, {
+      status: "running",
+      engineSessionId: CLAUDE_UUID,
+      engineSessionEngine: "claude",
+    });
     let observed: string | undefined;
     try {
       await orchestrateUnits({
@@ -1949,6 +2124,7 @@ describe("workflow resume compatibility", () => {
       updateMarker(unit, {
         status: priorStatus,
         engineSessionId: CLAUDE_UUID,
+        engineSessionEngine: "claude",
       });
       let observedId: string | undefined;
       let observedResumeStatus: string | undefined;
@@ -1982,4 +2158,416 @@ describe("workflow resume compatibility", () => {
       }
     },
   );
+});
+
+describe("dispatch session runtime integration", () => {
+  test("workflow dispatch runs at base without isolation and at the claimed cwd with isolation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-dispatch-runtime-cwd-"));
+    temporaryPaths.push(root);
+    const { repoRoot, cwd } = initializeLinkedGitWorktree(root);
+    const observed: string[] = [];
+    const run = (wtPath?: string) =>
+      runDispatchWithSessionRuntime({
+        engine: "claude",
+        prompt: "cwd prompt",
+        mode: "cli",
+        unit: wtPath ? "isolated" : "base",
+        base: repoRoot,
+        ...(wtPath ? { wtPath } : {}),
+        skillNames: [],
+        processSpawner: (_argv, options) => {
+          observed.push(options.cwd ?? "<missing>");
+          return completedProcess([
+            `${JSON.stringify({ type: "result", session_id: CLAUDE_UUID, result: "ok" })}\n`,
+          ]);
+        },
+      });
+    expect((await run()).ok).toBe(true);
+    expect((await run(cwd)).ok).toBe(true);
+    expect(observed).toEqual([realpathSync(repoRoot), realpathSync(cwd)]);
+  });
+
+  test.each(["opencode", "antigravity"] as const)(
+    "canonical workflow adapter retains %s execution compatibility",
+    async (engine) => {
+      const root = mkdtempSync(join(tmpdir(), `vf-dispatch-runtime-${engine}-`));
+      temporaryPaths.push(root);
+      initializeGitWorktree(root);
+      const prompt = `workflow prompt ${engine}`;
+      let observedArgv: string[] = [];
+      let observedInput = "";
+      const result = await runDispatchWithSessionRuntime({
+        engine,
+        prompt,
+        mode: "cli",
+        unit: engine,
+        base: root,
+        skillNames: [],
+        processSpawner: (argv, options) => {
+          observedArgv = argv;
+          observedInput = options.stdinText;
+          expect(options.cwd).toBe(realpathSync(root));
+          const output =
+            engine === "opencode"
+              ? `${JSON.stringify({ type: "step_start", sessionID: "opencode-session-safe" })}\n`
+              : "antigravity acknowledged\n";
+          return completedProcess([output]);
+        },
+      });
+      expect(result.ok).toBe(true);
+      expect(observedArgv[0]).toBe(engine === "opencode" ? "opencode" : "agy");
+      expect(engine === "opencode" ? observedInput : observedArgv.join(" ")).toContain(prompt);
+    },
+  );
+
+  test("the original workflow prompt is private from the first public chunk through the result", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-dispatch-runtime-private-prompt-"));
+    temporaryPaths.push(root);
+    initializeGitWorktree(root);
+    const prompt = "ORIGINAL WORKFLOW PROMPT MUST STAY PRIVATE";
+    const chunks: string[] = [];
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt,
+      mode: "cli",
+      unit: "private-prompt",
+      base: root,
+      skillNames: [],
+      onStdoutChunk: (chunk) => chunks.push(chunk),
+      processSpawner: () =>
+        completedProcess([
+          `${prompt}\n`,
+          `${JSON.stringify({ type: "result", session_id: CLAUDE_UUID, result: prompt })}\n`,
+        ]),
+    });
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks[0]).not.toContain(prompt);
+    expect(chunks.join("")).not.toContain(prompt);
+    expect(result.raw).not.toContain(prompt);
+    expect(JSON.stringify(result.summary ?? {})).not.toContain(prompt);
+  });
+
+  test("binding failure sanitizes the exact resume id as a private native identity", async () => {
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt: "private prompt",
+      mode: "cli",
+      unit: "resume-failure",
+      base: process.cwd(),
+      skillNames: [],
+      resumeSessionId: CLAUDE_UUID,
+      materializeBinding: () => {
+        throw new Error(`binding failed for ${CLAUDE_UUID}`);
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).not.toContain(CLAUDE_UUID);
+    expect(result.reason).toContain("[opaque-native-session]");
+    expect(JSON.stringify(result)).not.toContain(CLAUDE_UUID);
+  });
+
+  test("adapter timeout owns and kills the underlying workflow process", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-dispatch-runtime-timeout-"));
+    temporaryPaths.push(root);
+    initializeGitWorktree(root);
+    const child = pendingProcess();
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt: "timeout prompt",
+      mode: "cli",
+      unit: "timeout",
+      base: root,
+      skillNames: [],
+      adapterOptions: { timeoutMs: 10, graceMs: 0 },
+      processSpawner: () => child.process,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/timeout/i);
+    expect(child.kills()).toBe(1);
+    expect(child.exited()).toBe(true);
+  });
+
+  test.each(["claude", "copilot", "antigravity"] as const)(
+    "bridge execution for %s writes the canonical prompt to stdin through the owned adapter",
+    async (engine) => {
+      const root = mkdtempSync(join(tmpdir(), `vf-dispatch-runtime-bridge-${engine}-`));
+      temporaryPaths.push(root);
+      initializeGitWorktree(root);
+      const prompt = `bridge workflow prompt ${engine}`;
+      let observedArgv: string[] = [];
+      const result = await runDispatchWithSessionRuntime({
+        engine,
+        prompt,
+        mode: "bridge",
+        bridgeCommand: "bridge-tool --json",
+        unit: `bridge-${engine}`,
+        base: root,
+        skillNames: [],
+        processSpawner: (argv, options) => {
+          observedArgv = argv;
+          expect(options.cwd).toBe(realpathSync(root));
+          expect(options.stdinText).toBe(prompt);
+          return completedProcess(['```json\n{"confidence":1}\n```\n']);
+        },
+      });
+      expect(observedArgv).toEqual(
+        process.platform === "win32"
+          ? ["cmd.exe", "/c", "bridge-tool --json"]
+          : ["/bin/sh", "-c", "bridge-tool --json"],
+      );
+      expect(result.mode).toBe("bridge");
+      expect(result.ok).toBe(true);
+      expect(result.summary?.confidence).toBe(1);
+      expect(
+        statSync(join(root, ".vibeflow", "attempts", `${result.attemptId}.json`)).size,
+      ).toBeGreaterThan(0);
+    },
+  );
+
+  test("bridge sends a large Antigravity prompt through stdin without native argv materialization", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-dispatch-runtime-bridge-large-"));
+    temporaryPaths.push(root);
+    initializeGitWorktree(root);
+    const prompt = "large bridge prompt ".repeat(2_048);
+    let observedInput = "";
+    const result = await runDispatchWithSessionRuntime({
+      engine: "antigravity",
+      prompt,
+      mode: "bridge",
+      bridgeCommand: "bridge-tool --json",
+      unit: "bridge-large-antigravity",
+      base: root,
+      skillNames: [],
+      processSpawner: (_argv, options) => {
+        observedInput = options.stdinText ?? "";
+        return completedProcess(['```json\n{"confidence":1}\n```\n']);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(observedInput).toContain(prompt);
+  });
+
+  test("production CLI path materializes the dispatch-runner binding and maps adapter output", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-dispatch-runtime-"));
+    temporaryPaths.push(root);
+    const { repoRoot, cwd } = initializeLinkedGitWorktree(root);
+    let capturedBinding: AgentBinding | undefined;
+    let capturedOptions:
+      | (MaterializeAgentBindingOptions & { isolation?: SpawnOptionsProjection["isolation"] })
+      | undefined;
+    let capturedIsolation: SpawnOptionsProjection["isolation"] | undefined;
+    let adapterStarts = 0;
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt: "ORIGINAL DISPATCH PROMPT",
+      mode: "cli",
+      unit: "u1",
+      base: repoRoot,
+      wtPath: cwd,
+      skillNames: ["dispatch-runner", "vf"],
+      materializeBinding: (binding, options) => {
+        capturedBinding = binding;
+        capturedOptions = options;
+        capturedIsolation = options.isolation;
+        return {
+          resolved: {
+            role: {
+              spec: { name: "dispatch-runner" } as never,
+              source: "builtin",
+              resolved_hash: "role",
+              metadata: {},
+            },
+            skills: [],
+            engine: "claude",
+            model: "sonnet",
+            sessionMode: "fresh",
+            tool_intents: ["read", "write"],
+            sandbox: "workspace-write",
+            env_policy: conversationEnvPolicy("claude"),
+            isolation: options.isolation ?? null,
+            provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+            trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+          },
+          spawn: spawnProjection("claude", {
+            rendered_prompt: `dispatch-wrapper\n${options.taskText}`,
+            sandbox: "workspace-write",
+            isolation: options.isolation ?? null,
+            provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+            trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+          }),
+        } as MaterializedAgentBinding;
+      },
+      sessionAdapter: {
+        start(request) {
+          adapterStarts++;
+          expect(request.spawn.rendered_prompt).toContain("ORIGINAL DISPATCH PROMPT");
+          return completedHandle(request.attemptId, "claude", CLAUDE_UUID);
+        },
+        reconcileHistory: async () => ({
+          status: "unavailable",
+          imported_turn_count: 0,
+          imported_tool_count: 0,
+          completeness_reason: "n/a",
+        }),
+      },
+    });
+    expect(adapterStarts).toBe(1);
+    expect(capturedBinding).toEqual({
+      roleRef: "dispatch-runner",
+      engine: "claude",
+      sessionMode: "fresh",
+      additionalSkillRefs: ["dispatch-runner", "vf"],
+    });
+    expect(capturedOptions?.repoRoot).toBe(repoRoot);
+    expect(capturedOptions?.phase).toBe(2);
+    expect(capturedOptions?.taskText).toBe("ORIGINAL DISPATCH PROMPT");
+    expect(capturedIsolation && isIsolationLeaseLive(capturedIsolation)).toBe(false);
+    expect("sessionId" in result).toBe(false);
+    const resumeBinding =
+      readDispatchResumeBinding(result) ??
+      (() => {
+        throw new Error("expected a captured resume binding");
+      })();
+    const attemptId =
+      result.attemptId ??
+      (() => {
+        throw new Error("expected an attempt id");
+      })();
+    expect(resumeBinding).toEqual({
+      attemptId,
+      engine: "claude",
+      nativeSessionId: CLAUDE_UUID,
+    });
+  });
+
+  test("an injected process spawner stays inside the session adapter path and roots evidence at base", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-dispatch-runtime-process-seam-"));
+    temporaryPaths.push(root);
+    const { repoRoot, cwd } = initializeLinkedGitWorktree(root);
+    let processSpawnerCalls = 0;
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt: "legacy prompt",
+      mode: "cli",
+      unit: "u1",
+      base: repoRoot,
+      wtPath: cwd,
+      skillNames: ["vf"],
+      materializeBinding: (_binding, options) =>
+        ({
+          resolved: {
+            role: {
+              spec: { name: "dispatch-runner" } as never,
+              source: "builtin",
+              resolved_hash: "role",
+              metadata: {},
+            },
+            skills: [],
+            engine: "claude",
+            model: "sonnet",
+            sessionMode: "fresh",
+            tool_intents: ["read", "write"],
+            sandbox: "workspace-write",
+            env_policy: conversationEnvPolicy("claude"),
+            isolation: options.isolation ?? null,
+            provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+            trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+          },
+          spawn: spawnProjection("claude", {
+            rendered_prompt: options.taskText,
+            sandbox: "workspace-write",
+            isolation: options.isolation ?? null,
+            provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+            trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+          }),
+        }) as MaterializedAgentBinding,
+      processSpawner: (_argv, options) => {
+        processSpawnerCalls++;
+        expect(options.cwd).toBe(realpathSync(cwd));
+        return completedProcess([JSON.stringify({ type: "result", session_id: CLAUDE_UUID })]);
+      },
+    });
+    expect(processSpawnerCalls).toBe(1);
+    expect(result.ok).toBe(true);
+    expect(
+      statSync(join(repoRoot, ".vibeflow", "attempts", `${result.attemptId}.json`)).size,
+    ).toBeGreaterThan(0);
+    expect(readDispatchResumeBinding(result)?.nativeSessionId).toBe(CLAUDE_UUID);
+  });
+
+  test("adapter path accepts a process-spawn seam without falling back to the legacy dispatcher", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-dispatch-runtime-process-"));
+    temporaryPaths.push(root);
+    const { repoRoot, cwd } = initializeLinkedGitWorktree(root);
+    const legacySpawnerCalls = 0;
+    let processSpawns = 0;
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt: "adapter prompt",
+      mode: "cli",
+      unit: "u1",
+      base: repoRoot,
+      wtPath: cwd,
+      skillNames: ["vf"],
+      materializeBinding: (_binding, options) =>
+        ({
+          resolved: {
+            role: {
+              spec: { name: "dispatch-runner" } as never,
+              source: "builtin",
+              resolved_hash: "role",
+              metadata: {},
+            },
+            skills: [],
+            engine: "claude",
+            model: "sonnet",
+            sessionMode: "fresh",
+            tool_intents: ["read", "write"],
+            sandbox: "workspace-write",
+            env_policy: conversationEnvPolicy("claude"),
+            isolation: options.isolation ?? null,
+            provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+            trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+          },
+          spawn: spawnProjection("claude", {
+            rendered_prompt: options.taskText,
+            sandbox: "workspace-write",
+            isolation: options.isolation ?? null,
+            provenance: { roleSource: "builtin", roleHash: "role", skillHashes: ["vf"] },
+            trace_metadata: { role_resolved_hash: "role", skill_resolved_hashes: ["vf"] },
+          }),
+        }) as MaterializedAgentBinding,
+      processSpawner: (argv, options) => {
+        processSpawns++;
+        expect(argv[0]).toBe("claude");
+        expect(options.cwd).toBe(realpathSync(cwd));
+        expect(options.stdinText).toContain("adapter prompt");
+        return completedProcess([JSON.stringify({ type: "result", session_id: CLAUDE_UUID })]);
+      },
+    });
+    expect(processSpawns).toBe(1);
+    expect(legacySpawnerCalls).toBe(0);
+    expect(result.ok).toBe(true);
+    expect(
+      statSync(join(repoRoot, ".vibeflow", "attempts", `${result.attemptId}.json`)).size,
+    ).toBeGreaterThan(0);
+  });
+
+  test("binding admission failures fail closed without exposing a structural session id", async () => {
+    const result = await runDispatchWithSessionRuntime({
+      engine: "claude",
+      prompt: "sensitive prompt",
+      mode: "cli",
+      unit: "u1",
+      base: process.cwd(),
+      skillNames: ["repo-skill"],
+      materializeBinding: () => {
+        throw new Error("project role requires a live canonical isolation lease");
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/live canonical isolation lease/i);
+    expect("sessionId" in result).toBe(false);
+    expect(readDispatchResumeBinding(result)).toBeUndefined();
+  });
 });

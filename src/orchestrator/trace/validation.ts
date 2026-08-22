@@ -195,10 +195,10 @@ const storedRule = compileShape(
   `${correlationSchema} event_id:reference seq:number ts:reference idempotency_key:reference event:event`,
   rules,
 );
-const journalRule = compileShape("stored_event:stored native_session_id:nullableReference", {
-  ...rules,
-  stored: storedRule,
-});
+const journalRule = compileShape(
+  "stored_event:stored native_session_id:nullableReference batch_id?:reference batch_index?:number batch_size?:number",
+  { ...rules, stored: storedRule },
+);
 
 const json = (value: unknown, seen = new Set<object>(), depth = 0): boolean => {
   if (depth > TRACE_LIMITS.maxDepth) return false;
@@ -251,7 +251,22 @@ export const decodeRecord = (line: string): InternalTraceStoreRecord => {
     return fail("malformed record");
   }
   if (!json(record) || !journalRule(record)) fail("invalid record");
-  return record as InternalTraceStoreRecord;
+  const value = record as InternalTraceStoreRecord;
+  const batch = [value.batch_id, value.batch_index, value.batch_size];
+  const present = batch.filter((item) => item !== undefined).length;
+  if (
+    (present !== 0 && present !== batch.length) ||
+    (present === batch.length &&
+      (typeof value.batch_id !== "string" ||
+        !Number.isSafeInteger(value.batch_index) ||
+        !Number.isSafeInteger(value.batch_size) ||
+        (value.batch_index as number) < 0 ||
+        (value.batch_size as number) < 2 ||
+        (value.batch_size as number) > 64 ||
+        (value.batch_index as number) >= (value.batch_size as number)))
+  )
+    fail("invalid batch frame");
+  return value;
 };
 export const validInput = (
   correlation: TraceCorrelation,

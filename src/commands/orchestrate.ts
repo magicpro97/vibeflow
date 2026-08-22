@@ -1,5 +1,3 @@
-// src/commands/orchestrate.ts
-//
 // `vf orchestrate` subcommand — the multi-unit dispatch loop (issue #80, phase 6/14).
 // Resolver helpers live in orchestrate-resolve.ts (#186 PR7).
 // Reviewer prompt isolation lives in orchestrate-reviewer.ts (ADR-001).
@@ -49,7 +47,6 @@ import {
   goalEval,
   installLogbus,
   join,
-  makeAsyncSpawner,
   maybePublishPrs,
   normalizeUnit,
   out,
@@ -112,6 +109,7 @@ export async function orchestrate(
     publishGit?: PublishRunner;
     publishGh?: PublishRunner;
     gate?: ScopedGateFn;
+    sessionRuntime?: Parameters<typeof makeDispatcher>[10];
     acquisitionApprover?: AcquisitionApprover;
     acquisitionInstall?: AcquisitionInstall;
     acquisitionIsTTY?: () => boolean;
@@ -214,7 +212,11 @@ export async function orchestrate(
   // Stronger gate: a real (cli) dispatch requires a live-ready engine. When the caller injects
   // its own dispatch spawner (tests/headless), that spawner IS the engine round-trip, so we
   // trust it rather than probing the real binary — unless an explicit preflight is supplied.
-  const preflight = inject.preflight ?? (inject.spawner ? () => [readyStub(engine)] : undefined);
+  const preflight =
+    inject.preflight ??
+    (inject.spawner || inject.sessionRuntime?.processSpawner
+      ? () => [readyStub(engine)]
+      : undefined);
   if (!engineReady(engine, mode, preflight)) return 1;
 
   // Source-protection: only on a REAL (cli) dispatch — never dry/bridge (nothing irreversible).
@@ -234,24 +236,18 @@ export async function orchestrate(
     prot = { checkpoint: plan.checkpoint, fp, git, quota: { limited: false }, rolledBack: false };
   }
 
-  // Build the dispatch spawner honoring the configured per-unit timeout (0 disables it).
-  // Injected spawners (tests/headless) always win; bridge spawns via shell.
+  // The canonical session adapter owns every production process so timeout/cancel can reap it.
   const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
-  const spawner =
-    inject.spawner ??
-    makeAsyncSpawner({
-      timeoutMs,
-      shell: mode === "bridge",
-      // #556: honor the per-repo env-scrub policy on the orchestrator safety-net spawner.
-      envPolicy: readSettings(base).envPolicy,
-      // M2: route any stderr noise the engine emits to the bus.
-      onStderrChunk: (text) => {
-        out("engine-stderr", text, {
-          level: "warn",
-          meta: { engine },
-        });
-      },
-    });
+  const processSpawner = inject.sessionRuntime?.processSpawner;
+  const sessionRuntime = {
+    ...inject.sessionRuntime,
+    adapterOptions: {
+      ...inject.sessionRuntime?.adapterOptions,
+      ...(timeoutMs !== undefined && inject.sessionRuntime?.adapterOptions?.timeoutMs === undefined
+        ? { timeoutMs }
+        : {}),
+    },
+  };
 
   // Scope-conflict gate: refuse to dispatch overlapping scopes in parallel — serialize them.
   const conflicts = findScopeConflicts(units);
@@ -304,11 +300,12 @@ export async function orchestrate(
       base,
       mode,
       riskClass,
-      spawner,
+      processSpawner,
       prot,
       isolate,
       gateFn,
       flags.resume === true,
+      sessionRuntime,
     ),
     reviewer: makeReviewer(mode, thresholdFor(riskClass), {
       cwd: base,

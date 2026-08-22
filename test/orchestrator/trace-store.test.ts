@@ -273,6 +273,29 @@ const independentStore = (dir: string, suffix: string, mirrored: unknown[]) => {
     mirror: { mirrorTrace: (value) => mirrored.push(value) },
   });
 };
+const lifecycleInput = (
+  key: string,
+  lifecycle: "ACTIVE" | "PAUSED" | "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED",
+  health: "healthy" | "degraded" = "healthy",
+) => ({
+  idempotency_key: key,
+  event: {
+    type: "state_change" as const,
+    payload: {
+      lifecycle,
+      health,
+      terminal: ["COMPLETED", "STOPPED", "FAILED", "ABORTED"].includes(lifecycle),
+      reason: null,
+    },
+  },
+});
+const terminalInput = (lifecycle: "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED") => ({
+  idempotency_key: "conversation:terminal",
+  event: {
+    type: "conversation_terminal" as const,
+    payload: { lifecycle, terminal: true as const, final_score: null },
+  },
+});
 
 type IdentityEvent = {
   event_id: string;
@@ -342,6 +365,159 @@ test("independent stores serialize same-key and distinct-key races", async () =>
       ),
     ).not.toThrow();
     expect(existsSync(`${traceJournalPath(dir, "distinct-keys")}.lock`)).toBe(false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("canonical lifecycle append rejects stale transition and terminal races under the journal lock", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-lifecycle-cas-"));
+  try {
+    const one = independentStore(dir, "1", []);
+    const two = independentStore(dir, "2", []);
+    const sameCorrelation = { ...correlation, conversation_id: "lifecycle-cas" };
+    await one.append(sameCorrelation, lifecycleInput("conversation:active", "ACTIVE"));
+    const outcomes = await Promise.allSettled([
+      one.append(sameCorrelation, lifecycleInput("conversation:transition:1:PAUSED", "PAUSED")),
+      two.appendBatch?.([
+        {
+          correlation: sameCorrelation,
+          input: lifecycleInput("conversation:terminal-state", "COMPLETED"),
+        },
+        { correlation: sameCorrelation, input: terminalInput("COMPLETED") },
+      ]) as Promise<unknown>,
+    ]);
+    expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter(({ status }) => status === "rejected")).toHaveLength(1);
+    const replay = (await one.readConversation("lifecycle-cas")).map(
+      ({ stored_event }) => stored_event.event,
+    );
+    const paused = replay.some(
+      (event) => event.type === "state_change" && event.payload.lifecycle === "PAUSED",
+    );
+    const terminal = replay.filter((event) => event.type === "conversation_terminal");
+    expect({ paused, terminal: terminal.length }).toEqual(
+      paused ? { paused: true, terminal: 0 } : { paused: false, terminal: 1 },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("canonical lifecycle append admits ABORTED but rejects COMPLETED from durable PAUSED", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-lifecycle-paused-"));
+  try {
+    const store = new TraceStore(options(dir));
+    await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE"));
+    await store.append(correlation, lifecycleInput("conversation:transition:1:PAUSED", "PAUSED"));
+    await expect(store.append(correlation, input("stale-paused", "too late"))).rejects.toThrow(
+      /lifecycle/i,
+    );
+    await expect(
+      store.appendBatch?.([
+        {
+          correlation,
+          input: lifecycleInput("conversation:terminal-state", "COMPLETED"),
+        },
+        { correlation, input: terminalInput("COMPLETED") },
+      ]),
+    ).rejects.toThrow(/lifecycle/i);
+    await expect(
+      store.appendBatch?.([
+        {
+          correlation,
+          input: lifecycleInput("conversation:terminal-state", "ABORTED"),
+        },
+        { correlation, input: terminalInput("ABORTED") },
+      ]),
+    ).resolves.toHaveLength(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("canonical health changes are independent, typed, and legal while ACTIVE or PAUSED", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-health-cas-"));
+  try {
+    const store = new TraceStore(options(dir));
+    await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE"));
+    await expect(
+      store.append(
+        correlation,
+        lifecycleInput("conversation:health:1:degraded", "ACTIVE", "degraded"),
+      ),
+    ).resolves.toMatchObject({ event: { payload: { lifecycle: "ACTIVE", health: "degraded" } } });
+    await store.append(
+      correlation,
+      lifecycleInput("conversation:transition:2:PAUSED", "PAUSED", "degraded"),
+    );
+    await expect(
+      store.append(
+        correlation,
+        lifecycleInput("conversation:health:3:healthy", "PAUSED", "healthy"),
+      ),
+    ).resolves.toMatchObject({ event: { payload: { lifecycle: "PAUSED", health: "healthy" } } });
+    await expect(
+      store.append(
+        correlation,
+        lifecycleInput("conversation:health:4:healthy", "PAUSED", "healthy"),
+      ),
+    ).rejects.toThrow(/lifecycle/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("canonical lifecycle CAS rejects incoherent terminal flags without poisoning authority", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-terminal-flag-cas-"));
+  try {
+    const store = new TraceStore(options(dir));
+    const activeTerminal = lifecycleInput("poison-active-terminal", "ACTIVE");
+    activeTerminal.event.payload.terminal = true;
+    await expect(store.append(correlation, activeTerminal)).rejects.toThrow(/lifecycle/i);
+    await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE"));
+    const completedNonterminal = lifecycleInput("poison-completed-nonterminal", "COMPLETED");
+    completedNonterminal.event.payload.terminal = false;
+    await expect(store.append(correlation, completedNonterminal)).rejects.toThrow(/lifecycle/i);
+    await expect(
+      store.append(correlation, input("still-active", "admitted")),
+    ).resolves.toMatchObject({ event: { type: "user_message" } });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("durable terminal authority rejects every later non-idempotent effect", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-terminal-closed-"));
+  try {
+    const store = new TraceStore(options(dir));
+    await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE"));
+    await store.appendBatch?.([
+      {
+        correlation,
+        input: lifecycleInput("conversation:terminal-state", "COMPLETED"),
+      },
+      { correlation, input: terminalInput("COMPLETED") },
+    ]);
+    await expect(store.append(correlation, input("stale-message", "too late"))).rejects.toThrow(
+      /lifecycle/i,
+    );
+    await expect(
+      store.appendBatch?.([
+        { correlation, input: lifecycleInput("conversation:terminal-state", "COMPLETED") },
+        { correlation, input: terminalInput("COMPLETED") },
+        {
+          correlation,
+          input: {
+            idempotency_key: "stale-policy-effect",
+            event: { type: "error", payload: { agent_id: null, code: "late", message: "late" } },
+          },
+        },
+      ]),
+    ).rejects.toThrow(/lifecycle|idempotency/i);
+    expect(
+      await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE")),
+    ).toBeDefined();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -774,13 +950,28 @@ test("accepts all TraceEvent variants and rejects exact payload shape violations
   try {
     const store = new TraceStore(options(dir));
     for (const [index, sample] of samples.entries()) {
+      const sampleCorrelation = {
+        ...correlation,
+        conversation_id: `variant-${index}`,
+        operation_id: `variant-operation-${index}`,
+        turn_id: `variant-turn-${index}`,
+      };
+      if (sample.type === "conversation_terminal") {
+        await store.append(sampleCorrelation, lifecycleInput("conversation:active", "ACTIVE"));
+        await store.append(
+          sampleCorrelation,
+          lifecycleInput("conversation:terminal-state", sample.payload.lifecycle),
+        );
+      }
+      const validKey =
+        sample.type === "conversation_terminal" ? "conversation:terminal" : `valid-${index}`;
       await expect(
-        store.append(correlation, { idempotency_key: `valid-${index}`, event: sample }),
+        store.append(sampleCorrelation, { idempotency_key: validKey, event: sample }),
       ).resolves.toMatchObject({ event: sample });
       const extra = clone(sample) as unknown as { payload: Record<string, unknown> };
       extra.payload.extra = true;
       await expect(
-        store.append(correlation, {
+        store.append(sampleCorrelation, {
           idempotency_key: `extra-${index}`,
           event: extra as unknown as TraceEvent,
         }),
@@ -790,7 +981,7 @@ test("accepts all TraceEvent variants and rejects exact payload shape violations
       if (!key) throw new Error("sample payload missing key");
       delete missing.payload[key];
       await expect(
-        store.append(correlation, {
+        store.append(sampleCorrelation, {
           idempotency_key: `missing-${index}`,
           event: missing as unknown as TraceEvent,
         }),
@@ -1456,6 +1647,50 @@ test("recovering torn tail is durable before idempotent append resolves", async 
       truncateSpy.mockRestore();
     }
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("recovery drops a crash-torn batch containing an idempotent prefix and two new records", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-mixed-batch-"));
+  const realWrite = fs.writeSync;
+  const write = spyOn(fs, "writeSync");
+  try {
+    const store = new TraceStore(options(dir));
+    await store.append(correlation, input("old", "old"));
+    let injected = false;
+    write.mockImplementation(((
+      fd: number,
+      buffer: Uint8Array,
+      offset: number,
+      length: number,
+      position: number,
+    ) => {
+      const bytes = Buffer.from(buffer).subarray(offset, offset + length);
+      if (!injected && bytes.includes(Buffer.from('"batch-new-2"'))) {
+        injected = true;
+        const firstRecord = bytes.indexOf(10) + 1;
+        realWrite(fd, buffer, offset, firstRecord, position);
+        throw new Error("simulated mixed-batch crash");
+      }
+      return realWrite(fd, buffer, offset, length, position);
+    }) as typeof fs.writeSync);
+    await expect(
+      store.appendBatch?.([
+        { correlation, input: input("old", "old") },
+        { correlation, input: input("batch-new-1", "one") },
+        { correlation, input: input("batch-new-2", "two") },
+      ]),
+    ).rejects.toThrow("simulated mixed-batch crash");
+    write.mockRestore();
+
+    expect(
+      (await store.recoverConversation?.("safe"))?.map(
+        ({ stored_event }) => stored_event.idempotency_key,
+      ),
+    ).toEqual(["old"]);
+  } finally {
+    write.mockRestore();
     await rm(dir, { recursive: true, force: true });
   }
 });

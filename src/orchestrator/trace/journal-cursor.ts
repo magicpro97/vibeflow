@@ -106,19 +106,65 @@ const makeCursor = (
   };
 };
 
+function completeBatchPrefix(
+  records: readonly InternalTraceStoreRecord[],
+  recover: boolean,
+): number {
+  for (let index = 0; index < records.length; ) {
+    const first = records[index] as InternalTraceStoreRecord;
+    if (first.batch_id === undefined) {
+      index += 1;
+      continue;
+    }
+    const batchSize = first.batch_size;
+    if (batchSize === undefined) throw new Error("invalid batch frame");
+    if (first.batch_index !== 0) fail("invalid batch frame");
+    if (index + batchSize > records.length) {
+      if (recover) return index;
+      return fail("incomplete batch");
+    }
+    for (let offset = 0; offset < batchSize; offset++) {
+      const record = records[index + offset] as InternalTraceStoreRecord;
+      if (
+        record.batch_id !== first.batch_id ||
+        record.batch_size !== batchSize ||
+        record.batch_index !== offset
+      )
+        fail("invalid batch frame");
+    }
+    index += batchSize;
+  }
+  return records.length;
+}
+
+function prefixBytes(buffer: Buffer, recordCount: number): number {
+  let end = 0;
+  for (let index = 0; index < recordCount; index++) {
+    const newline = buffer.indexOf(10, end);
+    if (newline < 0) return fail("invalid batch boundary");
+    end = newline + 1;
+  }
+  return end;
+}
+
 export function auditJournal(fd: number, recover: boolean, conversationId: string): JournalCursor {
   const size = fs.fstatSync(fd).size;
   if (size > TRACE_LIMITS.maxJournalBytes) fail("journal too large");
   const buffer = readExact(fd, size, 0);
   const parsed = parseRecords(buffer, conversationId, 0, recover);
-  if (recover && parsed.validBytes !== size) {
-    fs.ftruncateSync(fd, parsed.validBytes);
+  const completeRecords = completeBatchPrefix(parsed.records, recover);
+  const validBytes =
+    completeRecords === parsed.records.length
+      ? parsed.validBytes
+      : prefixBytes(buffer.subarray(0, parsed.validBytes), completeRecords);
+  if (recover && validBytes !== size) {
+    fs.ftruncateSync(fd, validBytes);
     fs.fsyncSync(fd);
   }
   return makeCursor(
     fd,
-    parsed.records,
-    buffer.subarray(0, parsed.validBytes).subarray(-TAIL_BYTES),
+    parsed.records.slice(0, completeRecords),
+    buffer.subarray(0, validBytes).subarray(-TAIL_BYTES),
   );
 }
 

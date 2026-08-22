@@ -217,7 +217,6 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   logbus?: Logbus;
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
-  // Snapshot exact resume bindings before fresh markers can hide crash-surviving sessions.
   const resumeBindings = new Map(opts.units.map((unit) => [unit.name, readMarker(unit.name)]));
   // Log initial markers for visibility before the first unit dispatches.
   for (const u of opts.units) {
@@ -226,7 +225,11 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       u.name,
       opts.agent,
       previous?.engineSessionId
-        ? { engineSessionId: previous.engineSessionId, status: previous.status }
+        ? {
+            engineSessionId: previous.engineSessionId,
+            engineSessionEngine: previous.engineSessionEngine,
+            status: previous.status,
+          }
         : undefined,
     );
   }

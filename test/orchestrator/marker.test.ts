@@ -681,13 +681,18 @@ describe("closeLinkedIssue", () => {
 });
 
 describe("updateMarker engineSessionId (#618)", () => {
-  test("updateMarker persists engineSessionId (#618)", async () => {
+  test("updateMarker persists the engine-bound resume identity (#618)", async () => {
     const { createMarker, updateMarker, readMarker, cleanupMarker } = await loadMarker();
     const u = unit("sid-1");
-    createMarker(u);
-    const m = updateMarker(u, { status: "running", engineSessionId: "sess-xyz" });
-    expect(m?.engineSessionId).toBe("sess-xyz");
-    expect(readMarker(u)?.engineSessionId).toBe("sess-xyz");
+    createMarker(u, "claude");
+    const m = updateMarker(u, {
+      status: "running",
+      engineSessionId: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+      engineSessionEngine: "claude",
+    });
+    expect(m?.engineSessionId).toBe("50c1c208-9518-44e7-9fc5-d63b0bfcbec2");
+    expect(m?.engineSessionEngine).toBe("claude");
+    expect(readMarker(u)?.engineSessionEngine).toBe("claude");
     cleanupMarker(u);
   });
 
@@ -698,6 +703,19 @@ describe("updateMarker engineSessionId (#618)", () => {
     const m = updateMarker(u, { status: "done" });
     expect(m?.engineSessionId).toBeUndefined();
     cleanupMarker(u);
+  });
+
+  test("marker persistence rejects rebinding a native id to another engine", async () => {
+    const { createMarker, updateMarker } = await loadMarker();
+    const u = unit("sid-engine-mismatch");
+    createMarker(u, "claude");
+    updateMarker(u, {
+      engineSessionId: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+      engineSessionEngine: "claude",
+    });
+    expect(() => updateMarker(u, { engineSessionEngine: "codex" })).toThrow(
+      /resume engine must match/i,
+    );
   });
 });
 
