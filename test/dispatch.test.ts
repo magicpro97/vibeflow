@@ -18,6 +18,9 @@ import {
   writeDispatchPrompt,
 } from "../src/dispatch.js";
 
+const CLAUDE_UUID = "50c1c208-9518-44e7-9fc5-d63b0bfcbec2";
+const CODEX_UUID = "019f278f-d7ff-77d3-9c44-7459bbf08d19";
+
 describe("engineCommand — exact argv per engine (defect #1)", () => {
   test("claude → -p --output-format json", () => {
     const r = engineCommand("claude");
@@ -102,18 +105,18 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
 
 describe("engineCommand resume (#618 PR2a)", () => {
   test("claude with resumeSessionId → -r <id> in args", () => {
-    const r = engineCommand("claude", { has: () => true }, false, "sess-abc-123");
+    const r = engineCommand("claude", { has: () => true }, false, CLAUDE_UUID);
     expect(r).toEqual({
       cmd: "claude",
-      args: ["-p", "-r", "sess-abc-123", "--output-format", "json"],
+      args: ["-p", "-r", CLAUDE_UUID, "--output-format", "json"],
     });
   });
 
   test("claude resume + dangerouslySkip → both flags present", () => {
-    const r = engineCommand("claude", { has: () => true }, true, "sess-xyz");
+    const r = engineCommand("claude", { has: () => true }, true, CLAUDE_UUID);
     expect(r).toEqual({
       cmd: "claude",
-      args: ["-p", "-r", "sess-xyz", "--output-format", "json", "--dangerously-skip-permissions"],
+      args: ["-p", "-r", CLAUDE_UUID, "--output-format", "json", "--dangerously-skip-permissions"],
     });
   });
 
@@ -123,8 +126,8 @@ describe("engineCommand resume (#618 PR2a)", () => {
   });
 
   test("codex resume → exec resume <id> --json - (#618 PR2b-2)", () => {
-    const r = engineCommand("codex", { has: () => true }, false, "thread-1");
-    expect(r).toEqual({ cmd: "codex", args: ["exec", "resume", "thread-1", "--json", "-"] });
+    const r = engineCommand("codex", { has: () => true }, false, CODEX_UUID);
+    expect(r).toEqual({ cmd: "codex", args: ["exec", "resume", CODEX_UUID, "--json", "-"] });
   });
 
   test("copilot ignores resumeSessionId in PR2a (fresh)", () => {
@@ -180,10 +183,10 @@ describe("runDispatch resumeSessionId threading (#618 PR2a)", () => {
       engine: "claude",
       prompt: "x",
       mode: "cli",
-      resumeSessionId: "sess-resume-1",
+      resumeSessionId: CLAUDE_UUID,
       spawner,
     });
-    expect(capturedArgs).toEqual(["-p", "-r", "sess-resume-1", "--output-format", "json"]);
+    expect(capturedArgs).toEqual(["-p", "-r", CLAUDE_UUID, "--output-format", "json"]);
   });
 
   test("runDispatch without resumeSessionId → fresh claude args (#618 PR2a)", () => {
@@ -206,10 +209,10 @@ describe("runDispatch resumeSessionId threading (#618 PR2a)", () => {
       engine: "claude",
       prompt: "x",
       mode: "cli",
-      resumeSessionId: "sess-async-1",
+      resumeSessionId: CLAUDE_UUID,
       spawner,
     });
-    expect(capturedArgs).toEqual(["-p", "-r", "sess-async-1", "--output-format", "json"]);
+    expect(capturedArgs).toEqual(["-p", "-r", CLAUDE_UUID, "--output-format", "json"]);
   });
 
   test("runDispatchAsync without resumeSessionId → fresh claude args (#618 PR2a)", async () => {
@@ -1699,7 +1702,7 @@ describe("parseSessionId (#618)", () => {
     const envelope = JSON.stringify({
       type: "result",
       subtype: "success",
-      session_id: "sess-abc-123",
+      session_id: CLAUDE_UUID,
       num_turns: 2,
       result: "",
     });
@@ -1709,7 +1712,7 @@ describe("parseSessionId (#618)", () => {
       stderr: "",
     });
     const r = runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
-    expect(r.sessionId).toBe("sess-abc-123");
+    expect(r.sessionId).toBe(CLAUDE_UUID);
   });
 
   test("runDispatch leaves sessionId undefined when no envelope", () => {

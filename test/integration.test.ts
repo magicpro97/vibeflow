@@ -210,16 +210,17 @@ describe("orchestrate dry mode is read-only", () => {
     expect(existsSync(join(dir, CTX_DIR, "workunits", "auth", "CONTEXT.md"))).toBe(true);
   });
 
-  test("re-running a real dispatch does not accumulate duplicate evidence paths", async () => {
+  test("re-running a real dispatch records distinct immutable attempt evidence", async () => {
     const { runner } = fakeGit({ dirty: false });
     await orchestrate({ engine: "claude", yes: true }, dir, { spawner: okSpawner, git: runner });
     const { runner: runner2 } = fakeGit({ dirty: false });
     await orchestrate({ engine: "claude", yes: true }, dir, { spawner: okSpawner, git: runner2 });
     const evidence =
       (readState(dir) as WorkflowState).work_units.find((u) => u.name === "auth")?.evidence ?? [];
-    // a real run STILL persists evidence (non-regression) …
-    const resultPaths = evidence.filter((e) => e.includes("claude.result.json"));
-    expect(resultPaths.length).toBe(1); // … but exactly once, no duplicates across re-runs.
+    const resultPaths = evidence.filter((path) => path.includes("evidence/attempts/"));
+    expect(resultPaths).toHaveLength(2);
+    expect(new Set(resultPaths).size).toBe(2);
+    expect(evidence.some((path) => path.includes("claude.result.json"))).toBe(false);
   });
 });
 

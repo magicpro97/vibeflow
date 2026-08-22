@@ -2,8 +2,33 @@ import { existsSync } from "node:fs";
 import { extname } from "node:path";
 import { resolveCommand } from "../core.js";
 import { filterEnv } from "./env-filter.js";
+import { projectPublicEngineFrames } from "./public-redaction.js";
+import type { EngineProcess, EngineProcessSpawner } from "./session-types.js";
 import type { AsyncSpawner, AsyncSpawnerOpts, SyncResult } from "./types.js";
 import { bunSpawn } from "./types.js";
+
+/** Canonical Bun process launcher for the conversation session adapter. */
+export function makeEngineProcessSpawner(spawn: typeof bunSpawn = bunSpawn): EngineProcessSpawner {
+  return (argv, options): EngineProcess => {
+    const proc = spawn(argv, {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      detached: options.detached,
+      env: options.env,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    }) as unknown as EngineProcess;
+    try {
+      proc.stdin?.write(options.stdinText);
+      proc.stdin?.end();
+    } catch (error) {
+      proc.startupError = error instanceof Error ? error : new Error(String(error));
+    }
+    return proc;
+  };
+}
+
+export const defaultEngineProcessSpawner = makeEngineProcessSpawner();
 
 // Test seam: exported so unit tests can exercise the function body
 // (line 67-68) by mocking Bun.spawnSync.
@@ -157,9 +182,14 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
 
     const stdoutReader = proc.stdout?.getReader();
     const stderrReader = proc.stderr?.getReader();
-    const decoder = new TextDecoder();
+    const stdoutDecoder = new TextDecoder();
+    const stderrDecoder = new TextDecoder();
     let stdout = "";
     let stderr = "";
+    let publicStdout = "";
+    let publicStderr = "";
+    let publicStdoutDiscarding = false;
+    let publicStderrDiscarding = false;
     let timedOut = false;
 
     let term: Timer | undefined;
@@ -209,20 +239,58 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       (async () => {
         while (stdoutReader) {
           const { done, value } = await stdoutReader.read();
-          if (done) break;
-          const s = decoder.decode(value);
-          onChunk?.(s);
+          if (done) {
+            const projected = projectPublicEngineFrames(
+              publicStdout,
+              undefined,
+              true,
+              [],
+              publicStdoutDiscarding,
+            );
+            for (const frame of projected.frames) onChunk?.(frame);
+            break;
+          }
+          const s = stdoutDecoder.decode(value, { stream: true });
           stdout += s;
+          const projected = projectPublicEngineFrames(
+            publicStdout + s,
+            undefined,
+            false,
+            [],
+            publicStdoutDiscarding,
+          );
+          publicStdout = projected.remainder;
+          publicStdoutDiscarding = projected.discardingOversize;
+          for (const frame of projected.frames) onChunk?.(frame);
           resetIdle();
         }
       })(),
       (async () => {
         while (stderrReader) {
           const { done, value } = await stderrReader.read();
-          if (done) break;
-          const s = decoder.decode(value);
+          if (done) {
+            const projected = projectPublicEngineFrames(
+              publicStderr,
+              undefined,
+              true,
+              [],
+              publicStderrDiscarding,
+            );
+            for (const frame of projected.frames) onStderrChunk?.(frame);
+            break;
+          }
+          const s = stderrDecoder.decode(value, { stream: true });
           stderr += s;
-          onStderrChunk?.(s);
+          const projected = projectPublicEngineFrames(
+            publicStderr + s,
+            undefined,
+            false,
+            [],
+            publicStderrDiscarding,
+          );
+          publicStderr = projected.remainder;
+          publicStderrDiscarding = projected.discardingOversize;
+          for (const frame of projected.frames) onStderrChunk?.(frame);
           resetIdle();
         }
       })(),

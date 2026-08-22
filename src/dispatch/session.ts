@@ -1,0 +1,396 @@
+import { join } from "node:path";
+import type { Engine } from "../core.js";
+import {
+  createAttemptHandle,
+  createProcessTerminator,
+  normalizedAttemptError,
+  observeAttemptLifecycle,
+  persistFailedAttemptEvidence,
+  reserveAttemptEvidence,
+  snapshotSessionAdapterOptions,
+} from "./attempt-handle.js";
+import { filterEnv, providerCredentialValues } from "./env-filter.js";
+import {
+  claimIsolationLease,
+  materializeIsolationInvocation,
+  releaseIsolationLease,
+} from "./isolation.js";
+import { parseEngineSummary } from "./prompt.js";
+import {
+  captureSafeNativeSessionId,
+  projectPublicEngineFrames,
+  publicEngineSummary,
+  sanitizePublicEngineText,
+  sanitizePublicValue,
+} from "./public-redaction.js";
+import {
+  assertSpawnProjection,
+  reconcileSessionHistory,
+  sessionInvocation,
+  stdoutAcknowledges,
+} from "./session-argv.js";
+import { isCanonicalSpawnOptionsProjection } from "./session-types.js";
+import type {
+  AttemptHandle,
+  EngineProcess,
+  EngineSessionAdapter,
+  EngineSessionAdapterOptions,
+  EngineSessionResult,
+  InternalResumeBinding,
+  OperationLifecycleState,
+} from "./session-types.js";
+import { defaultEngineProcessSpawner } from "./spawners.js";
+
+export function createEngineSessionAdapter(
+  options: EngineSessionAdapterOptions = {},
+): EngineSessionAdapter {
+  const config = snapshotSessionAdapterOptions(options);
+  const spawnProcess = config.spawn ?? defaultEngineProcessSpawner;
+  const sourceEnv = config.sourceEnv as NodeJS.ProcessEnv;
+  const startedAttempts = new Set<string>();
+  const evidenceRoot = config.evidenceRoot ?? join(process.cwd(), ".vibeflow", "attempts");
+
+  return {
+    start(request): AttemptHandle {
+      const { attemptId, spawn, nativeSessionId, signal, onChunk, onLifecycle } = request;
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(attemptId)) {
+        throw new Error("attemptId must be a safe opaque identifier");
+      }
+      if (startedAttempts.has(attemptId)) {
+        throw new Error(`immutable attempt evidence already exists: ${attemptId}`);
+      }
+      if (signal.aborted) throw new Error("cannot start an already-aborted attempt");
+      startedAttempts.add(attemptId);
+      const reservation = config.writeEvidence
+        ? undefined
+        : reserveAttemptEvidence(evidenceRoot, attemptId);
+      let evidenceBinding = reservation
+        ? { attemptId, internalRef: reservation.internalRef }
+        : undefined;
+      const lifecycle: OperationLifecycleState[] = [];
+      let callbackError: Error | undefined;
+      const transition = (
+        state: OperationLifecycleState,
+        contain = false,
+        recordOnFailure = true,
+      ): boolean =>
+        observeAttemptLifecycle(
+          lifecycle,
+          state,
+          onLifecycle,
+          (failure) => {
+            callbackError ??= failure;
+          },
+          contain,
+          recordOnFailure,
+        );
+      let engine: Engine | "unknown" = "unknown";
+      let claimedProjection: typeof spawn.isolation = null;
+      let claimedLease: ReturnType<typeof claimIsolationLease> | undefined;
+      let initialPrivate: string[] = [];
+      const persistPreSpawnFailure = (error: Error) => {
+        const evidence = sanitizePublicValue(
+          {
+            attempt_id: attemptId,
+            engine,
+            lifecycle: [...lifecycle],
+            state: "engine_start",
+            error_kind: "engine_start",
+            ok: false,
+            reason: error.message,
+            native_session_status: "unavailable",
+          },
+          nativeSessionId ? [nativeSessionId] : [],
+          initialPrivate,
+        );
+        persistFailedAttemptEvidence(
+          reservation,
+          config.writeEvidence,
+          attemptId,
+          evidence,
+          (internalRef) => {
+            evidenceBinding = { attemptId, internalRef };
+          },
+        );
+      };
+
+      let invocation: ReturnType<typeof sessionInvocation>;
+      let env: NodeJS.ProcessEnv;
+      let argv: string[];
+      let cwd: string | undefined;
+      let inheritedPrivateValues: string[] = [];
+      try {
+        if (!isCanonicalSpawnOptionsProjection(spawn)) {
+          throw new Error("spawn projection lacks canonical spawn authority");
+        }
+        engine = spawn.engine;
+        claimedProjection = spawn.isolation;
+        initialPrivate = [spawn.rendered_prompt, spawn.isolation?.evidence_ref ?? ""];
+        assertSpawnProjection(spawn, nativeSessionId);
+        transition("requested");
+        const projectRole = spawn.provenance.roleSource === "repo";
+        if (projectRole && !claimedProjection) {
+          throw new Error("project role requires a live isolation lease");
+        }
+        if (claimedProjection) {
+          try {
+            claimedLease = claimIsolationLease(claimedProjection);
+          } catch {
+            if (projectRole) throw new Error("project role requires a live isolation lease");
+            throw new Error("spawn isolation lease is not live");
+          }
+        }
+        invocation = sessionInvocation(spawn, nativeSessionId);
+        env = filterEnv(sourceEnv, spawn.env_policy).env;
+        inheritedPrivateValues = providerCredentialValues(env, spawn.engine);
+        env.PWD = claimedLease?.cwd ?? process.cwd();
+        Object.assign(env, {
+          VF_ATTEMPT_ID: attemptId,
+          VF_SESSION_MODE: spawn.sessionMode,
+          VF_RENDERED_TOOLS: spawn.rendered_tools.join(","),
+          VF_ROLE_SANDBOX: spawn.sandbox ?? "none",
+          VF_ROLE_SOURCE: spawn.provenance.roleSource,
+          VF_ROLE_HASH: spawn.provenance.roleHash,
+          VF_SKILL_HASHES: spawn.provenance.skillHashes.join(","),
+          VF_ROLE_RESOLVED_HASH: spawn.trace_metadata.role_resolved_hash,
+          VF_SKILL_RESOLVED_HASHES: spawn.trace_metadata.skill_resolved_hashes.join(","),
+        });
+        const materialized = materializeIsolationInvocation(
+          claimedLease,
+          [invocation.cmd, ...invocation.args],
+          env,
+        );
+        argv = materialized.argv;
+        cwd = materialized.cwd;
+      } catch (error) {
+        const failure = normalizedAttemptError(error);
+        try {
+          persistPreSpawnFailure(failure);
+        } finally {
+          if (claimedProjection) void releaseIsolationLease(claimedProjection).catch(() => {});
+        }
+        throw failure;
+      }
+
+      let processHandle: EngineProcess;
+      try {
+        processHandle = spawnProcess(argv, {
+          ...(cwd ? { cwd } : {}),
+          env,
+          stdinText: invocation.input,
+          detached: config.spawn === undefined && process.platform !== "win32",
+        });
+      } catch (error) {
+        const failure = normalizedAttemptError(error);
+        try {
+          persistPreSpawnFailure(failure);
+        } finally {
+          if (claimedProjection) void releaseIsolationLease(claimedProjection).catch(() => {});
+        }
+        throw failure;
+      }
+
+      let resumeBinding: InternalResumeBinding | undefined =
+        spawn.sessionMode === "exact" && nativeSessionId
+          ? { attemptId, engine: spawn.engine, nativeSessionId }
+          : undefined;
+      let stdout = "";
+      const publicBuffers = { stdout: "", stderr: "" };
+      const discardingOversize = { stdout: false, stderr: false };
+      const privateValues = [...initialPrivate, ...inheritedPrivateValues];
+      let acknowledgementSeen = false;
+      let acknowledged = false;
+      let terminationReason: string | undefined;
+      let terminationRequested = false;
+      let terminalError: Error | undefined;
+      let hardTimer: ReturnType<typeof setTimeout> | undefined;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const { terminate: terminateProcess } = createProcessTerminator({
+        process: processHandle,
+        killProcessGroup: config.spawn === undefined && process.platform !== "win32",
+        graceMs: config.graceMs ?? 3000,
+        onReason: (reason) => {
+          terminationRequested = true;
+          terminationReason = reason;
+        },
+      });
+      const callbackReason = () =>
+        callbackError ? `callback failed: ${callbackError.message}` : undefined;
+      transition("dispatched", true);
+      if (callbackError) void terminateProcess(callbackReason());
+      const acknowledge = () => {
+        if (acknowledgementSeen) return;
+        acknowledgementSeen = true;
+        acknowledged = transition("acknowledged", true);
+        if (!acknowledged) void terminateProcess(callbackReason());
+      };
+      const emitChunk = (stream: "stdout" | "stderr", content: string) => {
+        try {
+          onChunk?.({ stream, content });
+        } catch (error) {
+          callbackError ??= normalizedAttemptError(error);
+          void terminateProcess(callbackReason());
+        }
+      };
+      const resetIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (config.idleTimeoutMs !== undefined) {
+          idleTimer = setTimeout(() => void terminateProcess("idle timeout"), config.idleTimeoutMs);
+        }
+      };
+      if (config.timeoutMs !== undefined) {
+        hardTimer = setTimeout(() => void terminateProcess("timeout"), config.timeoutMs);
+      }
+      resetIdle();
+      if (processHandle.startupError) {
+        void terminateProcess(`startup I/O failed: ${processHandle.startupError.message}`);
+      }
+
+      const readStream = async (
+        stream: ReadableStream<Uint8Array> | null | undefined,
+        kind: "stdout" | "stderr",
+      ) => {
+        if (!stream) return;
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            const tail = decoder.decode();
+            if (tail) {
+              if (kind === "stdout") stdout += tail;
+              publicBuffers[kind] += tail;
+            }
+            const projected = projectPublicEngineFrames(
+              publicBuffers[kind],
+              resumeBinding?.nativeSessionId,
+              true,
+              privateValues,
+              discardingOversize[kind],
+            );
+            for (const frame of projected.frames) emitChunk(kind, frame);
+            publicBuffers[kind] = "";
+            discardingOversize[kind] = projected.discardingOversize;
+            break;
+          }
+          const content = decoder.decode(value, { stream: true });
+          if (!content) continue;
+          resetIdle();
+          if (kind === "stdout") {
+            stdout += content;
+            const captured = captureSafeNativeSessionId(spawn.engine, stdout);
+            if (captured && !resumeBinding) {
+              resumeBinding = { attemptId, engine: spawn.engine, nativeSessionId: captured };
+            }
+            if (stdoutAcknowledges(spawn.engine, stdout)) acknowledge();
+          }
+          const projected = projectPublicEngineFrames(
+            publicBuffers[kind] + content,
+            resumeBinding?.nativeSessionId,
+            false,
+            privateValues,
+            discardingOversize[kind],
+          );
+          publicBuffers[kind] = projected.remainder;
+          discardingOversize[kind] = projected.discardingOversize;
+          for (const frame of projected.frames) emitChunk(kind, frame);
+        }
+      };
+
+      const safeExit = processHandle.exited.catch(async (error) => {
+        terminalError = normalizedAttemptError(error);
+        terminationReason ??= `engine exit failed: ${terminalError.message}`;
+        await terminateProcess(terminationReason);
+        return null;
+      });
+      const drains = Promise.all([
+        readStream(processHandle.stdout, "stdout"),
+        readStream(processHandle.stderr, "stderr"),
+      ]).catch(async (error) => {
+        terminalError = normalizedAttemptError(error);
+        await terminateProcess(`engine stream failed: ${terminalError.message}`);
+      });
+      const completion = (async (): Promise<EngineSessionResult> => {
+        try {
+          const [exitCode] = await Promise.all([safeExit, drains]);
+          let state: EngineSessionResult["state"] =
+            acknowledged && !callbackError && !terminalError && !terminationRequested
+              ? "completed"
+              : "ambiguous";
+          const terminalObserved = transition(state, true, state === "ambiguous");
+          if (state === "completed" && !terminalObserved) {
+            state = "ambiguous";
+            transition("ambiguous", true);
+          }
+          const rawReason =
+            terminationReason ??
+            callbackReason() ??
+            (terminalError
+              ? terminalError.message
+              : exitCode === 0
+                ? undefined
+                : `engine exited ${exitCode}`);
+          const nativeIds = resumeBinding?.nativeSessionId ? [resumeBinding.nativeSessionId] : [];
+          const reason = rawReason
+            ? sanitizePublicEngineText(rawReason, nativeIds, privateValues)
+            : undefined;
+          const ok = state === "completed" && exitCode === 0 && !rawReason;
+          const evidence = sanitizePublicValue(
+            {
+              attempt_id: attemptId,
+              engine: spawn.engine,
+              lifecycle: [...lifecycle],
+              state,
+              ok,
+              reason: reason ?? null,
+              native_session_status: resumeBinding ? "captured" : "unavailable",
+              isolation_evidence_ref: spawn.isolation?.evidence_ref ?? null,
+              provenance: spawn.provenance,
+              trace_metadata: spawn.trace_metadata,
+            },
+            nativeIds,
+            privateValues,
+          );
+          if (reservation) reservation.finalize(evidence);
+          else if (config.writeEvidence) {
+            const internalRef = await config.writeEvidence(attemptId, evidence);
+            evidenceBinding = { attemptId, internalRef };
+          }
+          return {
+            attemptId,
+            engine: spawn.engine,
+            ok,
+            state,
+            lifecycle: [...lifecycle],
+            output: sanitizePublicEngineText(stdout, nativeIds, privateValues),
+            summary: publicEngineSummary(
+              parseEngineSummary(stdout),
+              resumeBinding?.nativeSessionId,
+              privateValues,
+            ),
+            reason,
+            evidenceStatus: "persisted",
+            nativeSessionStatus: resumeBinding ? "captured" : "unavailable",
+          };
+        } finally {
+          if (hardTimer) clearTimeout(hardTimer);
+          if (idleTimer) clearTimeout(idleTimer);
+          if (claimedProjection) {
+            await releaseIsolationLease(claimedProjection).catch(() => {});
+          }
+        }
+      })();
+      return createAttemptHandle({
+        attemptId,
+        completion,
+        signal,
+        terminate: terminateProcess,
+        readResumeBinding: () => resumeBinding,
+        readEvidenceBinding: () => evidenceBinding,
+      });
+    },
+    reconcileHistory(request) {
+      return reconcileSessionHistory(request, config.historyRoots);
+    },
+  };
+}

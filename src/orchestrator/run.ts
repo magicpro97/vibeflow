@@ -10,7 +10,7 @@ import { computeConfidence } from "../gates.js";
 import { type OrchestratorApplyGate, applyGateBlock } from "../hooks/apply-gate.js";
 import type { Logbus } from "../logbus.js";
 import { thresholdFor } from "./investigate.js";
-import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
+import { cleanupMarker, createMarker, readMarker, updateMarker } from "./marker.js";
 import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security-checkpoint.js";
 import { applyStuckDetection } from "./stuck-wire.js";
 
@@ -217,8 +217,19 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   logbus?: Logbus;
 }): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
+  // Snapshot exact resume bindings before fresh markers can hide crash-surviving sessions.
+  const resumeBindings = new Map(opts.units.map((unit) => [unit.name, readMarker(unit.name)]));
   // Log initial markers for visibility before the first unit dispatches.
-  for (const u of opts.units) createMarker(u.name, opts.agent);
+  for (const u of opts.units) {
+    const previous = resumeBindings.get(u.name);
+    createMarker(
+      u.name,
+      opts.agent,
+      previous?.engineSessionId
+        ? { engineSessionId: previous.engineSessionId, status: previous.status }
+        : undefined,
+    );
+  }
   const security = opts.security;
   const controller = new AbortController();
   const units = (await runParallel(

@@ -11,10 +11,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { requireSafeEngineSessionId, sanitizePublicValue } from "../dispatch/public-redaction.js";
 import { appendTimeline, timelinePath } from "./timeline.js";
 
 export type MarkerStatus = "pending" | "running" | "done" | "failed" | "blocked";
-
 export interface DispatchMarker {
   unit: string;
   status: MarkerStatus;
@@ -28,8 +28,24 @@ export interface DispatchMarker {
   projectItemId?: string;
   /** GitHub issue URL or number — used to auto-close when PR merge is detected. */
   issueUrl?: string;
-  /** #618: engine conversation/session id, persisted for crash-resume (`--resume`). */
   engineSessionId?: string;
+  resumeStatus?: MarkerStatus;
+}
+
+export type PublicDispatchMarker = Omit<DispatchMarker, "engineSessionId" | "resumeStatus"> & {
+  nativeSessionStatus: "captured" | "unavailable";
+};
+
+function projectPublicMarker(marker: DispatchMarker): PublicDispatchMarker {
+  const { engineSessionId, resumeStatus: _resumeStatus, ...publicMarker } = marker;
+  return sanitizePublicValue(
+    {
+      ...publicMarker,
+      evidence: publicMarker.evidence.map(() => "[opaque-evidence]"),
+      nativeSessionStatus: engineSessionId ? "captured" : "unavailable",
+    },
+    engineSessionId ? [engineSessionId] : [],
+  );
 }
 
 /**
@@ -76,7 +92,16 @@ function lockPath(unitName: string): string {
   return join(markerDir(), `${unitName}.lock`);
 }
 
-export function createMarker(unit: string, agent?: string): DispatchMarker {
+export function createMarker(
+  unit: string,
+  agent?: string,
+  resumeBinding?: Pick<DispatchMarker, "engineSessionId" | "status">,
+): DispatchMarker {
+  const resumable =
+    resumeBinding?.engineSessionId &&
+    resumeBinding.status !== "done" &&
+    resumeBinding.status !== "pending";
+  if (resumable) requireSafeEngineSessionId(agent, resumeBinding.engineSessionId as string);
   const marker: DispatchMarker = {
     unit,
     status: "pending",
@@ -85,6 +110,8 @@ export function createMarker(unit: string, agent?: string): DispatchMarker {
     confidence: 0,
     evidence: [],
     agent,
+    ...(resumeBinding ? { resumeStatus: resumeBinding.status } : {}),
+    ...(resumable ? { engineSessionId: resumeBinding.engineSessionId } : {}),
   };
   writeFileSync(markerPath(unit), JSON.stringify(marker, null, 2));
   return marker;
@@ -202,7 +229,10 @@ export function updateMarker(
   if (update.exitCode !== undefined) marker.exitCode = update.exitCode;
   if (update.projectItemId !== undefined) marker.projectItemId = update.projectItemId;
   if (update.issueUrl !== undefined) marker.issueUrl = update.issueUrl;
-  if (update.engineSessionId !== undefined) marker.engineSessionId = update.engineSessionId;
+  if (update.engineSessionId !== undefined) {
+    requireSafeEngineSessionId(marker.agent, update.engineSessionId);
+    marker.engineSessionId = update.engineSessionId;
+  }
   writeFileSync(path, JSON.stringify(marker, null, 2));
 
   // AC #176: every status transition syncs to ProjectV2 #6
@@ -240,7 +270,7 @@ export function readMarker(unit: string): DispatchMarker | null {
   }
 }
 
-export function listMarkers(): DispatchMarker[] {
+export function listMarkers(): PublicDispatchMarker[] {
   const markers: DispatchMarker[] = [];
   const dir = markerDir();
   // markerDir() guarantees the directory exists (creates it if not),
@@ -258,7 +288,7 @@ export function listMarkers(): DispatchMarker[] {
       /* skip corrupt files */
     }
   }
-  return markers.sort((a, b) => b.updatedAt - a.updatedAt);
+  return markers.sort((a, b) => b.updatedAt - a.updatedAt).map(projectPublicMarker);
 }
 
 export function cleanupMarker(unit: string): void {
