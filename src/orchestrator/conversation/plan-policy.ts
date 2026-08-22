@@ -13,7 +13,14 @@ import type {
 } from "./types.js";
 
 export interface PlanWorkflowPolicies {
-  orchestrate: ConversationPolicy & Required<Pick<ConversationPolicy, "continueAfterApproval">>;
+  orchestrate: ConversationPolicy &
+    Required<Pick<ConversationPolicy, "continueAfterApproval">> & {
+      continuePlanAfterApproval?: (
+        context: ConversationContext,
+        decision: ApprovalDecision,
+        artifact: PlanArtifact,
+      ) => Promise<ConversationOrchestrationResult>;
+    };
   review: ConversationPolicy;
   verify: ConversationPolicy;
 }
@@ -83,7 +90,9 @@ export class PlanConversationPolicy implements ConversationPolicy {
       if (context.signal.aborted) return failed(context);
       const plan = await this.locatePlan?.(context);
       if (context.signal.aborted || !plan || !this.workflow) return failed(context);
-      const executed = await this.workflow.orchestrate.continueAfterApproval(context, decision);
+      const executed = this.workflow.orchestrate.continuePlanAfterApproval
+        ? await this.workflow.orchestrate.continuePlanAfterApproval(context, decision, plan)
+        : await this.workflow.orchestrate.continueAfterApproval(context, decision);
       if (context.signal.aborted) return failed(context);
       if (executed.operation_id !== context.correlation.operation_id) return failed(context);
       if (executed.status !== "completed") {

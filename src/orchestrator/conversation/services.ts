@@ -61,6 +61,7 @@ export interface OrchestrateService {
   execute(
     context: ConversationContext,
     approval: ApprovalDecision | null,
+    artifact?: PlanArtifact,
   ): Promise<ConversationOrchestrationResult>;
   cancel(command: OperationCancelCommand): Promise<OperationCancelResult>;
 }
@@ -95,11 +96,16 @@ function assertContent(value: unknown, kind: string): asserts value is string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${kind} content is empty`);
 }
 
-const assertPlan = (value: PlanArtifact | null): PlanArtifact => {
-  if (!value?.artifact_id || !value.revision_id || !value.ref) {
+const snapshotPlan = (value: PlanArtifact | null): Readonly<PlanArtifact> => {
+  const plan = structuredClone({
+    artifact_id: value?.artifact_id,
+    revision_id: value?.revision_id,
+    ref: value?.ref,
+  });
+  if (!plan.artifact_id || !plan.revision_id || !plan.ref) {
     throw new Error("plan artifact not found");
   }
-  return value;
+  return Object.freeze(plan) as Readonly<PlanArtifact>;
 };
 
 const assertActive = (context: ConversationContext): void => {
@@ -141,7 +147,7 @@ export class InjectedPlanService implements PlanService {
     )
       throw new Error("invalid plan revision");
     if (!this.options.update || !this.options.locate) throw new Error("plan update is unavailable");
-    const previous = assertPlan(await this.options.locate(context));
+    const previous = snapshotPlan(await this.options.locate(context));
     assertActive(context);
     const output = await this.options.update({ context, revision, previous });
     assertActive(context);
@@ -168,7 +174,7 @@ export class InjectedPlanService implements PlanService {
 export interface VerifyLibrary {
   run(input: {
     context: ConversationContext;
-    artifact: PlanArtifact;
+    artifact: Readonly<PlanArtifact>;
   }): Promise<PolicyVerifyReport>;
 }
 
@@ -234,9 +240,9 @@ export class InjectedVerifyService implements VerifyService {
     context: ConversationContext,
     artifact: PlanArtifact,
   ): Promise<PolicyVerifyReport> {
-    assertPlan(artifact);
+    const plan = snapshotPlan(artifact);
     if (context.signal.aborted) throw new Error("operation aborted");
-    const report = structuredClone(await this.library.run({ context, artifact })) as unknown;
+    const report = structuredClone(await this.library.run({ context, artifact: plan })) as unknown;
     if (context.signal.aborted) throw new Error("operation aborted");
     return projectVerifyReport(report);
   }
@@ -247,6 +253,7 @@ export interface OrchestrateLibrary {
   execute(input: {
     context: ConversationContext;
     approval: ApprovalDecision;
+    artifact?: Readonly<PlanArtifact>;
   }): Promise<OrchestrationResult>;
   cancel?(command: OperationCancelCommand): Promise<OperationCancelResult>;
 }
@@ -288,6 +295,7 @@ export class InjectedOrchestrateService implements OrchestrateService {
   async execute(
     context: ConversationContext,
     approval: ApprovalDecision | null,
+    artifact?: PlanArtifact,
   ): Promise<ConversationOrchestrationResult> {
     const aborted = (): ConversationOrchestrationResult => ({
       operation_id: context.correlation.operation_id,
@@ -325,7 +333,12 @@ export class InjectedOrchestrateService implements OrchestrateService {
         artifact_refs: [],
       };
     }
-    const untrusted = await this.library.execute({ context, approval });
+    const plan = artifact ? snapshotPlan(artifact) : undefined;
+    const untrusted = await this.library.execute({
+      context,
+      approval,
+      ...(plan ? { artifact: plan } : {}),
+    });
     if (context.signal.aborted) return aborted();
     const output = snapshotOrchestrationResult(untrusted);
     if (context.signal.aborted) return aborted();

@@ -1,6 +1,6 @@
 import { sanitizePublicText } from "../../dispatch/public-redaction.js";
 import { TRACE_LIMITS, utf8Bytes } from "../trace/limits.js";
-import type { OrchestrateService } from "./services.js";
+import type { OrchestrateService, PlanArtifact } from "./services.js";
 import type {
   ApprovalDecision,
   ConversationContext,
@@ -108,5 +108,13 @@ export class OrchestrateConversationPolicy implements ConversationPolicy {
     decision: ApprovalDecision,
   ): Promise<ConversationOrchestrationResult> => {
     return this.orchestrate.execute(context, decision);
+  };
+
+  continuePlanAfterApproval = (
+    context: ConversationContext,
+    decision: ApprovalDecision,
+    artifact: PlanArtifact,
+  ): Promise<ConversationOrchestrationResult> => {
+    return this.orchestrate.execute(context, decision, artifact);
   };
 }

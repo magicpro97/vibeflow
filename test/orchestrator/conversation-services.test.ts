@@ -535,6 +535,32 @@ describe("injected workflow services", () => {
     ).rejects.toThrow("full structured verify report");
   });
 
+  test("verify snapshots and freezes the exact plan identity before invoking its library", async () => {
+    const run = contextHarness();
+    const plan = artifact("vf-artifact-plan-original");
+    let received: Readonly<PlanArtifact> | undefined;
+    const service = new InjectedVerifyService({
+      run: async (input) => {
+        received = input.artifact;
+        expect(() => Object.assign(input.artifact, { ref: "vf-artifact-forged" })).toThrow();
+        plan.artifact_id = "mutated-artifact";
+        plan.revision_id = "mutated-revision";
+        plan.ref = "vf-artifact-mutated";
+        return passingReport();
+      },
+    });
+
+    await service.runVerify(run.context, plan);
+    expect(received).not.toBe(plan);
+    expect(received).toEqual({
+      artifact_id: "plan-1",
+      revision_id: "revision-1",
+      ref: "vf-artifact-plan-original",
+    });
+    expect(Object.isFrozen(received)).toBe(true);
+    expect(Object.keys(received ?? {})).toEqual(["artifact_id", "revision_id", "ref"]);
+  });
+
   test("verify snapshots accessor-backed reports before validating and deeply freezing", async () => {
     const run = contextHarness();
     const report = passingReport();

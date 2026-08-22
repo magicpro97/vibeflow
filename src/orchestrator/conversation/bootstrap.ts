@@ -122,11 +122,11 @@ function persistedPlanLocator(store: ConversationArtifactStore): PlanArtifactLoc
       if (!record) return null;
       const plan = record.artifacts.filter((entry) => entry.artifact_type === "plan").at(-1);
       if (plan) {
-        return {
+        return Object.freeze({
           artifact_id: plan.artifact_id,
           revision_id: record.manifest.revision_id,
           ref: plan.ref,
-        };
+        });
       }
       conversationId = record.manifest.parent_conversation_id;
     }
