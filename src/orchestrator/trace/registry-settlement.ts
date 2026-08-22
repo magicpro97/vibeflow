@@ -14,13 +14,17 @@ export function settleDurableRegistry(
   } catch {
     try {
       prepared.rollback();
-    } catch {}
+    } catch (error) {
+      void error;
+    }
     try {
       if (typeof registry?.rebuildConversation === "function") {
         registry.rebuildConversation(conversationId, records);
       } else if (typeof registry?.rebuild === "function") {
         registry.rebuild(records);
       }
-    } catch {}
+    } catch (error) {
+      void error;
+    }
   }
 }

@@ -2255,11 +2255,14 @@ test("a post-fsync registry commit failure cannot reject the durable trace appen
           commitAttempts++;
           throw new Error("injected post-fsync registry commit failure");
         },
-        rollback() {},
+        rollback() {
+          throw new Error("injected registry rollback failure");
+        },
       };
     },
     rebuild(records) {
       rebuilt.push(records.length);
+      if (records.length) throw new Error("injected registry recovery failure");
     },
   };
   try {
