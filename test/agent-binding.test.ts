@@ -234,6 +234,26 @@ describe("AgentBinding materialization", () => {
     expect(Object.isFrozen(out.spawn.trace_metadata.skill_resolved_hashes)).toBe(true);
   });
 
+  test("materialization snapshots caller-owned binding selections before launch authority exists", () => {
+    const binding = direct({ modelOverride: "claude-sonnet-4-5" });
+    const out = materializeAgentBinding(binding, options(repo()));
+
+    binding.roleRef = "reviewer";
+    binding.engine = "codex";
+    binding.modelOverride = "gpt-5.4";
+    binding.sessionMode = "fresh";
+
+    expect(out.resolved.role.spec.name).toBe("direct");
+    expect(out.resolved.engine).toBe("claude");
+    expect(out.resolved.model).toBe("claude-sonnet-4-5");
+    expect(out.resolved.sessionMode).toBe("replay");
+    expect(out.spawn).toMatchObject({
+      engine: "claude",
+      model: "claude-sonnet-4-5",
+      sessionMode: "replay",
+    });
+  });
+
   test("Codex uses canonical model mapping and sandbox rather than unenforceable tool flags", () => {
     const out = materializeAgentBinding(
       direct({ engine: "codex", sessionMode: "fresh" }),
