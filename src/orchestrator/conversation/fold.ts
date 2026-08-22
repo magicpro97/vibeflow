@@ -302,11 +302,11 @@ export function foldConversation(records: readonly PublicStoredTraceEvent[]): Co
             (!precommitsComplete(activeRound, responderIds) || activeRound.responses.size > 0)) ||
           (stage === "full" && !respondersComplete(activeRound, responderIds))
         ) {
-          return fail(
+          const reason =
             stage === "blind"
               ? "blind assessment requires every precommit before responses"
-              : "full assessment requires every completed participant response",
-          );
+              : "full assessment requires every completed participant response";
+          return fail(reason);
         }
         if (activeRound.decision) return fail("assessment occurred after consensus");
         activeRound.stages.add(stage);

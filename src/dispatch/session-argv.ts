@@ -31,6 +31,15 @@ function assertReadOnlyTools(spawn: SpawnOptionsProjection): void {
   }
 }
 
+/** Pure validation seam for the immutable engine/environment authority invariant. */
+export function assertSelectedConversationEngine(
+  spawn: Pick<SpawnOptionsProjection, "engine" | "env_policy">,
+): void {
+  if (spawn.env_policy.selectedEngine !== spawn.engine) {
+    throw new Error("spawn.env_policy must select the launched conversation engine");
+  }
+}
+
 export function assertSpawnProjection(
   spawn: SpawnOptionsProjection,
   nativeSessionId?: string,
@@ -51,9 +60,7 @@ export function assertSpawnProjection(
   ) {
     throw new Error("skill provenance and trace metadata disagree");
   }
-  if (spawn.env_policy.selectedEngine !== spawn.engine) {
-    throw new Error("spawn.env_policy must select the launched conversation engine");
-  }
+  assertSelectedConversationEngine(spawn);
   if (spawn.sessionMode === "exact") {
     if (!nativeSessionId) throw new Error("exact session mode requires a native session id");
     if (spawn.engine !== "claude" && spawn.engine !== "codex") {

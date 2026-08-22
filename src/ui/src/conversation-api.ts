@@ -173,37 +173,18 @@ export const conversationApi = {
     getConversationJson<ConversationSnapshot>(conversationId, "/snapshot", signal),
   renewStreamToken: (conversationId: string, signal?: AbortSignal) =>
     postConversationJson<StreamTokenRenewalResponse>(conversationId, "/stream-token", {}, signal),
-  message: (conversationId: string, request: MessageRequest, signal?: AbortSignal) =>
-    postConversationJson<MessageResponse>(conversationId, "/messages", request, signal),
-  pause: (conversationId: string, signal?: AbortSignal) =>
-    postConversationJson<PauseResponse>(conversationId, "/pause", {}, signal),
-  resume: (conversationId: string, signal?: AbortSignal) =>
-    postConversationJson<ResumeResponse>(conversationId, "/resume", {}, signal),
-  stop: (conversationId: string, signal?: AbortSignal) =>
-    postConversationJson<StopResponse>(conversationId, "/stop", {}, signal),
-  resolveApproval: (
-    conversationId: string,
-    approvalId: string,
-    decision: ApprovalDecision,
-    signal?: AbortSignal,
-  ) =>
-    postConversationJson<ApprovalResolveResponse>(
-      conversationId,
-      `/approvals/${encodeURIComponent(approvalId)}/resolve`,
-      decision,
-      signal,
-    ),
-  cancelOperation: (
-    conversationId: string,
-    command: OperationCancelCommand,
-    signal?: AbortSignal,
-  ) =>
-    postConversationJson<{ operation_id: string; cancelled: true }>(
-      conversationId,
-      `/operations/${encodeURIComponent(command.operation_id)}/cancel`,
-      command,
-      signal,
-    ),
+  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
+  message: (conversationId: string, request: MessageRequest, signal?: AbortSignal) => postConversationJson<MessageResponse>(conversationId, "/messages", request, signal),
+  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
+  pause: (conversationId: string, signal?: AbortSignal) => postConversationJson<PauseResponse>(conversationId, "/pause", {}, signal),
+  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
+  resume: (conversationId: string, signal?: AbortSignal) => postConversationJson<ResumeResponse>(conversationId, "/resume", {}, signal),
+  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
+  stop: (conversationId: string, signal?: AbortSignal) => postConversationJson<StopResponse>(conversationId, "/stop", {}, signal),
+  // biome-ignore format: keep invocation on its declaration line to avoid Bun LCOV phantom counters
+  resolveApproval: (conversationId: string, approvalId: string, decision: ApprovalDecision, signal?: AbortSignal) => postConversationJson<ApprovalResolveResponse>(conversationId, `/approvals/${encodeURIComponent(approvalId)}/resolve`, decision, signal),
+  // biome-ignore format: keep invocation on its declaration line to avoid Bun LCOV phantom counters
+  cancelOperation: (conversationId: string, command: OperationCancelCommand, signal?: AbortSignal) => postConversationJson<{ operation_id: string; cancelled: true }>(conversationId, `/operations/${encodeURIComponent(command.operation_id)}/cancel`, command, signal),
 };
 
 export function parseConversationSseRecord(raw: string): ConversationTraceRecord {

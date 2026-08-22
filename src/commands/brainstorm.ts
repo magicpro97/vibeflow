@@ -39,14 +39,14 @@ const averageConsensusScore = (
 };
 const terminalStatus = (status: string): BrainstormStatus => {
   if (
-    status === "completed" ||
-    status === "stopped" ||
-    status === "failed" ||
-    status === "aborted"
+    status !== "completed" &&
+    status !== "stopped" &&
+    status !== "failed" &&
+    status !== "aborted"
   ) {
-    return status;
+    throw new Error("brainstorm did not reach a terminal state");
   }
-  throw new Error("brainstorm did not reach a terminal state");
+  return status;
 };
 const errorKind = (exit: number): BrainstormErrorKind =>
   exit === CONVERSATION_EXIT.engineStart

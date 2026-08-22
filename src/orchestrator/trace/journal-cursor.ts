@@ -45,9 +45,7 @@ const readExact = (fd: number, length: number, position: number): Buffer => {
 const parseRecords = (
   buffer: Buffer,
   conversationId: string,
-  sequenceOffset: number,
   recover: boolean,
-  leadingSeparator = false,
 ): { records: InternalTraceStoreRecord[]; validBytes: number } => {
   let end = buffer.length;
   const newline = buffer.lastIndexOf(10);
@@ -59,28 +57,20 @@ const parseRecords = (
       end = newline + 1;
     }
   }
-  let body = buffer.subarray(0, end);
-  if (sequenceOffset && body[0] === 10) {
-    if (!leadingSeparator) fail("invalid record");
-    body = body.subarray(1);
-  }
+  const body = buffer.subarray(0, end);
   const text = decodeText(body);
   const lines = text ? text.replace(/\n$/, "").split("\n") : [];
   const records = lines.map(decodeRecord);
   records.forEach(({ stored_event: event }, index) => {
-    if (!validReplayEvent(event, conversationId, sequenceOffset + index + 1))
-      fail("invalid record");
+    if (!validReplayEvent(event, conversationId, index + 1)) fail("invalid record");
   });
   return { records, validBytes: end };
 };
 
-const fingerprint = (fd: number, size: number): Buffer =>
-  readExact(fd, Math.min(size, TAIL_BYTES), Math.max(0, size - TAIL_BYTES));
-
 const makeCursor = (
   fd: number,
   records: InternalTraceStoreRecord[],
-  tail?: Buffer,
+  tail: Buffer,
 ): JournalCursor => {
   const stat = fs.fstatSync(fd);
   const eventIds = new Set<string>();
@@ -101,8 +91,8 @@ const makeCursor = (
     size: stat.size,
     mtimeMs: stat.mtimeMs,
     ctimeMs: stat.ctimeMs,
-    tail: tail ?? fingerprint(fd, stat.size),
-    lastByte: stat.size ? ((tail ?? fingerprint(fd, stat.size)).at(-1) ?? null) : null,
+    tail,
+    lastByte: stat.size ? (tail.at(-1) ?? null) : null,
   };
 };
 
@@ -151,7 +141,7 @@ export function auditJournal(fd: number, recover: boolean, conversationId: strin
   const size = fs.fstatSync(fd).size;
   if (size > TRACE_LIMITS.maxJournalBytes) fail("journal too large");
   const buffer = readExact(fd, size, 0);
-  const parsed = parseRecords(buffer, conversationId, 0, recover);
+  const parsed = parseRecords(buffer, conversationId, recover);
   const completeRecords = completeBatchPrefix(parsed.records, recover);
   const validBytes =
     completeRecords === parsed.records.length

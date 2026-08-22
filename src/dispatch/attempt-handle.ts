@@ -143,10 +143,8 @@ export function reserveAttemptEvidence(
         // Best effort: the original reservation error remains authoritative.
       }
     }
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`immutable attempt evidence already exists: ${attemptId}`);
-    }
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    throw new Error(`immutable attempt evidence already exists: ${attemptId}`);
   }
   let finalized = false;
   return {

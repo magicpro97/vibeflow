@@ -149,7 +149,11 @@ function explicitParticipants(request: ConversationCreateRequest) {
   });
 }
 
-function defaultReadiness(repoRoot: string, phase: number): ConversationEngineReadiness[] {
+/** Testable projection for the production no-probe readiness default. */
+export function defaultConversationReadiness(
+  repoRoot: string,
+  phase: number,
+): ConversationEngineReadiness[] {
   return preflightAll([...ENGINES], { probe: false, cacheKey: repoRoot }).map((status) => ({
     engine: status.engine,
     ready: status.level === "ready",
@@ -169,7 +173,7 @@ function authority(
   return {
     registeredPolicies: ["direct", "debate", "plan", "review", "verify", "orchestrate"],
     registeredRoles: [...new Set(roles)],
-    engines: [...(options.readiness?.() ?? defaultReadiness(repoRoot, phase))],
+    engines: [...(options.readiness?.() ?? defaultConversationReadiness(repoRoot, phase))],
     domainRoles: [...(options.domainRoles ?? [])],
   };
 }

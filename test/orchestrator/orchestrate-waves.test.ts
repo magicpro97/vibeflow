@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { orchestrate } from "../../src/commands.js";
 import type { WorkflowState } from "../../src/core.js";
 import type { WorkUnit } from "../../src/core/types.js";
@@ -156,23 +156,31 @@ describe("orchestrate — wave-aware handoff (#612)", () => {
 describe("orchestrate — antigravity concurrency clamp", () => {
   test("antigravity forces concurrency 1 even when --concurrency is high", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-ag-conc-"));
-    writeState(dir, [unit("x"), unit("y")]);
-    const logs: string[] = [];
-    const origErr = console.error;
-    console.error = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "));
-    };
+    const key = basename(dir);
+    writeState(dir, [unit(`x-${key}`), unit(`y-${key}`)]);
     const seen: Array<{ name: string; prompt: string }> = [];
-    try {
-      await orchestrate({ yes: true, engine: "antigravity", concurrency: "100" }, dir, {
-        sessionRuntime: { processSpawner: recordingSpawner(seen) },
-      });
-      const concLine = logs.find((l) => l.includes("concurrency"));
-      expect(concLine).toBeDefined();
-      if (concLine) expect(concLine).toMatch(/concurrency 1\b/);
-      expect(seen.length).toBe(2);
-    } finally {
-      console.error = origErr;
-    }
+    let active = 0;
+    let maxActive = 0;
+    const baseSpawner = recordingSpawner(seen);
+    const delayedSpawner: EngineProcessSpawner = (argv, options) => {
+      const process = baseSpawner(argv, options);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return {
+        ...process,
+        exited: new Promise<number>((resolve) => {
+          setTimeout(() => {
+            active -= 1;
+            resolve(0);
+          }, 25);
+        }),
+      };
+    };
+    await orchestrate(
+      { yes: true, engine: "antigravity", concurrency: "100", "no-unit-gate": true },
+      dir,
+      { sessionRuntime: { processSpawner: delayedSpawner } },
+    );
+    expect({ calls: seen.length, maxActive }).toEqual({ calls: 2, maxActive: 1 });
   });
 });

@@ -78,6 +78,39 @@ function unchanged(before: BigIntStats, after: BigIntStats): boolean {
   );
 }
 
+/** Pure snapshot validation seam that preserves the directory TOCTOU checks. */
+export function assertRoleDirectorySnapshot(before: BigIntStats, entry: BigIntStats): void {
+  if (
+    !before.isDirectory() ||
+    entry.isSymbolicLink() ||
+    !entry.isDirectory() ||
+    !sameEntry(before, entry)
+  ) {
+    throw new Error("unsafe role directory");
+  }
+}
+
+/** Pure snapshot validation seam that preserves every post-read TOCTOU check. */
+export function assertStableRoleReadSnapshot(input: {
+  fileBefore: BigIntStats;
+  fileAfter: BigIntStats;
+  finalFileEntry: BigIntStats;
+  directoryBefore: BigIntStats;
+  directoryAfter: BigIntStats;
+  finalDirectoryEntry: BigIntStats;
+}): void {
+  if (
+    !unchanged(input.fileBefore, input.fileAfter) ||
+    input.fileAfter.nlink !== 1n ||
+    input.finalFileEntry.nlink !== 1n ||
+    !sameEntry(input.fileAfter, input.finalFileEntry) ||
+    !unchanged(input.directoryBefore, input.directoryAfter) ||
+    !sameEntry(input.directoryAfter, input.finalDirectoryEntry)
+  ) {
+    throw new Error("role path changed during read");
+  }
+}
+
 function readBounded(fd: number): string {
   const data = Buffer.alloc(MAX_ROLE_BYTES + 1);
   let offset = 0;
@@ -107,14 +140,7 @@ function exactRepoRole(roleRef: string, repoRoot: string): { path: string; text:
     );
     const directoryBefore = stableSnapshot(directoryFd);
     const directoryEntry = stableEntry(rolesDir);
-    if (
-      !directoryBefore.isDirectory() ||
-      directoryEntry.isSymbolicLink() ||
-      !directoryEntry.isDirectory() ||
-      !sameEntry(directoryBefore, directoryEntry)
-    ) {
-      throw new Error("unsafe role directory");
-    }
+    assertRoleDirectorySnapshot(directoryBefore, directoryEntry);
     const canonicalRoot = realpathSync(rolesDir);
     if (!isInside(canonicalRepo, canonicalRoot)) throw new Error("role root escapes repository");
     fileFd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -136,16 +162,14 @@ function exactRepoRole(roleRef: string, repoRoot: string): { path: string; text:
     const finalFileEntry = stableEntry(path);
     const directoryAfter = stableSnapshot(directoryFd);
     const finalDirectoryEntry = stableEntry(rolesDir);
-    if (
-      !unchanged(fileBefore, fileAfter) ||
-      fileAfter.nlink !== 1n ||
-      finalFileEntry.nlink !== 1n ||
-      !sameEntry(fileAfter, finalFileEntry) ||
-      !unchanged(directoryBefore, directoryAfter) ||
-      !sameEntry(directoryAfter, finalDirectoryEntry)
-    ) {
-      throw new Error("role path changed during read");
-    }
+    assertStableRoleReadSnapshot({
+      fileBefore,
+      fileAfter,
+      finalFileEntry,
+      directoryBefore,
+      directoryAfter,
+      finalDirectoryEntry,
+    });
     assertNoSymlinkPathComponents(path, pathError);
     return { path: metadataPath, text };
   } catch (error) {

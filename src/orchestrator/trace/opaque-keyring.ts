@@ -245,7 +245,7 @@ const loadKeyring = (root: string, limits: OpaqueKeyLimits, previous?: OpaqueKey
 };
 
 const acquire = (root: string): (() => void) => {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; ; attempt += 1) {
     try {
       return lockfile.lockSync(root, {
         realpath: false,
@@ -258,7 +258,6 @@ const acquire = (root: string): (() => void) => {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
-  return keyError("opaque key lock failed");
 };
 const derive = (key: Uint8Array, input: OpaqueIdentityInput): string =>
   `${input.kind}_${createHmac("sha256", key)

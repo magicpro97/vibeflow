@@ -20,7 +20,7 @@ export class OperationTransitionReservedError extends ConversationAuthorityClose
 const broker = new Map<string, OperationEntry>();
 
 /** Runtime-owned controller/attempt registry. Cancellation is two-phase so journaling wins. */
-export class OperationRegistry {
+export const OperationRegistry = class OperationRegistry {
   private readonly operations = new Map<string, OperationEntry>();
   private readonly tombstones = new Map<string, OperationTombstone>();
   private readonly tombstoneLimit: number;
@@ -384,4 +384,6 @@ export class OperationRegistry {
     if (settled?.conversationId === conversationId && settled.state === "cancelled") return true;
     return this.authority?.isCancellationClaimed(conversationId, operationId) ?? false;
   }
-}
+};
+
+export type OperationRegistry = InstanceType<typeof OperationRegistry>;

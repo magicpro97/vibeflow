@@ -52,15 +52,13 @@ const artifactId = (
   (reservation?.id("artifact", value) ??
     requireRegistry(context).register(context.conversationId, value)) as OpaqueArtifactId;
 
-const sessionRef = (
+/** Fail-closed seam for the reservation guaranteed by session-reference collection. */
+export const projectReservedSessionRef = (
   value: string,
-  context: PublicProjectionContext,
-  reservation?: ArtifactProjectionAuthority,
+  reservation: ArtifactProjectionAuthority | undefined,
 ): OpaqueSessionRef => {
-  if (reservation) return reservation.id("session", value) as OpaqueSessionRef;
-  const registry = requireRegistry(context);
-  if (!registry.sessionRef) throw new Error("public trace: artifact registry required");
-  return registry.sessionRef(context.conversationId, value);
+  if (!reservation) throw new Error("public trace: session projection reservation required");
+  return reservation.id("session", value) as OpaqueSessionRef;
 };
 
 const collectProjectionInputs = (
@@ -245,7 +243,7 @@ const project = (
 ): unknown => {
   if (depth > TRACE_LIMITS.maxDepth) throw new Error("public trace: value too deep");
   if (typeof value === "string") {
-    if (key === "public_session_ref") return sessionRef(value, context, reservation);
+    if (key === "public_session_ref") return projectReservedSessionRef(value, reservation);
     if (artifactReferenceKeys.has(key ?? "")) return artifactId(value, context, reservation);
     return sanitizePublicText(value, key, denied) as PublicText;
   }
@@ -343,7 +341,7 @@ export function projectPublicStoredTrace(
       public_session_ref:
         record.native_session_id === null
           ? null
-          : sessionRef(record.native_session_id, context, reservation),
+          : projectReservedSessionRef(record.native_session_id, reservation),
       event: projectTrace(event, context, denied, reservation),
     };
     reservation?.commit();

@@ -122,6 +122,10 @@ function containerInside(root: string, child: string): boolean {
   return rel !== ".." && !rel.startsWith("../") && !posix.isAbsolute(rel);
 }
 
+function assertContainerInside(root: string, cwd: string): void {
+  if (!containerInside(root, cwd)) throw new Error("container cwd is outside isolation root");
+}
+
 function inspectContainer(record: IsolationLeaseRecord): void {
   const { runtimeInspector, containerId, root, projection } = record;
   if (!runtimeInspector || !inspectors.has(runtimeInspector) || !containerId) {
@@ -152,9 +156,7 @@ function inspectContainer(record: IsolationLeaseRecord): void {
   if (!associated) {
     throw new Error("container mount lacks an associated canonical repository");
   }
-  if (!containerInside(root, projection.cwd)) {
-    throw new Error("container cwd is outside isolation root");
-  }
+  assertContainerInside(root, projection.cwd);
 }
 
 /** Build branded Docker inspection authority. Production uses an argument-array invocation. */
@@ -227,7 +229,7 @@ export function createIsolationLease(input: IsolationLeaseInput): IsolationLease
   } else {
     root = containerPath(input.root, "container isolation root");
     cwd = containerPath(input.cwd, "container isolation cwd");
-    if (!containerInside(root, cwd)) throw new Error("container cwd is outside isolation root");
+    assertContainerInside(root, cwd);
     if (!input.repoRoot) throw new Error("container associated canonical repository is required");
     if (!input.containerId || !input.runtimeInspector || !inspectors.has(input.runtimeInspector)) {
       throw new Error("trusted container runtime authority is unavailable");
