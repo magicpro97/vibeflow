@@ -4,7 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AttemptHandle, EngineSessionResult } from "../../src/dispatch/session-types.js";
-import { hasArtifactUpdateAuthority } from "../../src/orchestrator/conversation/artifact-authority.js";
+import {
+  hasArtifactRecordAuthority,
+  hasArtifactUpdateAuthority,
+} from "../../src/orchestrator/conversation/artifact-authority.js";
 import {
   type BindingAuthoritySnapshot,
   ConversationArtifactStore,
@@ -35,29 +38,37 @@ import type {
 
 const ROLE_HASH = "a".repeat(64);
 
+interface ArtifactAuthorityFixture {
+  manifest: { conversation_id: string; parent_conversation_id: string | null };
+  artifacts: Array<{ artifact_id: string; ref: string; previous_ref: string | null }>;
+}
+
 test("artifact update authority follows only a complete bounded acyclic revision ancestry", () => {
   const ref = `vf-artifact-${"a".repeat(64)}`;
-  const artifact = { artifact_id: "plan", ref };
-  const child = {
+  const artifact = { artifact_id: "plan", ref, previous_ref: null };
+  const child: ArtifactAuthorityFixture = {
     manifest: { conversation_id: "child", parent_conversation_id: "parent" },
-    artifacts: [],
+    artifacts: [{ artifact_id: "plan", ref: `vf-artifact-${"b".repeat(64)}`, previous_ref: ref }],
   };
-  const parent = {
+  const parent: ArtifactAuthorityFixture = {
     manifest: { conversation_id: "parent", parent_conversation_id: null as string | null },
     artifacts: [artifact],
   };
-  const records = new Map([
+  const records = new Map<string, ArtifactAuthorityFixture>([
     ["child", child],
     ["parent", parent],
   ]);
   const read = (id: string) => records.get(id) ?? null;
 
   expect(hasArtifactUpdateAuthority(child, "plan", ref, read)).toBe(true);
+  expect(hasArtifactRecordAuthority(child, read)).toBe(true);
   expect(hasArtifactUpdateAuthority(child, "other", ref, read)).toBe(false);
   parent.manifest.parent_conversation_id = "child";
   expect(hasArtifactUpdateAuthority(child, "plan", ref, read)).toBe(false);
+  expect(hasArtifactRecordAuthority(child, read)).toBe(false);
   records.delete("parent");
   expect(hasArtifactUpdateAuthority(child, "plan", ref, read)).toBe(false);
+  expect(hasArtifactRecordAuthority(child, read)).toBe(false);
 });
 const manifestBinding = () => ({
   participant_id: "participant-1",

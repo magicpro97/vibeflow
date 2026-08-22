@@ -14,10 +14,34 @@ interface ArtifactUpdateAuthorityRecord {
     readonly conversation_id: string;
     readonly parent_conversation_id: string | null;
   };
-  readonly artifacts: readonly { readonly artifact_id: string; readonly ref: string }[];
+  readonly artifacts: readonly {
+    readonly artifact_id: string;
+    readonly ref: string;
+    readonly previous_ref: string | null;
+  }[];
 }
 
 const MAX_ARTIFACT_ANCESTRY = 64;
+
+function artifactAncestry(
+  current: ArtifactUpdateAuthorityRecord,
+  read: (conversationId: string) => ArtifactUpdateAuthorityRecord | null,
+): readonly ArtifactUpdateAuthorityRecord[] | null {
+  const chain: ArtifactUpdateAuthorityRecord[] = [];
+  const seen = new Set<string>();
+  let expectedId = current.manifest.conversation_id;
+  let record: ArtifactUpdateAuthorityRecord | null = current;
+  while (record && chain.length < MAX_ARTIFACT_ANCESTRY) {
+    if (record.manifest.conversation_id !== expectedId || seen.has(expectedId)) return null;
+    seen.add(expectedId);
+    chain.push(record);
+    const parentId = record.manifest.parent_conversation_id;
+    if (parentId === null) return chain;
+    expectedId = parentId;
+    record = read(parentId);
+  }
+  return null;
+}
 
 export function hasArtifactUpdateAuthority(
   current: ArtifactUpdateAuthorityRecord,
@@ -25,21 +49,41 @@ export function hasArtifactUpdateAuthority(
   previousRef: string,
   read: (conversationId: string) => ArtifactUpdateAuthorityRecord | null,
 ): boolean {
-  const seen = new Set<string>();
-  let expectedId = current.manifest.conversation_id;
-  let record: ArtifactUpdateAuthorityRecord | null = current;
-  let authorized = false;
-  for (let depth = 0; record && depth < MAX_ARTIFACT_ANCESTRY; depth++) {
-    if (record.manifest.conversation_id !== expectedId || seen.has(expectedId)) return false;
-    seen.add(expectedId);
-    authorized ||= record.artifacts.some(
-      (artifact) => artifact.artifact_id === artifactId && artifact.ref === previousRef,
-    );
-    expectedId = record.manifest.parent_conversation_id ?? "";
-    if (!expectedId) return authorized;
-    record = read(expectedId);
-  }
-  return false;
+  return Boolean(
+    artifactAncestry(current, read)?.some((record) =>
+      record.artifacts.some(
+        (artifact) => artifact.artifact_id === artifactId && artifact.ref === previousRef,
+      ),
+    ),
+  );
+}
+
+export function hasArtifactRecordAuthority(
+  current: ArtifactUpdateAuthorityRecord,
+  read: (conversationId: string) => ArtifactUpdateAuthorityRecord | null,
+): boolean {
+  const chain = artifactAncestry(current, read);
+  if (!chain) return false;
+  return chain.every((record, recordIndex) =>
+    record.artifacts.every(
+      (artifact, artifactIndex) =>
+        artifact.previous_ref === null ||
+        record.artifacts
+          .slice(0, artifactIndex)
+          .some(
+            (prior) =>
+              prior.artifact_id === artifact.artifact_id && prior.ref === artifact.previous_ref,
+          ) ||
+        chain
+          .slice(recordIndex + 1)
+          .some((ancestor) =>
+            ancestor.artifacts.some(
+              (prior) =>
+                prior.artifact_id === artifact.artifact_id && prior.ref === artifact.previous_ref,
+            ),
+          ),
+    ),
+  );
 }
 
 interface ArtifactAuthorityOptions {

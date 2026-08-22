@@ -353,7 +353,7 @@ export interface ConversationService {
   cancelOperation(command: OperationCancelCommand): Promise<OperationCancelResult>;
   snapshot(id: string): Promise<ConversationSnapshot | null>;
   events(id: string, afterSeq: number): Promise<PublicStoredTraceEvent[] | null>;
-  subscribe(id: string, listener: ConversationListener): Unsubscribe | null;
+  subscribe(id: string, listener: ConversationListener, afterSeq?: number): Unsubscribe | null;
 }
 
 export type ConversationSseFrame =

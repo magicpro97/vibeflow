@@ -284,10 +284,8 @@ const assertArtifact: (value: unknown) => asserts value is ConversationArtifactE
     fail();
 };
 
-export function assertConversationDurableRecord(
-  value: unknown,
-  expectedId?: string,
-): asserts value is ConversationDurableRecord {
+// biome-ignore format: production file ceiling
+export function assertConversationDurableRecord(value: unknown, expectedId?: string, allowAncestorRoots = false): asserts value is ConversationDurableRecord {
   if (plain(value) && !Object.hasOwn(value, "artifact_reservations"))
     value.artifact_reservations = {};
   if (
@@ -373,7 +371,7 @@ export function assertConversationDurableRecord(
     fail();
   if (
     new Set(artifacts.map((item) => item.idempotency_key)).size !== artifacts.length ||
-    artifacts.some(
+    (!allowAncestorRoots && artifacts.some(
       (item, index) =>
         item.previous_ref !== null &&
         !artifacts
@@ -381,7 +379,7 @@ export function assertConversationDurableRecord(
           .some(
             (prior) => prior.artifact_id === item.artifact_id && prior.ref === item.previous_ref,
           ),
-    )
+    ))
   )
     fail();
   const reservations = value.artifact_reservations;

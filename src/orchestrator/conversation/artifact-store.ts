@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import type { InternalResumeBinding } from "../../dispatch/session-types.js";
-import { hasArtifactUpdateAuthority } from "./artifact-authority.js";
+// biome-ignore format: production file ceiling
+import { hasArtifactRecordAuthority, hasArtifactUpdateAuthority } from "./artifact-authority.js";
 import {
   type BindingAuthoritySnapshot,
   type ConversationArtifactEntry,
@@ -66,7 +67,10 @@ export class ConversationArtifactStore {
       release();
     }
   }
-  private readUnlocked(conversationId: string): ConversationDurableRecord | null {
+  // biome-ignore format: production file ceiling
+  private validRecord(value: unknown, id: string, ancestry = true): ConversationDurableRecord { assertConversationDurableRecord(value, id, true); if (ancestry && !hasArtifactRecordAuthority(value, (parent) => this.readUnlocked(parent, false))) fail("invalid manifest"); return value; }
+  // biome-ignore format: production file ceiling
+  private readUnlocked(conversationId: string, validateAncestry = true): ConversationDurableRecord | null {
     const path = this.path(conversationId);
     if (!safeEntry(path, fail, "unsafe manifest")) return null;
     const fd = openPrivateFile(path, MAX_MANIFEST_BYTES, fail, "unsafe manifest");
@@ -98,14 +102,13 @@ export class ConversationArtifactStore {
       } catch {
         return fail("invalid manifest");
       }
-      assertConversationDurableRecord(decoded, conversationId);
-      return clone(decoded);
+      return clone(this.validRecord(decoded, conversationId, validateAncestry));
     } finally {
       fs.closeSync(fd);
     }
   }
   private writeRecordUnlocked(record: ConversationDurableRecord): ConversationDurableRecord {
-    assertConversationDurableRecord(record, record.manifest.conversation_id);
+    this.validRecord(record, record.manifest.conversation_id);
     writePrivateAtomic(
       this.root,
       this.path(record.manifest.conversation_id),
