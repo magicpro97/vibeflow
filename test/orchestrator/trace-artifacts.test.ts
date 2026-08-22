@@ -100,6 +100,10 @@ test("opaque artifact and session identities are domain-separated and conversati
     const session = registry.sessionRef("conversation-a", "native-session");
     expect(session).not.toBe(first);
     expect(session).not.toBe(registry.sessionRef("conversation-b", "native-session"));
+    expect(registry.resolve("conversation-a", session)).toBeNull();
+    const last = String(first).at(-1);
+    const tampered = `${String(first).slice(0, -1)}${last === "A" ? "B" : "A"}`;
+    expect(registry.resolve("conversation-a", tampered)).toBeNull();
     expect(String(first)).not.toContain(internalRef);
     expect(String(session)).not.toContain("native-session");
   } finally {
