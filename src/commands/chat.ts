@@ -1,6 +1,7 @@
 import {
   CONVERSATION_EXIT,
   type ConversationCommandDeps,
+  assertNoResumeCreateFlags,
   c,
   classifyConversationError,
   classifyConversationResult,
@@ -12,6 +13,7 @@ import {
   out,
   parseConversationArgv,
   parseMaxRounds,
+  parseOptionalResumeId,
   parseParticipantSpec,
 } from "./_shared.js";
 
@@ -36,24 +38,28 @@ export async function chat(argv: string[], deps: ConversationCommandDeps = {}): 
     return CONVERSATION_EXIT.validation;
   }
   const content = parsed.positionals.join(" ").trim();
-  if (!content) {
-    if (json) {
-      jsonWrite({ ok: false, code: "missing_topic" });
+  try {
+    const resumeId = parseOptionalResumeId(parsed);
+    if (!content) {
+      if (json) {
+        jsonWrite({ ok: false, code: "missing_topic" });
+        return CONVERSATION_EXIT.validation;
+      }
+      out("vf", c.red('chat: missing topic — e.g. `vf chat "Explain this code"`'), {
+        level: "error",
+      });
       return CONVERSATION_EXIT.validation;
     }
-    out("vf", c.red('chat: missing topic — e.g. `vf chat "Explain this code"`'), {
-      level: "error",
-    });
-    return CONVERSATION_EXIT.validation;
-  }
-  try {
-    const service = conversationService(deps);
+    if (resumeId) {
+      assertNoResumeCreateFlags(parsed, ["policy", "participant", "max-rounds", "no-baseline"]);
+    }
     const participants = parsed.participants.map(parseParticipantSpec);
     const maxRounds = parseMaxRounds(parsed.flags["max-rounds"]);
-    if (typeof parsed.flags.resume === "string") {
+    const service = conversationService(deps);
+    if (resumeId) {
       const resumed = await executeConversationMessage(
         service,
-        parsed.flags.resume,
+        resumeId,
         content,
         json ? undefined : (chunk) => process.stdout.write(chunk),
       );

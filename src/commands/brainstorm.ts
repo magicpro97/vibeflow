@@ -5,6 +5,7 @@ import type { PublicStoredTraceEvent } from "../orchestrator/trace/types.js";
 import {
   CONVERSATION_EXIT,
   type ConversationCommandDeps,
+  assertNoResumeCreateFlags,
   c,
   classifyConversationError,
   classifyConversationResult,
@@ -16,9 +17,10 @@ import {
   out,
   parseConversationArgv,
   parseMaxRounds,
+  parseOptionalResumeId,
   parseParticipantSpec,
+  publicResumeValidationMessage,
 } from "./_shared.js";
-
 type BrainstormStatus = "completed" | "stopped" | "failed" | "aborted";
 type BrainstormErrorKind = "validation" | "engine_start" | "transport";
 function hasEvaluator(participants: readonly { role_ref: string }[]): boolean {
@@ -52,7 +54,6 @@ const errorKind = (exit: number): BrainstormErrorKind =>
     : exit === CONVERSATION_EXIT.transport
       ? "transport"
       : "validation";
-
 const errorMessage = (kind: BrainstormErrorKind): string =>
   kind === "validation"
     ? "request validation failed"
@@ -66,7 +67,6 @@ const normalizedErrorExit = (exit: number): number =>
   exit === CONVERSATION_EXIT.transport
     ? exit
     : CONVERSATION_EXIT.transport;
-
 const safeCode = (value: unknown, fallback: string): string => {
   const compact = String(value ?? "")
     .toLowerCase()
@@ -82,7 +82,6 @@ const transcriptPath = (conversationId: string, artifactId: string | null): stri
         artifactId,
       )}`
     : null;
-
 const findLastRecord = <T>(
   records: readonly T[],
   predicate: (record: T) => boolean,
@@ -94,14 +93,14 @@ const findLastRecord = <T>(
   return undefined;
 };
 
-const transcriptArtifactId = (records: readonly PublicStoredTraceEvent[]): string | null => {
+const transcriptArtifactRef = (records: readonly PublicStoredTraceEvent[]): string | null => {
   const created = findLastRecord(
     records,
     (record) =>
       record.event.type === "artifact_created" &&
       record.event.payload.artifact_type === "transcript",
   );
-  if (created?.event.type === "artifact_created") return String(created.event.payload.artifact_id);
+  if (created?.event.type === "artifact_created") return String(created.event.payload.ref);
   return null;
 };
 
@@ -274,7 +273,7 @@ async function brainstormExecutionJson(
     consensus_average: averageConsensusScore(rounds),
     decision_matrix: decisionMatrix,
     baseline_comparison: baselineComparison,
-    transcript_path: transcriptPath(execution.conversationId, transcriptArtifactId(records)),
+    transcript_path: transcriptPath(execution.conversationId, transcriptArtifactRef(records)),
     error: status === "failed" ? terminalError(records, exit) : null,
   });
 }
@@ -300,18 +299,19 @@ export async function brainstorm(
     return CONVERSATION_EXIT.validation;
   }
   const topic = parsed.positionals.join(" ").trim();
-  const resumeId = typeof parsed.flags.resume === "string" ? parsed.flags.resume.trim() : "";
-  if (!topic && !resumeId) {
-    if (json) return writeError(CONVERSATION_EXIT.validation);
-    out("vf", c.red('brainstorm: missing topic — e.g. `vf brainstorm "Compare options"`'), {
-      level: "error",
-    });
-    return CONVERSATION_EXIT.validation;
-  }
   try {
-    const service = conversationService(deps);
+    const resumeId = parseOptionalResumeId(parsed);
+    if (!topic && !resumeId) {
+      if (json) return writeError(CONVERSATION_EXIT.validation);
+      out("vf", c.red('brainstorm: missing topic — e.g. `vf brainstorm "Compare options"`'), {
+        level: "error",
+      });
+      return CONVERSATION_EXIT.validation;
+    }
+    if (resumeId) assertNoResumeCreateFlags(parsed, ["participant", "max-rounds", "no-baseline"]);
     const explicit = parsed.participants.map(parseParticipantSpec);
     const maxRounds = parseMaxRounds(parsed.flags["max-rounds"]);
+    const service = conversationService(deps);
     const request: ConversationCreateRequest = {
       topic,
       policy: "debate",
@@ -390,8 +390,9 @@ export async function brainstorm(
     return exit;
   } catch (error) {
     const exit = normalizedErrorExit(classifyConversationError(error));
+    const message = publicResumeValidationMessage(error) ?? errorMessage(errorKind(exit));
     if (json) return writeError(exit);
-    out("vf", c.red(`brainstorm: ${errorMessage(errorKind(exit))}`), {
+    out("vf", c.red(`brainstorm: ${message}`), {
       level: "error",
     });
     return exit;

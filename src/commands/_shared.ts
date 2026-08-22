@@ -251,6 +251,11 @@ export {
   parseMaxRounds,
   parseParticipantSpec,
 } from "./conversation-args.js";
+export {
+  assertNoResumeCreateFlags,
+  parseOptionalResumeId,
+  publicResumeValidationMessage,
+} from "./conversation-validation.js";
 export { executeConversationWorkflow } from "./conversation-workflow.js";
 export { buildPlanPrompt } from "./plan.js";
 export { collectVerifyReportAsync } from "./tools-detect.js";

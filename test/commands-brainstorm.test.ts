@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { brainstorm } from "../src/commands/brainstorm.js";
 
-const transcriptArtifactId = `artifact_${"t".repeat(43)}`;
+const transcriptArtifactId = "transcript-catalog-1";
+const transcriptArtifactRef = `artifact_${"t".repeat(43)}`;
 const artifactRefs = [
   `artifact_${"d".repeat(43)}`,
   `artifact_${"b".repeat(43)}`,
@@ -123,9 +124,7 @@ const debateEvents = [
       payload: {
         artifact_id: transcriptArtifactId,
         artifact_type: "transcript",
-        title: "Transcript",
-        path: "artifacts/transcript.md",
-        mime_type: "text/markdown",
+        ref: transcriptArtifactRef,
       },
     },
   },
@@ -312,6 +311,100 @@ describe("vf brainstorm", () => {
     expect(options).toEqual([{ baselineEnabled: false }, { baselineEnabled: false }]);
   });
 
+  test("--resume rejects create-only flags before constructing the service", async () => {
+    const cases = [
+      ["--participant", "brainstorm-participant@codex"],
+      ["--max-rounds", "2"],
+      ["--no-baseline"],
+    ];
+    for (const args of cases) {
+      const chunks: string[] = [];
+      const write = process.stdout.write;
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        chunks.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        const code = await brainstorm(["--json", "--resume", "conversation-1", ...args, "revise"], {
+          createService: () => {
+            throw new Error("service must not start");
+          },
+        });
+        expect(code).toBe(1);
+        expect(JSON.parse(chunks[0] as string)).toEqual({
+          status: "error",
+          error: {
+            error_kind: "validation",
+            code: "validation_error",
+            message: "request validation failed",
+          },
+        });
+        expect(chunks).toHaveLength(1);
+      } finally {
+        process.stdout.write = write;
+      }
+    }
+  });
+
+  test("--resume requires a non-empty persisted conversation id", async () => {
+    for (const resume of [["--resume"], ["--resume="]]) {
+      const chunks: string[] = [];
+      const write = process.stdout.write;
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        chunks.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        const code = await brainstorm(["--json", ...resume, "--no-baseline", "revise"], {
+          createService: () => {
+            throw new Error("service must not start");
+          },
+        });
+        expect(code).toBe(1);
+        expect(JSON.parse(chunks[0] as string).error.code).toBe("validation_error");
+      } finally {
+        process.stdout.write = write;
+      }
+    }
+  });
+
+  test("non-JSON resume validation names the incompatible create-only flag", async () => {
+    const chunks: string[] = [];
+    const error = console.error;
+    console.error = (...parts: unknown[]) => chunks.push(parts.map(String).join(" "));
+    try {
+      const code = await brainstorm(["--resume", "conversation-1", "--no-baseline", "revise"], {
+        createService: () => {
+          throw new Error("service must not start");
+        },
+      });
+      expect(code).toBe(1);
+      expect(chunks.join("")).toContain("invalid with --resume: --no-baseline");
+    } finally {
+      console.error = error;
+    }
+  });
+
+  test("--max-rounds rejects values above the public limit", async () => {
+    const chunks: string[] = [];
+    const write = process.stdout.write;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const code = await brainstorm(["--json", "--max-rounds", "101", "compare", "options"], {
+        createService: () => {
+          throw new Error("service must not start");
+        },
+      });
+      expect(code).toBe(1);
+      expect(JSON.parse(chunks[0] as string).error.code).toBe("validation_error");
+    } finally {
+      process.stdout.write = write;
+    }
+  });
+
   test("--json emits the exact 1.0 executed contract and preserves success exits", async () => {
     const chunks: string[] = [];
     const write = process.stdout.write;
@@ -468,7 +561,7 @@ describe("vf brainstorm", () => {
           divergence: 0,
           skip_reason: null,
         },
-        transcript_path: `/api/conversations/conversation-1/artifacts/${transcriptArtifactId}`,
+        transcript_path: `/api/conversations/conversation-1/artifacts/${transcriptArtifactRef}`,
         error: null,
       });
       expect(Array.isArray(output.rounds)).toBe(true);

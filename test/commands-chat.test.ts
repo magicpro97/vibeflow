@@ -103,6 +103,60 @@ describe("vf chat", () => {
     expect(resumed).toBe("revise that");
   });
 
+  test("--resume rejects create-only flags before constructing the service", async () => {
+    const cases = [
+      ["--policy", "debate"],
+      ["--participant", "direct@codex"],
+      ["--max-rounds", "2"],
+      ["--no-baseline"],
+    ];
+    for (const args of cases) {
+      const chunks: string[] = [];
+      const write = process.stdout.write;
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        chunks.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        const code = await chat(["--json", "--resume", "conversation-1", ...args, "revise"], {
+          createService: () => {
+            throw new Error("service must not start");
+          },
+        });
+        expect(code).toBe(1);
+        expect(JSON.parse(chunks[0] as string)).toEqual({ ok: false, code: "validation_error" });
+        expect(chunks).toHaveLength(1);
+      } finally {
+        process.stdout.write = write;
+      }
+    }
+  });
+
+  test("--resume requires a non-empty persisted conversation id", async () => {
+    for (const resume of [["--resume"], ["--resume="]]) {
+      const chunks: string[] = [];
+      const write = process.stdout.write;
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        chunks.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        const code = await chat(["--json", ...resume, "--no-baseline", "revise"], {
+          createService: () => {
+            throw new Error("service must not start");
+          },
+        });
+        expect(code).toBe(1);
+        expect(JSON.parse(chunks[0] as string)).toEqual({
+          ok: false,
+          code: "validation_error",
+        });
+      } finally {
+        process.stdout.write = write;
+      }
+    }
+  });
+
   test("--no-baseline forwards baselineEnabled=false to the shared service", async () => {
     let seen: unknown;
     const code = await chat(["--no-baseline", "--policy", "debate", "compare", "this"], {

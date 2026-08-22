@@ -98,5 +98,11 @@ describe("help text", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
     expect(src).toContain("canonical conversational entry");
     expect(src).toContain("shared debate policy");
+    const conversation = readFileSync(
+      join(import.meta.dir, "..", "src/commands/help-conversation.ts"),
+      "utf8",
+    );
+    expect(conversation).toContain("1..100");
+    expect(conversation).toContain("Create-only flags are rejected with --resume");
   });
 });

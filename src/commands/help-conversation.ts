@@ -24,6 +24,7 @@ export const CHAT_HELP =
   () => `${c.bold("vf chat")} ${c.dim('[--policy <direct|debate|plan|review|verify|orchestrate>] [--participant <role@engine[:model]>] [--resume <conversation-id>] [--max-rounds <n>] [--no-baseline] [--json] "<topic>"')}
 Canonical conversation entry. Routes through the shared conversation service; explicit
 policy and repeated --participant flags override the coordinator.
+--max-rounds accepts 1..100. Create-only flags are rejected with --resume.
 
 ${c.bold("Examples:")}
   vf chat "Explain why this function is pure"
@@ -35,6 +36,7 @@ export const BRAINSTORM_HELP =
   () => `${c.bold("vf brainstorm")} ${c.dim('[--participant <role@engine[:model]>] [--max-rounds <n>] [--yes] [--resume <conversation-id>] [--no-baseline] [--json] "<topic>"')}
 Compatibility facade over the shared debate policy. Dry-run by default; pass --yes to
 dispatch the full debate.
+--max-rounds accepts 1..100. Create-only flags are rejected with --resume.
 
 ${c.bold("Examples:")}
   vf brainstorm "Compare three API designs"

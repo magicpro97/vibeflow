@@ -152,7 +152,9 @@ export function parseMaxRounds(value: string | boolean | undefined): number | un
   if (value === undefined || value === false) return undefined;
   if (value === true) throw new Error("missing --max-rounds value");
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error("invalid --max-rounds value");
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {
+    throw new Error("invalid --max-rounds value");
+  }
   return parsed;
 }
 
