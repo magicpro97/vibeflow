@@ -1353,6 +1353,30 @@ describe("native resume evidence and history reconciliation", () => {
     });
   });
 
+  test("OpenCode releases both streams after close when no session id is captured", async () => {
+    const chunks: Array<{ stream: "stdout" | "stderr"; content: string }> = [];
+    const process = completedProcess(["stdout without a session id\n"]);
+    process.stderr = stream("stderr without a session id\n");
+    const adapter = createEngineSessionAdapter({
+      spawn: () => process,
+      writeEvidence: async () => "evidence/opencode-no-session-id.json",
+    });
+    const handle = adapter.start(
+      request("opencode", {
+        attemptId: "attempt-opencode-no-session-id",
+        onChunk: (chunk) => chunks.push(chunk),
+        spawn: spawnProjection("opencode", { rendered_tools: [], sandbox: null }),
+      }),
+    );
+
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()).toBeUndefined();
+    expect(result.nativeSessionStatus).toBe("unavailable");
+    expect(chunks).toContainEqual({ stream: "stdout", content: "stdout without a session id\n" });
+    expect(chunks).toContainEqual({ stream: "stderr", content: "stderr without a session id\n" });
+  });
+
   test.each([
     ["claude", CLAUDE_UUID, { type: "result", session_id: CLAUDE_UUID }],
     ["codex", CODEX_UUID, { type: "thread.started", thread_id: CODEX_UUID }],
