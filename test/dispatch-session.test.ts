@@ -1250,6 +1250,33 @@ describe("native resume evidence and history reconciliation", () => {
     expect(chunks.join("")).toContain("[opaque-native-session]");
   });
 
+  test("a split OpenCode control record stays buffered until its native id can be redacted", async () => {
+    const nativeId = "opencode-split-session";
+    const chunks: string[] = [];
+    const adapter = createEngineSessionAdapter({
+      spawn: () =>
+        completedProcess([
+          '{"type":"step_start","session',
+          `ID":"${nativeId}"} ordinary ${nativeId}\n`,
+        ]),
+      writeEvidence: async () => "evidence/opencode-split-frame.json",
+    });
+    const handle = adapter.start(
+      request("opencode", {
+        attemptId: "attempt-opencode-split-frame",
+        onChunk: (chunk) => chunks.push(chunk.content),
+        spawn: spawnProjection("opencode", { rendered_tools: [], sandbox: null }),
+      }),
+    );
+
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()?.nativeSessionId).toBe(nativeId);
+    expect(chunks.join("")).not.toContain(nativeId);
+    expect(result.output).not.toContain(nativeId);
+    expect(chunks.join("")).toContain("[opaque-native-session]");
+  });
+
   test.each([
     ["claude", CLAUDE_UUID, { type: "result", session_id: CLAUDE_UUID }],
     ["codex", CODEX_UUID, { type: "thread.started", thread_id: CODEX_UUID }],
