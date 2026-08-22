@@ -65,10 +65,8 @@ export function createConversationIsolationAuthority(
     acquire(repoRoot: string) {
       const parent = mkdtempSync(join(tmpdir(), "vf-conversation-isolation-"));
       const cwd = join(parent, "worktree");
-      let added = false;
       try {
         git(repoRoot, ["worktree", "add", "--quiet", "--detach", cwd, "HEAD"], 60_000);
-        added = true;
         return createLease({
           kind: "worktree",
           root: cwd,
@@ -78,18 +76,10 @@ export function createConversationIsolationAuthority(
           release: () => cleanupWorktree(git, removeTree, repoRoot, cwd, parent),
         });
       } catch {
-        if (added) {
-          try {
-            cleanupWorktree(git, removeTree, repoRoot, cwd, parent);
-          } catch {
-            // The public failure remains authority-unavailable, never a private local path.
-          }
-        } else {
-          try {
-            removeTree(parent);
-          } catch {
-            // The sanitized authority failure below remains the public result.
-          }
+        try {
+          cleanupWorktree(git, removeTree, repoRoot, cwd, parent);
+        } catch {
+          // The public failure remains authority-unavailable, never a private local path.
         }
         throw new Error("conversation isolation authority is unavailable");
       }
@@ -126,9 +116,16 @@ export function withAttemptIsolation(
       if (!request.spawn.isolation) return delegate.start(request);
       const isolation = authority.acquire(repoRoot);
       try {
-        return delegate.start({
+        const handle = delegate.start({
           ...request,
           spawn: createSpawnOptionsProjection({ ...request.spawn, isolation }),
+        });
+        return Object.freeze({
+          attemptId: handle.attemptId,
+          completion: handle.completion.finally(() => releaseIsolationLease(isolation)),
+          terminate: (reason?: string) => handle.terminate(reason),
+          readResumeBinding: () => handle.readResumeBinding(),
+          readEvidenceBinding: () => handle.readEvidenceBinding(),
         });
       } catch (error) {
         void releaseIsolationLease(isolation).catch(() => undefined);

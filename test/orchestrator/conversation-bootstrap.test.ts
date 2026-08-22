@@ -9,11 +9,16 @@ import type {
   MaterializedAgentBinding,
 } from "../../src/agents/binding.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
-import { releaseIsolationLease } from "../../src/dispatch/isolation.js";
+import {
+  createIsolationLease,
+  isIsolationLeaseLive,
+  releaseIsolationLease,
+} from "../../src/dispatch/isolation.js";
 import {
   type EngineProcess,
   createSpawnOptionsProjection,
 } from "../../src/dispatch/session-types.js";
+import { createEngineSessionAdapter } from "../../src/dispatch/session.js";
 import {
   bindWithIsolation,
   createConversationIsolationAuthority,
@@ -360,6 +365,100 @@ test("isolation acquisition failures clean partial authority and stay path-opaqu
     expect(() => absent.acquire(join(root, "not-a-repository"))).toThrow(
       "conversation isolation authority is unavailable",
     );
+
+    let latePath = "";
+    const late = createConversationIsolationAuthority({
+      runGit: (repoRoot, args, timeout) => {
+        execFileSync("git", ["-C", repoRoot, ...args], { timeout, stdio: "ignore" });
+        if (args[0] === "worktree" && args[1] === "add") {
+          latePath = String(args.at(-2));
+          throw new Error(`private late add failure: ${root}`);
+        }
+      },
+    });
+    let lateError: unknown;
+    try {
+      late.acquire(repo);
+    } catch (error) {
+      lateError = error;
+    }
+    expect(lateError).toEqual(new Error("conversation isolation authority is unavailable"));
+    expect(String(lateError)).not.toContain(root);
+    expect(existsSync(latePath)).toBe(false);
+    expect(
+      execFileSync("git", ["-C", repo, "worktree", "list", "--porcelain"], {
+        encoding: "utf8",
+      }),
+    ).toBe(worktreesBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("attempt completion surfaces the exact cleanup rejection swallowed by the session", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vf-bootstrap-attempt-cleanup-"));
+  try {
+    const repo = await repoWithAlwaysOnSkill(root);
+    const worktreesBefore = execFileSync("git", ["-C", repo, "worktree", "list", "--porcelain"], {
+      encoding: "utf8",
+    });
+    const cleanupFailure = new Error("injected exact cleanup failure");
+    let attemptLease: ReturnType<typeof createIsolationLease> | undefined;
+    const authority = createConversationIsolationAuthority({
+      createLease: (input) => {
+        const cleanup = input.release;
+        attemptLease = createIsolationLease({
+          ...input,
+          release: async () => {
+            await cleanup?.();
+            throw cleanupFailure;
+          },
+        });
+        return attemptLease;
+      },
+    });
+    const placeholder = {
+      kind: "worktree" as const,
+      cwd: repo,
+      evidence_ref: "placeholder-binding-isolation",
+    };
+    const spawn = projectBinding({
+      repoRoot: repo,
+      phase: 3,
+      taskText: "cleanup",
+      isolation: placeholder,
+    }).spawn;
+    const adapter = withAttemptIsolation(
+      createEngineSessionAdapter({
+        evidenceRoot: join(root, "evidence"),
+        sourceEnv: { PATH: process.env.PATH ?? "/usr/bin" },
+        spawn: () => completedCodexProcess(),
+      }),
+      authority,
+      repo,
+    );
+    const handle = adapter.start({
+      attemptId: "attempt-cleanup-failure",
+      spawn,
+      signal: new AbortController().signal,
+    });
+
+    expect(handle.attemptId).toBe("attempt-cleanup-failure");
+    expect(Object.isFrozen(handle)).toBe(true);
+    await expect(handle.completion).rejects.toBe(cleanupFailure);
+    expect(handle.readResumeBinding()).toMatchObject({
+      attemptId: "attempt-cleanup-failure",
+      engine: "codex",
+    });
+    expect(handle.readEvidenceBinding()).toMatchObject({ attemptId: "attempt-cleanup-failure" });
+    await expect(handle.terminate("already settled")).resolves.toBeUndefined();
+    expect(attemptLease && isIsolationLeaseLive(attemptLease)).toBe(false);
+    expect(attemptLease && existsSync(dirname(attemptLease.cwd))).toBe(false);
+    expect(
+      execFileSync("git", ["-C", repo, "worktree", "list", "--porcelain"], {
+        encoding: "utf8",
+      }),
+    ).toBe(worktreesBefore);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
