@@ -1,175 +1,105 @@
-import type { DebatePosition, DebateResult, WorkUnit } from "../core.js";
+import type { WorkUnit } from "../core.js";
+import { type EvaluatorOutput, decideRound } from "./consensus.js";
 
-/**
- * Subagent profile for each debate role.
- *
- * - `proposer` — argues FOR the proposal, presents evidence
- * - `challenger` — red-teams the proposal, finds flaws
- * - `judge` — weighs both sides, renders verdict
- */
-export interface DebateProfile {
-  role: "proposer" | "challenger" | "judge";
-  /** Classification that maps to a CLAUDE.md agent profile (registered in ~/.claude/agents/). */
-  agentType: string;
-  /** Core instruction injected before the proposal text. */
-  instruction: string;
+export interface DebateParticipantResult {
+  answer: string;
+  content: string;
+  claim: string | null;
+  evidence: string[];
 }
 
-export const DEBATE_PROFILES: Record<DebateProfile["role"], DebateProfile> = {
-  proposer: {
-    role: "proposer",
-    agentType: "proposer",
-    instruction: `You are the PROPOSER. Your job is to DEFEND a proposal with concrete evidence.
-Argue WHY it should be accepted. Present evidence, address anticipated objections preemptively.
-Be specific — cite file paths, line numbers, command output. Do NOT concede without evidence.`,
-  },
-  challenger: {
-    role: "challenger",
-    agentType: "challenger",
-    instruction: `You are the CHALLENGER. Your job is to ATTACK a proposal and find every flaw.
-Stress-test with edge cases, hidden assumptions, security/perf risks.
-Find what the proposer missed. Be adversarial — your job is to break the proposal, not be agreeable.
-Every attack must cite specific evidence (file paths, line numbers, or logical flaws).`,
-  },
-  judge: {
-    role: "judge",
-    agentType: "judge",
-    instruction: `You are the JUDGE. Weigh evidence from both sides and render a verdict.
-Determine which approach wins (or synthesize), list residual risks, and give an honest confidence score (0-1).
-Confidence = 1.0 means the decision is certain with no remaining doubts.
-Confidence = 0 means a complete guess — block the action.`,
-  },
-};
-
-/** Bounded investigation rounds — prevents infinite loop. */
-export const DEFAULT_MAX_DEBATE_ROUNDS = 3;
-
-/**
- * A single round of debate: proposer + challenger submit positions,
- * judge evaluates and returns updated confidence.
- */
-export interface DebateRound {
-  round: number;
-  question: string;
-  /** Context document the debate is about (PR diff, unit spec, architecture doc...). */
-  context: string;
-  proposerPosition?: DebatePosition;
-  challengerPosition?: DebatePosition;
-  judgeVerdict?: {
-    resolution: string;
-    confidence: number;
-    rejectedArguments: string[];
-    /** List of remaining open questions for next round. */
-    openQuestions: string[];
-  };
+interface PriorDebatePosition {
+  claim: string | null;
+  evidence: readonly string[];
 }
 
-const PROPOSER_INSTRUCTION =
-  "\n## Instructions\nBuild your strongest case. Cite specific evidence. Output JSON with fields: claim (string), evidence (string[]).";
+const fencedJson = /^```(?:json)?\s*([\s\S]*?)\s*```$/i;
 
-const CHALLENGER_REVIEW_INSTRUCTION =
-  "\n## Instructions\nReview the context and find every possible flaw, edge case, and hidden risk. Even without a proposer yet, identify issues.";
-
-const CHALLENGER_ATTACK_INSTRUCTION =
-  "\n## Instructions\nFind flaws, edge cases, and hidden risks. Be adversarial. Output JSON: claim (string), evidence (string[]).";
-
-const JUDGE_INSTRUCTION =
-  "\n## Instructions\nWeigh both sides. Output JSON: resolution (string), confidence (number 0-1), rejectedArguments (string[]), openQuestions (string[]).";
-
-/**
- * Run a single round of debate. In a real implementation each role would spawn
- * a subagent via `Task(agentType: ...)`. This function returns the prompt templates
- * so the CLI/API layer can delegate to subagents.
- */
-export function debateRoundPrompts(round: DebateRound): {
-  proposerPrompt: string;
-  challengerPrompt: string;
-  judgePrompt: string;
-} {
-  const { question, context, proposerPosition, challengerPosition } = round;
-
-  // Proposer: build the case
-  const proposerPrompt = [
-    DEBATE_PROFILES.proposer.instruction,
-    `\n## Question\n${question}`,
-    `\n## Context\n${context}`,
-    challengerPosition
-      ? `\n## Previous Challenger Rebuttal\n${challengerPosition.claim}\nEvidence: ${challengerPosition.evidence.join("; ")}`
-      : "",
-    PROPOSER_INSTRUCTION,
-  ].join("\n");
-
-  // Challenger: attack the proposer's case
-  const challengerPrompt = [
-    DEBATE_PROFILES.challenger.instruction,
-    `\n## Question\n${question}`,
-    `\n## Context\n${context}`,
-    proposerPosition
-      ? `\n## Proposer's Claim\n${proposerPosition.claim}\nEvidence: ${proposerPosition.evidence.join("; ")}`
-      : CHALLENGER_REVIEW_INSTRUCTION,
-    CHALLENGER_ATTACK_INSTRUCTION,
-  ].join("\n");
-
-  // Judge: weigh evidence
-  const judgePrompt = [
-    DEBATE_PROFILES.judge.instruction,
-    `\n## Question\n${question}`,
-    `\n## Context\n${context}`,
-    proposerPosition
-      ? `\n## Proposer\nClaim: ${proposerPosition.claim}\nEvidence: ${proposerPosition.evidence.join("; ")}`
-      : "",
-    challengerPosition
-      ? `\n## Challenger Rebuttal\nClaim: ${challengerPosition.claim}\nEvidence: ${challengerPosition.evidence.join("; ")}`
-      : "",
-    JUDGE_INSTRUCTION,
-  ].join("\n");
-
-  return { proposerPrompt, challengerPrompt, judgePrompt };
-}
-
-/**
- * Determine if another debate round is needed.
- * Returns false when: confidence >= 1.0, max rounds reached, or no open questions remain.
- */
-export function debateContinue(
-  currentRound: number,
-  confidence: number,
-  openQuestions: string[],
-  maxRounds = DEFAULT_MAX_DEBATE_ROUNDS,
-): boolean {
-  if (confidence >= 1.0) return false;
-  if (currentRound >= maxRounds) return false;
-  if (openQuestions.length === 0) return false;
-  return true;
-}
-
-/**
- * Synthesize a final DebateResult from completed rounds.
- */
-export function synthesizeResult(
-  question: string,
-  rounds: DebateRound[],
-  judgeConfidence: number,
-  judgeResolution: string,
-  rejected: string[],
-): DebateResult {
-  const positions: DebatePosition[] = [];
-  for (const r of rounds) {
-    if (r.proposerPosition) positions.push(r.proposerPosition);
-    if (r.challengerPosition) positions.push(r.challengerPosition);
+function parseJson(value: string): unknown {
+  const trimmed = value.trim();
+  const candidate = fencedJson.exec(trimmed)?.[1] ?? trimmed;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
   }
-  return {
-    question,
-    positions,
-    resolution: judgeResolution,
-    confidence: judgeConfidence,
-    rejected,
-  };
 }
 
-/**
- * Generate a debate prompt for a single work unit (used by vf orchestrate review phase).
- */
+const stringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/** Engines may return structured debate JSON; plain text remains a valid claim. */
+export function parseDebateParticipantOutput(output: string): DebateParticipantResult {
+  const parsed = parseJson(output);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    const claim = typeof record.claim === "string" ? record.claim : null;
+    const evidence = stringArray(record.evidence) ? [...new Set(record.evidence)] : [];
+    if (claim !== null) {
+      return {
+        answer: typeof record.answer === "string" ? record.answer : claim,
+        content: typeof record.content === "string" ? record.content : output,
+        claim,
+        evidence,
+      };
+    }
+  }
+  return { answer: output, content: output, claim: output || null, evidence: [] };
+}
+
+export function parseDebateEvaluatorOutput(
+  output: string,
+  round: number,
+  maxRounds: number,
+): EvaluatorOutput | null {
+  const parsed = parseJson(output);
+  return decideRound(parsed, round, maxRounds).outcome === "abort"
+    ? null
+    : (parsed as EvaluatorOutput);
+}
+
+/** Participant prompt uses bindings resolved by the canonical conversation runtime. */
+export function debateParticipantPrompt(
+  topic: string,
+  round: number,
+  prior: readonly PriorDebatePosition[],
+): string {
+  return [
+    "Develop one evidence-backed option for this debate.",
+    "Return exactly one JSON object with answer, content, claim, and evidence fields.",
+    JSON.stringify({ topic, round, prior_positions: prior }),
+  ].join("\n");
+}
+
+export function debateBlindEvaluatorPrompt(
+  precommits: readonly { answer: string; evidence: readonly string[] }[],
+): string {
+  return [
+    "Evaluate only the immutable precommits and their evidence. No peer response or identity is available.",
+    "Return exactly the agreement, conflict_resolution, evidence_quality, and convergence gate object.",
+    JSON.stringify({ precommits }),
+  ].join("\n");
+}
+
+export function debateFullEvaluatorPrompt(
+  blind: EvaluatorOutput,
+  positions: readonly PriorDebatePosition[],
+): string {
+  return [
+    "Evaluate the blind assessment against these anonymized peer positions.",
+    "Return exactly the agreement, conflict_resolution, evidence_quality, and convergence gate object.",
+    JSON.stringify({
+      blind_assessment: blind,
+      positions: positions.map((position, index) => ({
+        option: `option-${index + 1}`,
+        claim: position.claim,
+        evidence: position.evidence,
+      })),
+    }),
+  ].join("\n");
+}
+
+/** @deprecated Compatibility prompt for the legacy work-unit review surface only. */
 export function unitDebatePrompt(unit: WorkUnit): string {
   const parts = [`## Work Unit: ${unit.name}`];
   if (unit.spec) parts.push(`\n### Spec\n${unit.spec}`);
@@ -179,9 +109,7 @@ export function unitDebatePrompt(unit: WorkUnit): string {
   return parts.join("\n");
 }
 
-/**
- * Build debate prompts for a code review (PR diff or git diff).
- */
+/** @deprecated Compatibility prompt for the legacy PR-review surface only. */
 export function reviewDebatePrompt(title: string, description: string, diff: string): string {
   return [
     `## PR: ${title}`,
