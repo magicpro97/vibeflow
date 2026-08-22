@@ -92,6 +92,7 @@ test("opaque artifact and session identities are domain-separated and conversati
     const stable = registry.register("conversation-a", internalRef);
     const otherConversation = registry.register("conversation-b", internalRef);
     expect(first).toBe(stable);
+    expect(String(first)).toMatch(/^artifact_[A-Za-z0-9_-]{43}$/);
     expect(first).not.toBe(otherConversation);
     expect(registry.resolve("conversation-a", first)).toEqual({ internalRef });
     expect(registry.resolve("conversation-b", first)).toBeNull();
