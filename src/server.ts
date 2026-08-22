@@ -7,6 +7,12 @@ import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { askStreamResponse } from "./server/ask-route.js";
+import { conversationUrlHost, isConversationLoopbackHost } from "./server/conversation-host.js";
+import {
+  type ConversationHttpAuthority,
+  handleConversationRoute,
+  isConversationNamespace,
+} from "./server/conversation-route.js";
 import { handleDomainImpact, handleDomainsView } from "./server/domain-route.js";
 import { handleFileRoute } from "./server/file-route.js";
 import {
@@ -44,7 +50,6 @@ import { validateSkillRoots } from "./skills/validator.js";
 // Re-export the 4 test seams so the 5 importers don't change
 export { repoLanguages, toolViews, settingsView, replayFromLog };
 
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const ASSETS_DIR = new URL("./assets/", import.meta.url);
 const ASSET_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -60,7 +65,13 @@ const CSP =
 
 export function startServer(
   port = 0,
-  _opts: { uiHtmlPath?: URL; host?: string; repoDir?: string } = {},
+  _opts: {
+    uiHtmlPath?: URL;
+    host?: string;
+    repoDir?: string;
+    /** One process authority; callers reuse this object across server hot restarts. */
+    conversation?: ConversationHttpAuthority;
+  } = {},
 ): Promise<{
   server: { stop: () => void };
   url: string;
@@ -69,6 +80,11 @@ export function startServer(
 
   const host = _opts.host ?? "127.0.0.1";
   const bindAll = host === "0.0.0.0";
+  const conversationLoopback = isConversationLoopbackHost(host);
+  const conversation = _opts.conversation;
+  if (conversation && conversation.sessions.loopback !== conversationLoopback) {
+    throw new Error("conversation authority host mismatch");
+  }
   let activeRepo = _opts.repoDir ?? cwd();
 
   const uiHtmlPath = _opts.uiHtmlPath ?? new URL("../dist/ui/index.html", import.meta.url);
@@ -91,19 +107,17 @@ export function startServer(
   clearPending(); // discard orphaned hooks from previous server instance
   clearPendingSkillAcquisitions(); // #682 — reject outstanding acquisition waits on startup
 
-  const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
-
   const guarded = (req: Request): boolean => {
     // #561: when bindAll, AUTHENTICATE BY TOKEN, not Host header.
     // Host is attacker-controlled. Drop the host-match theater.
     if (bindAll) return req.headers.get("x-vibeflow-token") === token;
     // Loopback mode: Host check + CSRF origin guard.
     const reqHost = req.headers.get("host") ?? "";
-    if (!isLoopback(reqHost)) return false;
+    if (!isConversationLoopbackHost(reqHost)) return false;
     const o = req.headers.get("origin") || req.headers.get("referer");
     if (o) {
       try {
-        if (!isLoopback(new URL(o).hostname)) return false;
+        if (!isConversationLoopbackHost(new URL(o).hostname)) return false;
       } catch {
         return false;
       }
@@ -120,16 +134,34 @@ export function startServer(
       const method = req.method;
       const path = url.pathname;
 
+      // Own the conversation namespace before any legacy router can parse or mutate its body.
+      if (isConversationNamespace(path)) {
+        if (!conversation) {
+          return Response.json(
+            { code: "conversation_authority_unavailable" },
+            { status: 500, headers: { "cache-control": "no-store" } },
+          );
+        }
+        return handleConversationRoute(
+          { ...conversation, csrf: conversation.csrf ?? guarded },
+          req,
+          url,
+        );
+      }
+
       // --- GET / (HTML page) ---
       if (method === "GET" && (path === "/" || path === "/index.html")) {
+        const headers = new Headers({
+          "content-type": "text/html; charset=utf-8",
+          // no-cache: revalidate on every navigation so new asset hashes are picked up
+          "cache-control": "no-cache",
+          "content-security-policy": CSP,
+          "x-content-type-options": "nosniff",
+        });
+        const cookie = conversationLoopback ? conversation?.sessions.issueCookie() : null;
+        if (cookie) headers.append("set-cookie", cookie);
         return new Response(serveHtml(), {
-          headers: {
-            "content-type": "text/html; charset=utf-8",
-            // no-cache: revalidate on every navigation so new asset hashes are picked up
-            "cache-control": "no-cache",
-            "content-security-policy": CSP,
-            "x-content-type-options": "nosniff",
-          },
+          headers,
         });
       }
 
@@ -669,7 +701,7 @@ export function startServer(
 
       // --- POST /api/hook/pending — loopback or token when bindAll (#561) ---
       if (method === "POST" && path === "/api/hook/pending") {
-        if (bindAll ? !guarded(req) : !isLoopback(req.headers.get("host") ?? ""))
+        if (bindAll ? !guarded(req) : !isConversationLoopbackHost(req.headers.get("host") ?? ""))
           return Response.json({ error: "forbidden" }, { status: 403 });
         const body = (await req.json()) as { id?: string; input?: unknown; result?: unknown };
         if (typeof body.id !== "string" || !body.id)
@@ -789,7 +821,7 @@ export function startServer(
     },
   });
 
-  const displayHost = bindAll ? "0.0.0.0" : "127.0.0.1";
+  const displayHost = conversationUrlHost(host);
   if (bindAll) {
     console.error(
       c.red(
