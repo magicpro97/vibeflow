@@ -207,18 +207,35 @@ export function appendCursor(
   cursor: JournalCursor,
   record: InternalTraceStoreRecord,
   encoded: Buffer,
-): void {
-  cursor.records.push(record);
-  cursor.eventIds.add(record.stored_event.event_id);
-  cursor.idempotency.set(record.stored_event.idempotency_key, record);
-  const stat = fs.fstatSync(fd);
-  cursor.dev = stat.dev;
-  cursor.ino = stat.ino;
-  cursor.size = stat.size;
-  cursor.mtimeMs = stat.mtimeMs;
-  cursor.ctimeMs = stat.ctimeMs;
-  cursor.tail = Buffer.concat([cursor.tail, encoded]).subarray(-TAIL_BYTES);
-  cursor.lastByte = cursor.tail.at(-1) ?? null;
+): boolean {
+  try {
+    const stat = fs.fstatSync(fd);
+    const tail = Buffer.concat([cursor.tail, encoded]).subarray(-TAIL_BYTES);
+    cursor.records.push(record);
+    cursor.eventIds.add(record.stored_event.event_id);
+    cursor.idempotency.set(record.stored_event.idempotency_key, record);
+    cursor.dev = stat.dev;
+    cursor.ino = stat.ino;
+    cursor.size = stat.size;
+    cursor.mtimeMs = stat.mtimeMs;
+    cursor.ctimeMs = stat.ctimeMs;
+    cursor.tail = tail;
+    cursor.lastByte = tail.at(-1) ?? null;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function appendCursorBatch(
+  fd: number,
+  cursor: JournalCursor,
+  records: readonly InternalTraceStoreRecord[],
+  encoded: readonly Buffer[],
+): boolean {
+  return records.every((record, index) =>
+    appendCursor(fd, cursor, record, encoded[index] as Buffer),
+  );
 }
 
 export function writeFully(fd: number, buffer: Buffer, position: number): void {

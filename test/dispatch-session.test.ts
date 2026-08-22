@@ -1681,6 +1681,45 @@ describe("native resume evidence and history reconciliation", () => {
     }
   });
 
+  test("public streaming redacts each line of a multiline rendered prompt", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-public-multiline-prompt-redaction-"));
+    temporaryPaths.push(root);
+    const promptLines = [
+      "oracular marigold instruction alpha",
+      "tessellated moonstone instruction beta",
+      "velvet compass instruction gamma",
+    ];
+    const prompt = promptLines.join("\n");
+    const chunks: string[] = [];
+    const adapter = createEngineSessionAdapter({
+      evidenceRoot: root,
+      sourceEnv: { PATH: "/bin" },
+      spawn: () => completedProcess(promptLines.map((line) => `${line}\n`)),
+    });
+
+    const result = await adapter.start(
+      request("codex", {
+        attemptId: "attempt-public-multiline-prompt-redaction",
+        onChunk: (chunk) => chunks.push(chunk.content),
+        spawn: spawnProjection("codex", {
+          rendered_prompt: prompt,
+          rendered_tools: [],
+          isolation: null,
+        }),
+      }),
+    ).completion;
+
+    const publicJson = JSON.stringify({ chunks, result });
+    const evidence = readFileSync(
+      join(root, "attempt-public-multiline-prompt-redaction.json"),
+      "utf8",
+    );
+    for (const forbidden of promptLines) {
+      expect(publicJson).not.toContain(forbidden);
+      expect(evidence).not.toContain(forbidden);
+    }
+  });
+
   test("standalone public sanitizer removes bare credentials and local paths", () => {
     const value = sanitizePublicText(
       "sk-abcdefghijklmnopqrstuvwxyz1234567890 /tmp/private/file foo/bar.txt",
@@ -1688,6 +1727,16 @@ describe("native resume evidence and history reconciliation", () => {
     expect(value).not.toContain("sk-abcdefghijklmnopqrstuvwxyz1234567890");
     expect(value).not.toContain("/tmp/private/file");
     expect(value).not.toContain("foo/bar.txt");
+  });
+
+  test("public sanitizer fails closed when a private prompt has too many fragments", () => {
+    const fragmentedPrompt = Array.from(
+      { length: 513 },
+      (_, index) => `private prompt fragment ${index}`,
+    ).join("\n");
+    expect(sanitizePublicText("truthful public output", [], [fragmentedPrompt])).toBe(
+      "[redacted-oversize]",
+    );
   });
 
   test("short private values redact standalone without corrupting ordinary embedded text", async () => {

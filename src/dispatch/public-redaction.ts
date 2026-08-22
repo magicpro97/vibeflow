@@ -62,12 +62,34 @@ function deniedValues(
   nativeIds: readonly string[],
   privateValues: readonly string[],
 ): PublicDenyValue[] {
+  const privateLiterals = new Set<string>();
+  const addPrivateLiteral = (value: string): void => {
+    if (!value || privateLiterals.has(value)) return;
+    if (privateLiterals.size >= TRACE_LIMITS.maxArrayItems) {
+      throw new Error("too many private deny fragments");
+    }
+    privateLiterals.add(value);
+  };
+  for (const value of privateValues) {
+    const normalized = normalizedDenyLiteral(value);
+    if (!normalized) continue;
+    addPrivateLiteral(normalized);
+    for (const line of normalized.split("\n")) {
+      if (!line) continue;
+      addPrivateLiteral(line);
+      const trimmed = line.trim();
+      if (trimmed) addPrivateLiteral(trimmed);
+    }
+  }
   return [
     ...nativeIds.map((value) => ({
       value,
       replacement: "[opaque-native-session]" as const,
     })),
-    ...privateValues.map((value) => ({ value, replacement: "[redacted-ref]" as const })),
+    ...[...privateLiterals].map((value) => ({
+      value,
+      replacement: "[redacted-ref]" as const,
+    })),
   ];
 }
 

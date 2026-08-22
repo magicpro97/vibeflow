@@ -2237,6 +2237,53 @@ test("registry capacity is rejected before a durable append can poison journal o
   }
 });
 
+test("a post-fsync registry commit failure cannot reject the durable trace append", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trace-registry-post-fsync-"));
+  const traceDir = join(root, "trace");
+  const rebuilt: number[] = [];
+  let commitAttempts = 0;
+  const registry: RebuildableArtifactRegistry = {
+    register(_conversationId, internalRef) {
+      return `artifact_${internalRef}` as OpaqueArtifactId;
+    },
+    resolve() {
+      return null;
+    },
+    prepare() {
+      return {
+        commit() {
+          commitAttempts++;
+          throw new Error("injected post-fsync registry commit failure");
+        },
+        rollback() {},
+      };
+    },
+    rebuild(records) {
+      rebuilt.push(records.length);
+    },
+  };
+  try {
+    const store = new TraceStore({ ...options(traceDir), artifactRegistry: registry });
+    const stored = await store.append(correlation, {
+      idempotency_key: "durable-before-registry-commit",
+      event: {
+        type: "artifact_created",
+        payload: { artifact_id: "one", artifact_type: "plan", ref: "artifact/one" },
+      },
+    });
+
+    expect(stored.seq).toBe(1);
+    expect(commitAttempts).toBe(1);
+    expect(rebuilt).toContain(1);
+    const replayed = await new TraceStore({ dir: traceDir }).readConversation("safe");
+    expect(replayed.map(({ stored_event }) => stored_event.idempotency_key)).toEqual([
+      "durable-before-registry-commit",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("session-reference capacity is rejected before its trace record becomes durable", async () => {
   const root = await mkdtemp(join(tmpdir(), "trace-session-preflight-"));
   const traceDir = join(root, "trace");

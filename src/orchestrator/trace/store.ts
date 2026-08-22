@@ -6,7 +6,7 @@ import type { ArtifactRegistry, RebuildableArtifactRegistry } from "./artifacts.
 import {
   type JournalCursor,
   type JournalRefresh,
-  appendCursor,
+  appendCursorBatch,
   auditJournal,
   refreshJournal,
   writeFully,
@@ -15,6 +15,7 @@ import { TraceLifecycleConflictError, assertCanonicalLifecycleAppend } from "./l
 import { TRACE_LIMITS } from "./limits.js";
 import { assertNoSymlinkPathComponents } from "./path-safety.js";
 import { projectPublicStoredTrace } from "./project.js";
+import { settleDurableRegistry } from "./registry-settlement.js";
 import type {
   InternalTraceStoreRecord,
   PublicStoredTraceEvent,
@@ -364,6 +365,8 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
       });
       const batch = Buffer.concat(encoded);
       if (cursor.size + batch.length > TRACE_LIMITS.maxJournalBytes) fail("journal too large");
+      const appended = records.map((record) => clone(record));
+      const durableRecords = [...cursor.records, ...appended];
       const registry = this.options.artifactRegistry as Partial<RebuildableArtifactRegistry>;
       const prepared = registry?.prepare?.(records);
       try {
@@ -373,10 +376,10 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
         prepared?.rollback();
         throw error;
       }
-      prepared?.commit();
-      records.forEach((record, index) =>
-        appendCursor(fd, cursor, clone(record), encoded[index] as Buffer),
-      );
+      if (!appendCursorBatch(fd, cursor, appended, encoded)) {
+        this.cursors.delete(conversationId);
+      }
+      settleDurableRegistry(prepared, registry, conversationId, durableRecords);
       for (const record of records) {
         try {
           if (!prepared) this.indexRecord(record);

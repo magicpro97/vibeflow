@@ -339,7 +339,7 @@ async function harness<T extends EngineSessionAdapter = FakeAdapter>(
     rehydrateBinding,
     ...overrides,
   });
-  return { root, runtime, traceStore, adapter };
+  return { root, runtime, traceStore, adapter, artifacts };
 }
 
 const createInput = (
@@ -6503,6 +6503,69 @@ test("artifact authority rolls back when its canonical trace append fails", asyn
       ),
     ).toBe(false);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("artifact bytes survive a registry failure after the canonical trace is durable", async () => {
+  let createdRef = "";
+  const policy: ConversationPolicy = {
+    name: "artifact-post-fsync-registry-failure",
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(context) {
+      const created = await context.createArtifact({
+        artifact_type: "synthesis",
+        content: "must remain authoritative",
+        idempotency_key: "artifact:post-fsync",
+      });
+      createdRef = created.ref;
+      return {
+        operation_id: context.correlation.operation_id,
+        status: "completed",
+        artifact_refs: [created.ref],
+      };
+    },
+  };
+  const { root, runtime, artifacts } = await harness(policy);
+  const originalPrepare = artifacts.prepare.bind(artifacts);
+  let injected = false;
+  const prepareSpy = spyOn(artifacts, "prepare").mockImplementation((records) => {
+    const prepared = originalPrepare(records);
+    if (
+      injected ||
+      !records.some(({ stored_event }) => stored_event.event.type === "artifact_created")
+    ) {
+      return prepared;
+    }
+    injected = true;
+    return {
+      commit() {
+        throw new Error("injected post-fsync registry commit failure");
+      },
+      rollback: prepared.rollback,
+    };
+  });
+  try {
+    const outcome = await runtime.create(createInput(policy.name));
+    expect(outcome.result.status).toBe("completed");
+    const restarted = new ConversationArtifactStore({ dir: join(root, "manifests") });
+    expect(new TextDecoder().decode(restarted.readArtifactRef("conversation-1", createdRef))).toBe(
+      "must remain authoritative",
+    );
+    expect(
+      (await runtime.events("conversation-1", 0))?.some(
+        (event) => event.event.type === "artifact_created",
+      ),
+    ).toBe(true);
+  } finally {
+    prepareSpy.mockRestore();
     await rm(root, { recursive: true, force: true });
   }
 });
