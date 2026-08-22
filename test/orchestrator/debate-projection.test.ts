@@ -171,6 +171,13 @@ test("NFKC, Unicode whitespace, and non-locale case normalization group equivale
   ]);
 });
 
+test("Turkish I variants use host-locale-independent debate keys", () => {
+  expect(normalizeDebateOption("I")).toEqual({ option: "I", key: "i" });
+  expect(normalizeDebateOption("İ")).toEqual({ option: "İ", key: "i\u0307" });
+  expect(normalizeDebateOption("ı")).toEqual({ option: "ı", key: "ı" });
+  expect(normalizeDebateOption("i")).toEqual({ option: "i", key: "i" });
+});
+
 test("zero evidence population and not_applicable convergence produce bounded zero scores", () => {
   const matrix = projectDecisionMatrix(
     completedRound(
