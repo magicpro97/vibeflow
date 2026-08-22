@@ -1373,6 +1373,7 @@ describe("native resume evidence and history reconciliation", () => {
 
     expect(handle.readResumeBinding()).toBeUndefined();
     expect(result.nativeSessionStatus).toBe("unavailable");
+    expect(result.output).toBe("stdout without a session id\n");
     expect(chunks).toContainEqual({ stream: "stdout", content: "stdout without a session id\n" });
     expect(chunks).toContainEqual({ stream: "stderr", content: "stderr without a session id\n" });
   });
