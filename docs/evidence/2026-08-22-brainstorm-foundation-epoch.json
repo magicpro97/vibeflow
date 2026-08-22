@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-22T01:51:54Z",
+  "source_head": "80e69ae7ab1db499de035fc9ad5363afa1f1c547",
+  "state_sha256": "f18880a1c940115b3f8b07fc360316d6f9d9e27902e04ab62c0879bd64b22c9f",
+  "authority": "docs/specs/2026-08-17-brainstorm-debate-design.md",
+  "consumed_units": [
+    {
+      "name": "0a",
+      "status": "done",
+      "confidence": 0.95,
+      "evidence_count": 5,
+      "evidence_sha256": "a746b0cbcc06d07addb4397203daed10c6c442c86956f7a8b671fb8776e5dd5a",
+      "commit_refs": ["6472c3b2ca42738d02ad97758e8e586b9222db88"]
+    },
+    {
+      "name": "0b",
+      "status": "done",
+      "confidence": 0.98,
+      "evidence_count": 13,
+      "evidence_sha256": "c3cdd77e5fef8a9c047db8a8619de55ceac5da37771981a4e4b1d4bb75994213",
+      "commit_refs": [
+        "c4d84a04800b66be598da201c579c9018fe45ea9",
+        "bb9134253c34fcf9b8d721c9d7bec05f2fa469dd",
+        "c2433ffbe64a1fbfaa64f2873a7415aed9360a81"
+      ]
+    },
+    {
+      "name": "1",
+      "status": "done",
+      "confidence": 0.98,
+      "evidence_count": 5,
+      "evidence_sha256": "83a72ef738e0bd20d1080c44cbe9190cd7c17368b866781c31a23386512bd1b9",
+      "commit_refs": ["dc9bafb8dcf8a72137b23de7aa8da7d130a80d76"]
+    },
+    {
+      "name": "2",
+      "status": "done",
+      "confidence": 0.99,
+      "evidence_count": 13,
+      "evidence_sha256": "6366a258a330ed250515a81fd6fe4d15a7f4cbd00ec2a11bfa51961cc0b4d57d",
+      "commit_refs": ["84100a68435ceb088fc184e6ab2a6d2723222a54"]
+    }
+  ]
+}
