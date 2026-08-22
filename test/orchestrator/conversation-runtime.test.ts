@@ -2934,10 +2934,18 @@ test("terminal publication never exposes or notifies a half-terminal prefix", as
       },
     }),
   );
+  let unsubscribe: (() => void) | undefined;
+  let completion: Promise<unknown> | undefined;
   try {
     const accepted = await runtime.start(createInput("direct"));
+    completion = accepted.completion;
     const observed: string[] = [];
-    runtime.subscribe(accepted.conversation_id, (event) => observed.push(event.event.type));
+    const subscription = runtime.subscribe(accepted.conversation_id, (event) =>
+      observed.push(event.event.type),
+    ) as ((() => void) & { readonly replayReady: Promise<void> }) | null;
+    if (!subscription) throw new Error("conversation subscription was not created");
+    unsubscribe = subscription;
+    await subscription.replayReady;
     await waitFor(() => firstTerminalDurable);
     expect((await runtime.snapshot(accepted.conversation_id))?.lifecycle).toBe("ACTIVE");
     expect(observed).not.toContain("conversation_terminal");
@@ -2947,7 +2955,9 @@ test("terminal publication never exposes or notifies a half-terminal prefix", as
     expect((await runtime.snapshot(accepted.conversation_id))?.lifecycle).toBe("COMPLETED");
     expect(observed.slice(-2)).toEqual(["state_change", "conversation_terminal"]);
   } finally {
+    unsubscribe?.();
     releaseSuffix();
+    await completion?.catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -6067,14 +6077,38 @@ test("a failed child configuration is never linked and a retry completes the sam
 test("two services converge on one durable child execution for the same completed revision", async () => {
   const root = await mkdtemp(join(tmpdir(), "vf-conversation-shared-child-"));
   const artifacts = new DurableArtifactRegistry({ dir: join(root, "opaque") });
+  let releaseChildActive!: () => void;
+  let childActiveWritten!: () => void;
+  const childActiveGate = new Promise<void>((resolve) => {
+    releaseChildActive = resolve;
+  });
+  const childActiveStored = new Promise<void>((resolve) => {
+    childActiveWritten = resolve;
+  });
   let event = 0;
-  const makeService = (label: string, adapter: FakeAdapter) => {
-    const traceStore = new TraceStore({
+  const makeService = (label: string, adapter: FakeAdapter, blockChildActive = false) => {
+    const store = new TraceStore({
       dir: join(root, "trace"),
       artifactRegistry: artifacts,
       eventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, "0")}`,
       now: () => "2026-08-22T00:00:00.000Z",
     });
+    const traceStore = blockChildActive
+      ? {
+          readConversation: (id: string) => store.readConversation(id),
+          append: async (...args: Parameters<TraceStore["append"]>) => {
+            const stored = await store.append(...args);
+            if (
+              args[0].conversation_id !== "conversation-1" &&
+              args[1].idempotency_key === "conversation:active"
+            ) {
+              childActiveWritten();
+              await childActiveGate;
+            }
+            return stored;
+          },
+        }
+      : store;
     const counters = new Map<string, number>();
     return new ConversationOrchestrator({
       traceStore,
@@ -6093,8 +6127,9 @@ test("two services converge on one durable child execution for the same complete
   };
   const firstAdapter = new FakeAdapter();
   const secondAdapter = new FakeAdapter();
-  const firstService = makeService("first", firstAdapter);
+  const firstService = makeService("first", firstAdapter, true);
   const secondService = makeService("second", secondAdapter);
+  let firstPending: ReturnType<typeof firstService.message> | undefined;
   try {
     await firstService.create(createInput("direct"));
     const left = {
@@ -6102,14 +6137,18 @@ test("two services converge on one durable child execution for the same complete
       target_participants: ["participant-1", "participant-1"],
     };
     const right = { content: "shared revision", target_participants: ["participant-1"] };
-    const [first, second] = await Promise.all([
-      firstService.message("conversation-1", left),
-      secondService.message("conversation-1", right),
-    ]);
-    expect(second).toEqual(first);
-    const childId = first.child_conversation_id;
+    firstPending = firstService.message("conversation-1", left);
+    await childActiveStored;
+    const second = await secondService.message("conversation-1", right);
+    const childId = second.child_conversation_id;
     if (!childId) throw new Error("shared child conversation was not created");
-    await waitFor(async () => (await firstService.snapshot(childId))?.lifecycle === "COMPLETED");
+    await waitFor(async () => (await secondService.snapshot(childId))?.lifecycle === "COMPLETED");
+    releaseChildActive();
+    const first = await firstPending;
+    expect(second).toEqual(first);
+    expect(
+      (firstService as unknown as { runtime: ConversationRuntime }).runtime.operationId(childId),
+    ).toBeNull();
     expect(firstAdapter.starts.length + secondAdapter.starts.length).toBe(2);
     const events = await firstService.events(childId, 0);
     expect(events?.filter((item) => item.event.type === "user_message")).toHaveLength(1);
@@ -6118,6 +6157,8 @@ test("two services converge on one durable child execution for the same complete
     ).toEqual({ content: "shared revision", target_participants: ["participant-1"] });
     expect(events?.filter((item) => item.event.type === "conversation_terminal")).toHaveLength(1);
   } finally {
+    releaseChildActive();
+    await firstPending?.catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
 });

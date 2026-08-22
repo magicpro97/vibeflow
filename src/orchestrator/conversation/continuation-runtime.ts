@@ -1,4 +1,5 @@
 import { assertChildManifestAuthority, createChildManifest } from "./boundary-projection.js";
+import { ConversationAuthorityClosedError } from "./lifecycle-gate.js";
 import {
   conversationChildId,
   conversationChildOperationId,
@@ -90,7 +91,16 @@ export class ConversationContinuationRuntime {
       await this.runtime.configure(childId);
       await this.runtime.userMessage(childId, request, `child:message:${key}`);
     } catch (error) {
+      const canonicalChild =
+        error instanceof ConversationAuthorityClosedError
+          ? this.runtime.childRevision(parent.conversation_id, key)
+          : undefined;
+      this.runtime.finish(childId);
       await this.runtime.abandon(childId, "child configuration failed");
+      if (canonicalChild) {
+        return assertChildManifestAuthority(this.runtime.manifest(canonicalChild), parent, childId)
+          .conversation_id;
+      }
       throw error;
     }
     const [, claimed] = this.options.artifactStore.recordChildRevision(
