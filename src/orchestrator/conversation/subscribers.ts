@@ -21,7 +21,9 @@ export class ConversationSubscribers {
         subscriber.lastSeq = event.seq;
         try {
           subscriber.listener(event);
-        } catch {}
+        } catch (error) {
+          void error;
+        }
       }
     }
   }
@@ -55,7 +57,9 @@ export class ConversationSubscribers {
             subscriber.lastSeq = event.seq;
             try {
               listener(event);
-            } catch {}
+            } catch (error) {
+              void error;
+            }
           }
         }
         subscriber.replaying = false;

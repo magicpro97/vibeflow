@@ -84,7 +84,7 @@ export class ConversationRuntime {
   }
   // biome-ignore format: production file ceiling
   private notify(event: PublicStoredTraceEvent): void {
-    for (const listener of [...this.listeners]) { try { listener(event); } catch {} }
+    for (const listener of [...this.listeners]) { try { listener(event); } catch (error) { void error; } }
   }
   private correlation(
     manifest: ConversationManifest,

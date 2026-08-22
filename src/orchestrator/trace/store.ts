@@ -385,7 +385,9 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
             artifactRegistry: this.options.artifactRegistry,
           });
           this.options.mirror?.mirrorTrace(projected);
-        } catch {}
+        } catch (error) {
+          void error;
+        }
       }
       return output;
     });

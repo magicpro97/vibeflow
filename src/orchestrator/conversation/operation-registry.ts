@@ -95,13 +95,17 @@ export class OperationRegistry {
       for (const member of entry.members) {
         try {
           member.onCancelled?.(entry.conversationId, entry.operationId);
-        } catch {}
+        } catch (error) {
+          void error;
+        }
       }
     } else {
       for (const member of entry.members) {
         try {
           member.onSettled?.(entry.conversationId, entry.operationId, lifecycle);
-        } catch {}
+        } catch (error) {
+          void error;
+        }
       }
     }
     entry.controller.abort(reason);
