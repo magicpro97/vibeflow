@@ -618,4 +618,82 @@ describe("ask() integration (injected seams)", () => {
     expect(code).toBe(0);
     expect(seen?.prompt).toBe("why is that");
   });
+
+  test("--conversation routes the framed prompt through the shared conversation service", async () => {
+    await withFile("a\nb\nc\n", async (path) => {
+      let seen = "";
+      const code = await quiet(() =>
+        ask(
+          [`${path}:2-3`, "why"],
+          { conversation: "conversation-123" },
+          {
+            readiness: () => [ready("claude")],
+            createService: () =>
+              ({
+                message: async (_id: string, request: { content: string }) => {
+                  seen = request.content;
+                  return {
+                    message_id: "message-1",
+                    accepted: true,
+                    child_conversation_id: "conversation-124",
+                  };
+                },
+                snapshot: async () => ({ lifecycle: "COMPLETED" }),
+                subscribe: () => () => undefined,
+              }) as never,
+          },
+        ),
+      );
+      expect(code).toBe(0);
+      expect(seen).toContain("b\nc");
+      expect(seen).toContain("why");
+    });
+  });
+
+  test("fresh ask without an injected spawn uses the shared direct-policy conversation service", async () => {
+    await withFile("a\nb\nc\n", async (path) => {
+      let started: Record<string, unknown> | undefined;
+      const code = await quiet(() =>
+        ask(
+          [`${path}:2-3`, "explain", "this"],
+          {},
+          {
+            readiness: () => [ready("claude")],
+            createService: () =>
+              ({
+                start: async (request: {
+                  topic: string;
+                  policy: string;
+                  participants: unknown[];
+                }) => {
+                  started = request as unknown as Record<string, unknown>;
+                  return {
+                    conversation_id: "conversation-1",
+                    revision_id: "revision-1",
+                    operation_id: "operation-1",
+                    completion: Promise.resolve({
+                      conversation_id: "conversation-1",
+                      revision_id: "revision-1",
+                      result: {
+                        operation_id: "operation-1",
+                        status: "completed",
+                        artifact_refs: [],
+                      },
+                    }),
+                  };
+                },
+                subscribe: () => () => undefined,
+              }) as never,
+          },
+        ),
+      );
+      expect(code).toBe(0);
+      expect(started).toMatchObject({
+        policy: "direct",
+        participants: [{ role_ref: "direct", engine: "claude" }],
+      });
+      expect(String(started?.topic)).toContain("b\nc");
+      expect(String(started?.topic)).toContain("explain this");
+    });
+  });
 });

@@ -10,8 +10,7 @@
 // Private data (file-scoped, not re-exported):
 //   - COMMAND_HELP: per-subcommand help text registry
 
-import { VERSION, c, out } from "./_shared.js";
-import { COMMAND_HELP } from "./help-commands.js";
+import { COMMAND_HELP, VERSION, c, out } from "./_shared.js";
 
 export function printHelp(): number {
   out(
@@ -26,7 +25,9 @@ export function printHelp(): number {
     ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
     ${c.cyan("init")}              generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot | opencode | antigravity (--yes to launch)
+    ${c.cyan("chat")}              canonical conversational entry via the shared conversation runtime
     ${c.cyan("ask <f>:<lines>")}   inline code Q&A: stream an engine's answer about a snippet (--engine)
+    ${c.cyan("brainstorm")}        compatibility facade over the shared debate policy (dry by default, --yes to run)
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
     ${c.cyan("review evidence|check")}   create local commit-anchored evidence (--base <full-SHA> --result <JSON>) or validate it (--base <full-SHA>)
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)

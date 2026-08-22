@@ -376,6 +376,8 @@ describe("cli help routing", () => {
       ["units", "vf units"],
       ["init", "vf init"],
       ["orchestrate", "vf orchestrate"],
+      ["chat", "vf chat"],
+      ["brainstorm", "vf brainstorm"],
       ["tools", "vf tools"],
     ];
     for (const [cmd, marker] of cases) {
@@ -642,6 +644,15 @@ describe("engines", () => {
 });
 
 describe("server", () => {
+  test("ui wiring reuses one shared conversation authority across initial start and hot restart", () => {
+    const src = readFileSync(join(import.meta.dir, "..", "src/cli.ts"), "utf8");
+    expect(src).toContain("const conversation = buildConversationHttpAuthority({}, host, cwd());");
+    expect(src).toContain(
+      "startServerResilient(\n    Number.isFinite(port) ? port : 0,\n    host,\n    conversation,\n  )",
+    );
+    expect(src).toContain("startServer(Number.isFinite(port) ? port : 0, { host, conversation })");
+  });
+
   test("serves the Vue app and state endpoints on loopback", async () => {
     const { server, url } = await startServer(0);
     expect(url).toContain("127.0.0.1");

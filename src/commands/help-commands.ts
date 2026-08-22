@@ -1,7 +1,8 @@
-import { c } from "./_shared.js";
-import { SUPERPOWERS_HELP } from "./help-superpowers.js";
+import { ASK_HELP, BRAINSTORM_HELP, CHAT_HELP, SUPERPOWERS_HELP, c } from "./_shared.js";
 export const COMMAND_HELP: Record<string, () => string> = {
   superpowers: SUPERPOWERS_HELP,
+  chat: CHAT_HELP,
+  brainstorm: BRAINSTORM_HELP,
   ui: () => `${c.bold("vf ui")} ${c.dim("[--port <n>] [--host <addr>] [--no-open]")}
 Open the local web UI (intake wizard + workflow console). This is also the default
 command when you run \`vf\` with no arguments.
@@ -63,21 +64,7 @@ ${c.bold("Examples:")}
   vf run opencode --yes
   vf run antigravity --yes`,
 
-  ask: () => `${c.bold("vf ask")} ${c.dim('<path>:<start>[-<end>] "<question>" [--engine <e>] [--resume]')}
-Inline code Q&A: read a line range, frame it (file + language-fenced snippet +
-your question), and stream a ready engine's answer straight to the terminal.
-Reuses vf's engine-readiness selection; no chat app, no copy-paste.
-
-${c.bold("Options:")}
-  --engine <name>   force claude | codex | copilot | opencode | antigravity (must be ready); else the
-                    first ready engine in priority order is used
-  --resume          continue the engine's MOST RECENT conversation with a
-                    follow-up question (no target needed) — claude/codex/opencode/antigravity
-
-${c.bold("Examples:")}
-  vf ask src/cli.ts:210-267 "what does this switch do?"
-  vf ask src/dispatch.ts:172 "why the json output format?" --engine claude
-  vf ask --resume "ok, and is that thread-safe?"`,
+  ask: ASK_HELP,
 
   orchestrate:
     () => `${c.bold("vf orchestrate")} ${c.dim("[--engine <e>] [--yes] [--concurrency <n>] [--risk <class>] [--focus]")}

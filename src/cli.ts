@@ -30,8 +30,11 @@ import {
   workflow,
 } from "./commands.js";
 import { ask } from "./commands/ask.js";
+import { brainstorm } from "./commands/brainstorm.js";
 import { canary } from "./commands/canary.js";
+import { chat } from "./commands/chat.js";
 import { config, decision } from "./commands/config-decision.js";
+import { buildConversationHttpAuthority } from "./commands/conversation-http.js";
 import { coord } from "./commands/coord.js";
 import { evalCmd } from "./commands/eval.js";
 import { lanExposureWarning } from "./commands/lan-warning.js";
@@ -74,9 +77,10 @@ function promptYesNo(question: string): Promise<boolean> {
 async function startServerResilient(
   port: number,
   host?: string,
+  conversation = buildConversationHttpAuthority({}, host, cwd()),
 ): Promise<Awaited<ReturnType<typeof startServer>>> {
   try {
-    return await startServer(port, { host });
+    return await startServer(port, { host, conversation });
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "EADDRINUSE" && port !== 0) {
@@ -84,7 +88,7 @@ async function startServerResilient(
         level: "error",
       });
       const change = await promptYesNo("Switch to a different port? (y/N) ");
-      if (change) return await startServer(0, { host });
+      if (change) return await startServer(0, { host, conversation });
       out("vf", c.dim("Stopped."), {
         level: "error",
       });
@@ -122,9 +126,14 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
   }
   const port = typeof flags.port === "string" ? Number(flags.port) : 0;
   const host = typeof flags.host === "string" ? flags.host : undefined;
+  const conversation = buildConversationHttpAuthority({}, host, cwd());
   const warn = lanExposureWarning(host);
   if (warn) out("vf", c.red(warn));
-  let { server, url } = await startServerResilient(Number.isFinite(port) ? port : 0, host);
+  let { server, url } = await startServerResilient(
+    Number.isFinite(port) ? port : 0,
+    host,
+    conversation,
+  );
   if (!flags["no-open"]) openBrowser(url);
 
   // --- .ui-port: cross-process port discovery for the "watch live" tip ---
@@ -176,7 +185,7 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
         prev.stop();
         // Clear the screen and bring up a fresh server immediately.
         process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
-        startServer(Number.isFinite(port) ? port : 0, { host })
+        startServer(Number.isFinite(port) ? port : 0, { host, conversation })
           .then((next) => {
             ({ server, url } = next);
             writeUiPort(url);
@@ -219,7 +228,7 @@ async function main(argv: string[]): Promise<number> {
   // Passive nudge for every real command: prints a one-line "update available"
   // from the 24h cache (zero latency) and refreshes the cache in the background
   // when stale. Silent in CI / non-TTY / when opted out. Best-effort.
-  notifyUpdate();
+  if (!(flags.json === true && (cmd === "chat" || cmd === "brainstorm"))) notifyUpdate();
 
   switch (cmd) {
     case "pr":
@@ -239,6 +248,10 @@ async function main(argv: string[]): Promise<number> {
       return await run(positionals[0], flags);
     case "ask":
       return await ask(positionals, flags);
+    case "chat":
+      return await chat(rest);
+    case "brainstorm":
+      return await brainstorm(rest);
     case "orchestrate":
       return await orchestrate(flags);
     case "demo":

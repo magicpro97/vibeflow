@@ -89,4 +89,14 @@ describe("help text", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src/commands/help-commands.ts"), "utf8");
     expect(src).toContain("--min-pass-rate <0..1>");
   });
+
+  test("chat and brainstorm have per-command help blocks", () => {
+    expect(hasCommandHelp("chat")).toBe(true);
+    expect(hasCommandHelp("brainstorm")).toBe(true);
+    expect(printCommandHelp("chat")).toBe(0);
+    expect(printCommandHelp("brainstorm")).toBe(0);
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help.ts"), "utf8");
+    expect(src).toContain("canonical conversational entry");
+    expect(src).toContain("shared debate policy");
+  });
 });
