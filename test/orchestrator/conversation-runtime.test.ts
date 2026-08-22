@@ -27,6 +27,8 @@ import type {
 } from "../../src/orchestrator/conversation/runtime.js";
 import {
   ConversationControlConflictError,
+  ConversationInvalidTargetParticipantError,
+  ConversationNotFoundError,
   ConversationOrchestrator,
 } from "../../src/orchestrator/conversation/service.js";
 import type {
@@ -369,6 +371,31 @@ const completed = (attemptId = "runtime-attempt"): EngineSessionResult => ({
   output: "answer",
   evidenceStatus: "persisted",
   nativeSessionStatus: "unavailable",
+});
+
+test("public conversation controls throw typed lookup and target errors", async () => {
+  const { root, runtime } = await harness(new DirectConversationPolicy());
+  try {
+    const missingControls = [
+      () => runtime.message("missing", { content: "message" }),
+      () => runtime.pause("missing"),
+      () => runtime.resume("missing"),
+      () => runtime.stop("missing"),
+    ];
+    for (const control of missingControls) {
+      await expect(control()).rejects.toBeInstanceOf(ConversationNotFoundError);
+    }
+
+    await runtime.create(createInput("direct"));
+    await expect(
+      runtime.message("conversation-1", {
+        content: "target missing participant",
+        target_participants: ["missing"],
+      }),
+    ).rejects.toBeInstanceOf(ConversationInvalidTargetParticipantError);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("policy registry rejects duplicate names and never falls back for unknown policy", () => {

@@ -39,6 +39,8 @@ import type {
   StopResponse,
   Unsubscribe,
 } from "./types.js";
+export class ConversationNotFoundError extends Error {}
+export class ConversationInvalidTargetParticipantError extends Error {}
 export class ConversationControlConflictError extends Error {}
 const rethrowControlConflict = (error: unknown): never => {
   if (
@@ -279,7 +281,7 @@ export class ConversationOrchestrator implements ConversationService {
     const captured = canonicalMessageRequest(snapshotRuntimeValue(request));
     const manifest = this.runtime.manifest(id);
     const state = await this.snapshot(id);
-    if (!manifest || !state) throw new Error("conversation not found");
+    if (!manifest || !state) throw new ConversationNotFoundError("conversation not found");
     const targets = captured.target_participants ?? "all";
     if (
       targets !== "all" &&
@@ -287,7 +289,7 @@ export class ConversationOrchestrator implements ConversationService {
         (target) => !manifest.bindings.some((binding) => binding.participant_id === target),
       )
     )
-      throw new Error("unknown target participant");
+      throw new ConversationInvalidTargetParticipantError("unknown target participant");
     if (state.lifecycle === "COMPLETED") {
       const key = messageRevisionKey(captured);
       const existing = this.runtime.childRevision(id, key);
@@ -312,7 +314,7 @@ export class ConversationOrchestrator implements ConversationService {
   }
   async pause(id: string): Promise<PauseResponse> {
     const state = await this.snapshot(id);
-    if (!state) throw new Error("conversation not found");
+    if (!state) throw new ConversationNotFoundError("conversation not found");
     if (state.lifecycle !== "ACTIVE")
       throw new ConversationControlConflictError("pause requires ACTIVE");
     if (!this.runtime.operationId(id)) {
@@ -327,7 +329,7 @@ export class ConversationOrchestrator implements ConversationService {
   }
   async resume(id: string): Promise<ResumeResponse> {
     const state = await this.snapshot(id);
-    if (!state) throw new Error("conversation not found");
+    if (!state) throw new ConversationNotFoundError("conversation not found");
     if (state.lifecycle !== "PAUSED")
       throw new ConversationControlConflictError("resume requires PAUSED");
     await this.runtime.restore(id).catch(rethrowControlConflict);
@@ -340,7 +342,7 @@ export class ConversationOrchestrator implements ConversationService {
   }
   async stop(id: string): Promise<StopResponse> {
     const state = await this.runtime.controlState(id);
-    if (!state) throw new Error("conversation not found");
+    if (!state) throw new ConversationNotFoundError("conversation not found");
     if (isTerminalLifecycle(state.lifecycle))
       throw new ConversationControlConflictError("conversation is terminal");
     if (!this.runtime.operationId(id)) {
