@@ -8,8 +8,10 @@ import {
   ConversationInvalidTargetParticipantError,
   ConversationNotFoundError,
 } from "../src/orchestrator/conversation/service.js";
+import { orchestrationApprovalToken } from "../src/orchestrator/conversation/services.js";
 import type {
   ApprovalDecision,
+  ConversationContext,
   ConversationService,
   OperationCancelCommand,
 } from "../src/orchestrator/conversation/types.js";
@@ -433,6 +435,90 @@ describe("conversation DTO and status mapping", () => {
     expect(conversation.status).toBe(409);
     expect(await conversation.json()).toEqual({ code: "operation_conversation_mismatch" });
     expect(approvals).toBe(0);
+    expect(cancellations).toBe(0);
+  });
+
+  test("resolves production approval tokens without widening other route identities", async () => {
+    const token = orchestrationApprovalToken(
+      {
+        correlation: {
+          workflow_id: "workflow-a",
+          conversation_id: "conversation-a",
+          revision_id: "revision-a",
+          run_id: "run-a",
+          turn_id: "turn-a",
+          operation_id: "operation-a",
+          attempt_id: "attempt-a",
+        },
+      } as ConversationContext,
+      "human",
+    );
+    let resolved: ApprovalDecision | undefined;
+    let cancellations = 0;
+    const auth = authority({
+      service: service({
+        resolveApproval: async (_conversationId: string, decision: ApprovalDecision) => {
+          resolved = decision;
+          return { status: 202, body: { ...decision, resolved: true } };
+        },
+        cancelOperation: async (command: OperationCancelCommand) => {
+          cancellations += 1;
+          return {
+            status: 202,
+            body: { operation_id: command.operation_id, cancelled: true },
+          };
+        },
+      }),
+    });
+    const decision = { ...token, outcome: "approve" as const, reason: null };
+    const approved = await route(
+      auth,
+      request(
+        "POST",
+        `/api/conversations/conversation-a/approvals/${encodeURIComponent(token.approval_id)}/resolve`,
+        decision,
+      ),
+    );
+    expect(approved.status).toBe(202);
+    expect(await approved.json()).toEqual({ ...decision, resolved: true });
+    expect(resolved).toEqual(decision);
+
+    const malformedApprovalId = "approval:not-a-sha256";
+    const malformedApproval = await route(
+      auth,
+      request(
+        "POST",
+        `/api/conversations/conversation-a/approvals/${encodeURIComponent(malformedApprovalId)}/resolve`,
+        { ...decision, approval_id: malformedApprovalId },
+      ),
+    );
+    expect(malformedApproval.status).toBe(404);
+    expect(
+      (
+        await route(
+          auth,
+          request("GET", `/api/conversations/${encodeURIComponent("conversation:a")}/snapshot`),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await route(
+          auth,
+          request(
+            "POST",
+            `/api/conversations/conversation-a/operations/${encodeURIComponent("operation:a")}/cancel`,
+            {
+              conversation_id: "conversation-a",
+              operation_id: "operation:a",
+              actor: "human",
+              reason: null,
+            },
+          ),
+        )
+      ).status,
+    ).toBe(404);
+    expect(resolved).toEqual(decision);
     expect(cancellations).toBe(0);
   });
 

@@ -31,6 +31,7 @@ const PARTICIPANT_LIMIT = 64;
 const ROUND_LIMIT = 100;
 const ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
+const APPROVAL_TOKEN_PATTERN = /^approval:[0-9a-f]{64}$/;
 const CLIENT_ROUTING_ERRORS = new Set<ConversationRoutingError["code"]>([
   "invalid_routing_input",
   "unknown_explicit_policy",
@@ -197,7 +198,7 @@ function approvalRequest(body: JsonObject): ApprovalDecision | null {
   if (!exactKeys(body, ["approval_id", "operation_id", "actor", "outcome", "reason"])) return null;
   if (
     !Object.hasOwn(body, "reason") ||
-    !routeId(body.approval_id) ||
+    !approvalRouteId(body.approval_id) ||
     !routeId(body.operation_id) ||
     !boundedString(body.actor, SHORT_LIMIT) ||
     (body.outcome !== "approve" && body.outcome !== "reject") ||
@@ -248,6 +249,10 @@ function segments(url: URL): string[] | null {
 
 function routeId(value: unknown): value is string {
   return typeof value === "string" && ID_PATTERN.test(value);
+}
+
+function approvalRouteId(value: unknown): value is string {
+  return routeId(value) || (typeof value === "string" && APPROVAL_TOKEN_PATTERN.test(value));
 }
 
 function mapError(error: unknown): Response {
@@ -350,7 +355,12 @@ export async function handleConversationRoute(
         return response(404, "conversation_not_found");
       return accepted(authority.streamTokens.issue(conversationId));
     }
-    if (path.length === 4 && action === "approvals" && routeId(identity) && tail === "resolve") {
+    if (
+      path.length === 4 &&
+      action === "approvals" &&
+      approvalRouteId(identity) &&
+      tail === "resolve"
+    ) {
       const input = approvalRequest(body);
       if (!input) return response(400, "invalid_request");
       if (input.approval_id !== identity) return response(409, "approval_route_body_mismatch");
