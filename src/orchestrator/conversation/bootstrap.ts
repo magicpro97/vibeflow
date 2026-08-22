@@ -15,6 +15,12 @@ import { TRACE_LIMITS, utf8Bytes } from "../trace/limits.js";
 import { ensurePrivateDirectory } from "../trace/path-safety.js";
 import { TraceStore, type TraceStoreOptions } from "../trace/store.js";
 import { ConversationArtifactStore } from "./artifact-store.js";
+import {
+  type ConversationIsolationAuthority,
+  bindWithIsolation,
+  defaultConversationIsolationAuthority,
+  withAttemptIsolation,
+} from "./bootstrap-isolation.js";
 import { DebateConversationPolicy } from "./debate-policy.js";
 import { DirectConversationPolicy } from "./direct-policy.js";
 import { OrchestrateConversationPolicy } from "./orchestrate-policy.js";
@@ -59,18 +65,15 @@ export interface ConversationBootstrapLibraries {
   verify: VerifyLibrary;
   orchestrate: Omit<OrchestrateLibrary, "cancel">;
 }
-
 interface RoutingContext {
   workflowReady?: boolean;
   attachments?: readonly string[];
   skillDomains?: readonly string[];
 }
-
 interface BindingFactory {
   materialize: typeof materializeAgentBinding;
   preview: typeof previewAgentBinding;
 }
-
 export interface ConversationBootstrapOptions {
   repoRoot: string;
   libraries: ConversationBootstrapLibraries;
@@ -88,10 +91,9 @@ export interface ConversationBootstrapOptions {
   registeredRoles?: readonly string[];
   /** Unit-test seam. Production always uses the canonical current-HEAD evidence checker. */
   reviewEvidenceAuthority?: ReviewEvidenceAuthority;
-  /** Unit-test seam. Production callers omit this and use the canonical binder. */
   bindingFactory?: BindingFactory;
+  isolationAuthority?: ConversationIsolationAuthority;
 }
-
 export interface ConversationBootstrap {
   service: ConversationService;
   services: Readonly<{
@@ -107,7 +109,6 @@ export interface ConversationBootstrap {
     policies: ConversationPolicyRegistry;
   }>;
 }
-
 const fail = (message: string): never => {
   throw new Error(`conversation bootstrap: ${message}`);
 };
@@ -254,10 +255,17 @@ export function createConversationBootstrap(
     ...(options.now ? { now: options.now } : {}),
   });
   const artifactStore = new ConversationArtifactStore({ dir: join(root, "artifacts") });
-  const sessionAdapter = createEngineSessionAdapter({
-    ...options.session,
-    evidenceRoot: options.session?.evidenceRoot ?? join(root, "attempts"),
-  });
+  const isolationAuthority = options.isolationAuthority ?? defaultConversationIsolationAuthority;
+  const bindingIsolation =
+    options.bindingFactory && !options.isolationAuthority ? undefined : isolationAuthority;
+  const sessionAdapter = withAttemptIsolation(
+    createEngineSessionAdapter({
+      ...options.session,
+      evidenceRoot: options.session?.evidenceRoot ?? join(root, "attempts"),
+    }),
+    isolationAuthority,
+    repoRoot,
+  );
   const locatePlan = persistedPlanLocator(artifactStore);
   const plan = new InjectedPlanService({ ...options.libraries.plan, locate: locatePlan });
   const review = new InjectedReviewService(
@@ -309,18 +317,22 @@ export function createConversationBootstrap(
       evaluatorAutoAdded: selection.evaluatorAutoAdded,
       repoRoot,
       phase,
-      bindings: selection.participants.map((participant, index) => {
-        const input = bindingInput(participant);
-        return {
-          participantId: `participant-${index + 1}`,
-          input,
-          materialized: binder.materialize(input, {
-            repoRoot,
-            phase,
-            taskText: request.topic,
-          }),
-        };
-      }),
+      bindings: await Promise.all(
+        selection.participants.map(async (participant, index) => {
+          const input = bindingInput(participant);
+          return {
+            participantId: `participant-${index + 1}`,
+            input,
+            materialized: await bindWithIsolation(
+              bindingIsolation,
+              repoRoot,
+              phase,
+              request.topic,
+              (bindingOptions) => binder.materialize(input, bindingOptions),
+            ),
+          };
+        }),
+      ),
     };
   };
   const resolveDryRunRequest = async (
@@ -335,14 +347,22 @@ export function createConversationBootstrap(
       evaluatorAutoAdded: selection.evaluatorAutoAdded,
       repoRoot,
       phase,
-      bindings: selection.participants.map((participant, index) => {
-        const input = bindingInput(participant);
-        return {
-          participantId: `participant-${index + 1}`,
-          input,
-          preview: binder.preview(input, { repoRoot, phase, taskText: request.topic }),
-        };
-      }),
+      bindings: await Promise.all(
+        selection.participants.map(async (participant, index) => {
+          const input = bindingInput(participant);
+          return {
+            participantId: `participant-${index + 1}`,
+            input,
+            preview: await bindWithIsolation(
+              bindingIsolation,
+              repoRoot,
+              phase,
+              request.topic,
+              (bindingOptions) => binder.preview(input, bindingOptions),
+            ),
+          };
+        }),
+      ),
     };
   };
   const service = new ConversationOrchestrator({
@@ -354,12 +374,12 @@ export function createConversationBootstrap(
     resolveCreateRequest,
     resolveDryRunRequest,
     rehydrateBinding: (binding, manifest) =>
-      Promise.resolve(
-        binder.materialize(binding.input, {
-          repoRoot: manifest.repo_root,
-          phase: manifest.phase,
-          taskText: manifest.task_text,
-        }),
+      bindWithIsolation(
+        bindingIsolation,
+        manifest.repo_root,
+        manifest.phase,
+        manifest.task_text,
+        (bindingOptions) => binder.materialize(binding.input, bindingOptions),
       ),
     ...(options.id ? { id: options.id } : {}),
     ...(options.now ? { now: options.now } : {}),
@@ -373,7 +393,6 @@ export function createConversationBootstrap(
   });
 }
 
-/** Public CLI/server factory; detailed authority handles remain an explicit bootstrap test seam. */
 export function createConversationService(
   options: ConversationBootstrapOptions,
 ): ConversationService {
