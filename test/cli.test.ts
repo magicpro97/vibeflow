@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { canonicalFiles } from "../src/adapters/canonical-files.js";
 import { defaultContext } from "../src/adapters/context-builders.js";
 import { dispatchPrompt } from "../src/adapters/dispatch-prompt.js";
@@ -75,6 +76,16 @@ const noneReady = (engines: Engine[]): EngineReadiness[] =>
     detail: `${engine} CLI not found`,
     checkedAt: "",
   }));
+
+const isolatedUiFixture = (): { dir: string; html: URL } => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-ui-fixture-"));
+  const path = join(dir, "index.html");
+  writeFileSync(
+    path,
+    '<!doctype html><meta name="vf-token" content="__CSRF__"><meta name="vf-version" content="__VERSION__"><div id="app">VibeFlow</div>',
+  );
+  return { dir, html: pathToFileURL(path) };
+};
 
 describe("core", () => {
   test("parseFlags splits positionals and flags", () => {
@@ -654,14 +665,19 @@ describe("server", () => {
   });
 
   test("serves the Vue app and state endpoints on loopback", async () => {
-    const { server, url } = await startServer(0);
-    expect(url).toContain("127.0.0.1");
-    const html = await fetch(url).then((r) => r.text());
-    expect(html).toContain("VibeFlow");
-    expect(html).toContain('id="app"'); // Vue mount point
-    const state = await fetch(`${url}/state`);
-    expect(state.status).toBe(200);
-    server.stop();
+    const fixture = isolatedUiFixture();
+    const { server, url } = await startServer(0, { uiHtmlPath: fixture.html });
+    try {
+      expect(url).toContain("127.0.0.1");
+      const html = await fetch(url).then((r) => r.text());
+      expect(html).toContain("VibeFlow");
+      expect(html).toContain('id="app"'); // Vue mount point
+      const state = await fetch(`${url}/state`);
+      expect(state.status).toBe(200);
+    } finally {
+      server.stop();
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
   });
 
   test("serves same-origin /assets/* (CSP-safe) and guards traversal + bad extensions", async () => {
@@ -1447,12 +1463,17 @@ describe("server preflight + settings endpoints", () => {
   });
 
   test("the served HTML is the Vue app entry point", async () => {
-    const { server, url } = await startServer(0);
-    const html = await fetch(url).then((r) => r.text());
-    // Vue app entry: has #app mount point and csrf meta tag
-    expect(html).toContain('id="app"');
-    expect(html).toContain('name="vf-token"');
-    server.stop();
+    const fixture = isolatedUiFixture();
+    const { server, url } = await startServer(0, { uiHtmlPath: fixture.html });
+    try {
+      const html = await fetch(url).then((r) => r.text());
+      // Vue app entry: has #app mount point and csrf meta tag
+      expect(html).toContain('id="app"');
+      expect(html).toContain('name="vf-token"');
+    } finally {
+      server.stop();
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
   });
 });
 
