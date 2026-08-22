@@ -1,5 +1,9 @@
 import { ConversationRoutingError } from "../orchestrator/conversation/router.js";
-import { ConversationControlConflictError } from "../orchestrator/conversation/service.js";
+import {
+  ConversationControlConflictError,
+  ConversationInvalidTargetParticipantError,
+  ConversationNotFoundError,
+} from "../orchestrator/conversation/service.js";
 import type {
   ApprovalDecision,
   ConversationCreateParticipant,
@@ -247,13 +251,12 @@ function routeId(value: unknown): value is string {
 }
 
 function mapError(error: unknown): Response {
-  if (error instanceof Error && error.message === "conversation not found")
-    return response(404, "conversation_not_found");
+  if (error instanceof ConversationNotFoundError) return response(404, "conversation_not_found");
   if (error instanceof ConversationControlConflictError)
     return response(409, "conversation_conflict");
   if (
-    (error instanceof ConversationRoutingError && CLIENT_ROUTING_ERRORS.has(error.code)) ||
-    (error instanceof Error && error.message === "unknown target participant")
+    error instanceof ConversationInvalidTargetParticipantError ||
+    (error instanceof ConversationRoutingError && CLIENT_ROUTING_ERRORS.has(error.code))
   )
     return response(400, "invalid_request");
   return response(500, "conversation_failed");

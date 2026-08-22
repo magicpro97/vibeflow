@@ -3,7 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConversationRoutingError } from "../src/orchestrator/conversation/router.js";
-import { ConversationControlConflictError } from "../src/orchestrator/conversation/service.js";
+import {
+  ConversationControlConflictError,
+  ConversationInvalidTargetParticipantError,
+  ConversationNotFoundError,
+} from "../src/orchestrator/conversation/service.js";
 import type {
   ApprovalDecision,
   ConversationService,
@@ -355,8 +359,15 @@ describe("conversation DTO and status mapping", () => {
         409,
         "conversation_conflict",
       ],
-      [new Error("conversation not found"), 404, "conversation_not_found"],
+      [new ConversationNotFoundError("conversation not found"), 404, "conversation_not_found"],
+      [
+        new ConversationInvalidTargetParticipantError("unknown target participant"),
+        400,
+        "invalid_request",
+      ],
       [new ConversationRoutingError("unknown_explicit_policy"), 400, "invalid_request"],
+      [new Error("conversation not found"), 500, "conversation_failed"],
+      [new Error("unknown target participant"), 500, "conversation_failed"],
       [new Error("trace journal: invalid hash chain"), 500, "conversation_failed"],
       [new Error("/private/secret stack detail"), 500, "conversation_failed"],
     ] as const;
