@@ -106,7 +106,7 @@ export type Participant = {
   participant_id: string;
   role_ref: string;
   engine: Engine;
-  model: RoleSpec["model"] | null;
+  model: string | null;
 };
 export interface ApprovalToken {
   approval_id: string;
@@ -131,7 +131,7 @@ export interface CoordinatorDecisionPayload {
 export interface ParticipantBoundPayload {
   participant_id: string;
   engine: Engine;
-  model: RoleSpec["model"] | null;
+  model: string | null;
   prompt_hash: string;
   tools: RoleSpec["tools"];
   sandbox: NonNullable<RoleSpec["sandbox"]>;

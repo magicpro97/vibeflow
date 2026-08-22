@@ -12,8 +12,7 @@ import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { DEFAULTS, nowEpoch, safeText, stringifyEvent } from "./logbus/types.js";
 import type { LogContext, LogEvent, LogEventInput } from "./logbus/types.js";
-import { projectPublicTrace } from "./orchestrator/trace/project.js";
-import type { StoredTraceEvent } from "./orchestrator/trace/types.js";
+import type { PublicStoredTraceEvent } from "./orchestrator/trace/types.js";
 
 // Re-exports from moved modules
 export { out } from "./logbus/out.js";
@@ -313,7 +312,7 @@ export class Logbus {
     }
   }
 
-  mirrorTrace(event: StoredTraceEvent): void {
+  mirrorTrace(event: PublicStoredTraceEvent): void {
     this.write({
       runId: "trace-public",
       workflowId: "trace-public",
@@ -321,7 +320,7 @@ export class Logbus {
       channel: "vf",
       level: "info",
       text: `trace:${event.event.type}`.slice(0, 128),
-      meta: { event_id: event.event_id, seq: event.seq, event: projectPublicTrace(event.event) },
+      meta: { trace: event },
     });
   }
 

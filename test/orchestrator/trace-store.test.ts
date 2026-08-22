@@ -20,11 +20,23 @@ import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { type LogEvent, Logbus } from "../../src/logbus.js";
 import {
+  type ArtifactRegistry,
+  DurableArtifactRegistry,
+  type RebuildableArtifactRegistry,
+} from "../../src/orchestrator/trace/artifacts.js";
+import { projectPublicStoredTrace } from "../../src/orchestrator/trace/project.js";
+import {
   TraceIdempotencyConflictError,
   TraceStore,
   traceJournalPath,
 } from "../../src/orchestrator/trace/store.js";
-import type { TraceEvent } from "../../src/orchestrator/trace/types.js";
+import type {
+  OpaqueArtifactId,
+  OpaqueSessionRef,
+  StoredTraceEvent,
+  TraceEvent,
+} from "../../src/orchestrator/trace/types.js";
+import { decodeRecord, isValidParticipantModel } from "../../src/orchestrator/trace/validation.js";
 
 const correlation = {
   workflow_id: "w",
@@ -189,6 +201,33 @@ const samples: TraceEvent[] = [
   },
 ];
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
+const projectionRegistry: ArtifactRegistry = {
+  register(conversationId, internalRef) {
+    return `artifact_${conversationId}_${internalRef.length}` as OpaqueArtifactId;
+  },
+  resolve() {
+    return null;
+  },
+  sessionRef(conversationId, nativeSessionId) {
+    return `session_${conversationId}_${nativeSessionId.length}` as OpaqueSessionRef;
+  },
+  prepareProjection(inputs) {
+    return {
+      ids: inputs.map((input) =>
+        input.kind === "artifact"
+          ? (`artifact_${input.conversationId}_${input.value.length}` as OpaqueArtifactId)
+          : (`session_${input.conversationId}_${input.value.length}` as OpaqueSessionRef),
+      ),
+      commit() {},
+      rollback() {},
+    };
+  },
+};
+const publicStored = (stored_event: StoredTraceEvent, native_session_id: string | null = null) =>
+  projectPublicStoredTrace(
+    { stored_event, native_session_id },
+    { conversationId: stored_event.conversation_id, artifactRegistry: projectionRegistry },
+  );
 
 const runProcess = async (command: string, args: string[], timeoutMs = 1_000) => {
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -237,18 +276,12 @@ const independentStore = (dir: string, suffix: string, mirrored: unknown[]) => {
 
 type IdentityEvent = {
   event_id: string;
-  idempotency_key: string;
   seq: number;
   event: TraceEvent;
 };
 const identityTuple = (stored: IdentityEvent) => {
   if (stored.event.type !== "user_message") throw new Error("expected user message");
-  return [
-    stored.event_id,
-    stored.idempotency_key,
-    stored.seq,
-    stored.event.payload.content,
-  ] as const;
+  return [stored.event_id, stored.seq, stored.event.payload.content] as const;
 };
 const sortedIdentityTuples = (values: IdentityEvent[]) =>
   values.map(identityTuple).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -268,7 +301,7 @@ test("independent stores serialize same-key and distinct-key races", async () =>
     expect((await one.readConversation("same-key")).map((row) => row.stored_event)).toEqual([
       same[0],
     ]);
-    expect(mirrored).toEqual([same[0]]);
+    expect(mirrored).toEqual([publicStored(same[0])]);
     expect(existsSync(`${traceJournalPath(dir, "same-key")}.lock`)).toBe(false);
 
     mirrored.length = 0;
@@ -279,7 +312,9 @@ test("independent stores serialize same-key and distinct-key races", async () =>
     ]);
     const replayed = await two.readConversation("distinct-keys");
     expect(sortedIdentityTuples(mirrored as IdentityEvent[])).toEqual(
-      sortedIdentityTuples(appended),
+      sortedIdentityTuples(
+        appended.map((stored) => publicStored(stored)) as unknown as IdentityEvent[],
+      ),
     );
     expect((mirrored as IdentityEvent[]).map(({ seq }) => seq)).toEqual([1, 2]);
     expect(sortedIdentityTuples(replayed.map((row) => row.stored_event))).toEqual(
@@ -466,7 +501,7 @@ console.log(JSON.stringify({key:${JSON.stringify(key)},event_id:stored.event_id,
     }
     const replayed = await parentStore.readConversation(id);
     const expected = childResults
-      .map(({ key, event_id, seq }) => [event_id, key, seq, key] as const)
+      .map(({ key, event_id, seq }) => [event_id, seq, key] as const)
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     expect(sortedIdentityTuples(replayed.map((row) => row.stored_event))).toEqual(expected);
     expect(childResults.map(({ seq }) => seq).sort((a, b) => a - b)).toEqual([1, 2]);
@@ -593,20 +628,13 @@ test("makes private durable entries in order and cleans up observed resources", 
     const aliasAncestor = join(parent, "alias");
     symlinkSync(physicalAncestor, aliasAncestor, "dir");
     const aliasDir = join(aliasAncestor, "ordinary", "store");
-    const aliasStore = new TraceStore(options(aliasDir));
-    expect(resolve(aliasDir)).not.toBe(fs.realpathSync(aliasDir));
-    expect(fs.lstatSync(aliasDir).isDirectory()).toBe(true);
-    expect(fs.lstatSync(join(aliasDir, "..")).isDirectory()).toBe(true);
-    await aliasStore.readConversation("safe");
+    expect(() => new TraceStore(options(aliasDir))).toThrow("symlink path component");
 
     const conversations = join(dir, "conversations");
     const journal = traceJournalPath(dir, "safe");
     expect(fs.lstatSync(dir).mode & 0o777).toBe(0o700);
     expect(fs.lstatSync(conversations).mode & 0o777).toBe(0o700);
     expect(fs.lstatSync(journal).mode & 0o777).toBe(0o600);
-    expect(fs.lstatSync(aliasDir).mode & 0o777).toBe(0o700);
-    expect(fs.lstatSync(join(aliasDir, "conversations")).mode & 0o777).toBe(0o700);
-    expect(fs.lstatSync(traceJournalPath(aliasDir, "safe")).mode & 0o777).toBe(0o600);
     const index = (value: string) => actions.findIndex((action) => action === value);
     const realDir = fs.realpathSync(dir);
     for (const value of [
@@ -633,7 +661,6 @@ test("makes private durable entries in order and cleans up observed resources", 
       );
     }
     assertShapeDurability(dir);
-    assertShapeDurability(aliasDir);
     const rootOperations = operations.filter(({ path }) => path === realDir);
     const durabilityFsync = rootOperations.find(({ operation }) => operation === "fsync");
     const validationClose = rootOperations.find(
@@ -894,6 +921,175 @@ test("participant tools use canonical enum", async () => {
   }
 });
 
+test("participant models accept bounded provider IDs and reject hostile values", async () => {
+  const valid = [
+    "claude-sonnet-4-5-20250929",
+    "openai/gpt-5.4:preview",
+    "us.anthropic.claude-opus-4-1-v1:0",
+    "provider/model_v2.1@stable",
+  ];
+  const invalid = [
+    "",
+    "x".repeat(201),
+    "model\u0000override",
+    "../private/model",
+    "/absolute/model",
+    "C:/Users/alice/.ssh/id_rsa",
+    "src/private/evidence.json",
+    "GITHUB_TOKEN",
+    "provider//model",
+    "sk-abcdefghijklmnopqrstuvwxyz1234567890",
+  ];
+  expect(valid.map(isValidParticipantModel)).toEqual([true, true, true, true]);
+  expect(invalid.map(isValidParticipantModel)).toEqual(invalid.map(() => false));
+
+  const dir = await mkdtemp(join(tmpdir(), "trace-models-"));
+  try {
+    const store = new TraceStore(options(dir));
+    const configured = samples[0];
+    const bound = samples[2];
+    if (
+      !configured ||
+      configured.type !== "conversation_configured" ||
+      !bound ||
+      bound.type !== "participant_bound"
+    )
+      throw new Error("missing participant fixtures");
+    const configuredParticipant = configured.payload.participants[0];
+    const configuredModel = valid[1];
+    const boundModel = valid[2];
+    if (!configuredParticipant || !configuredModel || !boundModel)
+      throw new Error("missing participant model fixtures");
+    await expect(
+      store.append(correlation, {
+        idempotency_key: "provider-configured",
+        event: {
+          ...configured,
+          payload: {
+            ...configured.payload,
+            participants: [{ ...configuredParticipant, model: configuredModel }],
+          },
+        },
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      store.append(correlation, {
+        idempotency_key: "provider-bound",
+        event: { ...bound, payload: { ...bound.payload, model: boundModel } },
+      }),
+    ).resolves.toBeDefined();
+    for (const [index, model] of invalid.entries())
+      await expect(
+        store.append(correlation, {
+          idempotency_key: `hostile-model-${index}`,
+          event: {
+            ...bound,
+            payload: { ...bound.payload, model },
+          },
+        }),
+      ).rejects.toThrow();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("trace input enforces bounded strings, arrays, references, records, and journals", async () => {
+  const maxTextBytes = 64 * 1024;
+  const maxArrayItems = 512;
+  const maxReferenceBytes = 4 * 1024;
+  const maxRecordBytes = 512 * 1024;
+  const maxJournalBytes = 16 * 1024 * 1024;
+  const dir = await mkdtemp(join(tmpdir(), "trace-limits-"));
+  try {
+    const store = new TraceStore(options(dir));
+    await expect(
+      store.append(correlation, input("oversized-text", "x".repeat(maxTextBytes + 1))),
+    ).rejects.toThrow("invalid input");
+    await expect(
+      store.append(correlation, {
+        idempotency_key: "oversized-array",
+        event: {
+          type: "user_message",
+          payload: {
+            content: "safe",
+            target_participants: Array.from({ length: maxArrayItems + 1 }, () => "p"),
+          },
+        },
+      }),
+    ).rejects.toThrow("invalid input");
+    await expect(
+      store.append(
+        { ...correlation, evidence_refs: ["r".repeat(maxReferenceBytes + 1)] },
+        input("oversized-ref"),
+      ),
+    ).rejects.toThrow("invalid input");
+    await expect(
+      store.append(
+        correlation,
+        input("oversized-native-session"),
+        "n".repeat(maxReferenceBytes + 1),
+      ),
+    ).rejects.toThrow("invalid input");
+    expect(() => decodeRecord(`{"padding":"${"x".repeat(maxRecordBytes)}"}`)).toThrow(
+      "record too large",
+    );
+
+    await store.readConversation("oversized-journal");
+    writeFileSync(
+      traceJournalPath(dir, "oversized-journal"),
+      Buffer.alloc(maxJournalBytes + 1, 0x20),
+    );
+    await expect(store.readConversation("oversized-journal")).rejects.toThrow("journal too large");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("trace store incrementally indexes registry records after one rebuild", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-registry-index-"));
+  const rebuildLengths: number[] = [];
+  const indexLengths: number[] = [];
+  const registry: RebuildableArtifactRegistry & {
+    index(records: readonly unknown[]): void;
+  } = {
+    register(_conversationId, internalRef) {
+      return `artifact_${internalRef}` as OpaqueArtifactId;
+    },
+    resolve() {
+      return null;
+    },
+    rebuild(records) {
+      rebuildLengths.push(records.length);
+    },
+    index(records) {
+      indexLengths.push(records.length);
+    },
+  };
+  try {
+    const store = new TraceStore({ ...options(dir), artifactRegistry: registry });
+    await store.append(correlation, input("one", "one"));
+    await store.append(correlation, input("two", "two"));
+    await store.append(correlation, input("three", "three"));
+    expect(rebuildLengths).toEqual([0]);
+    expect(indexLengths).toEqual([1, 1, 1]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("trace store rejects a user-owned symlink in any supplied path component", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trace-component-symlink-"));
+  try {
+    const actual = join(root, "actual");
+    mkdirSync(actual, { mode: 0o700 });
+    const alias = join(root, "alias");
+    symlinkSync(actual, alias);
+    expect(() => new TraceStore(options(join(alias, "trace")))).toThrow("symlink path component");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects non-lossless JSON domain and accepts null-prototype data", async () => {
   const dir = await mkdtemp(join(tmpdir(), "trace-"));
   try {
@@ -1017,8 +1213,9 @@ test("mirrors durable journal synchronously once and treats mirror failures as b
           mirroredBeforeMutation = clone(stored);
           try {
             mirrorLocked = lockfile.checkSync(journal, { realpath: false });
+            const durable = JSON.parse(readFileSync(journal, "utf8").trim());
             mirrorStoredEventVisible =
-              JSON.stringify(JSON.parse(readFileSync(journal, "utf8").trim()).stored_event) ===
+              JSON.stringify(publicStored(durable.stored_event, durable.native_session_id)) ===
               JSON.stringify(stored);
             const working = [...journals.values()].find(({ creation }) => !creation);
             mirrorActionIndex = actions.push(`mirror:${working?.generation ?? 0}:working`) - 1;
@@ -1055,7 +1252,7 @@ test("mirrors durable journal synchronously once and treats mirror failures as b
     expect(mirrorLocked).toBe(true);
     expect(mirrorStoredEventVisible).toBe(true);
     expect(order).toEqual(["mirror", "resolved"]);
-    expect(mirroredBeforeMutation).toEqual(first);
+    expect(mirroredBeforeMutation).toEqual(publicStored(first));
     expect(first).toMatchObject({ conversation_id: "safe", event: event("x") });
     const replayed = await store.readConversation(correlation.conversation_id);
     expect(replayed).toEqual([{ stored_event: first, native_session_id: null }]);
@@ -1122,6 +1319,7 @@ test("durable canonical append, idempotency, private hash path, and mirror", asy
     expect(lstatSync(path).mode & 0o777).toBe(0o600);
     const observed = seen[0];
     expect(observed).toBeDefined();
+    const publicOne = publicStored(one);
     expect(observed).toEqual({
       seq: 2,
       ts: expect.any(Number),
@@ -1132,9 +1330,9 @@ test("durable canonical append, idempotency, private hash path, and mirror", asy
       channel: "vf",
       level: "info",
       text: "trace:user_message",
-      meta: { event_id: one.event_id, seq: 1, event: one.event },
+      meta: { trace: publicOne },
     });
-    expect(Object.keys(observed?.meta ?? {}).sort()).toEqual(["event", "event_id", "seq"]);
+    expect(Object.keys(observed?.meta ?? {})).toEqual(["trace"]);
     const serializedObserved = JSON.stringify(observed);
     for (const secret of [
       "constructor-secret-run",
@@ -1143,7 +1341,8 @@ test("durable canonical append, idempotency, private hash path, and mirror", asy
     ])
       expect(serializedObserved).not.toContain(secret);
     for (const key of Object.keys(correlation))
-      expect(serializedObserved).not.toContain(`${JSON.stringify(key)}:`);
+      expect(serializedObserved).toContain(`${JSON.stringify(key)}:`);
+    expect(serializedObserved).not.toContain("idempotency_key");
   } finally {
     if (bus) await bus.close();
     await rm(dir, { recursive: true, force: true });
@@ -1156,6 +1355,7 @@ test("append snapshots caller values before lock acquisition yields", async () =
     const mirrored: unknown[] = [];
     const store = new TraceStore({
       ...options(dir),
+      artifactRegistry: projectionRegistry,
       mirror: { mirrorTrace: (value) => mirrored.push(value) },
     });
     const mutableCorrelation = clone(correlation);
@@ -1187,7 +1387,7 @@ test("append snapshots caller values before lock acquisition yields", async () =
       { stored_event: stored, native_session_id: "native-before" },
     ]);
     expect(await store.append(correlation, input("snapshot", "before"), "changed")).toEqual(stored);
-    expect(mirrored).toEqual([stored]);
+    expect(mirrored).toEqual([publicStored(stored, "native-before")]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -1248,7 +1448,7 @@ test("recovering torn tail is durable before idempotent append resolves", async 
         expect(actions).toEqual(["truncate", "journal fsync", "resolved"]);
         expect(recovered).toEqual(stored);
         expect(readFileSync(path)).toEqual(canonical);
-        expect(mirrored).toEqual([stored]);
+        expect(mirrored).toEqual([publicStored(stored)]);
       } finally {
         fsyncSpy.mockRestore();
       }
@@ -1648,6 +1848,291 @@ test("rejects invalid and duplicate generated values without side effects", asyn
     );
     expect(await readFile(path)).toEqual(before);
     expect(mirrored).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("repeated append reads only a bounded tail instead of replaying the full journal", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-tail-cursor-"));
+  const realRead = fs.readSync;
+  let requestedBytes = 0;
+  const readSpy = spyOn(fs, "readSync").mockImplementation(((
+    fd,
+    buffer,
+    offset,
+    length,
+    position,
+  ) => {
+    requestedBytes += length;
+    return realRead(fd, buffer, offset, length, position);
+  }) as typeof fs.readSync);
+  try {
+    const store = new TraceStore(options(dir));
+    for (let index = 0; index < 80; index++)
+      await store.append(
+        { ...correlation, attempt_id: `attempt-${index}` },
+        input(`cursor-${index}`, `message-${index}`),
+      );
+    const journalBytes = lstatSync(traceJournalPath(dir, "safe")).size;
+    expect(requestedBytes).toBeLessThan(journalBytes * 15);
+  } finally {
+    readSpy.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("append cursor validates cross-store tails and preserves monotonic order", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-tail-cross-store-"));
+  try {
+    const first = new TraceStore(options(dir));
+    const second = new TraceStore({
+      ...options(dir),
+      eventId: (() => {
+        let n = 5_000;
+        return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+      })(),
+    });
+    for (let index = 0; index < 12; index++) {
+      const store = index % 2 ? second : first;
+      await store.append(
+        { ...correlation, attempt_id: `cross-${index}` },
+        input(`cross-${index}`, `message-${index}`),
+      );
+    }
+    const records = await first.readConversation("safe");
+    expect(records.map(({ stored_event }) => stored_event.seq)).toEqual(
+      Array.from({ length: 12 }, (_, index) => index + 1),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("same-size middle rewrite and empty truncation authoritatively rebuild registry state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trace-authoritative-rebuild-"));
+  const traceDir = join(root, "trace");
+  try {
+    const registry = new DurableArtifactRegistry({ dir: join(root, "registry") });
+    const store = new TraceStore({ ...options(traceDir), artifactRegistry: registry });
+    await store.append(correlation, {
+      idempotency_key: "artifact-one",
+      event: {
+        type: "artifact_created",
+        payload: { artifact_id: "one", artifact_type: "plan", ref: "artifact/one" },
+      },
+    });
+    await store.append(
+      { ...correlation, attempt_id: "last" },
+      {
+        idempotency_key: "artifact-last",
+        event: {
+          type: "artifact_created",
+          payload: { artifact_id: "last", artifact_type: "plan", ref: "artifact/end" },
+        },
+      },
+    );
+    const oldOpaque = registry.register("safe", "artifact/one");
+    await store.readConversation("safe");
+    const journal = traceJournalPath(traceDir, "safe");
+    const lines = readFileSync(journal, "utf8").trimEnd().split("\n");
+    const first = JSON.parse(lines[0] ?? "null");
+    first.stored_event.event.payload.ref = "artifact/two";
+    lines[0] = JSON.stringify(first);
+    const rewritten = `${lines.join("\n")}\n`;
+    expect(Buffer.byteLength(rewritten)).toBe(lstatSync(journal).size);
+    writeFileSync(journal, rewritten, { mode: 0o600 });
+    await store.readConversation("safe");
+    expect(registry.resolve("safe", oldOpaque)).toBeNull();
+    const rewrittenOpaque = registry.register("safe", "artifact/two");
+    expect(registry.resolve("safe", rewrittenOpaque)).toEqual({ internalRef: "artifact/two" });
+
+    writeFileSync(journal, "", { mode: 0o600 });
+    expect(await store.readConversation("safe")).toEqual([]);
+    expect(registry.resolve("safe", rewrittenOpaque)).toBeNull();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("registry capacity is rejected before a durable append can poison journal or cursor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trace-registry-preflight-"));
+  const traceDir = join(root, "trace");
+  try {
+    const registry = new DurableArtifactRegistry({
+      dir: join(root, "registry"),
+      limits: {
+        maxConversations: 1,
+        maxReferencesPerConversation: 1,
+        maxTotalReferences: 1,
+        maxRetiredKeys: 2,
+        maxAssignments: 4,
+      },
+    });
+    const store = new TraceStore({ ...options(traceDir), artifactRegistry: registry });
+    await store.append(correlation, {
+      idempotency_key: "within-cap",
+      event: {
+        type: "artifact_created",
+        payload: { artifact_id: "one", artifact_type: "plan", ref: "artifact/one" },
+      },
+    });
+    const journal = traceJournalPath(traceDir, "safe");
+    const before = readFileSync(journal);
+    await expect(
+      store.append(
+        { ...correlation, attempt_id: "over-cap" },
+        {
+          idempotency_key: "over-cap",
+          event: {
+            type: "artifact_created",
+            payload: { artifact_id: "two", artifact_type: "plan", ref: "artifact/two" },
+          },
+        },
+      ),
+    ).rejects.toThrow("reference limit reached");
+    expect(readFileSync(journal)).toEqual(before);
+    expect(await store.readConversation("safe")).toHaveLength(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("session-reference capacity is rejected before its trace record becomes durable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trace-session-preflight-"));
+  const traceDir = join(root, "trace");
+  const history = (session: string): TraceEvent => ({
+    type: "native_history_reconciled",
+    payload: {
+      public_session_ref: session,
+      status: "reconciled",
+      imported_turn_count: 0,
+      imported_tool_count: 0,
+      provenance_refs: [],
+      evidence_refs: [],
+      completeness_reason: "complete",
+    },
+  });
+  try {
+    const registry = new DurableArtifactRegistry({
+      dir: join(root, "registry"),
+      limits: {
+        maxConversations: 1,
+        maxReferencesPerConversation: 1,
+        maxTotalReferences: 1,
+        maxRetiredKeys: 1,
+        maxAssignments: 1,
+      },
+    });
+    const store = new TraceStore({ ...options(traceDir), artifactRegistry: registry });
+    await store.append(correlation, {
+      idempotency_key: "history-one",
+      event: history("native-one"),
+    });
+    const journal = traceJournalPath(traceDir, "safe");
+    const before = readFileSync(journal);
+    await expect(
+      store.append(
+        { ...correlation, attempt_id: "history-two" },
+        { idempotency_key: "history-two", event: history("native-two") },
+      ),
+    ).rejects.toThrow("assignment limit reached");
+    expect(readFileSync(journal)).toEqual(before);
+    expect(await store.readConversation("safe")).toHaveLength(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("append recovers a complete record missing its required separator without poisoning replay", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-missing-separator-"));
+  try {
+    const seed = new TraceStore(options(dir));
+    const first = await seed.append(correlation, input("one", "one"));
+    const journal = traceJournalPath(dir, "safe");
+    writeFileSync(journal, readFileSync(journal, "utf8").trimEnd(), { mode: 0o600 });
+    const live = new TraceStore({ dir });
+    await live.readConversation("safe");
+    const malformedTail = {
+      stored_event: {
+        ...first,
+        event_id: "00000000-0000-4000-8000-000000000002",
+        seq: 2,
+        attempt_id: "external",
+        idempotency_key: "external",
+        event: event("external"),
+      },
+      native_session_id: null,
+    };
+    await writeFile(journal, `${JSON.stringify(malformedTail)}\n`, { flag: "a" });
+    const recovered = await live.append(
+      { ...correlation, attempt_id: "after-recovery" },
+      input("after-recovery", "after-recovery"),
+    );
+    expect(recovered.seq).toBe(2);
+    const replayed = await new TraceStore({ dir }).readConversation("safe");
+    expect(replayed.map(({ stored_event }) => stored_event.idempotency_key)).toEqual([
+      "one",
+      "after-recovery",
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("external growth cannot hide a middle rewrite from the artifact registry", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trace-grow-rewrite-"));
+  const traceDir = join(root, "trace");
+  const registryDir = join(root, "registry");
+  try {
+    const registry = new DurableArtifactRegistry({ dir: registryDir });
+    const store = new TraceStore({ dir: traceDir, artifactRegistry: registry });
+    await store.append(correlation, {
+      idempotency_key: "artifact-one",
+      event: {
+        type: "artifact_created",
+        payload: { artifact_id: "one", artifact_type: "plan", ref: "artifact/one" },
+      },
+    });
+    await store.append(
+      { ...correlation, attempt_id: "padding" },
+      input("padding", "x".repeat(1_200)),
+    );
+    const oldOpaque = registry.register("safe", "artifact/one");
+    const journal = traceJournalPath(traceDir, "safe");
+    writeFileSync(journal, readFileSync(journal, "utf8").replace("artifact/one", "artifact/two"), {
+      mode: 0o600,
+    });
+    const external = new TraceStore({ dir: traceDir });
+    await external.append(
+      { ...correlation, attempt_id: "external" },
+      input("external", "external"),
+    );
+    const authority = new DurableArtifactRegistry({ dir: registryDir });
+    await new TraceStore({ dir: traceDir, artifactRegistry: authority }).readConversation("safe");
+    const rewrittenOpaque = authority.register("safe", "artifact/two");
+
+    await store.append({ ...correlation, attempt_id: "after" }, input("after", "after"));
+    expect(registry.resolve("safe", oldOpaque)).toBeNull();
+    expect(registry.resolve("safe", rewrittenOpaque)).toEqual({ internalRef: "artifact/two" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("mutating an idempotent result cannot alter the store cursor", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-idempotent-result-"));
+  try {
+    const store = new TraceStore(options(dir));
+    const request = input("same", "original");
+    const original = await store.append(correlation, request);
+    const duplicate = await store.append(correlation, request);
+    (duplicate.event.payload as { content: string }).content = "mutated";
+    expect(await store.append(correlation, request)).toEqual(original);
+    const replayed = await store.readConversation("safe");
+    expect((replayed[0]?.stored_event.event.payload as { content: string }).content).toBe(
+      "original",
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
