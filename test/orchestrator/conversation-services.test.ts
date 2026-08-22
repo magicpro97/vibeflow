@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MaterializedAgentBinding, PreviewAgentBinding } from "../../src/agents/binding.js";
+import type { WorkUnit } from "../../src/core.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
 import { createSpawnOptionsProjection } from "../../src/dispatch/session-types.js";
 import { createConversationBootstrap } from "../../src/orchestrator/conversation/bootstrap.js";
@@ -138,6 +139,15 @@ const passingReport = (): PolicyVerifyReport =>
       { status: "pass", details: `${name} passed`, evidence_refs: [`evidence:${name}`] },
     ]),
   ) as unknown as PolicyVerifyReport;
+
+const completedWorkUnit = (): WorkUnit => ({
+  name: "unit-a",
+  status: "done",
+  confidence: 1,
+  gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+  resources: { agents: 1, tokens: 1, cost_usd: 0, wall_seconds: 1 },
+  evidence: ["test:unit-a"],
+});
 
 const cleanWorktree = async () => ({
   ok: true,
@@ -627,7 +637,7 @@ describe("injected workflow services", () => {
       execute: async () => {
         executions += 1;
         return {
-          units: [{ name: "unit-a", status: "done" }],
+          units: [completedWorkUnit()],
           reviews: [{ unit: "unit-a", pass: true, reason: "approved" }],
         };
       },
@@ -1331,7 +1341,7 @@ test("bootstrap creates one shared authority set and registers every built-in po
             models_valid: true,
           }),
           execute: async () => ({
-            units: [{ name: "unit-a", status: "done" }],
+            units: [completedWorkUnit()],
             reviews: [{ unit: "unit-a", pass: true, reason: "approved" }],
           }),
         },
