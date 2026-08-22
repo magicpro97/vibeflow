@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import {
@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir as systemTmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { type LogEvent, Logbus } from "../../src/logbus.js";
@@ -37,6 +37,10 @@ import type {
   TraceEvent,
 } from "../../src/orchestrator/trace/types.js";
 import { decodeRecord, isValidParticipantModel } from "../../src/orchestrator/trace/validation.js";
+
+const traceStoreTestRoot = fs.mkdtempSync(join(systemTmpdir(), "trace-store-suite-"));
+const tmpdir = () => traceStoreTestRoot;
+afterAll(() => rmSync(traceStoreTestRoot, { recursive: true, force: true }));
 
 const correlation = {
   workflow_id: "w",

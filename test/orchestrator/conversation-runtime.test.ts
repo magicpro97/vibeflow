@@ -299,9 +299,10 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
 }
 
 const waitFor = async (check: () => boolean | Promise<boolean>) => {
-  for (let index = 0; index < 100; index++) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
     if (await check()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error("timed out waiting for test state");
 };
@@ -2721,11 +2722,10 @@ test.each([
       await runtime.pause(created.conversation_id);
       release();
       let lifecycle: string | undefined;
-      for (let index = 0; index < 100; index++) {
+      await waitFor(async () => {
         lifecycle = (await runtime.snapshot(created.conversation_id).catch(() => null))?.lifecycle;
-        if (lifecycle === expectedLifecycle) break;
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+        return lifecycle === expectedLifecycle;
+      });
       expect(lifecycle).toBe(expectedLifecycle);
       expect(
         await runtime.cancelOperation({
