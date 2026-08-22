@@ -68,6 +68,10 @@ describe("conversation command helpers", () => {
     expect(classifyConversationResult("stopped", [])).toBe(CONVERSATION_EXIT.ok);
   });
 
+  test("awaiting approval is an accepted nonterminal success exit", () => {
+    expect(classifyConversationResult("awaiting_approval", [])).toBe(CONVERSATION_EXIT.ok);
+  });
+
   test("buildConversationHttpAuthority caches one process-local authority per repo/host mode", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-conversation-http-"));
     try {

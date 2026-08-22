@@ -158,4 +158,43 @@ describe("vf chat", () => {
       process.stdout.write = write;
     }
   });
+
+  test("--json reports a pending approval as accepted instead of failed", async () => {
+    const chunks: string[] = [];
+    const write = process.stdout.write;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const code = await chat(["--json", "--policy", "plan", "draft", "a", "plan"], {
+        createService: () =>
+          ({
+            start: async () => ({
+              conversation_id: "conversation-1",
+              revision_id: "revision-1",
+              operation_id: "operation-1",
+              completion: Promise.resolve({
+                conversation_id: "conversation-1",
+                revision_id: "revision-1",
+                result: {
+                  operation_id: "operation-1",
+                  status: "awaiting_approval",
+                  artifact_refs: ["artifact-plan"],
+                },
+              }),
+            }),
+            subscribe: () => () => undefined,
+          }) as never,
+      });
+      expect(code).toBe(0);
+      expect(JSON.parse(chunks[0] as string)).toMatchObject({
+        ok: true,
+        status: "awaiting_approval",
+        artifact_refs: ["artifact-plan"],
+      });
+    } finally {
+      process.stdout.write = write;
+    }
+  });
 });

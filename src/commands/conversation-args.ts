@@ -272,7 +272,12 @@ export function classifyConversationResult(
   status: ConversationExecutionRecord["status"],
   events: readonly PublicStoredTraceEvent[],
 ): number {
-  if (status === "completed" || status === "accepted" || status === "stopped")
+  if (
+    status === "completed" ||
+    status === "accepted" ||
+    status === "awaiting_approval" ||
+    status === "stopped"
+  )
     return CONVERSATION_EXIT.ok;
   if (status === "aborted") return CONVERSATION_EXIT.aborted;
   const errorCodes = events.flatMap((event) =>
