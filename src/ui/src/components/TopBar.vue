@@ -62,15 +62,15 @@
       </button>
       <button
         class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-neutral-500 hover:text-white transition-colors duration-150 rounded"
-        title="Ask about code"
-        aria-label="Open ask"
+        title="Open conversation workspace"
+        aria-label="Open conversation workspace"
         @click="$emit('open-ask')"
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M6 6a2 2 0 1 1 2.6 1.9c-.4.15-.6.5-.6.9v.7" />
           <circle cx="8" cy="12" r="0.5" fill="currentColor" />
         </svg>
-        <span>Ask</span>
+        <span>Chat</span>
       </button>
       <button
         class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-neutral-500 hover:text-white transition-colors duration-150 rounded"
