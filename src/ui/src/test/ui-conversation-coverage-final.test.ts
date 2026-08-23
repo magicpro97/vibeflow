@@ -72,10 +72,11 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
     // biome-ignore format: compact authority fixture keeps the coverage test below the source cap
     const command = { conversation_id: id, operation_id: "operation-a", actor: "user", reason: "stop" } as const;
     await csrfApi.conversationApi.cancelOperation(id, command, signal);
+    await api.conversationApi.renewStreamToken(id, signal);
     // biome-ignore format: exact compact matrix keeps the coverage test below the source cap
-    const expectedRequests = [["/api/conversations", "POST", '{"topic":"hello"}'], ["/api/conversations/conversation-a/snapshot", "GET", null], ["/api/conversations/conversation-a/stream-token", "POST", "{}"], ["/api/conversations/conversation-a/messages", "POST", '{"content":"hi"}'], ["/api/conversations/conversation-a/pause", "POST", "{}"], ["/api/conversations/conversation-a/resume", "POST", "{}"], ["/api/conversations/conversation-a/stop", "POST", "{}"], ["/api/conversations/conversation-a/approvals/approval-a/resolve", "POST", JSON.stringify(decision)], ["/api/conversations/conversation-a/operations/operation-a/cancel", "POST", JSON.stringify(command)]];
+    const expectedRequests = [["/api/conversations", "POST", '{"topic":"hello"}'], ["/api/conversations/conversation-a/snapshot", "GET", null], ["/api/conversations/conversation-a/stream-token", "POST", "{}"], ["/api/conversations/conversation-a/messages", "POST", '{"content":"hi"}'], ["/api/conversations/conversation-a/pause", "POST", "{}"], ["/api/conversations/conversation-a/resume", "POST", "{}"], ["/api/conversations/conversation-a/stop", "POST", "{}"], ["/api/conversations/conversation-a/approvals/approval-a/resolve", "POST", JSON.stringify(decision)], ["/api/conversations/conversation-a/operations/operation-a/cancel", "POST", JSON.stringify(command)], ["/api/conversations/conversation-a/stream-token", "POST", "{}"]];
     // biome-ignore format: exact compact matrix keeps the coverage test below the source cap
-    eq("exact API request matrix", calls.map(({ path, init }) => [path, init.method, init.body ?? null, init.signal === signal, new Headers(init.headers).get("x-vibeflow-token")]), expectedRequests.map(([path, method, body]) => [path, method, body, true, method === "POST" ? "csrf-coverage-final" : null]));
+    eq("exact API request matrix", calls.map(({ path, init }) => [path, init.method, init.body ?? null, init.signal === signal, new Headers(init.headers).get("x-vibeflow-token")]), expectedRequests.map(([path, method, body], index) => [path, method, body, true, index < 9 && method === "POST" ? "csrf-coverage-final" : null]));
     eq(
       "SSE JSON",
       api.parseConversationSseRecord(JSON.stringify(trace(8, userMessage("hi")))).seq,
