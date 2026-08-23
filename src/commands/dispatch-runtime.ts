@@ -1,37 +1,29 @@
-// src/commands/dispatch-runtime.ts
-//
-// Dispatch/orchestration runtime: per-unit dispatcher, researcher, and
-// worktree isolation seam. Extracted from src/commands/protection.ts
-// (issue #131). The per-unit reviewer lives in dispatch-reviewer.ts (#503).
-
 import { join } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import { applyGuidance } from "../dispatch/guidance.js";
+import { readDispatchResumeBinding } from "../dispatch/public-redaction.js";
+import type { EngineProcessSpawner } from "../dispatch/session-types.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import { updateMarker } from "../orchestrator/marker.js";
 import { resolveResumeId } from "../orchestrator/resume-policy.js";
 import { readSettings } from "../settings.js";
+import { materializeDiscoveredDispatchSkills } from "../skills/dispatch-resolution.js";
 import {
   CTX_DIR,
   DEFAULT_MAX_ROUNDS,
   buildEnginePrompt,
   c,
   detectQuota,
-  discoverSkills,
   investigateUnit,
-  makeAsyncSpawner,
   out,
   persistDispatch,
   recoveryHint,
-  runDispatchAsync,
-  selectDispatchSkills,
   thresholdFor,
 } from "./_shared.js";
 import type {
   AsyncResearcher,
-  AsyncSpawner,
   DispatchResult,
   Engine,
   ProjectContext,
@@ -53,9 +45,6 @@ import {
   skippedByQuota,
 } from "./_shared.js";
 import type { ProtectionRuntime } from "./_shared.js";
-import { parseResources } from "./dispatch-resources.js";
-
-// ── Diff reading + worktree isolation seam (extracted to dispatch-diff.ts, #80) ──
 import {
   type DiffReader,
   type WorktreeOps,
@@ -64,47 +53,44 @@ import {
   defaultWorktreeOps,
   makeWorktreeOps,
 } from "./dispatch-diff.js";
-// Re-export seam so public surface unchanged (#80).
+import { parseResources } from "./dispatch-resources.js";
+import {
+  type DispatchSessionRuntimeOptions,
+  runDispatchWithSessionRuntime,
+} from "./dispatch-session-runtime.js";
 export { analyzeDiff, defaultDiffReader, defaultWorktreeOps, makeWorktreeOps };
 export type { DiffReader, WorktreeOps };
-// makeReviewer re-export (#503).
 export { makeReviewer } from "./dispatch-reviewer.js";
-
-/**
- * A read-only research step backed by the real dispatcher: each round dispatches a research
- * prompt (never writes) and reports the engine's self-assessed confidence. Used by
- * {@link investigateUnit} to raise confidence on a unit below the bar before we block it.
- */
-// Test seam: export for unit-test exercises of summary-uncertainty and envelope-fallback branches.
+/** Test seam: investigation rounds use the same dispatcher/session authority as live units. */
 export function makeResearcher(
   engine: Engine,
   ctx: ProjectContext,
   mode: "cli" | "bridge" | "dry",
-  dispatchSpawner?: AsyncSpawner,
+  processSpawner?: EngineProcessSpawner,
   base?: string,
+  sessionRuntime?: Pick<
+    DispatchSessionRuntimeOptions,
+    "adapterOptions" | "materializeBinding" | "processSpawner" | "sessionAdapter"
+  >,
+  signal?: AbortSignal,
 ): AsyncResearcher {
-  // Research rounds are read-only and should be fast — use a per-round timeout (180s)
-  // so investigation never cascades into a multi-hour hang when a round's engine stalls.
-  // #556: research spawns the real engine too — honor the env-scrub policy.
-  const researchSpawner =
-    dispatchSpawner ??
-    makeAsyncSpawner({ timeoutMs: 180_000, envPolicy: readSettings(base).envPolicy });
+  const repoRoot = base ?? process.cwd();
   return async (round, question) => {
     const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
       `research round ${round}`,
     ]);
-    // Pass a unit slug so copilot's prompt goes to a file, not argv (#526 item 7);
-    // research prompts carry full project context and can re-hit the ~32K argv limit.
-    // Pass `base` too (#536): when the server orchestrates a registered repo ≠ cwd(),
-    // the copilot dispatch file must land under the active repo. Falls back to cwd()
-    // inside writeDispatchPrompt when base is undefined (the CLI path, repo IS cwd).
-    const result = await runDispatchAsync({
+    const unit = `research-round-${round}`;
+    const result = await runDispatchWithSessionRuntime({
       engine,
       prompt,
       mode,
-      spawner: researchSpawner,
-      unit: `research-round-${round}`,
-      base,
+      unit,
+      base: repoRoot,
+      skillNames: [],
+      adapterOptions: { timeoutMs: 180_000 },
+      ...(processSpawner ? { processSpawner } : {}),
+      ...(signal ? { signal } : {}),
+      ...sessionRuntime,
     });
     const confidence = result.summary?.confidence ?? 0;
     // Build findings: prefer the summary's uncertainty field, then plain raw evidence.
@@ -142,7 +128,6 @@ export function makeResearcher(
   };
 }
 
-/** Persist an investigation outcome as auditable evidence inside the unit's evidence/ folder. */
 export function computeKnowledgeHeavySource(
   riskClass: RiskClass,
   unitText: string,
@@ -164,18 +149,22 @@ export function makeDispatcher(
   base: string,
   mode: "cli" | "bridge" | "dry",
   riskClass: RiskClass,
-  spawner?: AsyncSpawner,
+  processSpawner?: EngineProcessSpawner,
   prot?: ProtectionRuntime,
   isolate?: { base: string; wt?: WorktreeOps },
   gate?: ScopedGateFn,
   /** #618 PR2b-1: when true, a crashed unit's persisted engine session is resumed. */
   resume = false,
+  sessionRuntime?: Pick<
+    DispatchSessionRuntimeOptions,
+    "adapterOptions" | "materializeBinding" | "processSpawner" | "sessionAdapter"
+  >,
 ): UnitDispatcher {
-  return async (u) => {
+  return async (u, signal) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
     const unitDir = join(base, unitRel);
     // Quota latch: once an upstream HIGH-confidence limit is seen, skip not-yet-started units
-    // rather than burning more of a shared account (the run.ts loop has no abort seam in scope).
+    // rather than burning more of a shared account.
     if (prot?.quota.limited) {
       const outcome = skippedByQuota();
       outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
@@ -185,10 +174,8 @@ export function makeDispatcher(
     // matches by name. When a knowledge-heavy unit (feature/architecture, or UX/UI by spec) has
     // NO match, flag the gap so the engine won't silently freelance (esp. UX/UI).
     const unitText = `${u.name} ${u.spec ?? ""}`;
-    const { skillNames, alwaysNames, matchedNames, skillsRequired } = selectDispatchSkills(
-      discoverSkills(base),
-      unitText,
-    );
+    const { skillNames, alwaysNames, matchedNames, skillsRequired } =
+      materializeDiscoveredDispatchSkills(unitText, { repoRoot: base });
     const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
     const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
     const skillGap = knowledgeHeavy && matchedNames.length === 0;
@@ -248,84 +235,44 @@ export function makeDispatcher(
       const unitBranch = `vf-unit-${u.name}`;
       wtPath = wt.create(unitBranch, isolate.base);
     }
-    // PR28 audit Task 5 (M1): the old code used `spawner ?? makeAsyncSpawner({ onChunk, ... })`,
-    // which meant when a custom spawner was injected (e.g. for testing or for a different
-    // chunk strategy) the per-unit `onChunk` and `onStderrChunk` callbacks were NEVER
-    // fired — the file stream was never appended, and the logbus never saw engine
-    // progress, breaking the SSE relay for that unit. Fix: if a custom `spawner` is
-    // provided, WRAP it so the per-unit callbacks fire around the result. The chunks
-    // arrive post-hoc (after the spawner resolves) rather than during streaming, but
-    // the SSE log and logbus fanout are now CORRECT. The default path (no spawner) is
-    // unchanged — `makeAsyncSpawner({ onChunk, onStderrChunk })` still streams live.
-    const streamSpawner: AsyncSpawner =
-      spawner == null
-        ? makeAsyncSpawner({
-            // #556: per-unit dispatch is the PRIMARY spawn path — honor the env-scrub policy here.
-            envPolicy: readSettings(base).envPolicy,
-            onChunk: (text) => {
-              try {
-                const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
-                appendFileSafe(streamPath, line);
-              } catch (e) {
-                // biome-ignore format: keep single-line for line-count cap
-                out("engine-stderr", `[dispatch] stream.log append best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
-              }
-              // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
-              // both see engine progress without a second read of the spawner.
-              out("engine-stdout", text, {
-                level: "info",
-                unit: u.name,
-                meta: { engine, unit: u.name },
-              });
-            },
-            onStderrChunk: (text) => {
-              // M2: route engine warnings/errors/progress noise to the bus as
-              // warn-level events. Stderr no longer leaks to the parent TTY
-              // (stdio is now piped — see dispatch.ts); the bus owns visibility.
-              out("engine-stderr", text, {
-                level: "warn",
-                unit: u.name,
-                meta: { engine, unit: u.name },
-              });
-            },
-            ...(wtPath ? { cwd: wtPath } : {}),
-          })
-        : async (cmd, args, input) => {
-            // Composed path: invoke the injected spawner, then fan the accumulated
-            // stdout/stderr out via the per-unit callbacks. The callbacks are
-            // best-effort: a logging failure must not break the dispatch.
-            const r = await spawner(cmd, args, input);
-            try {
-              if (r.stdout) {
-                const line = `data: ${JSON.stringify({ unit: u.name, text: r.stdout, ts: Date.now() })}\n\n`;
-                appendFileSafe(streamPath, line);
-              }
-              if (r.stdout) {
-                out("engine-stdout", r.stdout, {
-                  level: "info",
-                  unit: u.name,
-                  meta: { engine, unit: u.name },
-                });
-              }
-              // Stderr: AsyncSpawner's return type only has { status, stdout, timedOut? };
-              // the base spawner may not surface stderr. The composed callback stays
-              // for shape compatibility; production engines route stderr via the
-              // orchestrator-level onStderrChunk (see orchestrate()).
-            } catch (e) {
-              // biome-ignore format: keep single-line for line-count cap
-              out("engine-stderr", `[dispatch] logbus fanout best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
-            }
-            return r;
-          };
-    const resumeSessionId = resolveResumeId(u.name, resume);
+    // The session adapter owns projection before either sink sees a byte. In particular,
+    // injected process output must not be mirrored here before canonical redaction.
+    const emitStdout = (text: string) => {
+      try {
+        const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
+        appendFileSafe(streamPath, line);
+      } catch (e) {
+        // biome-ignore format: keep single-line for line-count cap
+        out("engine-stderr", `[dispatch] stream.log append best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
+      }
+      out("engine-stdout", text, {
+        level: "info",
+        unit: u.name,
+        meta: { engine, unit: u.name },
+      });
+    };
+    const emitStderr = (text: string) => {
+      out("engine-stderr", text, {
+        level: "warn",
+        unit: u.name,
+        meta: { engine, unit: u.name },
+      });
+    };
+    const resumeSessionId = resolveResumeId(u.name, resume, engine);
     try {
-      const result = await runDispatchAsync({
+      const result = await runDispatchWithSessionRuntime({
         engine,
         prompt,
         mode,
-        spawner: streamSpawner,
         unit: u.name,
         base,
+        wtPath,
+        skillNames,
+        ...(processSpawner ? { processSpawner } : {}),
+        ...(signal ? { signal } : {}),
+        onStdoutChunk: emitStdout,
+        onStderrChunk: emitStderr,
+        ...sessionRuntime,
         ...(resumeSessionId ? { resumeSessionId } : {}),
       });
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
@@ -333,7 +280,13 @@ export function makeDispatcher(
       // ledger, so the dispatch outcome is reported in-memory only.
       if (mode !== "dry") {
         evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
-        if (result.sessionId) updateMarker(u.name, { engineSessionId: result.sessionId });
+        const resumeBinding = readDispatchResumeBinding(result);
+        if (resumeBinding) {
+          updateMarker(u.name, {
+            engineSessionId: resumeBinding.nativeSessionId,
+            engineSessionEngine: resumeBinding.engine,
+          });
+        }
         if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
       }
       let confidence = result.summary?.confidence ?? 0;
@@ -350,7 +303,15 @@ export function makeDispatcher(
             `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
           ),
         );
-        const research = makeResearcher(engine, ctx, mode, spawner, base);
+        const research = makeResearcher(
+          engine,
+          ctx,
+          mode,
+          processSpawner,
+          base,
+          sessionRuntime,
+          signal,
+        );
         const outcome = await investigateUnit(
           { name: u.name, confidence, owner_agent: u.owner_agent },
           { riskClass, research },

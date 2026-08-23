@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyIntake, mutateUnits, orchestrate } from "../src/commands.js";
 import { CTX_DIR, type WorkflowState, readState } from "../src/core.js";
+import type { EngineProcessSpawner } from "../src/dispatch/session-types.js";
 import { policyGates } from "../src/gates.js";
 import { resolveSkillNeeds } from "../src/skills/resolver.js";
 
@@ -13,6 +14,39 @@ import { resolveSkillNeeds } from "../src/skills/resolver.js";
  * the verification story holds at every step.
  */
 describe("e2e golden path", () => {
+  const claudeEnvelope = (confidence: number, uncertainty = "") =>
+    JSON.stringify({
+      type: "result",
+      session_id: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+      result: `\`\`\`json\n{ "confidence": ${confidence}, "uncertainty": "${uncertainty}" }\n\`\`\``,
+    });
+  const processSpawner = (
+    stdout: string,
+    hooks: { onStart?: () => void; onFinish?: () => void; delayMs?: number } = {},
+  ): EngineProcessSpawner => {
+    const { onStart, onFinish, delayMs = 0 } = hooks;
+    return () => {
+      onStart?.();
+      return {
+        stdin: { write: () => {}, end: () => {} },
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(stdout));
+            controller.close();
+          },
+        }),
+        stderr: new ReadableStream({ start: (controller) => controller.close() }),
+        exited: new Promise<number>((resolve) =>
+          setTimeout(() => {
+            onFinish?.();
+            resolve(0);
+          }, delayMs),
+        ),
+        kill: () => onFinish?.(),
+      };
+    };
+  };
+
   test("init → scan → resolve needs → orchestrate (dry) → gates", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-e2e-"));
     try {
@@ -75,11 +109,10 @@ describe("e2e golden path", () => {
       applyIntake({ goal: "Add risky thing", engines: ["claude"] }, { useAi: false, base: dir });
       // Inject a spawner that always reports low confidence (0.4). The bounded investigation
       // runs but cannot reach 1.0, so the unit must stay blocked → orchestrate exits 1.
-      const lowConfidence = JSON.stringify({
-        result: '```json\n{ "confidence": 0.4, "uncertainty": "still unsure" }\n```',
-      });
       const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-        spawner: async () => ({ status: 0, stdout: lowConfidence }),
+        sessionRuntime: {
+          processSpawner: processSpawner(claudeEnvelope(0.4, "still unsure")),
+        },
       });
       expect(code).toBe(1); // a real confidence<1 run blocks (no completion on a guess)
       const after = readState(dir) as WorkflowState;
@@ -103,12 +136,17 @@ describe("e2e golden path", () => {
       let inFlight = 0;
       let maxInFlight = 0;
       await orchestrate({ engine: "claude", yes: true }, dir, {
-        spawner: async () => {
-          inFlight++;
-          maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise((r) => setTimeout(r, 5));
-          inFlight--;
-          return { status: 0, stdout: "" };
+        sessionRuntime: {
+          processSpawner: processSpawner(claudeEnvelope(1), {
+            delayMs: 5,
+            onStart: () => {
+              inFlight++;
+              maxInFlight = Math.max(maxInFlight, inFlight);
+            },
+            onFinish: () => {
+              inFlight--;
+            },
+          }),
         },
       });
       // Overlapping scopes serialize: at most one dispatch runs at a time.
@@ -128,12 +166,17 @@ describe("e2e golden path", () => {
       let inFlight = 0;
       let maxInFlight = 0;
       await orchestrate({ engine: "claude", yes: true, concurrency: "2" }, dir, {
-        spawner: async () => {
-          inFlight++;
-          maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise((r) => setTimeout(r, 5));
-          inFlight--;
-          return { status: 0, stdout: JSON.stringify({ result: "no summary" }) };
+        sessionRuntime: {
+          processSpawner: processSpawner(claudeEnvelope(1), {
+            delayMs: 5,
+            onStart: () => {
+              inFlight++;
+              maxInFlight = Math.max(maxInFlight, inFlight);
+            },
+            onFinish: () => {
+              inFlight--;
+            },
+          }),
         },
       });
       // Disjoint scopes overlap under the bounded pool.
@@ -161,11 +204,13 @@ describe("e2e golden path", () => {
       });
 
       const dispatched: string[] = [];
+      const successSpawner = processSpawner(claudeEnvelope(1));
       await orchestrate({ engine: "claude", yes: true }, dir, {
-        spawner: async (_cmd, args) => {
-          // Record which unit's CONTEXT.md prompt this dispatch carried.
-          dispatched.push((args ?? []).join(" "));
-          return { status: 0, stdout: '```json\n{ "confidence": 1, "uncertainty": "" }\n```' };
+        sessionRuntime: {
+          processSpawner: (argv, options) => {
+            dispatched.push(argv.join(" "));
+            return successSpawner(argv, options);
+          },
         },
       });
 
@@ -194,10 +239,13 @@ describe("e2e golden path", () => {
       });
 
       let dispatched = 0;
+      const successSpawner = processSpawner(claudeEnvelope(1));
       const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-        spawner: async () => {
-          dispatched++;
-          return { status: 0, stdout: "" };
+        sessionRuntime: {
+          processSpawner: (argv, options) => {
+            dispatched++;
+            return successSpawner(argv, options);
+          },
         },
       });
       // No dispatch at all, and the goal is met → exit 0.

@@ -2,94 +2,62 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import { join, relative, resolve } from "node:path";
 import lockfile from "proper-lockfile";
+import type { ArtifactRegistry, RebuildableArtifactRegistry } from "./artifacts.js";
+import {
+  type JournalCursor,
+  type JournalRefresh,
+  appendCursorBatch,
+  auditJournal,
+  refreshJournal,
+  writeFully,
+} from "./journal-cursor.js";
+import { TraceLifecycleConflictError, assertCanonicalLifecycleAppend } from "./lifecycle-cas.js";
+import { TRACE_LIMITS } from "./limits.js";
+import { assertNoSymlinkPathComponents } from "./path-safety.js";
+import { projectPublicStoredTrace } from "./project.js";
+import { settleDurableRegistry } from "./registry-settlement.js";
 import type {
   InternalTraceStoreRecord,
+  PublicStoredTraceEvent,
   StoredTraceEvent,
   TraceAppendInput,
   TraceCorrelation,
 } from "./types.js";
-import { decodeRecord, fail, validGenerated, validInput, validReplayEvent } from "./validation.js";
+import { fail, validGenerated, validInput } from "./validation.js";
 
 export class TraceIdempotencyConflictError extends Error {}
+export { TraceLifecycleConflictError };
 export interface TraceStoreOptions {
   dir: string;
-  mirror?: { mirrorTrace(event: StoredTraceEvent): void };
+  artifactRegistry?: ArtifactRegistry;
+  mirror?: { mirrorTrace(event: PublicStoredTraceEvent): void };
   now?: () => string;
   eventId?: () => string;
 }
+export interface TraceBatchAppend {
+  correlation: TraceCorrelation;
+  input: TraceAppendInput;
+  native?: string | null;
+}
 export interface TraceStore {
   readConversation(id: string): Promise<InternalTraceStoreRecord[]>;
+  recoverConversation?(id: string): Promise<InternalTraceStoreRecord[]>;
   append(
     correlation: TraceCorrelation,
     input: TraceAppendInput,
     native?: string | null,
   ): Promise<StoredTraceEvent>;
+  appendBatch?(entries: readonly TraceBatchAppend[]): Promise<StoredTraceEvent[]>;
 }
 
-const decodeText = (buffer: Buffer): string => {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-  } catch {
-    return fail("invalid encoding");
-  }
-};
-
-const readFully = (fd: number): Buffer => {
-  const buffer = Buffer.alloc(fs.fstatSync(fd).size);
-  for (let offset = 0; offset < buffer.length; ) {
-    const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
-    if (count <= 0) fail("short read");
-    offset += count;
-  }
-  return buffer;
-};
-const writeFully = (fd: number, buffer: Buffer, position: number): void => {
-  for (let offset = 0; offset < buffer.length; ) {
-    const count = fs.writeSync(fd, buffer, offset, buffer.length - offset, position + offset);
-    if (count <= 0) fail("short write");
-    offset += count;
-  }
-};
-
-const replay = (
-  fd: number,
-  recover: boolean,
-  conversationId: string,
-): InternalTraceStoreRecord[] => {
-  const buffer = readFully(fd);
-  let end = buffer.length;
-  const newline = buffer.lastIndexOf(10);
-  if (buffer.length && newline !== buffer.length - 1) {
-    try {
-      JSON.parse(decodeText(buffer.subarray(newline + 1)));
-    } catch {
-      if (!recover) fail("unterminated record");
-      end = newline + 1;
-    }
-  }
-  const text = decodeText(buffer.subarray(0, end));
-  const lines = text ? text.replace(/\n$/, "").split("\n") : [];
-  const records = lines.map(decodeRecord);
-  const ids = new Set<string>();
-  const keys = new Set<string>();
-  records.forEach(({ stored_event: event }, index) => {
-    if (
-      !validReplayEvent(event, conversationId, index + 1) ||
-      ids.has(event.event_id) ||
-      keys.has(event.idempotency_key)
-    )
-      fail("invalid record");
-    ids.add(event.event_id);
-    keys.add(event.idempotency_key);
-  });
-  if (recover && end !== buffer.length) {
-    fs.ftruncateSync(fd, end);
-    fs.fsyncSync(fd);
-  }
-  return records;
-};
-const bytes = (input: TraceAppendInput) =>
+const inputBytes = (input: TraceAppendInput) =>
   JSON.stringify({ idempotency_key: input.idempotency_key, event: input.event });
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const expectedOwner = (): number | undefined =>
+  typeof process.geteuid === "function" ? process.geteuid() : undefined;
+const ownerMatches = (stat: fs.Stats): boolean =>
+  expectedOwner() === undefined || stat.uid === expectedOwner();
+
 export function traceJournalPath(dir: string, id: string): string {
   return join(
     resolve(dir),
@@ -99,19 +67,26 @@ export function traceJournalPath(dir: string, id: string): string {
 }
 
 export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class TraceStore {
+  private readonly cursors = new Map<string, JournalCursor>();
+
   constructor(
     private readonly options: TraceStoreOptions,
     private readonly root: string = "",
   ) {
-    const requested = resolve(options.dir);
+    const requested = assertNoSymlinkPathComponents(resolve(options.dir), fail);
     this.ensureDirectory(requested, resolve(requested, ".."), false);
     this.root = fs.realpathSync(requested);
   }
   private directoryFd(path: string, privateMode = true): number {
-    const fd = fs.openSync(
-      path,
-      fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW,
-    );
+    let fd: number;
+    try {
+      fd = fs.openSync(
+        path,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW,
+      );
+    } catch {
+      return fail("unsafe directory");
+    }
     try {
       const opened = fs.fstatSync(fd);
       const entry = fs.lstatSync(path);
@@ -119,6 +94,8 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
         !opened.isDirectory() ||
         entry.isSymbolicLink() ||
         !entry.isDirectory() ||
+        !ownerMatches(opened) ||
+        !ownerMatches(entry) ||
         (privateMode && (opened.mode & 0o777) !== 0o700) ||
         opened.dev !== entry.dev ||
         opened.ino !== entry.ino
@@ -131,13 +108,15 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
     }
   }
   private ensureDirectory(path: string, parent: string, privateParent = true): void {
+    const canonical = assertNoSymlinkPathComponents(path, fail);
     try {
-      fs.mkdirSync(path, { mode: 0o700 });
+      fs.mkdirSync(canonical, { mode: 0o700 });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
-    const fd = this.directoryFd(path);
+    const fd = this.directoryFd(canonical);
     fs.closeSync(fd);
+    assertNoSymlinkPathComponents(canonical, fail);
     const parentFd = this.directoryFd(parent, privateParent);
     try {
       fs.fsyncSync(parentFd);
@@ -158,7 +137,12 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
       fs.constants.O_RDWR |
       fs.constants.O_NOFOLLOW |
       (fs.constants.O_NONBLOCK === undefined ? 0 : fs.constants.O_NONBLOCK);
-    const fd = fs.openSync(path, flags);
+    let fd: number;
+    try {
+      fd = fs.openSync(path, flags);
+    } catch {
+      return fail("unsafe journal");
+    }
     try {
       const stat = fs.fstatSync(fd);
       const entry = fs.lstatSync(path);
@@ -166,13 +150,14 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
         !stat.isFile() ||
         entry.isSymbolicLink() ||
         !entry.isFile() ||
+        !ownerMatches(stat) ||
+        !ownerMatches(entry) ||
         stat.nlink !== 1 ||
         (stat.mode & 0o777) !== 0o600 ||
         stat.dev !== entry.dev ||
         stat.ino !== entry.ino
-      ) {
+      )
         fail("unsafe journal");
-      }
       return fd;
     } catch (error) {
       fs.closeSync(fd);
@@ -236,75 +221,178 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
       }
     }
   }
+  private syncRegistry(id: string, refresh: JournalRefresh): void {
+    const registry = this.options.artifactRegistry as Partial<RebuildableArtifactRegistry>;
+    if (typeof registry?.rebuild !== "function") return;
+    if (refresh.rebuilt) {
+      if (typeof registry.rebuildConversation === "function")
+        registry.rebuildConversation(id, refresh.cursor.records);
+      else registry.rebuild(refresh.cursor.records);
+    } else if (refresh.additions.length) {
+      if (typeof registry.index === "function") registry.index(refresh.additions);
+      else registry.rebuild(refresh.cursor.records);
+    }
+  }
+  private indexRecord(record: InternalTraceStoreRecord): void {
+    const registry = this.options.artifactRegistry as Partial<RebuildableArtifactRegistry>;
+    if (typeof registry?.rebuild !== "function") return;
+    if (typeof registry.index === "function") registry.index([record]);
+    else registry.rebuild([record]);
+  }
   async readConversation(id: string): Promise<InternalTraceStoreRecord[]> {
-    return this.withLockedJournal(id, (fd) => replay(fd, false, id));
+    return this.withLockedJournal(id, (fd) => {
+      const cursor = auditJournal(fd, false, id);
+      this.cursors.set(id, cursor);
+      this.syncRegistry(id, { cursor, rebuilt: true, additions: [] });
+      return clone(cursor.records);
+    });
+  }
+  async recoverConversation(id: string): Promise<InternalTraceStoreRecord[]> {
+    return this.withLockedJournal(id, (fd) => {
+      const cursor = auditJournal(fd, true, id);
+      this.cursors.set(id, cursor);
+      this.syncRegistry(id, { cursor, rebuilt: true, additions: [] });
+      return clone(cursor.records);
+    });
   }
   async append(
     correlation: TraceCorrelation,
     input: TraceAppendInput,
     native: string | null = null,
   ): Promise<StoredTraceEvent> {
-    if (!validInput(correlation, input, native)) fail("invalid input");
-    let capturedCorrelation: TraceCorrelation;
-    let capturedInput: TraceAppendInput;
-    let inputBytes: string;
+    const stored = await this.appendBatch([{ correlation, input, native }]);
+    return stored[0] ?? fail("invalid batch result");
+  }
+  async appendBatch(entries: readonly TraceBatchAppend[]): Promise<StoredTraceEvent[]> {
+    if (!entries.length || entries.length > 64) fail("invalid batch");
+    let captured: Array<Required<TraceBatchAppend> & { bytes: string }>;
     try {
-      capturedCorrelation = JSON.parse(JSON.stringify(correlation));
-      inputBytes = JSON.stringify({ idempotency_key: input.idempotency_key, event: input.event });
-      capturedInput = JSON.parse(inputBytes);
+      if (
+        entries.some(
+          (entry) =>
+            !entry ||
+            !validInput(
+              entry.correlation,
+              entry.input,
+              entry.native === undefined ? null : entry.native,
+            ),
+        )
+      )
+        return fail("invalid input");
+      captured = entries.map(({ correlation, input, native = null }) => {
+        const bytes = inputBytes(input);
+        return {
+          correlation: JSON.parse(JSON.stringify(correlation)),
+          input: JSON.parse(bytes),
+          native,
+          bytes,
+        };
+      });
     } catch {
       return fail("invalid input");
     }
-    if (!validInput(capturedCorrelation, capturedInput, native)) fail("invalid input");
-    const nativeSessionId = native;
-    return this.withLockedJournal(capturedCorrelation.conversation_id, (fd) => {
-      const records = replay(fd, true, capturedCorrelation.conversation_id);
-      const old = records.find(
-        (record) => record.stored_event.idempotency_key === capturedInput.idempotency_key,
-      );
-      if (old) {
-        if (
-          bytes({
-            idempotency_key: old.stored_event.idempotency_key,
-            event: old.stored_event.event,
-          }) === inputBytes
-        )
-          return old.stored_event;
-        throw new TraceIdempotencyConflictError("idempotency key conflict");
-      }
-      const event_id = this.options.eventId?.() ?? randomUUID();
-      const ts = this.options.now?.() ?? new Date().toISOString();
-      if (
-        !validGenerated(event_id, ts) ||
-        records.some((record) => record.stored_event.event_id === event_id)
+    const first = captured[0];
+    if (!first) return fail("invalid batch");
+    const conversationId = first.correlation.conversation_id;
+    if (
+      !conversationId ||
+      captured.some(
+        ({ correlation, input, native }) =>
+          correlation.conversation_id !== conversationId || !validInput(correlation, input, native),
       )
-        fail("invalid generated value");
-      const stored_event = {
-        ...capturedCorrelation,
-        event_id,
-        seq: records.length + 1,
-        ts,
-        idempotency_key: capturedInput.idempotency_key,
-        event: capturedInput.event,
-      };
-      const stat = fs.fstatSync(fd);
-      const last = Buffer.alloc(1);
-      if (stat.size && fs.readSync(fd, last, 0, 1, stat.size - 1) !== 1) fail("short read");
-      const separator = stat.size && last[0] !== 10 ? "\n" : "";
-      writeFully(
-        fd,
-        Buffer.from(
-          `${separator}${JSON.stringify({ stored_event, native_session_id: nativeSessionId })}\n`,
-        ),
-        stat.size,
-      );
-      fs.fsyncSync(fd);
-      try {
-        this.options.mirror?.mirrorTrace(JSON.parse(JSON.stringify(stored_event)));
-      } catch {
-        return stored_event;
+    )
+      fail("invalid input");
+    return this.withLockedJournal(conversationId, (fd) => {
+      const refresh = refreshJournal(fd, true, conversationId, this.cursors.get(conversationId));
+      const cursor = refresh.cursor;
+      this.cursors.set(conversationId, cursor);
+      this.syncRegistry(conversationId, refresh);
+      const pending = new Map<string, InternalTraceStoreRecord>();
+      const generatedIds = new Set<string>();
+      const output: StoredTraceEvent[] = [];
+      for (const item of captured) {
+        const old =
+          cursor.idempotency.get(item.input.idempotency_key) ??
+          pending.get(item.input.idempotency_key);
+        if (old) {
+          if (
+            inputBytes({
+              idempotency_key: old.stored_event.idempotency_key,
+              event: old.stored_event.event,
+            }) !== item.bytes
+          )
+            throw new TraceIdempotencyConflictError("idempotency key conflict");
+          output.push(clone(old.stored_event));
+          continue;
+        }
+        const event_id = this.options.eventId?.() ?? randomUUID();
+        const ts = this.options.now?.() ?? new Date().toISOString();
+        if (
+          !validGenerated(event_id, ts) ||
+          cursor.eventIds.has(event_id) ||
+          generatedIds.has(event_id)
+        )
+          fail("invalid generated value");
+        generatedIds.add(event_id);
+        const stored_event = {
+          ...item.correlation,
+          event_id,
+          seq: cursor.records.length + pending.size + 1,
+          ts,
+          idempotency_key: item.input.idempotency_key,
+          event: item.input.event,
+        };
+        const record = { stored_event, native_session_id: item.native };
+        pending.set(item.input.idempotency_key, record);
+        output.push(stored_event);
       }
-      return stored_event;
+      if (!pending.size) return output;
+      const records = [...pending.values()];
+      assertCanonicalLifecycleAppend(cursor.records, records);
+      if (records.length > 1) {
+        const batchId = records[0]?.stored_event.event_id as string;
+        records.forEach((record, batchIndex) => {
+          record.batch_id = batchId;
+          record.batch_index = batchIndex;
+          record.batch_size = records.length;
+        });
+      }
+      const encoded = records.map((record, index) => {
+        const body = Buffer.from(JSON.stringify(record));
+        if (body.length > TRACE_LIMITS.maxRecordBytes) fail("record too large");
+        const separator = index === 0 && cursor.size && cursor.lastByte !== 10 ? "\n" : "";
+        return Buffer.concat([Buffer.from(separator), body, Buffer.from("\n")]);
+      });
+      const batch = Buffer.concat(encoded);
+      if (cursor.size + batch.length > TRACE_LIMITS.maxJournalBytes) fail("journal too large");
+      const appended = records.map((record) => clone(record));
+      const durableRecords = [...cursor.records, ...appended];
+      const registry = this.options.artifactRegistry as Partial<RebuildableArtifactRegistry>;
+      const prepared = registry?.prepare?.(records);
+      try {
+        writeFully(fd, batch, cursor.size);
+        fs.fsyncSync(fd);
+      } catch (error) {
+        prepared?.rollback();
+        throw error;
+      }
+      if (!appendCursorBatch(fd, cursor, appended, encoded)) {
+        this.cursors.delete(conversationId);
+      }
+      settleDurableRegistry(prepared, registry, conversationId, durableRecords);
+      for (const record of records) {
+        try {
+          if (!prepared) this.indexRecord(record);
+          const projected = projectPublicStoredTrace(record, {
+            conversationId,
+            artifactRegistry: this.options.artifactRegistry,
+          });
+          this.options.mirror?.mirrorTrace(projected);
+        } catch (error) {
+          void error;
+        }
+      }
+      return output;
     });
   }
 };

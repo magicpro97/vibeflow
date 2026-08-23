@@ -1,3 +1,4 @@
+import type { Engine } from "../core.js";
 import type { DispatchMarker } from "./marker.js";
 import { readMarker } from "./marker.js";
 
@@ -10,6 +11,7 @@ import { readMarker } from "./marker.js";
 export function resolveResumeId(
   unit: string,
   resume: boolean,
+  engine: Engine,
   read: (u: string) => DispatchMarker | null = readMarker,
 ): string | undefined {
   if (!resume) return undefined;
@@ -17,5 +19,11 @@ export function resolveResumeId(
   if (!marker) return undefined;
   // Resume only crash-dở states; a clean `done` or not-yet-started `pending` never resumes.
   if (marker.status === "done" || marker.status === "pending") return undefined;
+  if (!marker.engineSessionId || !marker.engineSessionEngine) return undefined;
+  if (marker.engineSessionEngine !== engine) {
+    throw new Error(
+      `resume engine mismatch: marker=${marker.engineSessionEngine}, requested=${engine}`,
+    );
+  }
   return marker.engineSessionId;
 }

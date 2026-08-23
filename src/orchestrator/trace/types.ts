@@ -45,6 +45,10 @@ export interface StoredTraceEvent extends TraceCorrelation {
 export interface InternalTraceStoreRecord {
   stored_event: StoredTraceEvent;
   native_session_id: string | null;
+  /** Internal journal transaction framing. Never enters the public projection. */
+  batch_id?: string;
+  batch_index?: number;
+  batch_size?: number;
 }
 declare const publicTextBrand: unique symbol;
 declare const opaqueArtifactIdBrand: unique symbol;
@@ -106,7 +110,7 @@ export type Participant = {
   participant_id: string;
   role_ref: string;
   engine: Engine;
-  model: RoleSpec["model"] | null;
+  model: string | null;
 };
 export interface ApprovalToken {
   approval_id: string;
@@ -131,7 +135,7 @@ export interface CoordinatorDecisionPayload {
 export interface ParticipantBoundPayload {
   participant_id: string;
   engine: Engine;
-  model: RoleSpec["model"] | null;
+  model: string | null;
   prompt_hash: string;
   tools: RoleSpec["tools"];
   sandbox: NonNullable<RoleSpec["sandbox"]>;

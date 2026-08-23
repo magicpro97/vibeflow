@@ -1,29 +1,30 @@
 // `vf verify` + `detectToolchain` — engine/toolchain detection. Pure detection: no MCP, no installs.
 
 import { spawnSync as _spawnSync } from "node:child_process";
-import { writeState } from "../core.js";
-import { appendReviewEvidence } from "../hooks/review-evidence-gate.js";
-import { snapshotImpl } from "../spec-freshness.js";
+import { checkReviewEvidence, defaultGit } from "../hooks/review-evidence.js";
 import {
-  c,
-  cwd,
+  verifyLockMirrorCompleteness,
+  verifyRegistryLockIntegrity,
+} from "../skills/verify-lock.js";
+import {
+  type GoalEvaluation,
+  type VerifyCoreReport,
+  evaluateVerifyCore,
+  gateResult,
+  persistImplementationFingerprints,
+} from "../verify/core.js";
+import {
   e2eEvaluateDynamicImportWarning,
   e2eUnicodeSelectorWarning,
   existsSync,
   hasCommand,
   join,
-  out,
-  policyGates,
   readFileSync,
   readState,
   spawn,
-  spawnSync,
-  verifyLockGate,
   writeFileSafe,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
-import { autoCrystallizeAndReport, printVerifyReport } from "./verify-report.js";
-import { runWaiverGate } from "./waiver-gate.js";
 /** Current git HEAD sha for `base`, or "HEAD" when git unavailable. Used as diff base for Type-B drift detection. */
 function readVerifiedSha(base: string): string {
   const r = _spawnSync("git", ["rev-parse", "HEAD"], { cwd: base, encoding: "utf8" });
@@ -57,7 +58,7 @@ export function readLastVerify(base: string): LastVerify | null {
 }
 
 /** Stamp the last-verify marker. Best-effort: never fail verify on IO. */
-export function stampLastVerify(base: string, passed: boolean): void {
+export function stampLastVerify(base: string, passed: boolean): boolean {
   try {
     const marker: LastVerify = {
       sha: readVerifiedSha(base),
@@ -65,8 +66,10 @@ export function stampLastVerify(base: string, passed: boolean): void {
       at: new Date().toISOString(),
     };
     writeFileSafe(join(base, LAST_VERIFY_REL), JSON.stringify(marker, null, 2));
+    return true;
   } catch {
     /* marker is advisory bookkeeping — never block verify on it */
+    return false;
   }
 }
 
@@ -168,16 +171,8 @@ export function detectToolchain(
   return { kind: "none" };
 }
 
-/** Structured report shape returned by collectVerifyReportAsync.
- * Consumed by POST /api/verify (B1). The CLI verify() prints its own stdout
- * and does NOT consume this type. */
-export interface VerifyReport {
-  ok: boolean;
-  toolchain: { label: string; pass: boolean }[];
-  policy: { passed: string[]; warnings: string[]; failures: string[] };
-  /** ADR-003: behavioral goal-eval result. Only present when goal + goalEvalFn provided AND toolchain passes. */
-  goalEval?: { pass: boolean; uncovered: string[]; score?: number };
-}
+/** Full authoritative report. The legacy toolchain/policy fields remain as compatibility views. */
+export type VerifyReport = VerifyCoreReport;
 
 /** Async helper: runs toolchain + policy gates and returns a structured report.
  * REQUIRED by POST /api/verify — the sync spawnSync version freezes Bun.serve (the whole
@@ -196,6 +191,7 @@ export async function collectVerifyReportAsync(
     allowUnverifiedEvidence?: boolean; // ADR-004 escape hatch
     requireReviewEvidence?: boolean;
     reviewBase?: string; // #748: pushed-range fallback base
+    catalogDir?: string;
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
@@ -210,7 +206,9 @@ export async function collectVerifyReportAsync(
 
   const runGate = async (label: string, cmd: string, args: string[], dir = base) => {
     const r = await run(cmd, args, { stdio: "ignore", cwd: dir });
-    toolchain.push({ label, pass: r.status === 0 });
+    const result = { label, pass: r.status === 0 };
+    toolchain.push(result);
+    return result;
   };
 
   const plan = detectToolchain(base);
@@ -227,52 +225,77 @@ export async function collectVerifyReportAsync(
       await runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   }
 
-  // Coverage gate (only when lcov.info exists)
+  let coverageResult = gateResult("skipped", "coverage gate not requested");
+  let legacyCoverage: { label: string; pass: boolean } | undefined;
   if (inject.coverage) {
     const lcovPath = join(base, "coverage", "lcov.info");
     if (existsSync(lcovPath)) {
-      await runGate("coverage:gate", "node", ["scripts/coverage-gate.cjs"]);
-    }
+      legacyCoverage = await runGate("coverage:gate", "node", ["scripts/coverage-gate.cjs"]);
+      toolchain.pop();
+      coverageResult = gateResult(
+        legacyCoverage.pass ? "pass" : "fail",
+        legacyCoverage.pass ? "coverage gate passed" : "coverage gate failed",
+      );
+    } else coverageResult = gateResult("skipped", "coverage/lcov.info not found");
   }
 
   const rawState = readState(base);
-  if (inject.allowUnverifiedEvidence && rawState) rawState._allowUnverifiedEvidence = true;
-  const policy = policyGates(rawState, { base });
-  // #764: web/API verification must match CLI fail-closed semantics.
-  appendReviewEvidence(policy, base, inject.requireReviewEvidence !== false, inject.reviewBase);
-  const ok = toolchain.every((g) => g.pass) && policy.failures.length === 0;
-
-  // Type B drift PRODUCER: when the toolchain gates are all green, fingerprint
-  // each done unit's scoped files + record the verified git SHA, so a LATER
-  // verify can detect an out-of-pipeline edit (impl drift). Without this write
-  // the Type B gate stays silent (impl_fingerprint never set). Best-effort:
-  // a snapshot/persist failure must never fail an otherwise-passing verify.
-  if (ok && rawState?.work_units?.length) {
-    try {
-      const sha = readVerifiedSha(base);
-      let changed = false;
-      for (const u of rawState.work_units) {
-        if (u.status !== "done" || !u.scope?.length) continue;
-        u.impl_fingerprint = snapshotImpl(base, u.scope);
-        u.verified_sha = sha;
-        changed = true;
-      }
-      if (changed) writeState(base, rawState);
-    } catch {
-      // never block a green verify on the drift-snapshot bookkeeping.
-    }
-  }
-
-  // ADR-003: behavioral goal-eval gate (stub — wire real LLM via --goal-eval flag in phase 2)
-  if (inject.goal && inject.goalEvalFn && toolchain.every((g) => g.pass)) {
+  let goalEval: GoalEvaluation | undefined;
+  if (
+    inject.goal &&
+    inject.goalEvalFn &&
+    toolchain.every((gate) => gate.pass) &&
+    (!legacyCoverage || legacyCoverage.pass)
+  ) {
     const result = await inject.goalEvalFn(inject.goal);
-    const goalEvalOk = result.covered;
-    return {
-      ok: ok && goalEvalOk,
-      toolchain,
-      policy,
-      goalEval: { pass: result.covered, uncovered: result.uncovered, score: result.score },
-    };
+    goalEval = { pass: result.covered, uncovered: result.uncovered, score: result.score };
   }
-  return { ok, toolchain, policy };
+  let waiverResult = gateResult("skipped", "waiver-policy.cjs not found");
+  if (existsSync(join(base, "scripts", "waiver-policy.cjs"))) {
+    const result = await run("node", ["scripts/waiver-policy.cjs"], { stdio: "ignore", cwd: base });
+    waiverResult = gateResult(
+      result.status === 0 ? "pass" : "fail",
+      result.status === 0 ? "waiver policy passed" : "waiver policy failed",
+    );
+  }
+  const lock = verifyRegistryLockIntegrity(base);
+  const mirror = verifyLockMirrorCompleteness(base, { catalogDir: inject.catalogDir });
+  const registryFailures = [...lock.errors, ...mirror.errors];
+  const registryWarnings = [...lock.warnings, ...mirror.warnings];
+  const registryResult = registryFailures.length
+    ? gateResult("fail", registryFailures.join("\n"))
+    : registryWarnings.length
+      ? gateResult("warn", registryWarnings.join("\n"))
+      : gateResult("pass", "registry lock integrity and mirror completeness passed");
+  const review = checkReviewEvidence(
+    base,
+    inject.requireReviewEvidence !== false,
+    defaultGit,
+    inject.reviewBase,
+  );
+  const reviewResult = gateResult(
+    review.ok ? (review.reason.includes("(warn)") ? "warn" : "pass") : "fail",
+    review.reason,
+  );
+  const e2eWarnings = [
+    ...e2eUnicodeSelectorWarning(base),
+    ...e2eEvaluateDynamicImportWarning(base),
+  ];
+  const report = evaluateVerifyCore({
+    base,
+    state: rawState,
+    toolchain,
+    allowUnverifiedEvidence: inject.allowUnverifiedEvidence,
+    coverage: coverageResult,
+    waiver: waiverResult,
+    registryLock: registryResult,
+    reviewEvidence: reviewResult,
+    advisoryE2e: e2eWarnings.length
+      ? gateResult("warn", e2eWarnings.join("\n"))
+      : gateResult("pass", "advisory E2E scan passed"),
+    ...(goalEval ? { goalEval } : {}),
+  });
+  persistImplementationFingerprints(base, rawState, report);
+  if (legacyCoverage) report.toolchain.push(legacyCoverage);
+  return report;
 }

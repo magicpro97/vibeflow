@@ -85,6 +85,8 @@ export interface EngineSummary {
 }
 
 export interface DispatchResult {
+  /** Immutable evidence identity. Legacy callers may omit it and receive a generated UUID. */
+  attemptId?: string;
   engine: Engine;
   mode: "bridge" | "cli" | "dry";
   ok: boolean;
@@ -93,9 +95,6 @@ export interface DispatchResult {
   reason?: string;
   /** Non-fatal advisory (e.g. an unverifiable Copilot CLI version). */
   warning?: string;
-  /** #618: engine conversation/session id (claude JSON envelope `.session_id`),
-   *  captured for crash-resume. Absent when the engine emits no session envelope. */
-  sessionId?: string;
 }
 
 export type Spawner = (

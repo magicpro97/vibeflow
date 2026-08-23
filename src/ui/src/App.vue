@@ -19,16 +19,15 @@
     </div>
     <StatusBar />
     <SettingsPanel v-if="showSettings" @close="closeSettings" />
-    <AskCard v-if="store.askOpen" @close="store.closeAsk()" />
+    <ChatWorkspace v-if="store.askOpen" :initial-prefill="store.askPrefill" @close="store.closeAsk()" />
     <SkillPanel v-if="store.skillPanelOpen" @close="closeSkillPanel" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
-import AskCard from "./components/AskCard.vue";
+import ChatWorkspace from "./components/ChatWorkspace.vue";
 import LogPane from "./components/LogPane.vue";
-import ProjectList from "./components/ProjectList.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import SkillPanel from "./components/SkillPanel.vue";
 import Stage1Describe from "./components/Stage1Describe.vue";

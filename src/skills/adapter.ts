@@ -25,7 +25,7 @@ export interface AdapterResolveResult {
 
 const EXTENDS_RE = /^([a-z0-9]+(?:-[a-z0-9]+)*)(?:@(\d+\.\d+\.\d+))?$/;
 
-function parseExtends(v: string): { baseName: string; version?: string } | null {
+export function parseSkillReference(v: string): { baseName: string; version?: string } | null {
   const m = EXTENDS_RE.exec(v.trim());
   const baseName = m?.[1];
   if (!baseName) return null;
@@ -156,7 +156,7 @@ export function resolveAdapter(
   let mergedFm: Record<string, unknown> | undefined;
 
   for (const ext of adapterExtends) {
-    const parsed = parseExtends(ext);
+    const parsed = parseSkillReference(ext);
     if (!parsed) {
       warnings.push(
         `adapter "${adapterSkill.name}": invalid extends entry "${ext}" — expected "<skill-name>[@<version>]"`,
@@ -255,7 +255,7 @@ export function resolveAdapter(
   // remain from the base.
   // Inherit base capabilities/triggers if adapter leaves them undefined
   const baseSkillObj = allSkills.find(
-    (s) => s.name === parseExtends(adapterExtends[0] ?? "")?.baseName,
+    (s) => s.name === parseSkillReference(adapterExtends[0] ?? "")?.baseName,
   );
   if (!adapterSkill.capabilities && baseSkillObj?.capabilities) {
     resolved.capabilities = baseSkillObj.capabilities;
@@ -312,7 +312,7 @@ export function resolveAllAdapters(
 
       // Check if all bases are resolved
       const allBasesResolved = skill.extends.every((ext) => {
-        const parsed = parseExtends(ext);
+        const parsed = parseSkillReference(ext);
         return parsed && resolved.has(parsed.baseName);
       });
 

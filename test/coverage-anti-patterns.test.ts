@@ -86,6 +86,9 @@ describe("coverage anti-patterns (test/ only)", () => {
     // Terminal prompt tests intentionally spawn a subprocess to exercise
     // real stdin/stdout behavior across the process boundary.
     .filter((p) => !p.endsWith("terminal-prompts.test.ts"))
+    // The Node compatibility shim must execute in a real Node process because
+    // Bun's native global cannot be replaced with the compatibility runtime.
+    .filter((p) => !p.endsWith("bun-shim-node.test.ts"))
     // tryLock TOCTOU test intentionally spawns child bun processes to
     // exercise real cross-process lock contention — using a fakeSpawner
     // would defeat the test's purpose (CWE-367 is a real-process race).

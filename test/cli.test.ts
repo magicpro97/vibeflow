@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { canonicalFiles } from "../src/adapters/canonical-files.js";
 import { defaultContext } from "../src/adapters/context-builders.js";
 import { dispatchPrompt } from "../src/adapters/dispatch-prompt.js";
@@ -75,6 +76,16 @@ const noneReady = (engines: Engine[]): EngineReadiness[] =>
     detail: `${engine} CLI not found`,
     checkedAt: "",
   }));
+
+const isolatedUiFixture = (): { dir: string; html: URL } => {
+  const dir = mkdtempSync(join(tmpdir(), "vf-ui-fixture-"));
+  const path = join(dir, "index.html");
+  writeFileSync(
+    path,
+    '<!doctype html><meta name="vf-token" content="__CSRF__"><meta name="vf-version" content="__VERSION__"><div id="app">VibeFlow</div>',
+  );
+  return { dir, html: pathToFileURL(path) };
+};
 
 describe("core", () => {
   test("parseFlags splits positionals and flags", () => {
@@ -376,6 +387,8 @@ describe("cli help routing", () => {
       ["units", "vf units"],
       ["init", "vf init"],
       ["orchestrate", "vf orchestrate"],
+      ["chat", "vf chat"],
+      ["brainstorm", "vf brainstorm"],
       ["tools", "vf tools"],
     ];
     for (const [cmd, marker] of cases) {
@@ -642,15 +655,30 @@ describe("engines", () => {
 });
 
 describe("server", () => {
+  test("ui wiring reuses one shared conversation authority across initial start and hot restart", () => {
+    const src = readFileSync(join(import.meta.dir, "..", "src/cli.ts"), "utf8");
+    expect(src).toContain("const conversation = buildConversationHttpAuthority({}, host, cwd());");
+    expect(src).toContain(
+      "startServerResilient(\n    Number.isFinite(port) ? port : 0,\n    host,\n    conversation,\n  )",
+    );
+    expect(src).toContain("startServer(Number.isFinite(port) ? port : 0, { host, conversation })");
+    expect(src).toMatch(/void prev\s*\.stop\(true\)\s*\.then\(\(\) => \{/);
+  });
+
   test("serves the Vue app and state endpoints on loopback", async () => {
-    const { server, url } = await startServer(0);
-    expect(url).toContain("127.0.0.1");
-    const html = await fetch(url).then((r) => r.text());
-    expect(html).toContain("VibeFlow");
-    expect(html).toContain('id="app"'); // Vue mount point
-    const state = await fetch(`${url}/state`);
-    expect(state.status).toBe(200);
-    server.stop();
+    const fixture = isolatedUiFixture();
+    const { server, url } = await startServer(0, { uiHtmlPath: fixture.html });
+    try {
+      expect(url).toContain("127.0.0.1");
+      const html = await fetch(url).then((r) => r.text());
+      expect(html).toContain("VibeFlow");
+      expect(html).toContain('id="app"'); // Vue mount point
+      const state = await fetch(`${url}/state`);
+      expect(state.status).toBe(200);
+    } finally {
+      await server.stop(true);
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
   });
 
   test("serves same-origin /assets/* (CSP-safe) and guards traversal + bad extensions", async () => {
@@ -666,7 +694,7 @@ describe("server", () => {
     // Non-allowlisted extensions are not served even if the file exists.
     const ts = await fetch(`${url}/assets/probe.ts`);
     expect(ts.status).toBe(404);
-    server.stop();
+    await server.stop(true);
   });
 
   test("POST /api/init generates a workflow and rejects a missing CSRF token", async () => {
@@ -701,7 +729,7 @@ describe("server", () => {
         body: "{}",
       });
       expect(forbidden.status).toBe(403);
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1162,7 +1190,7 @@ describe("server write endpoints", () => {
       // attachments mirrored into the saved ledger
       expect(readState(dir)?.attachments?.some((a) => a.name === "spec.md")).toBe(true);
 
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1319,7 +1347,7 @@ describe("server orchestration endpoints", () => {
       expect(Array.isArray(orchJson.state.work_units)).toBe(true);
       expect(readFileSync(statePath, "utf8")).toBe(stateBefore); // ledger byte-identical
 
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1371,7 +1399,7 @@ describe("server preflight + settings endpoints", () => {
         expect(typeof r.level).toBe("string");
         expect(typeof r.detail).toBe("string");
       }
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1428,7 +1456,7 @@ describe("server preflight + settings endpoints", () => {
 
       // round-trip: the change persisted to SETTINGS.json on disk
       expect(readSettings(dir).tools.codegraph).toBe(true);
-      server.stop();
+      await server.stop(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1436,12 +1464,17 @@ describe("server preflight + settings endpoints", () => {
   });
 
   test("the served HTML is the Vue app entry point", async () => {
-    const { server, url } = await startServer(0);
-    const html = await fetch(url).then((r) => r.text());
-    // Vue app entry: has #app mount point and csrf meta tag
-    expect(html).toContain('id="app"');
-    expect(html).toContain('name="vf-token"');
-    server.stop();
+    const fixture = isolatedUiFixture();
+    const { server, url } = await startServer(0, { uiHtmlPath: fixture.html });
+    try {
+      const html = await fetch(url).then((r) => r.text());
+      // Vue app entry: has #app mount point and csrf meta tag
+      expect(html).toContain('id="app"');
+      expect(html).toContain('name="vf-token"');
+    } finally {
+      await server.stop(true);
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
   });
 });
 

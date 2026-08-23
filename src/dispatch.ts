@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { basename, extname, join } from "node:path";
 import {
   CTX_DIR,
@@ -9,6 +10,11 @@ import {
   writeFileSafe,
 } from "./core.js";
 import { parseEngineSummary, parseSessionId } from "./dispatch/prompt.js";
+import {
+  buildPublicDispatchResult,
+  persistPublicDispatchEvidence,
+  requireSafeNativeSessionId,
+} from "./dispatch/public-redaction.js";
 import {
   defaultAsyncSpawner,
   defaultSpawner,
@@ -187,6 +193,7 @@ export function engineCommand(
    *  ignore this until PR2b. */
   resumeSessionId?: string,
 ): EngineCommandResult {
+  if (resumeSessionId) requireSafeNativeSessionId(engine, resumeSessionId);
   switch (engine) {
     case "claude": {
       // #618 PR2a: `-r <id>` resumes a session (claude requires it alongside -p/--print).
@@ -272,25 +279,6 @@ export function materializePrompt(
   return { cmd: cli.cmd, args, input: "" };
 }
 
-function buildResult(
-  opts: DispatchOpts,
-  r: { status: number; stdout: string; stderr?: string; timedOut?: boolean },
-  failReason: string,
-  warning?: string,
-): DispatchResult {
-  const ok = r.status === 0;
-  return {
-    engine: opts.engine,
-    mode: opts.mode,
-    ok,
-    raw: r.stdout,
-    summary: parseEngineSummary(r.stdout),
-    sessionId: parseSessionId(r.stdout),
-    reason: ok ? undefined : r.timedOut ? "timeout" : failReason,
-    warning,
-  };
-}
-
 /**
  * Dispatch a prompt to an engine (synchronous).
  *  - mode "bridge": pipe to $VIBEFLOW_AI (default, engine-agnostic, offline-friendly)
@@ -299,11 +287,14 @@ function buildResult(
  */
 export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): DispatchResult {
   const { engine, prompt, mode } = opts;
+  const attemptId = randomUUID();
   const spawn = opts.spawner ?? defaultSpawner;
-  if (mode === "dry") return { engine, mode, ok: true, raw: "" };
+  if (mode === "dry") return { attemptId, engine, mode, ok: true, raw: "" };
   if (mode === "bridge") {
     const cmd = bridgeCommand(opts);
-    if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
+    if (!cmd) {
+      return { attemptId, engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
+    }
     // VIBEFLOW_AI is a shell command string (may include args) — spawn via shell unless a
     // test injected its own spawner.
     const bridgeSpawn =
@@ -323,16 +314,23 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
         if (stderrText) opts.onStderrChunk?.(stderrText);
         return { status: r.exitCode, stdout: r.stdout.toString(), stderr: stderrText };
       });
-    return buildResult(opts, bridgeSpawn(cmd, [], prompt), "bridge command failed");
+    return buildPublicDispatchResult(
+      opts,
+      bridgeSpawn(cmd, [], prompt),
+      "bridge command failed",
+      undefined,
+      attemptId,
+    );
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has, opts.resumeSessionId);
-  if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
+  if (!cli.ok) return { attemptId, engine, mode, ok: false, raw: "", reason: cli.reason };
   const invocation = materializePrompt(cli, preparePrompt(cli, opts));
-  return buildResult(
+  return buildPublicDispatchResult(
     opts,
     spawn(invocation.cmd, invocation.args, invocation.input),
     `${cli.cmd} failed`,
     cli.warning,
+    attemptId,
   );
 }
 
@@ -345,30 +343,38 @@ export async function runDispatchAsync(
   opts: DispatchOpts & { spawner?: AsyncSpawner },
 ): Promise<DispatchResult> {
   const { engine, prompt, mode } = opts;
+  const attemptId = randomUUID();
   const spawn = opts.spawner ?? defaultAsyncSpawner;
-  if (mode === "dry") return { engine, mode, ok: true, raw: "" };
+  if (mode === "dry") return { attemptId, engine, mode, ok: true, raw: "" };
   if (mode === "bridge") {
     const cmd = bridgeCommand(opts);
-    if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
+    if (!cmd) {
+      return { attemptId, engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
+    }
     // VIBEFLOW_AI is a shell command string (may include args), consistent with aiGenerate's
     // shell:true spawn. Use a shell-aware spawner unless a test injected its own.
     const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: true });
-    return buildResult(opts, await bridgeSpawn(cmd, [], prompt), "bridge command failed");
+    return buildPublicDispatchResult(
+      opts,
+      await bridgeSpawn(cmd, [], prompt),
+      "bridge command failed",
+      undefined,
+      attemptId,
+    );
   }
   const cli = resolveCli(engine, Boolean(opts.spawner), opts.has, opts.resumeSessionId);
-  if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
+  if (!cli.ok) return { attemptId, engine, mode, ok: false, raw: "", reason: cli.reason };
   const invocation = materializePrompt(cli, preparePrompt(cli, opts));
-  return buildResult(
+  return buildPublicDispatchResult(
     opts,
     await spawn(invocation.cmd, invocation.args, invocation.input),
     `${cli.cmd} failed`,
     cli.warning,
+    attemptId,
   );
 }
 
 /** Persist a dispatch result as evidence inside a work unit's `evidence/` folder. */
 export function persistDispatch(unitDir: string, result: DispatchResult): string {
-  const rel = `evidence/${result.engine}.result.json`;
-  writeFileSafe(join(unitDir, rel), JSON.stringify(result, null, 2));
-  return rel;
+  return persistPublicDispatchEvidence(unitDir, result);
 }

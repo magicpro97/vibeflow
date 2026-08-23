@@ -11,10 +11,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Engine } from "../core.js";
+import { sanitizePublicValue } from "../dispatch/public-redaction.js";
+import { applyResumeMarkerUpdate, resumeMarkerFields } from "./resume-binding.js";
 import { appendTimeline, timelinePath } from "./timeline.js";
 
 export type MarkerStatus = "pending" | "running" | "done" | "failed" | "blocked";
-
 export interface DispatchMarker {
   unit: string;
   status: MarkerStatus;
@@ -28,8 +30,33 @@ export interface DispatchMarker {
   projectItemId?: string;
   /** GitHub issue URL or number — used to auto-close when PR merge is detected. */
   issueUrl?: string;
-  /** #618: engine conversation/session id, persisted for crash-resume (`--resume`). */
   engineSessionId?: string;
+  engineSessionEngine?: Engine;
+  resumeStatus?: MarkerStatus;
+}
+
+export type PublicDispatchMarker = Omit<
+  DispatchMarker,
+  "engineSessionId" | "engineSessionEngine" | "resumeStatus"
+> & {
+  nativeSessionStatus: "captured" | "unavailable";
+};
+
+function projectPublicMarker(marker: DispatchMarker): PublicDispatchMarker {
+  const {
+    engineSessionId,
+    engineSessionEngine: _engineSessionEngine,
+    resumeStatus: _resumeStatus,
+    ...publicMarker
+  } = marker;
+  return sanitizePublicValue(
+    {
+      ...publicMarker,
+      evidence: publicMarker.evidence.map(() => "[opaque-evidence]"),
+      nativeSessionStatus: engineSessionId ? "captured" : "unavailable",
+    },
+    engineSessionId ? [engineSessionId] : [],
+  );
 }
 
 /**
@@ -76,7 +103,11 @@ function lockPath(unitName: string): string {
   return join(markerDir(), `${unitName}.lock`);
 }
 
-export function createMarker(unit: string, agent?: string): DispatchMarker {
+export function createMarker(
+  unit: string,
+  agent?: string,
+  resumeBinding?: Pick<DispatchMarker, "engineSessionId" | "engineSessionEngine" | "status">,
+): DispatchMarker {
   const marker: DispatchMarker = {
     unit,
     status: "pending",
@@ -85,6 +116,7 @@ export function createMarker(unit: string, agent?: string): DispatchMarker {
     confidence: 0,
     evidence: [],
     agent,
+    ...resumeMarkerFields(agent, resumeBinding),
   };
   writeFileSync(markerPath(unit), JSON.stringify(marker, null, 2));
   return marker;
@@ -183,6 +215,7 @@ export function updateMarker(
       | "projectItemId"
       | "issueUrl"
       | "engineSessionId"
+      | "engineSessionEngine"
     >
   >,
 ): DispatchMarker | null {
@@ -202,7 +235,7 @@ export function updateMarker(
   if (update.exitCode !== undefined) marker.exitCode = update.exitCode;
   if (update.projectItemId !== undefined) marker.projectItemId = update.projectItemId;
   if (update.issueUrl !== undefined) marker.issueUrl = update.issueUrl;
-  if (update.engineSessionId !== undefined) marker.engineSessionId = update.engineSessionId;
+  applyResumeMarkerUpdate(marker, update);
   writeFileSync(path, JSON.stringify(marker, null, 2));
 
   // AC #176: every status transition syncs to ProjectV2 #6
@@ -240,7 +273,7 @@ export function readMarker(unit: string): DispatchMarker | null {
   }
 }
 
-export function listMarkers(): DispatchMarker[] {
+export function listMarkers(): PublicDispatchMarker[] {
   const markers: DispatchMarker[] = [];
   const dir = markerDir();
   // markerDir() guarantees the directory exists (creates it if not),
@@ -258,7 +291,7 @@ export function listMarkers(): DispatchMarker[] {
       /* skip corrupt files */
     }
   }
-  return markers.sort((a, b) => b.updatedAt - a.updatedAt);
+  return markers.sort((a, b) => b.updatedAt - a.updatedAt).map(projectPublicMarker);
 }
 
 export function cleanupMarker(unit: string): void {
@@ -302,8 +335,7 @@ export function tryLock(unit: string): boolean {
     closeSync(fd);
     return true;
   }
-  // Lock file already exists. Read it to decide: live → refuse;
-  // stale → unlink and retry the atomic create.
+  // Lock file exists. Read it to decide: live → refuse; stale → unlink and retry.
   try {
     const data = JSON.parse(readFileSync(lock, "utf8"));
     const age = Date.now() - (data.ts || 0);

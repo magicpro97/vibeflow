@@ -1,3 +1,4 @@
+import type { SpawnOptionsProjection } from "../dispatch/session-types.js";
 import type { RoleModel, RoleSpec, ToolIntent } from "./role.js";
 
 /** Engine keys consumed by `renderForEngine` / `agentFilePath`. */
@@ -28,6 +29,37 @@ const CODEX_MODEL_MAP: Record<string, string> = {
 function codexModel(model: RoleModel): string {
   if (model.startsWith("gpt-")) return model;
   return CODEX_MODEL_MAP[model] ?? model;
+}
+
+function renderedModel(
+  engine: AgentEngine,
+  model: RoleModel,
+  modelOverride?: string,
+): string | null {
+  if (modelOverride)
+    return engine === "codex" ? (CODEX_MODEL_MAP[modelOverride] ?? modelOverride) : modelOverride;
+  if (engine === "claude") return model;
+  if (engine === "codex") return CODEX_MODEL_MAP[model] ?? model;
+  return null;
+}
+
+/** Materialize the renderer-controlled subset of a canonical spawn projection. */
+export function renderRoleForSpawn(
+  engine: AgentEngine,
+  spec: RoleSpec,
+  options: { modelOverride?: string; prompt?: string } = {},
+): Pick<SpawnOptionsProjection, "model" | "rendered_prompt" | "rendered_tools" | "sandbox"> {
+  const model = renderedModel(engine, spec.model, options.modelOverride);
+  const renderedTools =
+    engine === "codex" || engine === "opencode" || engine === "antigravity"
+      ? []
+      : spec.tools.map((tool) => CLAUDE_TOOL_MAP[tool]);
+  return {
+    model,
+    rendered_prompt: options.prompt ?? spec.body,
+    rendered_tools: renderedTools,
+    sandbox: engine === "opencode" || engine === "antigravity" ? null : (spec.sandbox ?? null),
+  };
 }
 
 /** Quote a TOML basic string. Disallows control chars and ensures

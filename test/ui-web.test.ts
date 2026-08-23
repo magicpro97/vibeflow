@@ -538,3 +538,11 @@ describe("#688 registry tab: read-only, no execute", () => {
     expect(store).not.toContain("executable: true");
   });
 });
+
+describe("Vue TypeScript module authority", () => {
+  test("the UI declares SFC and virtual stylesheet modules used by its entrypoint", () => {
+    const declarations = readFileSync(new URL("../src/ui/src/env.d.ts", import.meta.url), "utf8");
+    expect(declarations).toContain('declare module "*.vue"');
+    expect(declarations).toContain('declare module "virtual:uno.css"');
+  });
+});

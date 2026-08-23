@@ -1,8 +1,8 @@
 ---
 title: Command Reference
-description: Complete reference of all shipped `vf` CLI commands and their flags — start, doctor, init, orchestrate, units, skills, hooks, and verify.
+description: Complete reference of all shipped `vf` CLI commands and their flags, including conversations, orchestration, skills, hooks, and verification.
 category: reference
-last_updated: 2026-06-24
+last_updated: 2026-08-23
 ---
 
 # Command Reference
@@ -13,6 +13,7 @@ last_updated: 2026-06-24
 - [Check the Environment](#check-the-environment)
 - [Initialize a Workflow](#initialize-a-workflow)
 - [Dispatch](#dispatch)
+- [Conversations](#conversations)
 - [Orchestrate](#orchestrate)
 - [Work Units (Ledger)](#work-units-ledger)
 - [Settings (Config)](#settings-config)
@@ -89,13 +90,40 @@ vf run <claude|codex|copilot|opencode|antigravity>   # write .vibeflow/dispatch/
 vf run <engine> --yes           # launch the engine CLI
 ```
 
-## Ask (inline code Q&A)
+## Conversations
+
+`chat`, `brainstorm`, and persisted `ask` calls all enter the same conversation runtime.
+That runtime owns lifecycle state, ordered public trace events, approvals, and artifact
+projections. User topics, messages, and engine outputs appear in the public trace only after
+redaction. Internal role/provider prompt templates, the rendered provider prompt, native engine
+session identifiers, credentials, environment values, and local paths remain private.
+
+### Engine capability matrix
+
+The runtime names in this tree are Claude, Codex, Copilot, OpenCode, and Antigravity. The
+matrix below reflects the exact conversation/runtime behavior enforced by the current adapters.
+
+| Engine | Fresh execution | Tool/sandbox enforcement | Exact native resume | History reconciliation | Phase/admission |
+|--------|-----------------|--------------------------|---------------------|------------------------|-----------------|
+| Claude | yes | full | yes (`-p -r <session_id>`) | supported | Phase 1 built-in read-only yes; phase 2+ yes |
+| Codex | yes | partial: sandbox yes, rendered tools denied | yes (`exec resume <thread_id>`) | supported | Phase 1 built-in read-only yes; phase 2+ yes |
+| Copilot | yes | full | unavailable; no native resume path | unavailable | Phase 1 no; phase 2+ yes when ready/admitted |
+| OpenCode | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; most-recent `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Antigravity | yes | no: conversation launches reject requested tools or sandbox | yes (`--conversation <conversation_id>`) | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+
+Exact native resume is the by-id conversation/session path; the older `vf ask --resume`
+continuation remains engine-native and follows each CLI's own "most recent session" behavior
+where available. Phase 1 admits only built-in read-only Claude/Codex bindings; phase 2+
+requires a verified engine and live canonical isolation for repo overlays.
+
+### Ask (inline code Q&A)
 
 ```bash
 vf ask src/cli.ts:210-267 "what does this switch do?"   # stream an answer about a snippet
 vf ask src/dispatch.ts:172 "why json output?"           # single line (start==end)
 vf ask src/x.ts:5-12 "explain" --engine claude          # force a specific ready engine
 vf ask --resume "ok, and is that thread-safe?"          # continue the last conversation (multi-turn)
+vf ask --conversation conversation-123 src/x.ts:5-12 "revise it" # persisted conversation
 ```
 
 Reads the given line range, frames a prompt (file path + language-fenced snippet +
@@ -106,6 +134,130 @@ Antigravity; Antigravity uses workspace-scoped `agy --continue`). Reuses vf's en
 selection — no new dispatch path, no dependency. Bad target/range, missing file,
 missing question, or no ready engine exits non-zero with an actionable message.
 Run `vf doctor --probe` if none are ready.
+
+The two continuation flags have deliberately different authority:
+
+- `--resume` asks the selected engine CLI to continue its most recent **native** session. It
+  accepts only a follow-up question and is supported by Claude, Codex, OpenCode, and
+  Antigravity; Copilot reports that native resume is unavailable.
+- `--conversation <id>` frames the requested file range and posts it to that exact persisted
+  VibeFlow conversation. A completed parent produces a child revision instead of mutating
+  its terminal trace.
+
+`ask` has no `--json` mode. Fresh and `--conversation` asks use the conversation exit table
+below. Native `--resume` returns the selected engine process's exit status unchanged; local
+target, file, readiness, and unsupported-resume errors retain the legacy `ask` status `2`.
+
+### Chat
+
+```bash
+vf chat "Explain why this function is pure"
+vf chat --policy plan --max-rounds 2 "Draft a migration plan"
+vf chat --participant direct@codex --participant direct@claude "Compare implementations"
+vf chat --resume conversation-123 "Revise the previous answer"
+vf chat --no-baseline --json "Compare without a baseline run"
+```
+
+`vf chat` is the canonical conversational entry. The coordinator selects a policy unless
+`--policy <direct|debate|plan|review|verify|orchestrate>` overrides it. Repeat
+`--participant <role@engine[:model]>` to bind explicit participants. `--max-rounds <n>` must
+be an integer from `1` through `100`. `--no-baseline` disables the independent debate baseline.
+`--resume <conversation-id>` injects the topic into an active conversation or creates a child
+revision from a completed one. Resume accepts only `--resume`, `--json`, and the new message:
+combining it with create-only `--policy`, `--participant`, `--max-rounds`, or `--no-baseline`
+is a validation error rather than a silently ignored option.
+
+With `--json`, stdout contains exactly one JSON document and no streamed deltas. A new
+conversation returns:
+
+```json
+{"ok":true,"conversation_id":"conversation-123","revision_id":"revision-1","status":"completed","artifact_refs":["artifact-1"],"output":"..."}
+```
+
+A resumed conversation returns `conversation_id`, nullable `child_conversation_id`, `status`,
+and `output`. Validation errors are also single documents, for example
+`{"ok":false,"code":"missing_topic"}` or
+`{"ok":false,"code":"unknown_flags","flags":["--wat"]}`. Runtime failures use the error
+codes in the exit-code table below.
+
+A plan that pauses for approval returns `ok: true`, `status: "awaiting_approval"`, its current
+`artifact_refs`, and exit `0`. Resolve the pending approval in the web workspace or HTTP API;
+exit `4` remains reserved for a conversation that reaches `FAILED`. Result and approval
+`artifact_refs` are stable public catalog ids, not artifact-download capabilities.
+
+### Brainstorm
+
+```bash
+vf brainstorm "Compare three API designs"                # dry-run only
+vf brainstorm --participant brainstorm-participant@codex \
+  --participant brainstorm-skeptic@claude "Compare designs"
+vf brainstorm --yes --max-rounds 3 "Find the safest rollout plan"
+vf brainstorm --resume conversation-123 "Run another round"
+vf brainstorm --yes --no-baseline --json "Compare designs"
+```
+
+`vf brainstorm` is a compatibility facade over the `debate` policy. It requires at least two
+non-evaluator participants and exactly one evaluator; the runtime adds the evaluator when it
+is omitted. A new invocation is a read-only dry run unless `--yes` is present. `--resume`
+continues immediately and therefore does not require `--yes`.
+
+`--max-rounds` accepts integers from `1` through `100`. With `--resume`, the create-only
+`--participant`, `--max-rounds`, and `--no-baseline` flags are rejected; they are never silently
+ignored. `--yes` is unnecessary on resume because resume is already an explicit mutation.
+
+`--json` always writes exactly one document. Dry-run output has exactly these top-level
+fields: `status` (`"dry_run"`), `dry_run` (`true`), `participants`,
+`evaluator_auto_added`, `engines_available`, and `models_valid`. Executed output has
+`version` (`"1.0"`), `conversation_id`, terminal `status`, `dry_run` (`false`), `rounds`,
+`consensus_score`, `consensus_average`, `decision_matrix`, `baseline_comparison`,
+`transcript_path`, and nullable `error`. `transcript_path`, when present, is an authenticated
+opaque artifact URL built from the `ref` in the public `artifact_created` trace event; it is
+fetchable through the artifact route and is never a filesystem path or a catalog `artifact_id`.
+Pre-execution JSON errors use
+`{"status":"error","error":{"error_kind":"validation|engine_start|transport","code":"...","message":"..."}}`.
+
+### Chat, brainstorm, and persisted-ask exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Dry run, accepted/completed conversation (including explicit `awaiting_approval`), or a user-stopped conversation |
+| `1` | Invalid flags, participant syntax, topic, range, or other validation input |
+| `2` | An admitted engine could not start or no requested engine was available |
+| `3` | Conversation persistence or transport failed |
+| `4` | The conversation reached `FAILED` |
+| `5` | The conversation reached `ABORTED` |
+
+### Conversation HTTP API and SSE
+
+The web workspace uses the same public DTOs as the CLI:
+
+| Method | Route | Result |
+|--------|-------|--------|
+| `POST` | `/api/conversations` | `202`; conversation id, scoped stream token, expiry, and `Location` |
+| `GET` | `/api/conversations/:id/snapshot` | Current public snapshot |
+| `GET` | `/api/conversations/:id/events?stream_token=...&since=N` | Ordered SSE replay, snapshot barrier, then live events |
+| `POST` | `/api/conversations/:id/messages` | `202`; accepted message and optional child id/`Location` |
+| `POST` | `/api/conversations/:id/pause`, `/resume`, `/stop` | `202`; typed lifecycle result |
+| `POST` | `/api/conversations/:id/approvals/:approvalId/resolve` | Typed `202`, `404`, or `409` result |
+| `POST` | `/api/conversations/:id/operations/:operationId/cancel` | Typed `202`, `404`, or `409` result |
+| `POST` | `/api/conversations/:id/stream-token` | `202`; renewed conversation-scoped token |
+| `GET` | `/api/conversations/:id/artifacts/:opaqueId` | Authenticated bytes; no client path parameter |
+
+Normal JSON and artifact requests require the process-local, `HttpOnly`, `SameSite=Strict`
+`vf_conversation_session` cookie. Loopback writes additionally require the page's per-process
+CSRF token. The SSE endpoint accepts only its 256-bit, single-conversation stream token; it
+does not accept the session cookie as an SSE credential. Tokens expire after 15 minutes and
+are renewed through the session-authenticated endpoint. The conversation workspace is
+intentionally unavailable on `--host 0.0.0.0`: LAN page loads receive no conversation session
+cookie, so conversation routes fail closed with `401`.
+
+Resume SSE with either `Last-Event-ID: N` or `?since=N`. If both are supplied they must
+match. The server replays records with `seq > N` in ascending order, emits a snapshot at the
+replay barrier, buffers concurrently arriving records, and then switches to live delivery.
+Clients must deduplicate by `seq`. Invalid or conflicting cursors return `400`; unknown
+conversations return `404`; lifecycle or route/body conflicts return `409`; missing session
+or stream authority returns `401`, and a loopback write with a session but no valid CSRF token
+returns `403`.
 
 ## Orchestrate
 

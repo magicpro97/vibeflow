@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CTX_DIR, type Skill } from "../src/core.js";
-import { sanitizeSkillLogValue } from "../src/skills/discovery.js";
+import { classifySkillSource, sanitizeSkillLogValue } from "../src/skills/discovery.js";
 import { renderSkillDetail, showSkill } from "../src/skills/lifecycle.js";
 import {
   discoverSkills,
@@ -33,6 +41,27 @@ function skill(partial: Partial<Skill> & { name: string }): Skill {
 }
 
 describe("registry provenance (never auto-verify external skills)", () => {
+  test("classifySkillSource rejects a canonical path that escapes through a symlink", () => {
+    const root = tmpRepo();
+    const outside = tmpRepo();
+    try {
+      const skillMd = join(outside, "SKILL.md");
+      writeFileSync(skillMd, "outside");
+      symlinkSync(outside, join(root, "escape"), process.platform === "win32" ? "junction" : "dir");
+
+      expect(() =>
+        classifySkillSource(join(root, "escape", "SKILL.md"), {
+          repo: [root],
+          shared: [],
+          builtin: [],
+        }),
+      ).toThrow("skill path escapes canonical discovery root");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   test("a prototype-pollution SKILL.md does NOT yield a verified skill", () => {
     const dir = tmpRepo();
     try {

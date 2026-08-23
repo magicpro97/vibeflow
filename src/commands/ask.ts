@@ -19,6 +19,13 @@ import { out } from "../logbus.js";
 import { preflightAll } from "../preflight.js";
 import type { EngineReadiness } from "../preflight/types.js";
 import { readSettings } from "../settings.js";
+import {
+  type ConversationCommandDeps,
+  classifyConversationResult,
+  conversationService,
+  executeConversationCreate,
+  executeConversationMessage,
+} from "./_shared.js";
 
 /** Prompt delivery per engine: on stdin, or as a trailing argv token. */
 type PromptMode = "stdin" | "arg";
@@ -36,6 +43,10 @@ export interface AskDeps {
   spawn?: (inv: AskInvocation, prompt: string) => number;
   /** File reader (default: readFileSync utf8). */
   readText?: (path: string) => string;
+  /** Conversation runtime injection seam for the production direct-policy path. */
+  service?: ConversationCommandDeps["service"];
+  createService?: ConversationCommandDeps["createService"];
+  bootstrap?: ConversationCommandDeps["bootstrap"];
 }
 
 export interface ParsedTarget {
@@ -319,6 +330,10 @@ export async function ask(
   const eng = engine as Engine;
 
   const spawn = deps.spawn ?? inheritSpawn;
+  const conversationId =
+    typeof flags.conversation === "string" && flags.conversation.trim()
+      ? flags.conversation.trim()
+      : null;
 
   // --resume: continue the engine's most-recent conversation with just a follow-up
   // question — no target/snippet needed (the prior turn already has the code context).
@@ -349,7 +364,33 @@ export async function ask(
 
   const lang = langFence(target.path);
   const prompt = framePrompt(target.path, target.start, target.end, lang, sliced.snippet, question);
-  const inv = askInvocation(eng);
-  out("vf", c.dim(`ask: ${eng} · ${target.path}:${target.start}-${target.end}`));
-  return spawn(inv, prompt);
+  if (deps.spawn) {
+    const inv = askInvocation(eng);
+    out("vf", c.dim(`ask: ${eng} · ${target.path}:${target.start}-${target.end}`));
+    return spawn(inv, prompt);
+  }
+  const service = conversationService(
+    {
+      ...(deps.service ? { service: deps.service } : {}),
+      ...(deps.createService ? { createService: deps.createService } : {}),
+      ...(deps.bootstrap ? { bootstrap: deps.bootstrap } : {}),
+    },
+    cwd(),
+  );
+  if (conversationId) {
+    const resumed = await executeConversationMessage(service, conversationId, prompt, (chunk) =>
+      process.stdout.write(chunk),
+    );
+    return classifyConversationResult(resumed.status, resumed.events);
+  }
+  const execution = await executeConversationCreate(
+    service,
+    {
+      topic: prompt,
+      policy: "direct",
+      participants: [{ role_ref: "direct", engine: eng }],
+    },
+    (chunk) => process.stdout.write(chunk),
+  );
+  return classifyConversationResult(execution.status, execution.events);
 }

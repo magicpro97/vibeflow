@@ -1,7 +1,7 @@
 // biome-ignore format: entire-file — tight formatting keeps file ≤400 lines
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { CTX_DIR, type Skill } from "../core.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { resolveAllAdapters } from "./adapter.js";
@@ -22,7 +22,70 @@ import { type ParseSkillOpts, trustedIdentityForSharedSkill } from "./review-pro
  * `discoverSkills` also scans the SHARED catalog (~/.vibeflow/skills/) AFTER
  * project-local roots, so a project-local skill always shadows the shared one.
  */
-const SKILL_ROOTS: string[] = [join(CTX_DIR, "skills"), join(".kiro", "skills"), ...SKILL_MIRRORS];
+export type SkillSource = "repo" | "shared" | "builtin";
+
+export interface SkillDiscoveryRoots {
+  repo: string[];
+  shared: string[];
+  builtin: string[];
+}
+
+export const REPO_SKILL_ROOT = join(CTX_DIR, "skills");
+export const REPO_SKILL_ROOTS: readonly string[] = [
+  REPO_SKILL_ROOT,
+  join(".kiro", "skills"),
+  ...SKILL_MIRRORS,
+];
+/** No package-owned skill root is currently part of canonical discovery. */
+export const BUILTIN_SKILL_ROOTS: readonly string[] = [];
+const SKILL_ROOTS: readonly string[] = REPO_SKILL_ROOTS;
+
+/** Concrete roots used by discovery, grouped into stable provenance classes. */
+export function skillDiscoveryRoots(
+  repo: string,
+  shared = join(process.env.VF_SKILLS_HOME ?? homedir(), ".vibeflow", "skills"),
+): SkillDiscoveryRoots {
+  return {
+    repo: REPO_SKILL_ROOTS.map((root) => join(repo, root)),
+    shared: [shared],
+    builtin: BUILTIN_SKILL_ROOTS.map((root) => join(repo, root)),
+  };
+}
+
+function canonical(path: string): string {
+  const absolute = resolve(path);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+function inside(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return (
+    rel === "" ||
+    (!isAbsolute(rel) &&
+      rel !== ".." &&
+      !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+  );
+}
+
+/** Map a discovered SKILL.md to exactly one canonical source class. */
+export function classifySkillSource(path: string, roots: SkillDiscoveryRoots): SkillSource {
+  for (const source of ["repo", "shared", "builtin"] as const) {
+    for (const root of roots[source]) {
+      const absoluteRoot = resolve(root);
+      const absolutePath = resolve(path);
+      if (!inside(absoluteRoot, absolutePath)) continue;
+      if (!inside(canonical(absoluteRoot), canonical(absolutePath))) {
+        throw new Error(`skill path escapes canonical discovery root: ${path}`);
+      }
+      return source;
+    }
+  }
+  throw new Error(`skill path is outside canonical discovery roots: ${path}`);
+}
 
 const UNSAFE_LOG_CHAR = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 

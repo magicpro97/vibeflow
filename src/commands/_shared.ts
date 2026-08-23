@@ -234,6 +234,36 @@ export type { Ctx7AuthResult } from "./init-ctx7.js";
 export { runInitAiEnrichment } from "./init-ai.js";
 export type { InitAiEnrichmentOpts } from "./init-ai.js";
 
+// === conversation command sibling bridges ===
+// The conversation helpers must also respect the no-direct-sibling-import rule.
+export {
+  CONVERSATION_EXIT,
+  type ConversationCommandDeps,
+  classifyConversationError,
+  classifyConversationResult,
+  conversationBootstrap,
+  conversationJsonErrorCode,
+  conversationService,
+  executeConversationCreate,
+  executeConversationMessage,
+  jsonWrite,
+  parseConversationArgv,
+  parseMaxRounds,
+  parseParticipantSpec,
+} from "./conversation-args.js";
+export {
+  assertNoResumeCreateFlags,
+  parseOptionalResumeId,
+  publicResumeValidationMessage,
+} from "./conversation-validation.js";
+export { executeConversationWorkflow } from "./conversation-workflow.js";
+export { buildPlanPrompt } from "./plan.js";
+export { collectVerifyReportAsync } from "./tools-detect.js";
+export type { VerifyReport } from "./tools-detect.js";
+export { ASK_HELP, BRAINSTORM_HELP, CHAT_HELP } from "./help-conversation.js";
+export { SUPERPOWERS_HELP } from "./help-superpowers.js";
+export { COMMAND_HELP } from "./help-commands.js";
+
 // === Reusable hook-emit helper re-exported from hooks.ts ===
 // `vf init`'s interactive hooks step arms the engine guardrail configs via the
 // same writer `vf hooks emit --yes` uses. The cycle rule routes the cross-sibling

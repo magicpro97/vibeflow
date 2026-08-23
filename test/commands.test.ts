@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyIntake, doctor, orchestrate } from "../src/commands.js";
 import { type WorkflowState, readState, writeState } from "../src/core.js";
-import type { AsyncSpawner } from "../src/dispatch.js";
+import type { EngineProcessSpawner } from "../src/dispatch/session-types.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
 
 function writeFixture(base: string, overrides: Partial<WorkflowState> = {}): void {
@@ -48,6 +48,32 @@ function writeFixture(base: string, overrides: Partial<WorkflowState> = {}): voi
   writeFileSync(join(ctx, "WORKFLOW_STATE.json"), JSON.stringify(state, null, 2));
 }
 
+function completedEngineProcess(stdout: string) {
+  return {
+    stdin: { write: () => {}, end: () => {} },
+    stdout: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(stdout));
+        controller.close();
+      },
+    }),
+    stderr: new ReadableStream({ start: (controller) => controller.close() }),
+    exited: Promise.resolve(0),
+    kill: () => {},
+  };
+}
+
+function claudeProcessSpawner(confidence: number): EngineProcessSpawner {
+  return () =>
+    completedEngineProcess(
+      JSON.stringify({
+        type: "result",
+        session_id: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+        result: `\`\`\`json\n{"confidence": ${confidence}}\n\`\`\``,
+      }),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 1. orchestrate dry-run lists units
 // ---------------------------------------------------------------------------
@@ -71,7 +97,7 @@ describe("doctor", () => {
       { engine: "codex" as const, level: "ready" as const, detail: "ready", checkedAt: "" },
       { engine: "copilot" as const, level: "ready" as const, detail: "ready", checkedAt: "" },
     ];
-    const code = await doctor({}, { readiness });
+    const code = await doctor({}, { readiness, hasCommand: () => true });
     expect(typeof code).toBe("number");
     // node + git are required and should be present
     expect(code).toBe(0);
@@ -155,13 +181,8 @@ describe("orchestrate review gate", () => {
     const dir = mkdtempSync(join(tmpdir(), "test-orch-low-"));
     writeFixture(dir);
 
-    const mockSpawner: AsyncSpawner = async () => ({
-      status: 0,
-      stdout: '```json\n{"confidence": 0.4}\n```',
-    });
-
     const code = await orchestrate({ yes: true, risk: "feature", engine: "claude" }, dir, {
-      spawner: mockSpawner,
+      sessionRuntime: { processSpawner: claudeProcessSpawner(0.4) },
       git: mockGit,
       // Inject a passing gate so this test isolates the CONFIDENCE path — the
       // real scopedGate (wired in #267) would otherwise fail in the empty
@@ -176,13 +197,8 @@ describe("orchestrate review gate", () => {
     const dir = mkdtempSync(join(tmpdir(), "test-orch-high-"));
     writeFixture(dir);
 
-    const mockSpawner: AsyncSpawner = async () => ({
-      status: 0,
-      stdout: '```json\n{"confidence": 0.9}\n```',
-    });
-
     const code = await orchestrate({ yes: true, risk: "feature", engine: "claude" }, dir, {
-      spawner: mockSpawner,
+      sessionRuntime: { processSpawner: claudeProcessSpawner(0.9) },
       git: mockGit,
       // Passing gate → isolates the confidence path (see note above).
       gate: () => ({ pass: true }),

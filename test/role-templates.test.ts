@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderClaudeAgent } from "../src/agents/render.js";
 import {
+  ALL_ROLE_NAMES,
+  CONVERSATION_ROLE_NAMES,
   ROLE_NAMES,
   defaultRoleContext,
   getRoleSpec,
@@ -9,7 +11,7 @@ import {
 } from "../src/agents/role-templates.js";
 
 describe("role-templates", () => {
-  test("exposes the 6 expected default roles", () => {
+  test("preserves the 6 workflow roles and adds read-only conversation roles", () => {
     expect(ROLE_NAMES).toEqual([
       "cli-engine",
       "web-ui",
@@ -18,10 +20,31 @@ describe("role-templates", () => {
       "dispatch-runner",
       "doc-writer",
     ]);
+    expect(CONVERSATION_ROLE_NAMES).toEqual([
+      "direct",
+      "brainstorm-participant",
+      "brainstorm-skeptic",
+      "brainstorm-domain-expert",
+      "brainstorm-evaluator",
+    ]);
+    expect(ALL_ROLE_NAMES).toEqual([...ROLE_NAMES, ...CONVERSATION_ROLE_NAMES]);
     const specs = listRoleSpecs();
-    expect(specs).toHaveLength(6);
-    for (const name of ROLE_NAMES) {
+    expect(specs).toHaveLength(11);
+    for (const name of ALL_ROLE_NAMES) {
       expect(specs.find((s) => s.name === name)).toBeDefined();
+    }
+  });
+
+  test("conversation roles are built-in read-only without mutating workflow roles", () => {
+    for (const name of CONVERSATION_ROLE_NAMES) {
+      const spec = getRoleSpec(name);
+      expect(spec?.sandbox).toBe("read-only");
+      expect(spec?.tools).not.toContain("write");
+      expect(spec?.tools).not.toContain("edit");
+      expect(spec?.tools).not.toContain("bash");
+    }
+    for (const name of ROLE_NAMES) {
+      expect(getRoleSpec(name)?.sandbox).toBe("workspace-write");
     }
   });
 
@@ -58,7 +81,7 @@ describe("role-templates", () => {
   });
 
   test("getRoleSpec returns the same spec as listRoleSpecs[idx]", () => {
-    for (const name of ROLE_NAMES) {
+    for (const name of ALL_ROLE_NAMES) {
       const a = getRoleSpec(name);
       const b = listRoleSpecs().find((s) => s.name === name);
       expect(a).toEqual(b);

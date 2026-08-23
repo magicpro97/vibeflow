@@ -218,19 +218,22 @@ describe("resumeInvocation (#562 multi-turn — engine-native continue)", () => 
   });
 });
 
-describe("inheritSpawn (real process, cross-platform via node)", () => {
+describe("inheritSpawn (real process, cross-platform via active runtime)", () => {
   test("stdin mode: pipes prompt, returns exit status 0", () => {
-    // `node -e ""` ignores stdin and exits 0 — proves the stdin/pipe branch runs.
-    const code = inheritSpawn({ cmd: "node", args: ["-e", ""], promptMode: "stdin" }, "hello");
+    // The active runtime exits cleanly after accepting piped stdin — proving the pipe branch runs.
+    const code = inheritSpawn(
+      { cmd: process.execPath, args: ["-e", "process.exit(0)"], promptMode: "stdin" },
+      "hello",
+    );
     expect(code).toBe(0);
   });
   test("arg mode: prompt appended to argv (no -p flag to splice after)", () => {
     // materializeArgs order-after-`-p` is proven in its own describe; here just
     // confirm arg-mode delivers the prompt as an argv token. Avoid a literal `-p`
-    // in the node args — node would consume it as its OWN print flag.
+    // in the runtime args — the runtime would consume it as its OWN print flag.
     const code = inheritSpawn(
       {
-        cmd: "node",
+        cmd: process.execPath,
         args: ["-e", "process.exit(process.argv[1] === 'PING' ? 0 : 4)"],
         promptMode: "arg",
       },
@@ -240,18 +243,22 @@ describe("inheritSpawn (real process, cross-platform via node)", () => {
   });
   test("nonzero engine exit propagates", () => {
     const code = inheritSpawn(
-      { cmd: "node", args: ["-e", "process.exit(2)"], promptMode: "stdin" },
+      { cmd: process.execPath, args: ["-e", "process.exit(2)"], promptMode: "stdin" },
       "x",
     );
     expect(code).toBe(2);
   });
 });
 
-describe("captureSpawn (real process, cross-platform via node) — #562 Stage B", () => {
+describe("captureSpawn (real process, cross-platform via active runtime) — #562 Stage B", () => {
   test("stdin mode: captures stdout, code 0, onChunk fires with the text", () => {
     let chunk: string | undefined;
     const r = captureSpawn(
-      { cmd: "node", args: ["-e", 'process.stdout.write("HELLO")'], promptMode: "stdin" },
+      {
+        cmd: process.execPath,
+        args: ["-e", 'process.stdout.write("HELLO")'],
+        promptMode: "stdin",
+      },
       "x",
       (s) => {
         chunk = s;
@@ -264,10 +271,10 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
 
   test("arg mode: prompt delivered as an argv token, captured back", () => {
     // Ordering-after-`-p` is proven in the materializeArgs describe. Here confirm
-    // arg-mode captures the prompt token. No literal `-p` (node would eat it).
+    // arg-mode captures the prompt token. No literal `-p` (the runtime would eat it).
     const r = captureSpawn(
       {
-        cmd: "node",
+        cmd: process.execPath,
         args: ["-e", "process.stdout.write(process.argv[1])"],
         promptMode: "arg",
       },
@@ -279,7 +286,7 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
 
   test("nonzero engine exit propagates in code", () => {
     const r = captureSpawn(
-      { cmd: "node", args: ["-e", "process.exit(3)"], promptMode: "stdin" },
+      { cmd: process.execPath, args: ["-e", "process.exit(3)"], promptMode: "stdin" },
       "x",
     );
     expect(r.code).toBe(3);
@@ -288,7 +295,7 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
   test("empty stdout falls back to stderr so failures are visible", () => {
     const r = captureSpawn(
       {
-        cmd: "node",
+        cmd: process.execPath,
         args: ["-e", 'process.stderr.write("BOOM"); process.exit(1)'],
         promptMode: "stdin",
       },
@@ -308,7 +315,7 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
     try {
       const r = captureSpawn(
         {
-          cmd: "node",
+          cmd: process.execPath,
           args: ["-e", `process.stdout.write(process.env.${AWS_SECRET_KEY} || 'SCRUBBED')`],
           promptMode: "stdin",
         },
@@ -323,7 +330,7 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
 
   test("ALWAYS_KEEP preserves PATH in captureSpawn child env", () => {
     const save = process.env.PATH;
-    // spawn via the absolute node path so a mutated PATH can't break process lookup;
+    // spawn via the absolute active-runtime path so a mutated PATH can't break process lookup;
     // the child prints its inherited PATH to prove ALWAYS_KEEP passed it through.
     process.env.PATH = `/test/path:${save}`;
     try {
@@ -348,7 +355,10 @@ describe("captureSpawn (real process, cross-platform via node) — #562 Stage B"
   test("inheritSpawn returns 0 with filtered env (secret dropped, child still exits clean)", () => {
     process.env[AWS_SECRET_KEY] = "test-secret-should-not-leak-inherit";
     try {
-      const code = inheritSpawn({ cmd: "node", args: ["-e", ""], promptMode: "stdin" }, "x");
+      const code = inheritSpawn(
+        { cmd: process.execPath, args: ["-e", "process.exit(0)"], promptMode: "stdin" },
+        "x",
+      );
       expect(code).toBe(0);
     } finally {
       delete process.env[AWS_SECRET_KEY];
@@ -607,5 +617,83 @@ describe("ask() integration (injected seams)", () => {
     );
     expect(code).toBe(0);
     expect(seen?.prompt).toBe("why is that");
+  });
+
+  test("--conversation routes the framed prompt through the shared conversation service", async () => {
+    await withFile("a\nb\nc\n", async (path) => {
+      let seen = "";
+      const code = await quiet(() =>
+        ask(
+          [`${path}:2-3`, "why"],
+          { conversation: "conversation-123" },
+          {
+            readiness: () => [ready("claude")],
+            createService: () =>
+              ({
+                message: async (_id: string, request: { content: string }) => {
+                  seen = request.content;
+                  return {
+                    message_id: "message-1",
+                    accepted: true,
+                    child_conversation_id: "conversation-124",
+                  };
+                },
+                snapshot: async () => ({ lifecycle: "COMPLETED" }),
+                subscribe: () => () => undefined,
+              }) as never,
+          },
+        ),
+      );
+      expect(code).toBe(0);
+      expect(seen).toContain("b\nc");
+      expect(seen).toContain("why");
+    });
+  });
+
+  test("fresh ask without an injected spawn uses the shared direct-policy conversation service", async () => {
+    await withFile("a\nb\nc\n", async (path) => {
+      let started: Record<string, unknown> | undefined;
+      const code = await quiet(() =>
+        ask(
+          [`${path}:2-3`, "explain", "this"],
+          {},
+          {
+            readiness: () => [ready("claude")],
+            createService: () =>
+              ({
+                start: async (request: {
+                  topic: string;
+                  policy: string;
+                  participants: unknown[];
+                }) => {
+                  started = request as unknown as Record<string, unknown>;
+                  return {
+                    conversation_id: "conversation-1",
+                    revision_id: "revision-1",
+                    operation_id: "operation-1",
+                    completion: Promise.resolve({
+                      conversation_id: "conversation-1",
+                      revision_id: "revision-1",
+                      result: {
+                        operation_id: "operation-1",
+                        status: "completed",
+                        artifact_refs: [],
+                      },
+                    }),
+                  };
+                },
+                subscribe: () => () => undefined,
+              }) as never,
+          },
+        ),
+      );
+      expect(code).toBe(0);
+      expect(started).toMatchObject({
+        policy: "direct",
+        participants: [{ role_ref: "direct", engine: "claude" }],
+      });
+      expect(String(started?.topic)).toContain("b\nc");
+      expect(String(started?.topic)).toContain("explain this");
+    });
   });
 });

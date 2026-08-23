@@ -1,7 +1,7 @@
 // `vf verify` synchronous CLI gates. Kept separate from async server reporting
 // so sandbox execution can grow here without pushing tools-detect.ts over its cap.
 
-import { appendReviewEvidence } from "../hooks/review-evidence-gate.js";
+import { checkReviewEvidence, defaultGit } from "../hooks/review-evidence.js";
 import {
   type SandboxRequest,
   type SandboxRuntime,
@@ -9,6 +9,11 @@ import {
   defaultSandboxRuntime,
   prepareDockerSandbox,
 } from "../sandbox.js";
+import {
+  evaluateVerifyCore,
+  gateResult,
+  persistImplementationFingerprints,
+} from "../verify/core.js";
 import {
   appendJournal,
   c,
@@ -18,7 +23,6 @@ import {
   existsSync,
   join,
   out,
-  policyGates,
   readState,
   spawnSync,
   verifyLockGate,
@@ -41,7 +45,6 @@ export function verify(
     sandboxRuntime?: SandboxRuntime;
   } = {},
 ): number {
-  let failed = 0;
   const base = inject.projectDir ?? cwd();
   const sandboxRuntime = inject.sandboxRuntime ?? defaultSandboxRuntime();
   const sandbox = inject.sandbox
@@ -49,6 +52,13 @@ export function verify(
     : undefined;
   if (sandbox && !sandbox.ok) {
     out("vf", c.red(`✗ ${sandbox.message}`), { level: "error" });
+    evaluateVerifyCore({
+      base,
+      state: readState(base),
+      toolchain: [],
+      sandbox: gateResult("fail", sandbox.message),
+      reviewEvidence: gateResult("skipped", "verification stopped before review evidence"),
+    });
     return 1;
   }
   const writeJournal = inject.journal === true;
@@ -59,6 +69,7 @@ export function verify(
     sandbox.cleanup();
   };
   try {
+    const toolchain: { label: string; pass: boolean }[] = [];
     const runGate = (label: string, cmd: string, args: string[], dir = base) => {
       out("vf", c.cyan(`▶ ${label}`));
       // Test seam: tests inject a fake spawner to avoid the 28s
@@ -75,28 +86,39 @@ export function verify(
       if (sandbox?.ok && r.status === null)
         sandboxRuntime.run(["rm", "-f", sandbox.spec.containerName], base);
       if (r.status !== 0) {
-        failed++;
         out("vf", c.red(`✗ ${label} failed`));
       } else {
         out("vf", c.green(`✓ ${label}`));
       }
+      return r.status === 0;
     };
 
     // Toolchain gates — detect the project's build system instead of assuming npm.
     const plan = detectToolchain(base);
     if (plan.kind === "npm") {
-      for (const gate of plan.gates)
-        runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
+      for (const gate of plan.gates) {
+        const label = `${plan.runner} run ${gate}`;
+        toolchain.push({ label, pass: runGate(label, plan.runner, ["run", gate]) });
+      }
       if (plan.gates.length === 0)
         out("vf", c.dim("package.json has no typecheck/lint/test scripts."));
     } else if (plan.kind === "gradle") {
-      runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
+      const label = `${plan.cmd} check`;
+      toolchain.push({ label, pass: runGate(label, plan.cmd, ["check"]) });
     } else if (plan.kind === "flutter") {
-      for (const gate of plan.gates) runGate(`${plan.cmd} ${gate}`, plan.cmd, [gate]);
+      for (const gate of plan.gates) {
+        const label = `${plan.cmd} ${gate}`;
+        toolchain.push({ label, pass: runGate(label, plan.cmd, [gate]) });
+      }
     } else if (plan.kind === "monorepo") {
       const label = plan.dir.split(/[/\\]/).pop() ?? plan.dir;
-      for (const gate of plan.gates)
-        runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
+      for (const gate of plan.gates) {
+        const gateLabel = `(${label}) ${plan.runner} run ${gate}`;
+        toolchain.push({
+          label: gateLabel,
+          pass: runGate(gateLabel, plan.runner, ["run", gate], plan.dir),
+        });
+      }
     } else {
       out(
         "vf",
@@ -106,57 +128,111 @@ export function verify(
       );
     }
 
-    // Policy gates (confidence / evidence / scope) over the workflow ledger.
     const st = readState(base);
-    if (inject.allowUnverifiedEvidence && st) st._allowUnverifiedEvidence = true;
-    const report = policyGates(st);
-    // #764: hard by default; explicit false is an internal/test escape hatch.
-    appendReviewEvidence(report, base, inject.requireReviewEvidence !== false, inject.reviewBase);
-    printVerifyReport(report);
-    failed += report.failures.length;
-
+    let coverageResult = gateResult("skipped", "coverage gate not requested");
     if (inject.coverage) {
       const lcovPath = join(base, "coverage", "lcov.info");
-      if (existsSync(lcovPath)) runGate("coverage gate", "node", ["scripts/coverage-gate.cjs"]);
-      else out("vf", c.yellow("⚠ coverage/lcov.info not found — run `bun run coverage` first"));
+      if (existsSync(lcovPath)) {
+        const pass = runGate("coverage gate", "node", ["scripts/coverage-gate.cjs"]);
+        coverageResult = gateResult(
+          pass ? "pass" : "fail",
+          `coverage gate ${pass ? "passed" : "failed"}`,
+        );
+      } else {
+        coverageResult = gateResult("skipped", "coverage/lcov.info not found");
+        out("vf", c.yellow("⚠ coverage/lcov.info not found — run `bun run coverage` first"));
+      }
     }
 
-    // Waiver policy gate — validate declaration metadata and expiry (issue #679).
+    let waiverResult = gateResult("skipped", "waiver-policy.cjs not found");
     if (sandbox?.ok) {
-      if (existsSync(join(base, "scripts", "waiver-policy.cjs")))
-        runGate("waiver policy gate", "node", ["scripts/waiver-policy.cjs"]);
-      else out("vf", c.dim("⚠ waiver-policy.cjs not found — skipping"));
-    } else if (!runWaiverGate(base, { spawner: inject.spawner })) failed++;
+      if (existsSync(join(base, "scripts", "waiver-policy.cjs"))) {
+        const pass = runGate("waiver policy gate", "node", ["scripts/waiver-policy.cjs"]);
+        waiverResult = gateResult(
+          pass ? "pass" : "fail",
+          `waiver policy ${pass ? "passed" : "failed"}`,
+        );
+      } else out("vf", c.dim("⚠ waiver-policy.cjs not found — skipping"));
+    } else if (existsSync(join(base, "scripts", "waiver-policy.cjs"))) {
+      const pass = runWaiverGate(base, { spawner: inject.spawner });
+      waiverResult = gateResult(
+        pass ? "pass" : "fail",
+        `waiver policy ${pass ? "passed" : "failed"}`,
+      );
+    } else runWaiverGate(base, { spawner: inject.spawner });
 
-    // e2e advisory gates — non-fatal warnings only.
-    for (const w of e2eUnicodeSelectorWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
-    for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
+    const e2eWarnings = [
+      ...e2eUnicodeSelectorWarning(base),
+      ...e2eEvaluateDynamicImportWarning(base),
+    ];
+    for (const warning of e2eWarnings) out("vf", c.yellow(`⚠ ${warning}`));
 
-    // Registry lock integrity + mirror completeness (issue #654).
-    // Normal repos without a lock file pass silently.
-    failed += verifyLockGate(base, { catalogDir: inject.catalogDir }).failed;
+    const lock = verifyLockGate(base, { catalogDir: inject.catalogDir });
+    const review = checkReviewEvidence(
+      base,
+      inject.requireReviewEvidence !== false,
+      defaultGit,
+      inject.reviewBase,
+    );
+    const report = evaluateVerifyCore({
+      base,
+      state: st,
+      toolchain,
+      allowUnverifiedEvidence: inject.allowUnverifiedEvidence,
+      coverage: coverageResult,
+      sandbox: sandbox?.ok
+        ? gateResult("pass", "sandbox prepared and gate commands isolated")
+        : gateResult("skipped", "sandbox not requested"),
+      waiver: waiverResult,
+      registryLock: gateResult(
+        lock.failed ? "fail" : "pass",
+        lock.failed
+          ? "registry lock integrity or mirror completeness failed"
+          : "registry lock integrity and mirror completeness passed",
+      ),
+      reviewEvidence: gateResult(
+        review.ok ? (review.reason.includes("(warn)") ? "warn" : "pass") : "fail",
+        review.reason,
+      ),
+      advisoryE2e: e2eWarnings.length
+        ? gateResult("warn", e2eWarnings.join("\n"))
+        : gateResult("pass", "advisory E2E scan passed"),
+    });
+    printVerifyReport(report.policy);
+    out("vf", c.dim(`confidence: ${report.confidence}`));
 
-    if (failed > 0) {
+    persistImplementationFingerprints(base, st, report);
+
+    if (!report.ok) {
       out("vf");
+      const failed = Object.values(report.gates).filter((gate) => gate.status === "fail").length;
       out("vf", c.red(`${failed} gate(s) failed.`), { level: "error" });
-      stampLastVerify(base, false);
+      report.gates.marker_result = gateResult(
+        stampLastVerify(base, false) ? "pass" : "warn",
+        "failure marker write attempted",
+      );
       if (writeJournal) {
         appendJournal(base, "verify", "fail", [
           `${failed} gate(s) failed`,
-          ...report.failures.map((f) => `- ${f}`),
+          ...report.policy.failures.map((failure) => `- ${failure}`),
         ]);
+        report.gates.journal_result = gateResult("pass", "failure journal appended");
         autoCrystallizeAndReport(base);
       }
       return 1;
     }
     out("vf");
     out("vf", c.green("All configured gates passed."));
-    stampLastVerify(base, true);
+    report.gates.marker_result = gateResult(
+      stampLastVerify(base, true) ? "pass" : "warn",
+      "passing marker write attempted",
+    );
     if (writeJournal) {
       appendJournal(base, "verify", "pass", [
-        `${report.passed.length} gate(s) passed`,
-        ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
+        `${report.policy.passed.length} gate(s) passed`,
+        ...(report.policy.warnings.length ? [`${report.policy.warnings.length} warning(s)`] : []),
       ]);
+      report.gates.journal_result = gateResult("pass", "passing journal appended");
       autoCrystallizeAndReport(base);
     }
     return 0;

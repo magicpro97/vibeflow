@@ -1,8 +1,8 @@
 ---
 title: User Guide
-description: Verifiable end-to-end user guide — install, mental model, web UI, CLI walkthrough, generated files, and troubleshooting.
+description: Verifiable end-to-end user guide for workflows, traced conversations, the web UI, CLI, generated files, and troubleshooting.
 category: tutorial
-last_updated: 2026-06-24
+last_updated: 2026-08-23
 ---
 
 # VibeFlow User Guide
@@ -25,6 +25,19 @@ parallel, and refuses to "complete" anything without recorded evidence.
 
 This guide is verifiable end to end — every section ends with a command whose output you
 can check.
+
+## Engine matrix
+
+The runtime names in this tree are Claude, Codex, Copilot, OpenCode, and Antigravity. The
+conversation/runtime matrix is:
+
+| Engine | Fresh execution | Tool/sandbox enforcement | Exact native resume | History reconciliation | Phase/admission |
+|--------|-----------------|--------------------------|---------------------|------------------------|-----------------|
+| Claude | yes | full | yes | supported | Phase 1 built-in read-only yes; phase 2+ yes |
+| Codex | yes | partial: sandbox yes, rendered tools denied | yes | supported | Phase 1 built-in read-only yes; phase 2+ yes |
+| Copilot | yes | full | unavailable; no native resume path | unavailable | Phase 1 no; phase 2+ yes when ready/admitted |
+| OpenCode | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; most-recent `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Antigravity | yes | no: conversation launches reject requested tools or sandbox | yes (`--conversation <conversation_id>`) | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 
 ---
 
@@ -93,10 +106,53 @@ Opens `http://127.0.0.1:<port>` (loopback only). The dashboard has:
    acquire).
 7. **Discovery** — Context7 docs/skill lookup. The network is only touched after you tick
    **approve network**.
+8. **Conversation workspace** — create or resume a direct, debate, plan, review, verify, or
+   orchestrate conversation; follow streamed rounds and deltas; inspect the decision matrix,
+   baseline, public trace, approvals, operations, and opaque artifacts; inject a message or
+   create a child revision from a completed result.
 
 Security: the server binds to `127.0.0.1`, every write carries a per-process CSRF token,
 the Host/Origin must be loopback, uploads are sanitized and size-capped, and the page ships
 no third-party JavaScript under a strict CSP.
+
+### Conversation workspace
+
+Select **Open conversation workspace** in the top bar. The dialog is designed for a
+small-laptop viewport and keeps keyboard focus inside it until you press Escape or select
+**Close**.
+
+To start a conversation:
+
+1. Enter a topic. Leave **Policy** blank to let the coordinator decide, or enter
+   `direct`, `debate`, `plan`, `review`, `verify`, or `orchestrate`.
+2. Optionally set **Max rounds** to an integer from 1 through 100 and add one participant per
+   line as `role@engine[:model]`.
+3. Select **Start conversation**. The initial snapshot appears first; ordered replay and
+   live trace events then fill the message timeline, rounds, operations, and artifacts.
+4. Use **Pause**, **Resume**, or **Stop** only when enabled. Approval and cancellation cards
+   carry the exact operation identifiers shown in the trace. A `409` means another control
+   action won the race; refresh or resume instead of repeating blindly.
+5. Select **Trace** on a message or artifact to inspect public correlation fields and the
+   sanitized event payload. Result and approval `artifact_refs` are public catalog ids; select
+   **Preview** to fetch bytes with the separate opaque `ref` emitted by `artifact_created`.
+
+Use the **Resume** tab to reconnect to an existing conversation id. If a stream disconnects,
+the UI renews its short-lived token and resumes after its last confirmed sequence. Duplicate
+replay/live events are ignored by `seq`. Sending a message to an active conversation steers
+that conversation; sending one to a completed conversation creates a child revision and
+shows a link back to its parent.
+
+Conversation credentials have separate jobs. The browser receives an `HttpOnly`,
+`SameSite=Strict` session cookie for JSON and artifact requests; loopback writes also carry
+the page's per-process CSRF token. SSE uses a different, 15-minute token scoped to one
+conversation. Neither token is stored in `localStorage` or `sessionStorage`, and provider
+credentials, native session ids, internal/provider prompts, environment values, and local
+artifact paths are not public DTO fields. The conversation workspace fails closed on LAN-bound
+`vf ui --host 0.0.0.0`; use the loopback UI for conversations.
+
+The public trace does contain the user's topic and messages plus engine responses after
+redaction. “Prompts are private” refers specifically to internal role/provider templates and
+the rendered provider prompt; those implementation inputs never become public trace fields.
 
 ### Typed evidence
 
@@ -197,6 +253,58 @@ skips the gate). Verify:
 ```bash
 cat .vibeflow/PROJECT_CONTEXT.md     # contains a "## Detected stack" section
 ```
+
+### Ask, chat, and brainstorm
+
+Use `ask` for a file-range question, `chat` for the canonical persisted conversation, and
+`brainstorm` when you explicitly want the debate policy:
+
+```bash
+vf ask src/server.ts:130-180 "what protects these routes?"
+vf ask --resume "which failure is fail-closed?"          # latest native engine session
+vf ask --conversation conversation-123 src/server.ts:130-180 "revise this explanation"
+
+vf chat "Explain the release flow"
+vf chat --policy plan --participant planner@codex --max-rounds 2 "Plan the migration"
+vf chat --resume conversation-123 "Revise step two"
+
+vf brainstorm "Compare two storage designs"             # deterministic dry run
+vf brainstorm --yes --max-rounds 3 "Compare two storage designs"
+vf brainstorm --yes --no-baseline --json "Compare designs"
+```
+
+`ask --resume` is engine-native and continues the selected CLI's most recent session; it
+does not select a VibeFlow conversation id. Claude, Codex, OpenCode, and Antigravity support
+that path, while Copilot reports it as unavailable. `ask --conversation <id>` is the explicit
+persisted path. It frames the file snippet and posts it to that conversation.
+
+`chat` accepts `--policy`, repeated `--participant <role@engine[:model]>`,
+`--max-rounds`, `--resume`, `--no-baseline`, and `--json`. `brainstorm` accepts repeated
+participants, `--max-rounds`, `--resume`, `--no-baseline`, `--json`, and `--yes`. A new
+brainstorm is dry-run by default; only `--yes` dispatches engines. A resumed brainstorm
+continues immediately. `--max-rounds` is bounded to `1..100`.
+
+Resume does not reuse creation settings. `chat --resume` rejects `--policy`, `--participant`,
+`--max-rounds`, and `--no-baseline`; `brainstorm --resume` rejects `--participant`,
+`--max-rounds`, and `--no-baseline`. This is a validation error, not silent option dropping.
+
+For scripts, `--json` emits exactly one JSON document on stdout and suppresses streamed
+deltas. Brainstorm dry runs report resolved participants, whether the evaluator was added,
+engine availability, and model validity. Executed brainstorms report every completed round,
+consensus, deterministic decision matrix, baseline comparison, and an authenticated opaque
+transcript URL derived from `artifact_created.payload.ref`; that URL is fetchable through the
+authenticated artifact route. Exit codes are `0` success/dry-run/stopped, `1` validation,
+`2` engine start, `3` transport, `4` failed, and `5` aborted. See the
+[Command Reference](./COMMAND_REFERENCE.md#conversations) for the exact JSON fields and HTTP
+contract.
+
+A plan paused at its approval gate is accepted, not failed: JSON reports
+`status: "awaiting_approval"` with its current artifact references and the command exits `0`.
+Resolve it from the conversation workspace or HTTP API before the workflow continues.
+
+Those stable codes apply to `chat`, `brainstorm`, and persisted asks. Native `ask --resume`
+passes through the engine process status, while legacy local ask/readiness errors return `2`;
+`ask` does not offer JSON output.
 
 ### Resolve which skills a task needs (demand-driven)
 
@@ -368,6 +476,19 @@ canonical context. Work units and skills appear only when a task actually needs 
 - **`vf discover` failed / offline** — Context7 runs over HTTP; check connectivity. Set
   `CONTEXT7_API_KEY` to raise the rate limit (keyless works but is throttled).
 - **An engine CLI isn't launched on `vf run`** — install it; `vf doctor` shows what's missing.
+- **Conversation request returns `401`** — open the loopback page first so it can issue the
+  process-local session cookie. Conversation routes intentionally do not work from a
+  `--host 0.0.0.0` page.
+- **Conversation write returns `403`** — reload the page; its per-process CSRF token no
+  longer matches the running server.
+- **Conversation control returns `409`** — the lifecycle changed, the approval was already
+  resolved, or the route/body operation ids disagree. Resume the latest snapshot and use the
+  current control card.
+- **The conversation says it is reconnecting** — token renewal and cursor replay are
+  automatic. If it persists, verify that the original process is still running; sessions,
+  stream-token digests, and the live runtime are process-local.
+- **An artifact preview is unavailable** — only opaque ids emitted by that conversation's
+  public trace can be fetched. Raw paths and ids from a different conversation are rejected.
 - **`vf verify` fails on confidence** — raise the unit to `1.0` with evidence, or keep
   investigating; this is the anti-hallucination gate working as designed.
 

@@ -78,6 +78,37 @@ describe("dispatch.ts stderr pipe (M2)", () => {
     expect(stderrText).toBe("out-stderr");
   });
 
+  test("flushes incomplete UTF-8 tails from stdout and stderr at EOF", async () => {
+    const streamOf = (bytes: number[]) =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from(bytes));
+          controller.close();
+        },
+      });
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: streamOf([0x6f, 0x6b, 0xe2]),
+      stderr: streamOf([0x65, 0x72, 0x72, 0xf0]),
+      exited: Promise.resolve(0),
+      kill: () => true,
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const spawner = makeAsyncSpawner({
+      spawn: (() => fakeChild) as unknown as typeof Bun.spawn,
+      onChunk: (text) => stdoutChunks.push(text),
+      onStderrChunk: (text) => stderrChunks.push(text),
+    });
+
+    const result = await spawner("ignored", [], "");
+
+    expect(result.stdout).toBe("ok�");
+    expect(result.stderr).toBe("err�");
+    expect(stdoutChunks.join("")).toBe("ok�");
+    expect(stderrChunks.join("")).toBe("err�");
+  });
+
   test("reports failure when the command cannot be spawned", async () => {
     let stderrText: string | undefined;
     const spawner = makeAsyncSpawner({
