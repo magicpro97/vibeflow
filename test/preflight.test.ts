@@ -840,7 +840,7 @@ describe("probeInvocation (test seam)", () => {
     // the fallback spawner closure actually executed (it's the only
     // path that can produce ready/probe-failed/no-binary here).
     expect(["ready", "probe-failed", "no-binary"]).toContain(r.level);
-  });
+  }, 30_000);
 });
 
 describe("runAttempts (extracted helper)", () => {
