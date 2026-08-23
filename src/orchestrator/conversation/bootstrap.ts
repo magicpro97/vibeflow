@@ -134,7 +134,6 @@ function persistedPlanLocator(store: ConversationArtifactStore): PlanArtifactLoc
     return null;
   };
 }
-
 const validEngine = (value: string): value is Engine => ENGINES.includes(value as Engine);
 
 function explicitParticipants(request: ConversationCreateRequest) {
@@ -148,7 +147,6 @@ function explicitParticipants(request: ConversationCreateRequest) {
     };
   });
 }
-
 /** Testable projection for the production no-probe readiness default. */
 export function defaultConversationReadiness(
   repoRoot: string,
@@ -160,7 +158,6 @@ export function defaultConversationReadiness(
     admitted: phase > 1 || status.engine === "claude" || status.engine === "codex",
   }));
 }
-
 function authority(
   options: ConversationBootstrapOptions,
   repoRoot: string,
@@ -177,7 +174,6 @@ function authority(
     domainRoles: [...(options.domainRoles ?? [])],
   };
 }
-
 async function selectedRoute(
   request: ConversationCreateRequest,
   options: ConversationBootstrapOptions,
