@@ -314,6 +314,7 @@ async function startRealConversationServer() {
   return {
     url: running.url,
     root,
+    repo,
     isolatedTmp,
     head,
     service: authority.service,
@@ -1360,9 +1361,14 @@ if (playwright) {
         });
         expect(fixture.launches.length).toBeGreaterThan(0);
         for (const launch of fixture.launches) {
+          const cwd = launch.options.cwd;
           expect(launch.argv[0]).toBe("copilot");
-          expect(launch.options.cwd).toBeUndefined();
-          expect(launch.options.env.PWD).toBeTruthy();
+          expect(cwd).toBeTruthy();
+          expect(cwd).toContain(`${fixture.isolatedTmp}/vf-conversation-isolation-`);
+          expect(cwd?.endsWith("/worktree")).toBe(true);
+          expect(cwd).not.toBe(fixture.repo);
+          expect(launch.options.env.PWD).toBe(cwd);
+          expect(launch.options.env.PWD).not.toBe(fixture.repo);
           expect(launch.options.env.TMPDIR).toBe(fixture.isolatedTmp);
           expect(launch.options.env.TMP).toBe(fixture.isolatedTmp);
           expect(launch.options.env.TEMP).toBe(fixture.isolatedTmp);
