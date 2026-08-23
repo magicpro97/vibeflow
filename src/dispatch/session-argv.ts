@@ -63,7 +63,7 @@ export function assertSpawnProjection(
   assertSelectedConversationEngine(spawn);
   if (spawn.sessionMode === "exact") {
     if (!nativeSessionId) throw new Error("exact session mode requires a native session id");
-    if (spawn.engine !== "claude" && spawn.engine !== "codex") {
+    if (spawn.engine !== "claude" && spawn.engine !== "codex" && spawn.engine !== "antigravity") {
       throw new Error(`${spawn.engine} exact resume is unavailable for safe admission`);
     }
     requireSafeNativeSessionId(spawn.engine, nativeSessionId);

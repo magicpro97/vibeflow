@@ -109,7 +109,7 @@ matrix below reflects the exact conversation/runtime behavior enforced by the cu
 | Codex | yes | partial: sandbox yes, rendered tools denied | yes (`exec resume <thread_id>`) | supported | Phase 1 built-in read-only yes; phase 2+ yes |
 | Copilot | yes | full | unavailable; no native resume path | unavailable | Phase 1 no; phase 2+ yes when ready/admitted |
 | OpenCode | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; most-recent `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
-| Antigravity | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; workspace-scoped `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Antigravity | yes | no: conversation launches reject requested tools or sandbox | yes (`--conversation <conversation_id>`) | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 
 Exact native resume is the by-id conversation/session path; the older `vf ask --resume`
 continuation remains engine-native and follows each CLI's own "most recent session" behavior

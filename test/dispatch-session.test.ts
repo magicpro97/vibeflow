@@ -532,6 +532,19 @@ describe("engine session execution projection", () => {
       "gpt-5.4",
       ["--sandbox", "read-only", "--model", "gpt-5.4", "exec", "resume", CODEX_UUID, "--json", "-"],
     ],
+    [
+      "antigravity",
+      "agy-conversation.42",
+      "gemini-3-pro",
+      [
+        "--conversation",
+        "agy-conversation.42",
+        "-p",
+        "prompt-antigravity",
+        "--model",
+        "gemini-3-pro",
+      ],
+    ],
   ] as const)(
     "%s exact mode consumes the exact native id and model override",
     async (engine, nativeSessionId, model, expectedArgs) => {
@@ -549,7 +562,11 @@ describe("engine session execution projection", () => {
           spawn: spawnProjection(engine, {
             sessionMode: "exact",
             model,
-            ...(engine === "codex" ? { rendered_tools: [] } : {}),
+            ...(engine === "codex"
+              ? { rendered_tools: [] }
+              : engine === "antigravity"
+                ? { rendered_tools: [], sandbox: null }
+                : {}),
           }),
         }),
       ).completion;
@@ -605,7 +622,31 @@ describe("engine session execution projection", () => {
     },
   );
 
-  test.each(["copilot", "opencode", "antigravity"] as const)(
+  test("Antigravity rejects a flag-shaped exact conversation id before spawn", () => {
+    let spawns = 0;
+    const adapter = createEngineSessionAdapter({
+      spawn: () => {
+        spawns++;
+        return completedProcess();
+      },
+      writeEvidence: async () => "internal/invalid-antigravity-native",
+    });
+    expect(() =>
+      adapter.start(
+        request("antigravity", {
+          nativeSessionId: "--model",
+          spawn: spawnProjection("antigravity", {
+            sessionMode: "exact",
+            rendered_tools: [],
+            sandbox: null,
+          }),
+        }),
+      ),
+    ).toThrow(/invalid antigravity native session id/);
+    expect(spawns).toBe(0);
+  });
+
+  test.each(["copilot", "opencode"] as const)(
     "%s exact mode fails closed because safe native resume is not admitted",
     (engine) => {
       const adapter = createEngineSessionAdapter({

@@ -37,7 +37,7 @@ conversation/runtime matrix is:
 | Codex | yes | partial: sandbox yes, rendered tools denied | yes | supported | Phase 1 built-in read-only yes; phase 2+ yes |
 | Copilot | yes | full | unavailable; no native resume path | unavailable | Phase 1 no; phase 2+ yes when ready/admitted |
 | OpenCode | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; most-recent `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
-| Antigravity | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; workspace-scoped `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Antigravity | yes | no: conversation launches reject requested tools or sandbox | yes (`--conversation <conversation_id>`) | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 
 ---
 
