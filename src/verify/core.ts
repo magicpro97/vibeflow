@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { WorkflowState } from "../core.js";
 import { writeState } from "../core.js";
 import { type GateReport, computeConfidence, policyGates } from "../gates.js";
@@ -239,29 +241,131 @@ function currentHead(base: string): string {
   return result.status === 0 ? result.stdout.trim() : "HEAD";
 }
 
+function cleanWorktree(base: string): boolean {
+  const result = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    cwd: base,
+    encoding: "utf8",
+  });
+  return result.status === 0 && result.stdout.trim() === "";
+}
+
+type ScopePathAuthority = "tracked" | "ignored" | "absent" | "untracked" | "error";
+
+function scopePathAuthority(base: string, rel: string): ScopePathAuthority {
+  const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", rel], {
+    cwd: base,
+    encoding: "utf8",
+  });
+  if (tracked.status === 0) return "tracked";
+  if (tracked.status !== 1) return "error";
+
+  const ignored = spawnSync("git", ["check-ignore", "-q", "--", rel], {
+    cwd: base,
+    encoding: "utf8",
+  });
+  if (ignored.status === 0) return "ignored";
+  if (ignored.status !== 1) return "error";
+  return existsSync(join(base, rel)) ? "untracked" : "absent";
+}
+
+const DRIFT_CHECKPOINT_REQUIRED_PASSES = [
+  "toolchain",
+  "coverage",
+  "waiver",
+  "registry_lock",
+  "review_evidence",
+] as const satisfies readonly VerifyGateName[];
+
+function isDriftOnlyCheckpoint(report: VerifyCoreReport): boolean {
+  if (report.ok || report.confidence !== 1) return false;
+  if (
+    report.policy.failures.length === 0 ||
+    !report.policy.failures.every((failure) => failure.startsWith("impl-drift:"))
+  ) {
+    return false;
+  }
+  if (report.gates.implementation_drift.status !== "fail") return false;
+  if (DRIFT_CHECKPOINT_REQUIRED_PASSES.some((name) => report.gates[name].status !== "pass")) {
+    return false;
+  }
+  if (report.gates.review_evidence.details !== "review-evidence(ok)") return false;
+  const nonBlocking = new Set<VerifyGateName>(VERIFY_NON_BLOCKING_GATES);
+  return VERIFY_GATE_ORDER.every(
+    (name) =>
+      name === "implementation_drift" ||
+      nonBlocking.has(name) ||
+      report.gates[name].status !== "fail",
+  );
+}
+
 export function persistImplementationFingerprints(
   base: string,
   state: WorkflowState | null,
   report: VerifyCoreReport,
   inject: {
     headSha?: (base: string) => string;
+    worktreeClean?: (base: string) => boolean;
+    scopePathAuthority?: (base: string, rel: string) => ScopePathAuthority;
     snapshot?: (base: string, scope: string[]) => Record<string, string | null>;
     write?: (base: string, state: WorkflowState) => void;
   } = {},
 ): boolean {
-  if (!report.ok || !state?.work_units.length) return false;
+  if (!state?.work_units.length) return false;
   try {
-    const sha = (inject.headSha ?? currentHead)(base);
+    const driftCheckpoint = isDriftOnlyCheckpoint(report);
+    if (!report.ok && !driftCheckpoint) return false;
+    const headSha = inject.headSha ?? currentHead;
+    const sha = headSha(base);
+    const worktreeClean = inject.worktreeClean ?? cleanWorktree;
+    if (driftCheckpoint && (!/^[0-9a-f]{40}$/i.test(sha) || !worktreeClean(base))) return false;
+
     const snapshot = inject.snapshot ?? snapshotImpl;
-    let changed = false;
-    for (const unit of state.work_units) {
+    const pending: Array<{
+      index: number;
+      fingerprint: Record<string, string | null>;
+    }> = [];
+    for (const [index, unit] of state.work_units.entries()) {
       if (unit.status !== "done" || !unit.scope?.length) continue;
-      unit.impl_fingerprint = snapshot(base, unit.scope);
-      unit.verified_sha = sha;
-      changed = true;
+      pending.push({ index, fingerprint: snapshot(base, unit.scope) });
     }
-    if (changed) (inject.write ?? writeState)(base, state);
-    return changed;
+    if (!pending.length) return false;
+
+    const classify = inject.scopePathAuthority ?? scopePathAuthority;
+    for (const update of pending) {
+      const unit = state.work_units[update.index];
+      if (!unit?.scope) return false;
+      const reviewedFingerprint: Record<string, string | null> = {};
+      for (const rel of unit.scope) {
+        const authority = classify(base, rel);
+        if (authority === "ignored") continue;
+        if (driftCheckpoint && (authority === "untracked" || authority === "error")) return false;
+        reviewedFingerprint[rel] = update.fingerprint[rel] ?? null;
+      }
+      update.fingerprint = reviewedFingerprint;
+    }
+
+    if (driftCheckpoint) {
+      const finalSha = headSha(base);
+      if (finalSha !== sha || !/^[0-9a-f]{40}$/i.test(finalSha) || !worktreeClean(base)) {
+        return false;
+      }
+    }
+
+    const nextState = structuredClone(state);
+    for (const update of pending) {
+      const unit = nextState.work_units[update.index];
+      if (!unit) return false;
+      unit.impl_fingerprint = update.fingerprint;
+      unit.verified_sha = sha;
+    }
+    (inject.write ?? writeState)(base, nextState);
+    for (const update of pending) {
+      const unit = state.work_units[update.index];
+      if (!unit) continue;
+      unit.impl_fingerprint = update.fingerprint;
+      unit.verified_sha = sha;
+    }
+    return true;
   } catch {
     return false;
   }

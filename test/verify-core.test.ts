@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   assertionPayload,
   confidenceAssertionExitCode,
   runConfidenceAssertion,
 } from "../scripts/assert-vf-confidence.js";
 import { stampLastVerify } from "../src/commands/tools-detect.js";
-import type { WorkflowState } from "../src/core.js";
+import { type WorkflowState, readState } from "../src/core.js";
+import { snapshotImpl } from "../src/spec-freshness.js";
 import {
   VERIFY_GATE_ORDER,
   evaluateVerifyCore,
@@ -55,6 +60,17 @@ function report(confidences: number[] = [1]) {
     markerResult: gateResult("skipped", "read-only calculation"),
     journalResult: gateResult("skipped", "not requested"),
   });
+}
+
+function driftOnlyReport() {
+  const result = report();
+  const failure = "impl-drift: scoped implementation changed";
+  result.ok = false;
+  result.policy.ok = false;
+  result.policy.failures = [failure];
+  result.gates.implementation_drift = gateResult("fail", failure);
+  result.gates.review_evidence = gateResult("pass", "review-evidence(ok)");
+  return result;
 }
 
 describe("authoritative verify core", () => {
@@ -205,6 +221,417 @@ describe("authoritative verify core", () => {
       }),
     ).toBe(false);
     expect(writes).toHaveLength(1);
+  });
+
+  test("a reviewed drift-only failure checkpoints atomically for a second verify", () => {
+    const workflow = state([1]);
+    const writes: WorkflowState[] = [];
+    const sha = "b".repeat(40);
+    let headChecks = 0;
+    let cleanChecks = 0;
+    const firstReport = driftOnlyReport();
+    expect(firstReport.ok).toBe(false);
+    expect(
+      persistImplementationFingerprints("/tmp/verify-core", workflow, firstReport, {
+        headSha: () => {
+          headChecks++;
+          return sha;
+        },
+        worktreeClean: () => {
+          cleanChecks++;
+          return true;
+        },
+        scopePathAuthority: () => "tracked",
+        snapshot: () => ({ "src/unit-0.ts": "reviewed-digest" }),
+        write: (_base, next) => writes.push(structuredClone(next)),
+      }),
+    ).toBe(true);
+    expect(headChecks).toBe(2);
+    expect(cleanChecks).toBe(2);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.work_units[0]?.impl_fingerprint).toEqual({
+      "src/unit-0.ts": "reviewed-digest",
+    });
+    expect(writes[0]?.work_units[0]?.verified_sha).toBe(sha);
+    expect(firstReport.ok).toBe(false);
+  });
+
+  test("a real clean Git drift requires one failed checkpoint before the second report passes", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-drift-checkpoint-"));
+    const git = (args: string[]) =>
+      execFileSync("git", args, { cwd: base, encoding: "utf8" }).trim();
+    try {
+      git(["init", "--quiet"]);
+      git(["config", "user.name", "VibeFlow Test"]);
+      git(["config", "user.email", "vf-test@example.invalid"]);
+      mkdirSync(join(base, "src"), { recursive: true });
+      writeFileSync(join(base, ".gitignore"), ".vibeflow/\n");
+      writeFileSync(join(base, "src", "unit-0.ts"), "export const value = 1;\n");
+      git(["add", ".gitignore", "src/unit-0.ts"]);
+      git(["commit", "--quiet", "-m", "test: seed drift checkpoint"]);
+
+      const workflow = state([1]);
+      const unit = workflow.work_units[0];
+      if (!unit) throw new Error("test unit missing");
+      unit.impl_fingerprint = snapshotImpl(base, unit.scope ?? []);
+      unit.verified_sha = git(["rev-parse", "HEAD"]);
+
+      writeFileSync(join(base, "src", "unit-0.ts"), "export const value = 2;\n");
+      git(["add", "src/unit-0.ts"]);
+      git(["commit", "--quiet", "-m", "test: change scoped implementation"]);
+      expect(git(["status", "--porcelain"])).toBe("");
+
+      const evaluate = (current: WorkflowState | null) =>
+        evaluateVerifyCore({
+          base,
+          state: current,
+          toolchain: [{ label: "bun test", pass: true }],
+          coverage: pass,
+          sandbox: gateResult("skipped", "not requested"),
+          waiver: pass,
+          registryLock: pass,
+          reviewEvidence: gateResult("pass", "review-evidence(ok)"),
+          advisoryE2e: pass,
+        });
+      const first = evaluate(workflow);
+      expect(first.ok).toBe(false);
+      expect(first.policy.failures.every((failure) => failure.startsWith("impl-drift:"))).toBe(
+        true,
+      );
+      expect(first.gates.implementation_drift.status).toBe("fail");
+      expect(persistImplementationFingerprints(base, workflow, first)).toBe(true);
+      expect(first.ok).toBe(false);
+
+      const refreshed = readState(base);
+      const second = evaluate(refreshed);
+      expect(second.gates.implementation_drift.status).toBe("pass");
+      expect(second.ok).toBe(true);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("drift checkpoint fails closed unless every authority condition holds", () => {
+    const cases: Array<[string, (candidate: ReturnType<typeof driftOnlyReport>) => void]> = [
+      [
+        "confidence",
+        (candidate) => {
+          candidate.confidence = 0.99;
+        },
+      ],
+      [
+        "empty policy",
+        (candidate) => {
+          candidate.policy.failures = [];
+        },
+      ],
+      [
+        "mixed policy",
+        (candidate) => {
+          candidate.policy.failures.push("test-evidence: stale");
+        },
+      ],
+      [
+        "implementation gate",
+        (candidate) => {
+          candidate.gates.implementation_drift = pass;
+        },
+      ],
+      [
+        "toolchain",
+        (candidate) => {
+          candidate.gates.toolchain = gateResult("warn", "x");
+        },
+      ],
+      [
+        "coverage",
+        (candidate) => {
+          candidate.gates.coverage = gateResult("skipped", "x");
+        },
+      ],
+      [
+        "waiver",
+        (candidate) => {
+          candidate.gates.waiver = gateResult("fail", "x");
+        },
+      ],
+      [
+        "registry",
+        (candidate) => {
+          candidate.gates.registry_lock = gateResult("warn", "x");
+        },
+      ],
+      [
+        "review warning",
+        (candidate) => {
+          candidate.gates.review_evidence = gateResult("warn", "x");
+        },
+      ],
+      [
+        "review fallback",
+        (candidate) => {
+          candidate.gates.review_evidence = gateResult(
+            "pass",
+            "review-evidence: no applicable checklist",
+          );
+        },
+      ],
+      [
+        "other blocker",
+        (candidate) => {
+          candidate.gates.scope = gateResult("fail", "x");
+        },
+      ],
+    ];
+    for (const [name, mutate] of cases) {
+      const candidate = driftOnlyReport();
+      mutate(candidate);
+      let inspected = false;
+      expect(
+        persistImplementationFingerprints("/tmp/verify-core", state([1]), candidate, {
+          headSha: () => {
+            inspected = true;
+            return "c".repeat(40);
+          },
+          worktreeClean: () => true,
+          scopePathAuthority: () => "tracked",
+          snapshot: () => ({ "src/unit-0.ts": "digest" }),
+          write: () => {
+            throw new Error("must not write");
+          },
+        }),
+        name,
+      ).toBe(false);
+      expect(inspected, name).toBe(false);
+    }
+  });
+
+  test("drift checkpoint rejects dirty, invalid, or moving Git authority", () => {
+    const attempts: Array<{
+      name: string;
+      heads: string[];
+      clean: boolean[];
+      snapshots: number;
+    }> = [
+      { name: "invalid head", heads: ["HEAD"], clean: [true], snapshots: 0 },
+      { name: "dirty before", heads: ["d".repeat(40)], clean: [false], snapshots: 0 },
+      {
+        name: "moving head",
+        heads: ["d".repeat(40), "e".repeat(40)],
+        clean: [true, true],
+        snapshots: 1,
+      },
+      {
+        name: "dirty after",
+        heads: ["d".repeat(40), "d".repeat(40)],
+        clean: [true, false],
+        snapshots: 1,
+      },
+    ];
+    for (const attempt of attempts) {
+      let snapshots = 0;
+      let writes = 0;
+      expect(
+        persistImplementationFingerprints("/tmp/verify-core", state([1]), driftOnlyReport(), {
+          headSha: () => attempt.heads.shift() ?? "invalid",
+          worktreeClean: () => attempt.clean.shift() ?? false,
+          scopePathAuthority: () => "tracked",
+          snapshot: () => {
+            snapshots++;
+            return { "src/unit-0.ts": "digest" };
+          },
+          write: () => {
+            writes++;
+          },
+        }),
+        attempt.name,
+      ).toBe(false);
+      expect(snapshots, attempt.name).toBe(attempt.snapshots);
+      expect(writes, attempt.name).toBe(0);
+    }
+  });
+
+  test("drift checkpoint does not mutate or write when snapshot or persistence fails", () => {
+    for (const failure of ["snapshot", "write"] as const) {
+      const workflow = state([1]);
+      const before = structuredClone(workflow);
+      let writes = 0;
+      expect(
+        persistImplementationFingerprints("/tmp/verify-core", workflow, driftOnlyReport(), {
+          headSha: () => "f".repeat(40),
+          worktreeClean: () => true,
+          scopePathAuthority: () => "tracked",
+          snapshot: () => {
+            if (failure === "snapshot") throw new Error("snapshot unavailable");
+            return { "src/unit-0.ts": "digest" };
+          },
+          write: () => {
+            writes++;
+            throw new Error("state write unavailable");
+          },
+        }),
+        failure,
+      ).toBe(false);
+      expect(workflow, failure).toEqual(before);
+      expect(writes, failure).toBe(failure === "write" ? 1 : 0);
+    }
+  });
+
+  test("drift checkpoint fingerprints only current-HEAD-reviewable scope paths", () => {
+    const workflow = state([1]);
+    const unit = workflow.work_units[0];
+    if (!unit) throw new Error("test unit missing");
+    unit.scope = ["src/tracked.ts", ".vibeflow/knowledge/decisions.md", "src/future.ts"];
+    unit.impl_fingerprint = {
+      "src/tracked.ts": "old",
+      ".vibeflow/knowledge/decisions.md": "local-old",
+      "src/future.ts": null,
+    };
+    const writes: WorkflowState[] = [];
+    expect(
+      persistImplementationFingerprints("/tmp/verify-core", workflow, driftOnlyReport(), {
+        headSha: () => "1".repeat(40),
+        worktreeClean: () => true,
+        scopePathAuthority: (_base, rel) =>
+          rel.startsWith(".vibeflow/")
+            ? "ignored"
+            : rel.endsWith("future.ts")
+              ? "absent"
+              : "tracked",
+        snapshot: () => ({
+          "src/tracked.ts": "reviewed-new",
+          ".vibeflow/knowledge/decisions.md": "local-new",
+          "src/future.ts": null,
+        }),
+        write: (_base, next) => writes.push(structuredClone(next)),
+      }),
+    ).toBe(true);
+    expect(writes[0]?.work_units[0]?.impl_fingerprint).toEqual({
+      "src/tracked.ts": "reviewed-new",
+      "src/future.ts": null,
+    });
+  });
+
+  test("drift checkpoint rejects nonignored untracked scope and Git classification errors", () => {
+    for (const authority of ["untracked", "error"] as const) {
+      let writes = 0;
+      expect(
+        persistImplementationFingerprints("/tmp/verify-core", state([1]), driftOnlyReport(), {
+          headSha: () => "2".repeat(40),
+          worktreeClean: () => true,
+          scopePathAuthority: () => authority,
+          snapshot: () => ({ "src/unit-0.ts": "new" }),
+          write: () => {
+            writes++;
+          },
+        }),
+        authority,
+      ).toBe(false);
+      expect(writes, authority).toBe(0);
+    }
+  });
+
+  test("Git scope classification drops ignored paths, preserves absent sentinels, and rejects untracked paths", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-drift-scope-authority-"));
+    const git = (args: string[]) =>
+      execFileSync("git", args, { cwd: base, encoding: "utf8" }).trim();
+    try {
+      git(["init", "--quiet"]);
+      git(["config", "user.name", "VibeFlow Test"]);
+      git(["config", "user.email", "vf-test@example.invalid"]);
+      writeFileSync(join(base, ".gitignore"), "ignored.md\n.vibeflow/\n");
+      writeFileSync(join(base, "ignored.md"), "local process evidence\n");
+      git(["add", ".gitignore"]);
+      git(["commit", "--quiet", "-m", "test: seed scope authority"]);
+
+      const ignored = state([1]);
+      const ignoredUnit = ignored.work_units[0];
+      if (!ignoredUnit) throw new Error("test unit missing");
+      ignoredUnit.scope = ["ignored.md"];
+      ignoredUnit.impl_fingerprint = snapshotImpl(base, ignoredUnit.scope);
+      expect(persistImplementationFingerprints(base, ignored, report())).toBe(true);
+      expect(ignored.work_units[0]?.impl_fingerprint).toEqual({});
+
+      const absent = state([1]);
+      const absentUnit = absent.work_units[0];
+      if (!absentUnit) throw new Error("test unit missing");
+      absentUnit.scope = ["future.ts"];
+      expect(
+        persistImplementationFingerprints(base, absent, driftOnlyReport(), {
+          headSha: () => git(["rev-parse", "HEAD"]),
+          worktreeClean: () => true,
+        }),
+      ).toBe(true);
+      expect(absent.work_units[0]?.impl_fingerprint).toEqual({ "future.ts": null });
+
+      writeFileSync(join(base, "local.ts"), "untracked\n");
+      const untracked = state([1]);
+      const untrackedUnit = untracked.work_units[0];
+      if (!untrackedUnit) throw new Error("test unit missing");
+      untrackedUnit.scope = ["local.ts"];
+      expect(
+        persistImplementationFingerprints(base, untracked, driftOnlyReport(), {
+          headSha: () => git(["rev-parse", "HEAD"]),
+          worktreeClean: () => true,
+        }),
+      ).toBe(false);
+
+      renameSync(
+        join(base, ".git", "info", "exclude"),
+        join(base, ".git", "info", "exclude.saved"),
+      );
+      mkdirSync(join(base, ".git", "info", "exclude"));
+      const classificationError = state([1]);
+      const classificationErrorUnit = classificationError.work_units[0];
+      if (!classificationErrorUnit) throw new Error("test unit missing");
+      classificationErrorUnit.scope = ["git-error.ts"];
+      expect(
+        persistImplementationFingerprints(base, classificationError, driftOnlyReport(), {
+          headSha: () => git(["rev-parse", "HEAD"]),
+          worktreeClean: () => true,
+        }),
+      ).toBe(false);
+
+      expect(
+        persistImplementationFingerprints(
+          "/definitely/missing/vf-repo",
+          state([1]),
+          driftOnlyReport(),
+          {
+            headSha: () => "3".repeat(40),
+            worktreeClean: () => true,
+            snapshot: () => ({ "src/unit-0.ts": "digest" }),
+          },
+        ),
+      ).toBe(false);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("tracked paths win over ignore patterns when Git force-adds them", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-drift-force-added-"));
+    const git = (args: string[]) =>
+      execFileSync("git", args, { cwd: base, encoding: "utf8" }).trim();
+    try {
+      git(["init", "--quiet"]);
+      git(["config", "user.name", "VibeFlow Test"]);
+      git(["config", "user.email", "vf-test@example.invalid"]);
+      mkdirSync(join(base, "src"), { recursive: true });
+      writeFileSync(join(base, ".gitignore"), "*.generated\n.vibeflow/\n");
+      writeFileSync(join(base, "src", "forced.generated"), "reviewed\n");
+      git(["add", ".gitignore"]);
+      git(["add", "-f", "src/forced.generated"]);
+      git(["commit", "--quiet", "-m", "test: force-add reviewed scope"]);
+      const workflow = state([1]);
+      const unit = workflow.work_units[0];
+      if (!unit) throw new Error("test unit missing");
+      unit.scope = ["src/forced.generated"];
+      expect(persistImplementationFingerprints(base, workflow, report())).toBe(true);
+      expect(workflow.work_units[0]?.impl_fingerprint?.["src/forced.generated"]).toBeString();
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });
 

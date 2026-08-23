@@ -1,19 +1,23 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { startServer } from "../src/server";
+import { startServer as startProductionServer } from "../src/server";
 
-const workflowStatePath = join(process.cwd(), ".vibeflow", "WORKFLOW_STATE.json");
-const previousWorkflowState = existsSync(workflowStatePath)
-  ? readFileSync(workflowStatePath)
-  : null;
+const suiteRepoDir = mkdtempSync(join(tmpdir(), "vf-server-suite-"));
+
+/** Keep default-server writes inside a suite-owned repo, while preserving explicit fixtures. */
+function startServer(
+  port = 0,
+  opts: NonNullable<Parameters<typeof startProductionServer>[1]> = {},
+): ReturnType<typeof startProductionServer> {
+  return startProductionServer(port, { repoDir: suiteRepoDir, ...opts });
+}
 
 afterAll(() => {
-  if (previousWorkflowState) writeFileSync(workflowStatePath, previousWorkflowState);
-  else rmSync(workflowStatePath, { force: true });
+  rmSync(suiteRepoDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 });
 });
 
 /** Fetch the CSRF token from the HTML page served at `/`. */
@@ -1027,7 +1031,7 @@ describe("server HTTP API handlers", () => {
       await fetch(`${url}/api/init`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-vibeflow-token": token },
-        body: JSON.stringify({ goal: "test goal", repoPath: url }),
+        body: JSON.stringify({ goal: "test goal", repoPath: suiteRepoDir }),
       });
       // State should now exist
       const before = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": token } }).then(
@@ -1180,7 +1184,7 @@ describe("server HTTP API handlers", () => {
       await fetch(`${url}/api/init`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-vibeflow-token": token },
-        body: JSON.stringify({ goal: "test", repoPath: "/tmp" }),
+        body: JSON.stringify({ goal: "test", repoPath: suiteRepoDir }),
       });
       const res = await fetch(`${url}/api/units`, {
         method: "POST",
@@ -1948,7 +1952,7 @@ test("POST /api/init rejects goal longer than 10,000 chars with 400", async () =
     const res = await fetch(`${url}/api/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
-      body: JSON.stringify({ goal: "x".repeat(10_001), repoPath: "/tmp" }),
+      body: JSON.stringify({ goal: "x".repeat(10_001), repoPath: suiteRepoDir }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -2061,7 +2065,7 @@ test("POST /api/init rejects whitespace-only goal with 400", async () => {
     const res = await fetch(`${url}/api/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
-      body: JSON.stringify({ goal: "   \t\n", repoPath: "/tmp" }),
+      body: JSON.stringify({ goal: "   \t\n", repoPath: suiteRepoDir }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -2250,7 +2254,7 @@ test("POST /api/init with __CLEAR__ goal returns 400 (line 117)", async () => {
     const res = await fetch(`${url}/api/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
-      body: JSON.stringify({ goal: "__CLEAR__", repoPath: "/tmp", engines: ["claude"] }),
+      body: JSON.stringify({ goal: "__CLEAR__", repoPath: suiteRepoDir, engines: ["claude"] }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -2269,7 +2273,7 @@ test("POST /api/init with valid repoPath sets active repo (line 132)", async () 
       headers: { "Content-Type": "application/json", "x-vibeflow-token": token },
       body: JSON.stringify({
         goal: "test repo path",
-        repoPath: process.cwd(),
+        repoPath: suiteRepoDir,
         engines: ["claude"],
       }),
     });

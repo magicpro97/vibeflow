@@ -201,6 +201,8 @@ export function verify(
     printVerifyReport(report.policy);
     out("vf", c.dim(`confidence: ${report.confidence}`));
 
+    persistImplementationFingerprints(base, st, report);
+
     if (!report.ok) {
       out("vf");
       const failed = Object.values(report.gates).filter((gate) => gate.status === "fail").length;
@@ -219,7 +221,6 @@ export function verify(
       }
       return 1;
     }
-    persistImplementationFingerprints(base, st, report);
     out("vf");
     out("vf", c.green("All configured gates passed."));
     report.gates.marker_result = gateResult(
