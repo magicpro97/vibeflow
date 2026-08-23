@@ -393,8 +393,13 @@ describe("brainstorm Phase 3 acceptance", () => {
     }
     expect(adapters).toContain("claude exact mode consumes the exact native id and model override");
     expect(adapters).toContain("codex exact mode consumes the exact native id and model override");
-    for (const engine of ["copilot", "opencode", "antigravity"]) {
+    expect(adapters).toContain(
+      "antigravity exact mode consumes the exact native id and model override",
+    );
+    for (const engine of ["copilot", "opencode"]) {
       expect(adapters).toContain(`${engine} exact mode fails closed`);
+    }
+    for (const engine of ["copilot", "opencode", "antigravity"]) {
       expect(adapters).toContain(`${engine} reports history unavailable`);
     }
     expect(adapters).toContain("workflow dispatch runs at base without isolation");
