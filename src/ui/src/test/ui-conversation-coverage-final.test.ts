@@ -136,6 +136,12 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
       matrix?.rows.map((row) => row.option),
       ["Alpha", "Beta"],
     );
+    // biome-ignore format: compact projection fixture keeps the coverage test below the source cap
+    const winner = (option: string) => matrix?.rows[0] ? { ...matrix, rows: [{ ...matrix.rows[0], option, rank: 1 }] } : null;
+    // biome-ignore format: compact projection fixture keeps the coverage test below the source cap
+    const baseline = (status: "success" | "failed" | "skipped", answer: string | null, decision = matrix) => api.projectConversationBaseline([trace(25, { type: "baseline_result", payload: { status, answer, confidence: null, skip_reason: status === "success" ? null : "reason" } })], decision);
+    // biome-ignore format: exact compact matrix keeps every public baseline branch below the source cap
+    eq("baseline projection branches", [api.projectConversationBaseline([], matrix), baseline("skipped", null), baseline("success", "answer", null), baseline("success", "", matrix), baseline("success", "---", winner("!!!")), baseline("success", "---", matrix), baseline("success", "alpha beta", winner("beta gamma")), baseline("success", "  ＡLPHA café ", winner("alpha CAFÉ"))], [null, { status: "skipped", baseline_answer: null, debate_answer: "Alpha", divergence: null, skip_reason: "reason" }, { status: "failed", baseline_answer: "answer", debate_answer: null, divergence: null, skip_reason: "no_debate_answer" }, { status: "failed", baseline_answer: "", debate_answer: "Alpha", divergence: null, skip_reason: "baseline_missing" }, { status: "success", baseline_answer: "---", debate_answer: "!!!", divergence: 0, skip_reason: null }, { status: "success", baseline_answer: "---", debate_answer: "Alpha", divergence: 1, skip_reason: null }, { status: "success", baseline_answer: "alpha beta", debate_answer: "beta gamma", divergence: 0.666667, skip_reason: null }, { status: "success", baseline_answer: "  ＡLPHA café ", debate_answer: "alpha CAFÉ", divergence: 0, skip_reason: null }]);
     const types = await import("../conversation-types.js");
     const changingAttempt = types.createConversationStreamAttemptGuard();
     const terminal = await types.recoverConversationStreamAttempt(

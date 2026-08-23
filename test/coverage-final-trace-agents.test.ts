@@ -538,6 +538,36 @@ const rejectUnsafe = (message: string): never => {
 };
 
 describe("final path safety rejection coverage", () => {
+  test("canonicalizes an exact root-owned trusted OS alias target", () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "darwin",
+      writable: true,
+    });
+    const lstat = spyOn(fs, "lstatSync").mockImplementation(
+      (() =>
+        ({
+          isSymbolicLink: () => true,
+          uid: 0,
+        }) as unknown as fs.Stats) as unknown as typeof fs.lstatSync,
+    );
+    const realpath = spyOn(fs, "realpathSync").mockImplementation(
+      (() => "/private/tmp") as unknown as typeof fs.realpathSync,
+    );
+    try {
+      expect(assertNoSymlinkPathComponents("/tmp", rejectUnsafe)).toBe("/private/tmp");
+    } finally {
+      realpath.mockRestore();
+      lstat.mockRestore();
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        value: originalPlatform,
+        writable: true,
+      });
+    }
+  });
+
   test("fails closed when inspection of a trusted OS alias itself fails", () => {
     const originalPlatform = process.platform;
     Object.defineProperty(process, "platform", {
