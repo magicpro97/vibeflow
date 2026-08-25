@@ -1,0 +1,100 @@
+import type { CapabilityMetadataV1 } from "../manifest/types.js";
+
+export interface RegistryPackageStatementV1 {
+  schema_version: "1.0";
+  registry_origin: string;
+  package_id: string;
+  version: string;
+  content_sha256: string;
+  provenance: { source_url: string; commit_oid: string | null };
+  publisher_id: string;
+  issued_at: string;
+  expires_at: string;
+}
+
+export interface RegistrySignatureEnvelopeV1 {
+  schema_version: "1.0";
+  statement: RegistryPackageStatementV1;
+  signature: {
+    algorithm: "Ed25519";
+    key_id: string;
+    value_base64url: string;
+  };
+}
+
+export interface RegistryCapabilityIndexV1 {
+  schema_version: "1.0";
+  registry_origin: string;
+  generated_at: string;
+  entries: Array<{
+    package_id: string;
+    version: string;
+    metadata_hint: CapabilityMetadataV1;
+    package_url: string;
+    signature_envelope: RegistrySignatureEnvelopeV1;
+  }>;
+  content_digest: string;
+}
+
+export interface RegistryTrustKeyV1 {
+  key_id: string;
+  algorithm: "Ed25519";
+  public_key_spki_base64: string;
+  registry_origin: string;
+  publisher_id: string | null;
+  valid_from: string;
+  valid_until: string;
+  state: "active" | "deprecated" | "revoked";
+  trust_epoch: number;
+  frame_digest: string;
+}
+
+export interface VerifiedRegistryEnvelopeV1 {
+  envelope_digest: string;
+  key_id: string;
+  statement_expires_at: string;
+  status: "verified" | "stale" | "blocked";
+}
+
+export type PackagePinSourceV1 =
+  | {
+      kind: "registry";
+      registry_origin: string;
+      source_url: string;
+      commit_oid: string | null;
+      signature_envelope_digest: string;
+    }
+  | { kind: "git"; canonical_url: string; commit_oid: string }
+  | { kind: "local-dev"; repo_relative_alias: string }
+  | {
+      kind: "legacy-adopt";
+      legacy_source:
+        | "skill-lock"
+        | "tool-managed-evidence"
+        | "mcp-managed-sidecar"
+        | "hook-sentinel"
+        | "role-marker";
+      inspection_evidence_digest: string;
+    };
+
+export interface PackagePinV1 {
+  id: string;
+  version: string;
+  source: PackagePinSourceV1;
+  content_sha256: string;
+  trust: "verified" | "source-pinned" | "dev-unverified" | "legacy-verified";
+  nonportable: boolean;
+  pin_digest: string;
+}
+
+export interface PackageAuthenticityBindingV1 {
+  schema_version: "1.0";
+  pin_digest: string;
+  manifest_digest: string;
+  registry_signature: {
+    envelope_digest: string;
+    key_id: string;
+    statement_expires_at: string;
+  } | null;
+  authenticity_digest: string;
+}
