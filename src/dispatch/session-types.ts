@@ -150,6 +150,24 @@ export interface AttemptHandle<T = EngineSessionResult> {
   readEvidenceBinding(): { attemptId: string; internalRef: string } | undefined;
 }
 
+export interface AttemptStartAuthorityRecordV1 {
+  schema_version: "1.0";
+  attempt_id: string;
+  engine: Engine;
+  outcome: "accepted" | "proved-absent" | "unknown";
+  native_session_id: string | null;
+  evidence_ref: string;
+  evidence_sha256: string;
+  process_quiescent: true;
+  recorded_at: string;
+  record_digest: string;
+}
+
+/** Branded reader minted only from the concrete adapter-owned durable evidence store. */
+export interface DurableAttemptStartAuthorityReaderV1 {
+  read(attemptId: string): AttemptStartAuthorityRecordV1 | null;
+}
+
 export interface EngineSessionRequest {
   attemptId: string;
   spawn: SpawnOptionsProjection;
@@ -176,6 +194,8 @@ export interface HistoryReconcileResult {
 export interface EngineSessionAdapter {
   start(request: EngineSessionRequest): AttemptHandle;
   reconcileHistory(request: HistoryReconcileRequest): Promise<HistoryReconcileResult>;
+  /** Absent means this adapter is ineligible for revision start/retry authority. */
+  readonly startAuthority?: DurableAttemptStartAuthorityReaderV1;
 }
 
 export interface EngineProcess {

@@ -19,6 +19,7 @@ import { ConversationArtifactStore } from "../../src/orchestrator/conversation/a
 import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
 import { ConversationPolicyRegistry } from "../../src/orchestrator/conversation/policy-registry.js";
 import { ConversationOrchestrator } from "../../src/orchestrator/conversation/service.js";
+import { prepareConversationTurn } from "../../src/orchestrator/conversation/turn-delivery.js";
 import type {
   ArtifactCreateRequest,
   AttemptRef,
@@ -228,6 +229,20 @@ function harness(
       options.readiness ?? bindings.map(() => ({ engine_available: true, model_valid: true })),
     signal: new AbortController().signal,
     messages: () => Promise.resolve([]),
+    prepareTurn: (request: Parameters<ConversationContext["prepareTurn"]>[0]) =>
+      Promise.resolve(
+        prepareConversationTurn({
+          conversation_id: correlation.conversation_id,
+          revision_id: correlation.revision_id,
+          request,
+          events: [],
+          resume: null,
+          prior_delivery: undefined,
+          observed_after_public_seq: 0,
+          shared_handoff: null,
+        }),
+      ),
+    publishSocialIntent: () => ({ accepted: true, diagnostic_code: null }),
     emit: (emission: PolicyEmission) => append(emission),
     launchAttempt: (request: PolicyAttemptRequest) => {
       attempts.push(structuredClone(request));

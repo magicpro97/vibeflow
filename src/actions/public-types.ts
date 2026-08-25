@@ -54,6 +54,7 @@ export interface PublicTargetResultV1 {
     | "applied"
     | "failed"
     | "manual"
+    | "required-user-action"
     | "unsupported"
     | "omitted"
     | "reversed"

@@ -53,6 +53,7 @@ import type {
   UnitDispatcher,
 } from "./_shared.js";
 
+import { activateProjectCapabilityAuthorityForVfInit } from "../capabilities/source/authority-activation.js";
 import { writeInitArtifacts } from "./init-artifacts.js";
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
@@ -219,6 +220,7 @@ export async function init(
   else initSpinner.succeed(dry ? "Init dry run prepared" : "VibeFlow context generated");
 
   if (result.refused) return reportPreflightRefusal(result.readiness);
+  if (!dry) activateProjectCapabilityAuthorityForVfInit(cwd());
   const label = dry ? "dry run" : "init";
   out("vf", panel("VibeFlow", c.bold(label)));
   const dropped = (result.readiness ?? []).filter((r) => r.level !== "ready");

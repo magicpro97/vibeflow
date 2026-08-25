@@ -141,7 +141,7 @@ function resolved(headOverride?: any) {
 }
 
 const artifactRegistry = {
-  register: () => `vf-artifact-${"b".repeat(64)}` as any,
+  register: () => `artifact_${Buffer.alloc(32, 11).toString("base64url")}` as any,
   resolve: () => null,
 };
 
@@ -265,4 +265,50 @@ test("unresolved lineage never invents a timeline head", async () => {
     artifactRegistry,
   });
   await expect(service.read("root")).rejects.toBeInstanceOf(TimelineHeadUnresolvedError);
+});
+
+test("active timeline projects private evidence opaquely and retains canonical multiline output", async () => {
+  const value = resolved();
+  const active = record("child", "revision-child", 2, {
+    type: "agent_response_delta",
+    payload: {
+      round_id: "direct:operation-2",
+      participant_id: "participant-1",
+      content_delta: "first line\nsecond line\twith detail",
+      final_claim: null,
+      final_evidence: [],
+      completes_response: false,
+    },
+  });
+  active.stored_event.evidence_refs = ["/Users/private/runtime/evidence.json"];
+  value.selected_nodes[1].source.journal_records.push(active);
+  value.selected_nodes[1].source.journal_head.last_seq = 2;
+  const service = new ConversationTimelineService({
+    scopeId: "project:test",
+    cursorCodec: new TimelineCursorCodec(Buffer.alloc(32, 10)),
+    lineage: { resolve: () => value } as any,
+    artifactRegistry,
+    boundary: (from, to) => ({
+      from,
+      to,
+      handoff_id: `vf-handoff-${"c".repeat(64)}`,
+      prompt_projection_digest: `sha256:${"d".repeat(64)}`,
+    }),
+  });
+  const timeline = await service.read("root");
+  const projected = timeline.items.find(
+    (item) =>
+      item.kind === "conversation-event" &&
+      item.event.conversation_id === "child" &&
+      item.event.seq === 2,
+  );
+  if (projected?.kind !== "conversation-event") throw new Error("active event is absent");
+  expect(Array.from(projected.event.evidence_refs ?? [], String)).toEqual([
+    `artifact_${Buffer.alloc(32, 11).toString("base64url")}`,
+  ]);
+  expect(projected.event.event).toMatchObject({
+    type: "agent_response_delta",
+    payload: { content_delta: "first line\nsecond line\twith detail" },
+  });
+  expect(JSON.stringify(timeline)).not.toContain("/Users/private");
 });

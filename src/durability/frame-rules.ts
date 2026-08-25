@@ -50,6 +50,12 @@ const RULES: Readonly<Record<VffrDomain, VffrDomainRule>> = Object.freeze({
   "registry-trust": rule("trust_epoch", "frame_digest", "previous_frame_digest", "recorded_at"),
   "secret-revocation": rule("sequence", "frame_digest", "previous_frame_digest", "revoked_at"),
   "literal-staging": rule("sequence", "frame_digest", "previous_frame_digest", "recorded_at"),
+  "private-file-range-staging": rule(
+    "sequence",
+    "frame_digest",
+    "previous_frame_digest",
+    "recorded_at",
+  ),
   "conversation-action-receipt": rule(
     "sequence",
     "receipt_digest",

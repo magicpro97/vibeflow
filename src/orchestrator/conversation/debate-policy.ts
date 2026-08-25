@@ -7,14 +7,14 @@ import {
 } from "../debate.js";
 import type { StoredTraceEvent } from "../trace/types.js";
 import { persistBaselineResult, projectBaselineComparison } from "./baseline.js";
+import type { AgentSocialIntentRequestV1 } from "./conversation-interaction-types.js";
 import { projectDecisionMatrix } from "./debate-projection.js";
-import { debateMessagePrompt } from "./message-delivery.js";
+import { publishDebateParticipantResponse } from "./debate-response-publication.js";
 import type {
   ConversationContext,
   ConversationOrchestrationResult,
   ConversationPolicy,
   DryRunResult,
-  MessageRequest,
   PolicyAttempt,
 } from "./types.js";
 
@@ -25,6 +25,7 @@ interface ParticipantRoundResult {
   content: string;
   claim: string | null;
   evidence: string[];
+  socialIntent: AgentSocialIntentRequestV1;
 }
 
 interface TranscriptRound {
@@ -137,7 +138,6 @@ export class DebateConversationPolicy implements ConversationPolicy {
     if (context.signal.aborted) return failed(context, "aborted");
 
     const transcript: TranscriptRound[] = [];
-    let prior: Array<{ claim: string | null; evidence: readonly string[] }> = [];
     for (let round = 1; round <= context.maxRounds; round += 1) {
       const roundId = `round-${round}`;
       journal.push(
@@ -146,8 +146,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
           event: { type: "round_boundary", payload: { round_id: roundId, phase: "start" } },
         }),
       );
-      const messages = await context.messages();
-      const participants = await this.runParticipants(context, responders, round, prior, messages);
+      const participants = await this.runParticipants(context, responders, round);
       if (!participants) return failed(context, context.signal.aborted ? "aborted" : "failed");
       for (const participant of participants) {
         journal.push(
@@ -178,22 +177,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
       );
       if (!blind) return failed(context, context.signal.aborted ? "aborted" : "failed");
       for (const participant of participants) {
-        journal.push(
-          await participant.attempt.emit({
-            idempotency_key: `debate:round:${round}:participant:${participant.participantId}:response`,
-            event: {
-              type: "agent_response_delta",
-              payload: {
-                round_id: roundId,
-                participant_id: participant.participantId,
-                content_delta: participant.content,
-                final_claim: participant.claim,
-                final_evidence: participant.evidence,
-                completes_response: true,
-              },
-            },
-          }),
-        );
+        journal.push(await publishDebateParticipantResponse(context, round, participant));
       }
       const positions = participants.map(({ claim, evidence }) => ({ claim, evidence }));
       const full = await this.evaluate(
@@ -237,7 +221,6 @@ export class DebateConversationPolicy implements ConversationPolicy {
         full,
         decision,
       });
-      prior = positions;
       if (decision.outcome !== "continue") break;
     }
     return this.publishArtifacts(context, responders, journal, transcript);
@@ -247,19 +230,24 @@ export class DebateConversationPolicy implements ConversationPolicy {
     context: ConversationContext,
     indices: readonly number[],
     round: number,
-    prior: readonly { claim: string | null; evidence: readonly string[] }[],
-    messages: readonly MessageRequest[],
   ): Promise<ParticipantRoundResult[] | null> {
-    const launched = indices.map((bindingIndex) => {
-      const participantId = context.participantIds[bindingIndex] as string;
-      const attempt = context.launchAttempt({
-        participantId,
-        bindingIndex,
-        purpose: "participant",
-        promptInput: debateMessagePrompt(context.topic, round, prior, messages, participantId),
-      });
-      return { participantId, attempt };
-    });
+    const launched = await Promise.all(
+      indices.map(async (bindingIndex) => {
+        const participantId = context.participantIds[bindingIndex] as string;
+        const delivery = await context.prepareTurn({
+          participant_id: participantId,
+          instruction: { kind: "debate-participant", topic: context.topic, round },
+        });
+        const attempt = context.launchAttempt({
+          participantId,
+          bindingIndex,
+          purpose: "participant",
+          promptInput: delivery.prompt_input,
+          delivery,
+        });
+        return { participantId, attempt };
+      }),
+    );
     const results = await Promise.all(launched.map(({ attempt }) => attempt.completion));
     const failedIndex = results.findIndex((result) => !result.ok || result.state !== "completed");
     if (failedIndex >= 0) {
@@ -274,13 +262,20 @@ export class DebateConversationPolicy implements ConversationPolicy {
       );
       return null;
     }
-    return launched.map(({ participantId, attempt }, index) => ({
-      participantId,
-      attempt,
-      ...parseDebateParticipantOutput(
+    return launched.map(({ participantId, attempt }, index) => {
+      const parsed = parseDebateParticipantOutput(
         (results[index] as NonNullable<(typeof results)[number]>).output,
-      ),
-    }));
+      );
+      return {
+        participantId,
+        attempt,
+        answer: parsed.answer,
+        content: parsed.content,
+        claim: parsed.claim,
+        evidence: parsed.evidence,
+        socialIntent: parsed.social_intent,
+      };
+    });
   }
 
   private async evaluate(

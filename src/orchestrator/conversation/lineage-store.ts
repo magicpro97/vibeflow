@@ -216,7 +216,9 @@ export class LineageAuthorityStore {
     transitions: ReadonlyMap<string, unknown>,
     options: { fault?: (point: AtomicCasFaultPoint) => void } = {},
   ): LineageHeadRecordV1 {
-    validateLineageHeadForRead(prior, lineage, transitions);
+    assertLineageHeadRecordV1(prior);
+    if (prior.root_session_id !== lineage.root_session_id)
+      throw new Error("lineage prior head root mismatch");
     validateLineageHeadForRead(replacement, lineage, transitions);
     if (
       replacement.head_epoch !== prior.head_epoch + 1 ||
@@ -258,6 +260,32 @@ export class LineageAuthorityStore {
     if (record.root_session_id !== rootSessionId)
       throw new LineageAuthorityCorruptError("reservation storage key mismatch");
     return record;
+  }
+
+  readReservationHistory(rootSessionId: string): ReadonlyMap<string, unknown> {
+    const current = this.readReservation(rootSessionId);
+    const history = new Map<string, unknown>();
+    let digest = current?.previous_reservation_digest ?? null;
+    for (let count = 0; digest !== null && count < 4_096; count += 1) {
+      const bytes = privateFileBytes(
+        join(this.paths.checkpoints, `${digestHex(digest)}.json`),
+        MAX_HEAD_BYTES,
+      );
+      if (bytes === null)
+        throw new LineageAuthorityCorruptError("reservation checkpoint is absent");
+      const record = decodeCanonical<RevisionReservationRecordV1>(
+        bytes,
+        assertRevisionReservationRecordV1,
+        "revision reservation checkpoint",
+      );
+      if (record.root_session_id !== rootSessionId || record.content_digest !== digest)
+        throw new LineageAuthorityCorruptError("reservation checkpoint identity mismatch");
+      history.set(digest, record);
+      digest = record.previous_reservation_digest;
+    }
+    if (digest !== null)
+      throw new LineageAuthorityCorruptError("reservation checkpoint history exceeds bound");
+    return history;
   }
 
   commitReservation(

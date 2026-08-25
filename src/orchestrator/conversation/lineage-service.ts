@@ -7,6 +7,10 @@ import { createConversationRevisionSummary } from "./catalog-row.js";
 import type { ConversationRevisionSummaryV1 } from "./catalog-types.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
 import {
+  type PreparedRevisionRecoveryLinkInputV1,
+  validatePreparedRevisionRecoveryLink,
+} from "./lineage-prepared-revision.js";
+import {
   type PublishedRevisionTransitionInputV1,
   publishedRevisionAuthorityMap,
 } from "./lineage-published-transition.js";
@@ -41,6 +45,15 @@ export interface ConversationLineageResponseV1 {
   head_digest: string;
   nodes: ConversationRevisionSummaryV1[];
   next_cursor: string | null;
+}
+
+export interface ConversationHeadResponseV1 {
+  schema_version: "1.0";
+  root_session_id: string;
+  head_status: "committed" | "ambiguous" | "unclaimed";
+  head_epoch: number;
+  head_digest: string;
+  active: ConversationRevisionSummaryV1 | null;
 }
 
 export interface ResolvedConversationLineageV1 {
@@ -82,6 +95,11 @@ export interface ConversationLineageServiceOptions {
   headTransitions?(lineage: ConversationLineageReadV1): ReadonlyMap<string, unknown>;
   reservationHistory?(lineage: ConversationLineageReadV1): ReadonlyMap<string, unknown>;
   publishedRevisionTransitions?(): readonly PublishedRevisionTransitionInputV1[];
+  revisionRecoveryAuthority?(operationId: string): {
+    operation: unknown;
+    revision_plan: unknown;
+  } | null;
+  actionAuthority?: ReadConversationSourceInventoryOptions["actionAuthority"];
 }
 
 const key = (node: LineageNodeIdentityV1): string =>
@@ -134,15 +152,73 @@ export class ConversationLineageService {
     return (this.options.readInventory ?? readConversationSourceInventory)({
       artifactRoot: this.options.artifactRoot,
       traceRoot: this.options.traceRoot,
+      ...(this.options.actionAuthority ? { actionAuthority: this.options.actionAuthority } : {}),
     });
   }
 
   resolve(conversationId: string): ResolvedConversationLineageV1 {
     if (!isSafeCatalogIdentifier(conversationId)) throw new ConversationLineageNotFoundError();
-    const inventory = this.inventory();
     const published = this.options.publishedRevisionTransitions?.() ?? [];
+    return this.resolveInventory(conversationId, this.inventory(), published);
+  }
+
+  resolveRevisionRecovery(
+    conversationId: string,
+    rootSessionId: string,
+    operationId: string,
+  ): ResolvedConversationLineageV1 {
+    if (
+      !isSafeCatalogIdentifier(conversationId) ||
+      !isSafeCatalogIdentifier(rootSessionId) ||
+      !/^vf-operation-[0-9a-f]{64}$/.test(operationId)
+    )
+      throw new ConversationLineageNotFoundError();
+    const reservation = this.store.readReservation(rootSessionId);
+    if (
+      reservation?.status !== "active" ||
+      reservation.operation_id !== operationId ||
+      reservation.root_session_id !== rootSessionId
+    )
+      throw new ConversationLineageNotFoundError();
+    const recoveryAuthority = this.options.revisionRecoveryAuthority?.(operationId);
+    if (!recoveryAuthority) throw new ConversationLineageNotFoundError();
+    const preparedInput: PreparedRevisionRecoveryLinkInputV1 = {
+      ...recoveryAuthority,
+      reservation,
+    };
+    const prepared = validatePreparedRevisionRecoveryLink(preparedInput);
+    if (
+      prepared.root_session_id !== rootSessionId ||
+      prepared.operation_id !== operationId ||
+      (prepared.child.conversation_id !== conversationId &&
+        prepared.parent.conversation_id !== conversationId) ||
+      prepared.reservation_digest !== reservation.content_digest
+    )
+      throw new ConversationLineageNotFoundError();
+    const inventory = (this.options.readInventory ?? readConversationSourceInventory)({
+      artifactRoot: this.options.artifactRoot,
+      traceRoot: this.options.traceRoot,
+      includeHiddenRevisions: true,
+      includeHiddenRevisionOperationIds: new Set([operationId]),
+      ...(this.options.actionAuthority ? { actionAuthority: this.options.actionAuthority } : {}),
+    });
+    return this.resolveInventory(
+      conversationId,
+      inventory,
+      this.options.publishedRevisionTransitions?.() ?? [],
+      [preparedInput],
+    );
+  }
+
+  private resolveInventory(
+    conversationId: string,
+    inventory: ConversationSourceInventoryV1,
+    published: readonly PublishedRevisionTransitionInputV1[],
+    recoveryPrepared: readonly PreparedRevisionRecoveryLinkInputV1[] = [],
+  ): ResolvedConversationLineageV1 {
     const derivation = deriveConversationLineages(inventory, {
       publishedRevisionTransitions: published,
+      recoveryPreparedRevisionLinks: recoveryPrepared,
     });
     const lineage = derivation.lineages.find((candidate) =>
       candidate.nodes.some((node) => node.node.conversation_id === conversationId),
@@ -172,6 +248,36 @@ export class ConversationLineageService {
       head,
       revision_claim_epoch: revisionClaimEpoch,
       selected_nodes: selectedAncestry(lineage, head),
+    };
+  }
+
+  head(rootSessionId: string): ConversationHeadResponseV1 {
+    const resolved = this.resolve(rootSessionId);
+    if (
+      resolved.lineage.root_session_id !== rootSessionId ||
+      resolved.requested.node.conversation_id !== rootSessionId ||
+      resolved.requested.node.revision_ordinal !== 0
+    )
+      throw new ConversationLineageNotFoundError();
+    const activeIdentity = resolved.head.active;
+    const activeNode = activeIdentity
+      ? resolved.lineage.nodes.filter((node) => key(node.node) === key(activeIdentity))
+      : [];
+    if (
+      activeNode.length > 1 ||
+      (resolved.head.head_status === "committed" && activeNode.length !== 1) ||
+      (resolved.head.head_status !== "committed" && activeNode.length !== 0)
+    )
+      throw new LineageAuthorityCorruptError("lineage head summary does not bind one active leaf");
+    return {
+      schema_version: "1.0",
+      root_session_id: rootSessionId,
+      head_status: resolved.head.head_status,
+      head_epoch: resolved.head.head_epoch,
+      head_digest: resolved.head.content_digest,
+      active: activeNode[0]
+        ? createConversationRevisionSummary(activeNode[0], resolved.revision_claim_epoch)
+        : null,
     };
   }
 

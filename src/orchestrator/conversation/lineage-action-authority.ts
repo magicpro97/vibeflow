@@ -28,7 +28,13 @@ export interface LineageActionClosureV1 {
   dispatch: ActionDispatchRecordV1;
 }
 
-export type LineagePlanKindV1 = "lineage-head" | "lineage-association" | "revision-operation";
+export type LineagePlanKindV1 =
+  | "lineage-head"
+  | "lineage-association"
+  | "revision-operation"
+  | "context-compaction"
+  | "conversation-control"
+  | "public-literal-publication";
 
 export interface LineageActionPlanBindingV1 {
   schema_version: "1.0";
@@ -130,7 +136,7 @@ function sortedUnique(values: readonly string[]): boolean {
   );
 }
 
-function assertLineageActionPlanBindingV1(
+export function assertLineageActionPlanBindingV1(
   value: unknown,
   nativePlanDigest: string,
   planKind: LineagePlanKindV1,

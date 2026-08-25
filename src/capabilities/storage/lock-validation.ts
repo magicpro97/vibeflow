@@ -4,8 +4,11 @@ import type { CapabilityLockEntryV1, CapabilityLockV1 } from "../wire/lock.js";
 import {
   CapabilityValidationError,
   assertSortedUnique,
+  boolean,
   bytewise,
   digest,
+  enumeration,
+  exactKeys,
   integer,
   localId,
   packageId,
@@ -13,6 +16,10 @@ import {
   text,
   timestamp,
 } from "../wire/primitives.js";
+import { validateLockEntryAuthenticity } from "./lock-entry-authenticity.js";
+import { validatePortablePublicScalar } from "./portable-value-validation.js";
+
+const ENGINES = ["claude", "codex", "copilot", "opencode", "antigravity"] as const;
 
 export function capabilityLockEntryDigest(entry: CapabilityLockEntryV1): string {
   const { lock_entry_digest: _, ...preimage } = entry;
@@ -32,39 +39,25 @@ export function capabilityLockDigest(lock: CapabilityLockV1): string {
   return digestV1("VF-CAPABILITY-LOCK\0v1\0", preimage);
 }
 
-function validateAuthenticity(entry: CapabilityLockEntryV1): void {
-  const binding = entry.authenticity_binding;
-  const { authenticity_digest: _, ...preimage } = binding;
-  if (binding.authenticity_digest !== digestV1("VF-PACKAGE-AUTHENTICITY-BINDING\0v1\0", preimage))
-    throw new CapabilityValidationError(
-      "authenticity binding digest mismatch",
-      `${entry.package_id}.authenticity_binding`,
-      "integrity_failure",
-    );
-  if (
-    binding.pin_digest !== entry.pin.pin_digest ||
-    binding.manifest_digest !== entry.manifest_digest
-  )
-    throw new CapabilityValidationError(
-      "authenticity binding does not match lock entry",
-      `${entry.package_id}.authenticity_binding`,
-    );
-  if ((entry.pin.source.kind === "registry") !== (binding.registry_signature !== null))
-    throw new CapabilityValidationError(
-      "registry signature nullability mismatch",
-      `${entry.package_id}.authenticity_binding`,
-    );
-  if (
-    entry.pin.source.kind === "registry" &&
-    binding.registry_signature?.envelope_digest !== entry.pin.source.signature_envelope_digest
-  )
-    throw new CapabilityValidationError(
-      "registry envelope digest differs from pin",
-      `${entry.package_id}.authenticity_binding`,
-    );
-}
-
 function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["scope"]): void {
+  exactKeys(
+    entry,
+    [
+      "package_id",
+      "pin",
+      "manifest_digest",
+      "authenticity_binding",
+      "lock_entry_digest",
+      "dependencies",
+      "public_inputs",
+      "secret_input_ids",
+      "portable_input_digest",
+      "targets",
+      "ownership_keys",
+    ],
+    [],
+    `lock.packages.${entry.package_id ?? "?"}`,
+  );
   packageId(entry.package_id, "entry.package_id");
   validateImmutablePackagePin(entry.pin);
   if (entry.pin.id !== entry.package_id)
@@ -73,7 +66,7 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
       `${entry.package_id}.pin.id`,
     );
   digest(entry.manifest_digest, `${entry.package_id}.manifest_digest`);
-  validateAuthenticity(entry);
+  validateLockEntryAuthenticity(entry);
   assertSortedUnique(
     entry.dependencies,
     (a, b) =>
@@ -83,8 +76,31 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
       ),
     `${entry.package_id}.dependencies`,
   );
-  for (const dependency of entry.dependencies) {
+  for (const [index, dependency] of entry.dependencies.entries()) {
+    const path = `${entry.package_id}.dependencies[${index}]`;
+    if (dependency.required_scope === "same")
+      exactKeys(
+        dependency,
+        ["required_scope", "package_id", "version", "content_sha256"],
+        [],
+        path,
+      );
+    else if (dependency.required_scope === "user-prerequisite")
+      exactKeys(
+        dependency,
+        [
+          "required_scope",
+          "package_id",
+          "version",
+          "content_sha256",
+          "required_health_plan_digest",
+        ],
+        [],
+        path,
+      );
+    else throw new CapabilityValidationError("invalid dependency scope", `${path}.required_scope`);
     packageId(dependency.package_id, "dependency.package_id");
+    text(dependency.version, `${path}.version`, { min: 1, max: 128, ascii: true });
     rawSha256(dependency.content_sha256, "dependency.content_sha256");
     if (dependency.required_scope === "user-prerequisite")
       digest(dependency.required_health_plan_digest, "dependency.required_health_plan_digest");
@@ -94,7 +110,11 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
     (a, b) => bytewise(a.input_id, b.input_id),
     `${entry.package_id}.public_inputs`,
   );
-  for (const input of entry.public_inputs) localId(input.input_id, "public_input.input_id");
+  for (const [index, input] of entry.public_inputs.entries()) {
+    exactKeys(input, ["input_id", "value"], [], `${entry.package_id}.public_inputs[${index}]`);
+    localId(input.input_id, "public_input.input_id");
+    validatePortablePublicScalar(input.value, `${entry.package_id}.public_inputs[${index}].value`);
+  }
   assertSortedUnique(entry.secret_input_ids, bytewise, `${entry.package_id}.secret_input_ids`);
   for (const input of entry.secret_input_ids) localId(input, "secret_input_id");
   if (entry.portable_input_digest !== portableInputDigest(entry))
@@ -114,14 +134,39 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
   );
   const ownership = new Set<string>();
   for (const target of entry.targets) {
+    exactKeys(
+      target,
+      [
+        "target_id",
+        "component_id",
+        "scope",
+        "engine",
+        "participant_id",
+        "required",
+        "state",
+        "adapter_fingerprints",
+        "projections",
+        "enforcement_digest",
+        "health_plan_digest",
+      ],
+      [],
+      `${entry.package_id}.targets.${target.target_id ?? "?"}`,
+    );
     text(target.target_id, "target.target_id", { min: 1, max: 512, ascii: true });
     localId(target.component_id, "target.component_id");
-    if (target.scope !== scope || !["installed", "degraded"].includes(target.state))
+    if (target.scope !== scope)
       throw new CapabilityValidationError(
         "locked target scope/state is invalid",
         `${entry.package_id}.targets`,
       );
+    if (target.engine !== null) enumeration(target.engine, ENGINES, "target.engine");
+    if (target.participant_id !== null)
+      text(target.participant_id, "target.participant_id", { min: 1, max: 512, ascii: true });
+    boolean(target.required, "target.required");
+    enumeration(target.state, ["installed", "degraded"] as const, "target.state");
     assertSortedUnique(target.adapter_fingerprints, bytewise, "target.adapter_fingerprints");
+    for (const fingerprint of target.adapter_fingerprints)
+      digest(fingerprint, "target.adapter_fingerprints");
     assertSortedUnique(
       target.projections,
       (a, b) =>
@@ -132,7 +177,14 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
       "target.projections",
     );
     for (const projection of target.projections) {
+      exactKeys(
+        projection,
+        ["ownership_key", "projection_digest"],
+        [],
+        `${entry.package_id}.targets.${target.target_id}.projections`,
+      );
       text(projection.ownership_key, "projection.ownership_key", { min: 1, max: 512, ascii: true });
+      validatePortablePublicScalar(projection.ownership_key, "projection.ownership_key");
       digest(projection.projection_digest, "projection.projection_digest");
       ownership.add(projection.ownership_key);
     }
@@ -157,6 +209,24 @@ export function validateCapabilityLock(
   lock: CapabilityLockV1,
   options: { expected_scope?: "project" | "user"; parents?: readonly CapabilityLockV1[] } = {},
 ): CapabilityLockV1 {
+  exactKeys(
+    lock,
+    [
+      "schema_version",
+      "fabric_active",
+      "scope",
+      "generation_id",
+      "generation_ordinal",
+      "parent_generation_digests",
+      "packages",
+      "policy_digest",
+      "permission_digest",
+      "created_at",
+      "content_digest",
+    ],
+    [],
+    "lock",
+  );
   if (lock.schema_version !== "1.0")
     throw new CapabilityValidationError(
       "unsupported capability lock schema",
@@ -169,7 +239,15 @@ export function validateCapabilityLock(
     (options.expected_scope && options.expected_scope !== lock.scope)
   )
     throw new CapabilityValidationError("capability lock scope/fabric marker is invalid", "lock");
+  if (!/^vf-generation-[a-f0-9]{64}$/.test(lock.generation_id))
+    throw new CapabilityValidationError("invalid generation ID", "lock.generation_id");
   integer(lock.generation_ordinal, "lock.generation_ordinal");
+  if (lock.parent_generation_digests.length > 32 || lock.packages.length > 10_000)
+    throw new CapabilityValidationError(
+      "portable lock collection exceeds bounds",
+      "lock",
+      "bounds",
+    );
   assertSortedUnique(lock.parent_generation_digests, bytewise, "lock.parent_generation_digests");
   for (const value of lock.parent_generation_digests) digest(value, "parent_generation_digest");
   assertSortedUnique(

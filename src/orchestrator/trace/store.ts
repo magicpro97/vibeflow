@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import { join, relative, resolve } from "node:path";
 import lockfile from "proper-lockfile";
@@ -16,6 +16,7 @@ import { TRACE_LIMITS } from "./limits.js";
 import { assertNoSymlinkPathComponents } from "./path-safety.js";
 import { projectPublicStoredTrace } from "./project.js";
 import { settleDurableRegistry } from "./registry-settlement.js";
+import { traceJournalPath } from "./trace-journal-path.js";
 import type {
   InternalTraceStoreRecord,
   PublicStoredTraceEvent,
@@ -24,8 +25,9 @@ import type {
   TraceCorrelation,
 } from "./types.js";
 import { fail, validGenerated, validInput } from "./validation.js";
-
+export { traceJournalPath } from "./trace-journal-path.js";
 export class TraceIdempotencyConflictError extends Error {}
+export class TraceHeadConflictError extends Error {}
 export { TraceLifecycleConflictError };
 export interface TraceStoreOptions {
   dir: string;
@@ -46,10 +48,13 @@ export interface TraceStore {
     correlation: TraceCorrelation,
     input: TraceAppendInput,
     native?: string | null,
+    expectedLastSeq?: number,
   ): Promise<StoredTraceEvent>;
-  appendBatch?(entries: readonly TraceBatchAppend[]): Promise<StoredTraceEvent[]>;
+  appendBatch?(
+    entries: readonly TraceBatchAppend[],
+    expectedLastSeq?: number,
+  ): Promise<StoredTraceEvent[]>;
 }
-
 const inputBytes = (input: TraceAppendInput) =>
   JSON.stringify({ idempotency_key: input.idempotency_key, event: input.event });
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -57,18 +62,8 @@ const expectedOwner = (): number | undefined =>
   typeof process.geteuid === "function" ? process.geteuid() : undefined;
 const ownerMatches = (stat: fs.Stats): boolean =>
   expectedOwner() === undefined || stat.uid === expectedOwner();
-
-export function traceJournalPath(dir: string, id: string): string {
-  return join(
-    resolve(dir),
-    "conversations",
-    `${createHash("sha256").update("v1-trace-conversation\0").update(id).digest("hex")}.jsonl`,
-  );
-}
-
 export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class TraceStore {
   private readonly cursors = new Map<string, JournalCursor>();
-
   constructor(
     private readonly options: TraceStoreOptions,
     private readonly root: string = "",
@@ -259,11 +254,15 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
     correlation: TraceCorrelation,
     input: TraceAppendInput,
     native: string | null = null,
+    expectedLastSeq?: number,
   ): Promise<StoredTraceEvent> {
-    const stored = await this.appendBatch([{ correlation, input, native }]);
+    const stored = await this.appendBatch([{ correlation, input, native }], expectedLastSeq);
     return stored[0] ?? fail("invalid batch result");
   }
-  async appendBatch(entries: readonly TraceBatchAppend[]): Promise<StoredTraceEvent[]> {
+  async appendBatch(
+    entries: readonly TraceBatchAppend[],
+    expectedLastSeq?: number,
+  ): Promise<StoredTraceEvent[]> {
     if (!entries.length || entries.length > 64) fail("invalid batch");
     let captured: Array<Required<TraceBatchAppend> & { bytes: string }>;
     try {
@@ -305,6 +304,8 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
     return this.withLockedJournal(conversationId, (fd) => {
       const refresh = refreshJournal(fd, true, conversationId, this.cursors.get(conversationId));
       const cursor = refresh.cursor;
+      if (expectedLastSeq !== undefined && cursor.records.length !== expectedLastSeq)
+        throw new TraceHeadConflictError("trace journal head changed");
       this.cursors.set(conversationId, cursor);
       this.syncRegistry(conversationId, refresh);
       const pending = new Map<string, InternalTraceStoreRecord>();

@@ -23,3 +23,8 @@ export interface CapabilityReadStatusV1 {
   lock: import("../wire/lock.js").CapabilityLockV1 | null;
   error: string | null;
 }
+
+export interface CapabilityObjectDigestSpecV1 {
+  domain: string;
+  omit_keys: string[];
+}

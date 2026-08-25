@@ -5,6 +5,7 @@ import {
   CapabilityValidationError,
   assertSortedUnique,
   bytewise,
+  exactKeys,
   localId,
   rawSha256,
   text,
@@ -22,6 +23,20 @@ export function validateComponent(
   inputs: ReadonlyMap<string, CapabilityInputDeclarationV1>,
   refs: Array<{ id: string; path: string }>,
 ): void {
+  if (component.type === "tool")
+    exactKeys(
+      component.installer,
+      ["kind", "coordinate", "version", "artifact_sha256", "lifecycle_scripts"],
+      [],
+      `${path}.installer`,
+    );
+  if (component.type === "mcp" && component.executable !== undefined)
+    exactKeys(
+      component.executable,
+      ["component_id", "relative_path", "sha256"],
+      [],
+      `${path}.executable`,
+    );
   localId(component.component_id, `${path}.component_id`);
   if (
     !Array.isArray(component.targets) ||

@@ -6,6 +6,7 @@ import {
   type ConversationTimelineService,
   TimelineHeadUnresolvedError,
 } from "../orchestrator/conversation/timeline-service.js";
+import { deriveBrowserActionAuthority } from "./conversation-action-principal.js";
 import type { ConversationSessionAuthority } from "./conversation-auth.js";
 import { conversationReadError } from "./conversation-list-route.js";
 
@@ -99,7 +100,11 @@ export async function handleConversationTimelineRoute(
     return conversationReadError("invalid_request", { message: "The timeline query is invalid." });
   }
   try {
-    const body = await authority.timeline.read(rootSessionId, input);
+    const recipient = deriveBrowserActionAuthority(request, rootSessionId).actor.public_actor_id;
+    const body = await authority.timeline.read(rootSessionId, {
+      ...input,
+      recipient_public_id: recipient,
+    });
     return Response.json(body, { status: 200, headers: { "cache-control": "no-store" } });
   } catch (error) {
     return mapTimelineError(error);

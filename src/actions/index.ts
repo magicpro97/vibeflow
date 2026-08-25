@@ -1,4 +1,5 @@
 export * from "./challenge.js";
+export * from "./durable-authority-reader.js";
 export * from "./authority-proofs.js";
 export * from "./errors.js";
 export * from "./idempotency.js";

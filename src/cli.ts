@@ -4,6 +4,8 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import {
+  authority,
+  capability,
   defaultGit,
   demo,
   discover,
@@ -214,6 +216,14 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  if (cmd === "capability") {
+    if (rest.includes("--help") || rest.includes("-h")) return printCommandHelp("capability");
+    return await capability(rest);
+  }
+  if (cmd === "authority") {
+    if (rest.includes("--help") || rest.includes("-h")) return printCommandHelp("authority");
+    return await authority(rest);
+  }
   const { positionals, flags } = parseFlags(rest);
 
   if (flags.version || cmd === "--version" || cmd === "-v") return printVersion();

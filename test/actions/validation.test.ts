@@ -22,6 +22,72 @@ const valid = {
 describe("strict action wire validation", () => {
   test("accepts a bounded exact request", () => {
     expect(parseActionProposalRequestJson(JSON.stringify(valid))).toEqual(valid);
+    expect(
+      validateHostActionRequest({
+        type: "conversation.continue_message",
+        content: "continue",
+        target_participants: ["participant-1", "participant-2"],
+      }),
+    ).toEqual({
+      type: "conversation.continue_message",
+      content: "continue",
+      target_participants: ["participant-1", "participant-2"],
+    });
+  });
+
+  test("requires a canonical bounded continuation message", () => {
+    for (const candidate of [
+      {
+        type: "conversation.continue_message",
+        content: "   ",
+        target_participants: "all",
+      },
+      {
+        type: "conversation.continue_message",
+        content: "continue",
+        target_participants: [],
+      },
+      {
+        type: "conversation.continue_message",
+        content: "continue",
+        target_participants: ["participant-2", "participant-1"],
+      },
+      {
+        type: "conversation.continue_message",
+        content: "continue",
+        target_participants: ["participant-1", "participant-1"],
+      },
+    ])
+      expect(() => validateHostActionRequest(candidate)).toThrow(ActionValidationError);
+  });
+
+  test("accepts only ordered bounded immutable quote references on continuation", () => {
+    const quote = {
+      root_session_id: "root-1",
+      conversation_id: "conversation-1",
+      revision_id: "revision-1",
+      target_event_id: "event-1",
+      target_kind: "completed-agent-response",
+      content_digest: `sha256:${"b".repeat(64)}`,
+      author_public_id: "participant-1",
+    } as const;
+    expect(
+      validateHostActionRequest({
+        type: "conversation.continue_message",
+        content: "continue",
+        target_participants: "all",
+        quote_refs: [quote],
+      }),
+    ).toMatchObject({ quote_refs: [quote] });
+    for (const quote_refs of [[], [quote, quote], [{ ...quote, content_digest: "sha256:no" }]])
+      expect(() =>
+        validateHostActionRequest({
+          type: "conversation.continue_message",
+          content: "continue",
+          target_participants: "all",
+          quote_refs,
+        }),
+      ).toThrow(ActionValidationError);
   });
 
   test("rejects unknown fields, duplicates, pollution keys, and unsupported versions", () => {

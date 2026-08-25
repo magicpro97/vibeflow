@@ -1,24 +1,46 @@
+import type { ActionProposalRequestV1, ActionRequestAuthorityV1 } from "../../actions/index.js";
 import { TraceLifecycleConflictError } from "../trace/store.js";
-import {
-  projectDryRunResult,
-  projectRuntimeCreateRequest,
-  projectRuntimePreviewRequest,
-} from "./boundary-projection.js";
+import { projectDryRunResult } from "./boundary-projection.js";
 import { ConversationContinuationRuntime } from "./continuation-runtime.js";
 import { snapshotRuntimeValue } from "./emission-authority.js";
 import { ConversationAuthorityClosedError } from "./lifecycle-gate.js";
 import {
   ConversationSubscribers,
   type RuntimeCreateRequest,
-  type RuntimePreviewRequest,
+  bindingAuthorities,
   canonicalMessageRequest,
-  conversationTerminal,
   isTerminalLifecycle,
   messageRevisionKey,
-  projectOrchestrationResult,
-  terminalResultStatus,
 } from "./policy-registry.js";
+import {
+  settleConfiguredPrivateFileRange,
+  settlePersistFailedPrivateFileRange,
+} from "./private-file-range-commit-authority.js";
+import { ConversationRequestMaterializer } from "./request-materializer.js";
+import { proposeDeferredConversationAction } from "./revision-action-service.js";
+import type { ConversationRevisionAuthority } from "./revision-authority.js";
+import type { ConversationDeferredRevisionAuthority } from "./revision-deferred-authority.js";
+import { RevisionLaneRetryRuntime } from "./revision-lane-retry-runtime.js";
+import { continueTerminalConversationMessage } from "./revision-message.js";
+import {
+  createConversationDeferredRevisionAuthority,
+  createConversationRevisionAuthority,
+  withConversationHomeAuthorities,
+} from "./revision-service-factory.js";
 import { ConversationRuntime, type ConversationRuntimeOptions } from "./runtime.js";
+import {
+  ConversationControlConflictError,
+  ConversationInvalidTargetParticipantError,
+  ConversationNotFoundError,
+  rethrowControlConflict,
+} from "./service-errors.js";
+import { ConversationExecutionRuntime } from "./service-execution-runtime.js";
+import { revisionQuiescenceReader } from "./service-revision-quiescence.js";
+export {
+  ConversationControlConflictError,
+  ConversationInvalidTargetParticipantError,
+  ConversationNotFoundError,
+} from "./service-errors.js";
 import type {
   ApprovalDecision,
   ApprovalResolveResult,
@@ -26,8 +48,6 @@ import type {
   ConversationCreateResult,
   ConversationInvocationOptions,
   ConversationListener,
-  ConversationManifest,
-  ConversationOrchestrationResult,
   ConversationService,
   ConversationStartResult,
   DryRunResult,
@@ -40,212 +60,144 @@ import type {
   StopResponse,
   Unsubscribe,
 } from "./types.js";
-export class ConversationNotFoundError extends Error {}
-export class ConversationInvalidTargetParticipantError extends Error {}
-export class ConversationControlConflictError extends Error {}
-const rethrowControlConflict = (error: unknown): never => {
-  if (
-    !(error instanceof TraceLifecycleConflictError) &&
-    !(error instanceof ConversationAuthorityClosedError)
-  )
-    throw error;
-  throw new ConversationControlConflictError(error.message);
-};
 /** Public domain service. It delegates every append/launch into its private runtime authority. */
 export class ConversationOrchestrator implements ConversationService {
+  private readonly options: ConversationRuntimeOptions;
   private readonly runtime: ConversationRuntime;
   private readonly subscribers = new ConversationSubscribers();
   private readonly continuations: ConversationContinuationRuntime;
+  private readonly revisions: ConversationRevisionAuthority;
+  private readonly deferredRevisions: ConversationDeferredRevisionAuthority;
+  private readonly requests: ConversationRequestMaterializer;
+  private readonly revisionLaneRetry: RevisionLaneRetryRuntime | null;
+  private readonly execution: ConversationExecutionRuntime;
   private readonly now: () => string;
   private readonly schedule: (task: () => void) => void;
-  constructor(private readonly options: ConversationRuntimeOptions) {
-    this.runtime = new ConversationRuntime(options);
+  constructor(options: ConversationRuntimeOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
-    this.schedule = options.schedule ?? ((task) => setTimeout(task, 0));
-    this.runtime.onAppend((event) => this.subscribers.notify(event));
+    this.options = withConversationHomeAuthorities(options, this.now);
+    this.runtime = new ConversationRuntime(this.options);
+    this.schedule = this.options.schedule ?? ((task) => setTimeout(task, 0));
+    this.requests = new ConversationRequestMaterializer(this.runtime, this.options, this.now);
+    this.execution = new ConversationExecutionRuntime(this.runtime, this.options);
+    this.revisionLaneRetry = this.options.homeAuthorities
+      ? new RevisionLaneRetryRuntime(this.options, this.options.homeAuthorities.handoffs)
+      : null;
+    this.runtime.onAppend((event) => {
+      this.subscribers.notify(event);
+      this.options.onConversationSourceCommitted?.(event);
+    });
     this.continuations = new ConversationContinuationRuntime(
       this.runtime,
-      options,
-      (manifest, operationId, result) => this.finalizeResult(manifest, operationId, result),
-      (manifest, operationId) => this.executeConfigured(manifest, operationId),
+      this.options,
+      (manifest, operationId, result) => this.execution.finalize(manifest, operationId, result),
+    );
+    this.revisions = createConversationRevisionAuthority(
+      this.options,
+      this.runtime,
       this.now,
       this.schedule,
+      (manifest, operationId) => this.execution.execute(manifest, operationId),
     );
-  }
-  private manifest(request: RuntimeCreateRequest | RuntimePreviewRequest): ConversationManifest {
-    return {
-      version: "1.0",
-      conversation_id: this.runtime.ids("conversation"),
-      workflow_id: this.runtime.ids("workflow"),
-      revision_id: this.runtime.ids("revision"),
-      run_id: this.runtime.ids("run"),
-      parent_conversation_id: "parent" in request ? (request.parent?.conversationId ?? null) : null,
-      parent_revision_id: "parent" in request ? (request.parent?.revisionId ?? null) : null,
-      topic: request.topic,
-      policy: request.policy,
-      max_rounds: request.maxRounds,
-      baseline_enabled: request.baselineEnabled ?? true,
-      evaluator_auto_added: request.evaluatorAutoAdded ?? false,
-      repo_root: request.repoRoot,
-      phase: request.phase,
-      task_text: request.topic,
-      bindings: request.bindings.map((binding) => ({
-        participant_id: binding.participantId,
-        input: binding.input,
-      })),
-      created_at: this.now(),
-    };
-  }
-  private async materializeRequest(
-    request: ConversationCreateRequest | RuntimeCreateRequest,
-    options: ConversationInvocationOptions = {},
-  ): Promise<RuntimeCreateRequest> {
-    const capturedOptions = snapshotRuntimeValue(options);
-    const resolved =
-      "bindings" in request ? request : await this.resolveRequest(snapshotRuntimeValue(request));
-    return projectRuntimeCreateRequest(resolved, capturedOptions);
-  }
-  private resolveRequest(request: ConversationCreateRequest): Promise<RuntimeCreateRequest> {
-    const resolver = this.options.resolveCreateRequest;
-    if (!resolver) throw new Error("conversation create requires canonical binding resolution");
-    return resolver(request);
-  }
-  private async previewRequest(
-    request: ConversationCreateRequest | RuntimeCreateRequest,
-    options: ConversationInvocationOptions,
-  ): Promise<RuntimeCreateRequest | RuntimePreviewRequest> {
-    if ("bindings" in request || !this.options.resolveDryRunRequest) {
-      return this.materializeRequest(request, options);
-    }
-    const capturedOptions = snapshotRuntimeValue(options);
-    const resolved = await this.options.resolveDryRunRequest(snapshotRuntimeValue(request));
-    return projectRuntimePreviewRequest(resolved, capturedOptions);
-  }
-  private async executeConfigured(
-    manifest: ConversationManifest,
-    operationId: string,
-  ): Promise<ConversationCreateResult> {
-    let keepLive = false;
-    try {
-      let result: ConversationOrchestrationResult;
-      const policy = this.options.policies.require(manifest.policy);
-      try {
-        result = await policy.execute(await this.runtime.context(manifest.conversation_id));
-      } catch {
-        result = {
-          operation_id: operationId,
-          status: "failed",
-          artifact_refs: [],
-        };
-      }
-      result = projectOrchestrationResult(
-        result,
-        operationId,
-        manifest.conversation_id,
-        this.options.artifactStore,
-      );
-      if (result.status === "awaiting_approval" && !policy.continueAfterApproval) {
-        result = { operation_id: operationId, status: "failed", artifact_refs: [] };
-      }
-      result = await this.finalizeResult(manifest, operationId, result);
-      keepLive = result.status === "awaiting_approval";
-      return {
-        conversation_id: manifest.conversation_id,
-        revision_id: manifest.revision_id,
-        result,
-      };
-    } finally {
-      if (!keepLive) this.runtime.finish(manifest.conversation_id);
-    }
-  }
-  private async finalizeResult(
-    manifest: ConversationManifest,
-    operationId: string,
-    candidate: ConversationOrchestrationResult,
-  ): Promise<ConversationOrchestrationResult> {
-    let result =
-      candidate.operation_id === operationId
-        ? candidate
-        : { operation_id: operationId, status: "failed" as const, artifact_refs: [] };
-    const state = await this.snapshot(manifest.conversation_id);
-    if (state && isTerminalLifecycle(state.lifecycle)) {
-      const status = terminalResultStatus(state.lifecycle);
-      return {
-        operation_id: operationId,
-        status,
-        artifact_refs: status === "completed" ? result.artifact_refs : [],
-      };
-    }
-    if (state?.lifecycle === "PAUSED" && result.status === "completed") {
-      result = { operation_id: operationId, status: "aborted", artifact_refs: [] };
-    }
-    if (this.runtime.operationCancelled(manifest.conversation_id, operationId)) {
-      result = { operation_id: operationId, status: "aborted", artifact_refs: [] };
-    }
-    const requested = conversationTerminal(result.status);
-    if (!requested) {
-      if (
-        result.status === "awaiting_approval" &&
-        !(await this.runtime.retain(manifest.conversation_id, operationId))
-      ) {
-        return { operation_id: operationId, status: "aborted", artifact_refs: [] };
-      }
-      return result;
-    }
-    if (state?.lifecycle !== "ACTIVE" && state?.lifecycle !== "PAUSED") {
-      return result;
-    }
-    try {
-      const effective = await this.runtime.terminal(
-        manifest.conversation_id,
-        requested,
-        state.health,
-        requested === "COMPLETED" ? null : result.status,
-        requested === "COMPLETED" ? state.consensus_score : null,
-      );
-      return effective === requested
-        ? result
-        : {
-            operation_id: operationId,
-            status: effective === "STOPPED" ? "stopped" : "aborted",
-            artifact_refs: [],
-          };
-    } catch {
-      await this.runtime.terminal(
-        manifest.conversation_id,
-        "FAILED",
-        state.health,
-        "terminal append failed",
-        null,
-      );
-      return { operation_id: operationId, status: "failed", artifact_refs: [] };
-    }
+    this.deferredRevisions = createConversationDeferredRevisionAuthority(
+      this.options,
+      this.runtime,
+      this.now,
+      this.schedule,
+      (manifest, operationId) => this.execution.execute(manifest, operationId),
+    );
   }
   async start(
     input: ConversationCreateRequest | RuntimeCreateRequest,
     options: ConversationInvocationOptions = {},
   ): Promise<ConversationStartResult> {
-    const request = await this.materializeRequest(input, options);
+    const request = await this.requests.materialize(input, options);
     if (!request.topic || !request.policy || request.maxRounds < 1 || !request.bindings.length)
       throw new Error("invalid conversation create request");
     this.options.policies.require(request.policy);
-    const manifest = this.manifest(request);
+    const manifest = this.requests.manifest(request);
     const bindings = request.bindings.map((binding) => binding.materialized);
-    const operationId = this.runtime.begin(manifest, bindings);
+    const privateFileRange = request.private_file_range;
+    const createContextKey = `conversation-create:${manifest.conversation_id}`;
+    if (privateFileRange && !this.options.homeAuthorities)
+      throw new Error("private file range authority is unavailable");
+    if (privateFileRange && this.options.homeAuthorities) {
+      this.options.homeAuthorities.privateFileRanges.reserve(
+        privateFileRange,
+        createContextKey,
+        this.now(),
+      );
+      try {
+        this.options.homeAuthorities.privateTurnContexts.writeCreate({
+          conversationId: manifest.conversation_id,
+          targetParticipantIds: manifest.bindings.map((binding) => binding.participant_id),
+          createdAt: this.now(),
+          handoff: privateFileRange,
+          fileRange: this.options.homeAuthorities.privateFileRanges.content(privateFileRange),
+        });
+      } catch (error) {
+        this.options.homeAuthorities.privateFileRanges.release(
+          privateFileRange,
+          createContextKey,
+          this.now(),
+        );
+        throw error;
+      }
+    }
+    let operationId: string;
+    try {
+      operationId = this.runtime.begin(manifest, bindings);
+    } catch (error) {
+      if (privateFileRange && this.options.homeAuthorities)
+        this.options.homeAuthorities.privateFileRanges.release(
+          privateFileRange,
+          createContextKey,
+          this.now(),
+        );
+      throw error;
+    }
     try {
       this.runtime.persist(manifest, bindings);
     } catch (error) {
+      if (privateFileRange && this.options.homeAuthorities)
+        settlePersistFailedPrivateFileRange(
+          this.options.artifactStore,
+          this.options.homeAuthorities,
+          privateFileRange,
+          manifest.conversation_id,
+          createContextKey,
+          this.now(),
+          manifest,
+          bindingAuthorities(manifest, bindings),
+        );
       await this.runtime.abandon(manifest.conversation_id, "conversation persistence failed");
       throw error;
     }
     try {
       await this.runtime.configure(manifest.conversation_id);
     } catch (error) {
+      if (privateFileRange && this.options.homeAuthorities)
+        await settleConfiguredPrivateFileRange(
+          this.options.traceStore,
+          this.options.homeAuthorities,
+          privateFileRange,
+          manifest.conversation_id,
+          createContextKey,
+          this.now(),
+        );
       await this.runtime.abandon(manifest.conversation_id, "conversation configure failed");
       throw error;
     }
+    if (privateFileRange && this.options.homeAuthorities) {
+      this.options.homeAuthorities.privateFileRanges.consume(
+        privateFileRange,
+        createContextKey,
+        `conversation:${manifest.conversation_id}:create`,
+        this.now(),
+      );
+    }
     const completion = new Promise<ConversationCreateResult>((resolve, reject) => {
-      this.schedule(() => void this.executeConfigured(manifest, operationId).then(resolve, reject));
+      this.schedule(() => void this.execution.execute(manifest, operationId).then(resolve, reject));
     });
     void completion.catch(() => undefined);
     return Object.freeze({
@@ -265,10 +217,10 @@ export class ConversationOrchestrator implements ConversationService {
     input: ConversationCreateRequest | RuntimeCreateRequest,
     options: ConversationInvocationOptions = {},
   ): Promise<DryRunResult> {
-    const request = await this.previewRequest(input, options);
+    const request = await this.requests.preview(input, options);
     if (!request.topic || !request.policy || request.maxRounds < 1 || !request.bindings.length)
       throw new Error("invalid conversation dry-run request");
-    const manifest = this.manifest(request);
+    const manifest = this.requests.manifest(request);
     const bindings = request.bindings.map((binding) =>
       "preview" in binding ? binding.preview : binding.materialized,
     );
@@ -282,7 +234,16 @@ export class ConversationOrchestrator implements ConversationService {
     const manifest = this.runtime.manifest(id);
     const state = await this.snapshot(id);
     if (!manifest || !state) throw new ConversationNotFoundError("conversation not found");
-    const targets = captured.target_participants ?? "all";
+    const quoteRefs = captured.quote_refs
+      ? this.options.socialAuthority?.humanQuotes(id, captured.quote_refs)
+      : undefined;
+    if (captured.quote_refs && !quoteRefs)
+      throw new Error("conversation interaction authority is unavailable");
+    const message = {
+      ...captured,
+      ...(quoteRefs ? { quote_refs: quoteRefs } : {}),
+    };
+    const targets = message.target_participants ?? "all";
     if (
       targets !== "all" &&
       targets.some(
@@ -290,16 +251,15 @@ export class ConversationOrchestrator implements ConversationService {
       )
     )
       throw new ConversationInvalidTargetParticipantError("unknown target participant");
-    if (state.lifecycle === "COMPLETED") {
-      const key = messageRevisionKey(captured);
-      const existing = this.runtime.childRevision(id, key);
-      const child = existing ?? (await this.continuations.childRevision(manifest, captured, key));
-      return {
-        message_id: key,
-        accepted: true,
-        child_conversation_id: child,
-        location: `/api/conversations/${child}`,
-      };
+    if (isTerminalLifecycle(state.lifecycle)) {
+      const key = messageRevisionKey(message);
+      return continueTerminalConversationMessage({
+        revisions: this.revisions,
+        conversationId: id,
+        snapshot: state,
+        request: { ...message, target_participants: targets },
+        messageKey: key,
+      }).catch(rethrowControlConflict);
     }
     if (state.lifecycle !== "ACTIVE")
       throw new ConversationControlConflictError("message requires ACTIVE");
@@ -308,9 +268,34 @@ export class ConversationOrchestrator implements ConversationService {
     }
     const messageId = this.runtime.ids("message");
     await this.runtime
-      .userMessage(id, { ...captured, target_participants: targets }, `message:${messageId}`)
+      .userMessage(id, { ...message, target_participants: targets }, `message:${messageId}`)
       .catch(rethrowControlConflict);
     return { message_id: messageId, accepted: true };
+  }
+
+  async proposeConversationAction(
+    id: string,
+    request: ActionProposalRequestV1,
+    authority: ActionRequestAuthorityV1,
+  ) {
+    return proposeDeferredConversationAction({
+      conversationId: id,
+      manifest: this.runtime.manifest(id),
+      snapshot: await this.snapshot(id),
+      request,
+      authority,
+      revisions: this.deferredRevisions,
+    });
+  }
+
+  commitConversationAction(input: {
+    conversationId: string;
+    proposalId: string;
+    proposalDigest: string;
+    approvalId: string;
+    authority: ActionRequestAuthorityV1;
+  }) {
+    return this.deferredRevisions.commitAction(input).catch(rethrowControlConflict);
   }
   async pause(id: string): Promise<PauseResponse> {
     const state = await this.snapshot(id);
@@ -386,6 +371,18 @@ export class ConversationOrchestrator implements ConversationService {
     const durable = await this.runtime.prepareCancellation(captured);
     if (durable) return durable;
     return this.runtime.cancelOperation(captured);
+  }
+
+  revisionOperationQuiescent(conversationId: string, operationId: string): boolean {
+    return revisionQuiescenceReader(
+      this.runtime,
+      this.revisionLaneRetry,
+      this.options.homeAuthorities?.revisionLanes ?? null,
+    )(conversationId, operationId);
+  }
+  retryRevisionLanes(input: Parameters<RevisionLaneRetryRuntime["retry"]>[0]) {
+    if (!this.revisionLaneRetry) throw new Error("revision retry runtime authority is absent");
+    return this.revisionLaneRetry.retry(input);
   }
   snapshot(id: string) {
     return this.runtime.snapshot(id);

@@ -16,7 +16,7 @@ import {
   prepareActionDispatch,
   recordActionTerminal,
 } from "./store-dispatch.js";
-import { readVerifiedActionSnapshot } from "./store-read-validation.js";
+import { readRecordedActionSnapshot, readVerifiedActionSnapshot } from "./store-read-validation.js";
 import {
   assertRequestAuthority,
   equalCanonical,
@@ -104,11 +104,27 @@ export class ActionAuthorityStore {
     return readVerifiedActionSnapshot(this.files, this.authorityResolver, proposalId);
   }
 
+  getRecorded(proposalId: string): ActionAuthoritySnapshotV1 | null {
+    return readRecordedActionSnapshot(this.files, proposalId);
+  }
+
   listPending(): ActionAuthoritySnapshotV1[] {
     return this.files
       .proposalIds()
       .map((proposalId) => this.get(proposalId))
       .filter((value): value is ActionAuthoritySnapshotV1 => value?.state === "pending_review")
+      .sort(
+        (left, right) =>
+          right.proposal.created_at.localeCompare(left.proposal.created_at) ||
+          right.proposal.proposal_id.localeCompare(left.proposal.proposal_id),
+      );
+  }
+
+  list(): ActionAuthoritySnapshotV1[] {
+    return this.files
+      .proposalIds()
+      .map((proposalId) => this.get(proposalId))
+      .filter((value): value is ActionAuthoritySnapshotV1 => value !== null)
       .sort(
         (left, right) =>
           right.proposal.created_at.localeCompare(left.proposal.created_at) ||
@@ -212,6 +228,14 @@ export class ActionAuthorityStore {
 
   prepareDispatch(proposalId: string, approvalId: string): ActionDispatchRecordV1 {
     return prepareActionDispatch(this.dispatchRuntime(), proposalId, approvalId);
+  }
+
+  getDispatch(operationId: string): ActionDispatchRecordV1 | null {
+    return this.files.readDispatch(operationId);
+  }
+
+  actionRootPath(): string {
+    return this.files.actionRoot;
   }
 
   beginDispatch(proposalId: string, approvalId: string): ActionAuthoritySnapshotV1 {

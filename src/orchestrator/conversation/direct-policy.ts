@@ -1,8 +1,5 @@
-import {
-  MAX_DIRECT_CONTINUATIONS,
-  appliesToParticipant,
-  directMessagePrompt,
-} from "./message-delivery.js";
+import { DirectOutputStreamV1 } from "./direct-output-stream.js";
+import { MAX_DIRECT_CONTINUATIONS } from "./message-delivery.js";
 import type {
   ConversationContext,
   ConversationOrchestrationResult,
@@ -55,12 +52,10 @@ export class DirectConversationPolicy implements ConversationPolicy {
         artifact_refs: [],
       };
     }
-    let messages = await context.messages();
-    let observedMessages = messages.length;
-    let promptInput = directMessagePrompt(
-      messages.filter((message) => appliesToParticipant(message, participantId)),
-    );
-    if (!promptInput) promptInput = context.topic;
+    let delivery = await context.prepareTurn({
+      participant_id: participantId,
+      instruction: { kind: "direct", topic: context.topic },
+    });
     let continuation = 0;
     while (true) {
       const suffix = continuation === 0 ? "" : `:continuation:${continuation}`;
@@ -69,12 +64,13 @@ export class DirectConversationPolicy implements ConversationPolicy {
         participantId,
         bindingIndex: 0,
         purpose: "direct",
-        promptInput,
+        promptInput: delivery.prompt_input,
+        delivery,
       });
-      let stdoutChunks = 0;
+      let emittedChunks = 0;
       let emissionChain: Promise<unknown> = Promise.resolve();
       const queueDelta = (content: string) => {
-        const index = stdoutChunks++;
+        const index = emittedChunks++;
         const emitted = attempt.emit({
           idempotency_key: `${eventPrefix}:chunk:${index}`,
           event: {
@@ -91,25 +87,26 @@ export class DirectConversationPolicy implements ConversationPolicy {
         });
         emissionChain = emissionChain.then(() => emitted);
       };
+      const outputStream = new DirectOutputStreamV1(queueDelta);
       const unsubscribe = attempt.onChunk((chunk) => {
-        if (chunk.stream === "stdout" && chunk.content) queueDelta(chunk.content);
+        if (chunk.stream === "stdout" && chunk.content) outputStream.push(chunk.content);
       });
       const result = await attempt.completion;
       unsubscribe();
-      if (stdoutChunks === 0 && result.output) queueDelta(result.output);
+      const parsed = outputStream.finish(result.output);
       await emissionChain;
       const complete = result.state === "completed";
       const failed = !result.ok || context.signal.aborted;
-      let pending: MessageRequest[] = [];
+      let pending = false;
       if (!failed) {
-        messages = await context.messages();
-        pending = messages
-          .slice(observedMessages)
-          .filter((message) => appliesToParticipant(message, participantId));
-        observedMessages = messages.length;
+        delivery = await context.prepareTurn({
+          participant_id: participantId,
+          instruction: { kind: "direct", topic: null },
+        });
+        pending = delivery.applicable_user_message_count > 0;
       }
-      if (failed || !pending.length) {
-        await attempt.emit({
+      if (failed || !pending) {
+        const response = await attempt.emit({
           idempotency_key: `${eventPrefix}:complete`,
           event: {
             type: "agent_response_delta",
@@ -117,12 +114,18 @@ export class DirectConversationPolicy implements ConversationPolicy {
               round_id: `direct:${context.correlation.operation_id}`,
               participant_id: participantId,
               content_delta: "",
-              final_claim: complete && result.ok ? result.output || null : null,
+              final_claim: complete && result.ok ? parsed.answer || null : null,
               final_evidence: [],
               completes_response: complete,
             },
           },
         });
+        if (complete && result.ok && parsed.social_intent.present)
+          context.publishSocialIntent({
+            participant_id: participantId,
+            response_event_id: response.event_id,
+            request: parsed.social_intent,
+          });
       }
       if (failed) {
         return {
@@ -131,7 +134,7 @@ export class DirectConversationPolicy implements ConversationPolicy {
           artifact_refs: [],
         };
       }
-      if (!pending.length) break;
+      if (!pending) break;
       continuation += 1;
       if (continuation > MAX_DIRECT_CONTINUATIONS) {
         await context.emit({
@@ -151,7 +154,6 @@ export class DirectConversationPolicy implements ConversationPolicy {
           artifact_refs: [],
         };
       }
-      promptInput = directMessagePrompt(pending);
     }
     return {
       operation_id: context.correlation.operation_id,

@@ -3,6 +3,8 @@ import type { ArtifactRegistry } from "../trace/artifacts.js";
 import type { TraceStore } from "../trace/store.js";
 import type { InternalTraceStoreRecord } from "../trace/types.js";
 import type { ConversationArtifactStore, PersistedResumeBinding } from "./artifact-store.js";
+import { reviewedActionEventIds } from "./conversation-reviewed-action.js";
+import type { ConversationReviewedActionAuthorityV1 } from "./conversation-reviewed-action.js";
 import { snapshotMaterializedBindings } from "./emission-authority.js";
 import { foldConversation } from "./fold.js";
 import { ConversationAuthorityClosedError, type LiveConversation } from "./lifecycle-gate.js";
@@ -28,6 +30,7 @@ interface RestartRuntimeOptions {
   traceStore: TraceStore;
   artifactRegistry: ArtifactRegistry;
   artifactStore: ConversationArtifactStore;
+  reviewedActionAuthority?: ConversationReviewedActionAuthorityV1;
   id(kind: string): string;
   current(id: string): LiveConversation | undefined;
   reconcileActive(live: LiveConversation): Promise<void>;
@@ -76,7 +79,15 @@ export class ConversationRestartRuntime {
   private stateFromRecords(id: string, records: readonly InternalTraceStoreRecord[]): ControlState {
     const projected = projectConversationEvents(records, id, this.options.artifactRegistry, 0);
     if (!projected.length) return { lifecycle: "INIT", health: "healthy", transitionEpoch: 0 };
-    const { lifecycle, health } = foldConversation(projected);
+    const { lifecycle, health } = foldConversation(
+      projected,
+      reviewedActionEventIds(
+        this.options.artifactStore.rootPath(),
+        this.options.reviewedActionAuthority,
+        this.options.artifactStore.readRecord(id)?.artifacts ?? [],
+        records,
+      ),
+    );
     return { lifecycle, health, transitionEpoch: conversationTransitionEpoch(records) };
   }
 

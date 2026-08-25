@@ -21,8 +21,6 @@ import {
   defaultConversationReadiness,
 } from "../../src/orchestrator/conversation/bootstrap.js";
 import {
-  assertChildManifestAuthority,
-  createChildManifest,
   projectDryRunResult,
   projectOrchestrationResult,
   projectRuntimePreviewRequest,
@@ -541,23 +539,6 @@ describe("conversation final validation and projection coverage", () => {
         {} as never,
       ),
     ).toEqual({ operation_id: "operation-a", status: "failed", artifact_refs: [] });
-  });
-
-  test("walks the full child authority comparison before rejecting changed bindings", () => {
-    const parent = manifest();
-    const childId = "conversation-child";
-    const child = createChildManifest(parent, childId, "run-child", "2026-08-23T00:01:00.000Z");
-    child.bindings = [
-      {
-        participant_id: "changed",
-        input: { roleRef: "brainstorm-participant", engine: "codex", sessionMode: "fresh" },
-      },
-    ];
-    expect(() => assertChildManifestAuthority(child, parent, childId)).toThrow(
-      "persisted child revision authority changed",
-    );
-    const valid = createChildManifest(parent, childId, "run-child", "2026-08-23T00:01:00.000Z");
-    expect(assertChildManifestAuthority(valid, parent, childId)).toBe(valid);
   });
 });
 

@@ -1,4 +1,12 @@
-import { ASK_HELP, BRAINSTORM_HELP, CHAT_HELP, SUPERPOWERS_HELP, c } from "./_shared.js";
+import {
+  ASK_HELP,
+  BRAINSTORM_HELP,
+  CHAT_HELP,
+  SUPERPOWERS_HELP,
+  authorityCommandHelp,
+  c,
+  capabilityCommandHelp,
+} from "./_shared.js";
 export const COMMAND_HELP: Record<string, () => string> = {
   superpowers: SUPERPOWERS_HELP,
   chat: CHAT_HELP,
@@ -177,6 +185,10 @@ ${c.bold("Examples:")}
   vf config memory builtin
   vf config env-policy status
   vf config env-policy deny 'MY_APP_*'`,
+
+  capability: capabilityCommandHelp,
+
+  authority: authorityCommandHelp,
 
   skills: () =>
     `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | curator scan [--scope=local|repo] | eval <skill-dir> | update-dependent <canonical-skill> | semantic-filter [--max-reviews N] [--reviewer ID] | registry <add|list|update|install|release-propose|release>]")}

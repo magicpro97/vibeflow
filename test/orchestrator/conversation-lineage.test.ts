@@ -1,5 +1,6 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
+import * as fs from "node:fs";
 import {
   appendFileSync,
   chmodSync,
@@ -9,11 +10,12 @@ import {
   renameSync,
   statSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { conversationManifestPath } from "../../src/orchestrator/conversation/artifact-store.js";
 import { CatalogCursorCodec } from "../../src/orchestrator/conversation/catalog-cursor.js";
 import {
@@ -22,10 +24,15 @@ import {
   readPrivateDirectoryNames,
   readPrivateFileBytesAt,
 } from "../../src/orchestrator/conversation/catalog-read-safety.js";
+import { validateLineageHeadForRead } from "../../src/orchestrator/conversation/lineage-head-reader.js";
 import { deriveConversationLineages } from "../../src/orchestrator/conversation/lineage-reader.js";
 import { revisionReservationDigest } from "../../src/orchestrator/conversation/lineage-reservation.js";
-import { ConversationLineageService } from "../../src/orchestrator/conversation/lineage-service.js";
+import {
+  ConversationLineageNotFoundError,
+  ConversationLineageService,
+} from "../../src/orchestrator/conversation/lineage-service.js";
 import { LineageAuthorityStore } from "../../src/orchestrator/conversation/lineage-store.js";
+import { lineageHeadDigest } from "../../src/orchestrator/conversation/lineage-types.js";
 import {
   type ValidatedConversationSourceV1,
   readConversationSourceInventory,
@@ -318,6 +325,111 @@ test("reader derives paired legacy ancestry and one deterministic initial head w
     expect(treeDigest(root)).toEqual(before);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("source inventory retries same-inode complete and partial journal growth without degrading", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vf-lineage-growing-journal-"));
+  const realRead = fs.readSync;
+  let readSpy: ReturnType<typeof spyOn> | undefined;
+  try {
+    const artifacts = join(root, "artifacts");
+    const traces = join(root, "trace");
+    const record = durableRecord("growing");
+    writeLegacy(artifacts, traces, record);
+    const journal = traceJournalPath(traces, "growing");
+    const journalIdentity = statSync(journal);
+    const appended = storedRecord(
+      "growing",
+      record.manifest.revision_id,
+      3,
+      "2026-08-25T00:00:01.000Z",
+      { type: "user_message", payload: { content: "concurrent", target_participants: "all" } },
+    );
+    const encoded = `${JSON.stringify(appended)}\n`;
+    const split = Math.floor(encoded.length / 2);
+    let growthStep = 0;
+    readSpy = spyOn(fs, "readSync").mockImplementation(((fd, buffer, offset, length, position) => {
+      const count = realRead(fd, buffer, offset, length, position);
+      const opened = fs.fstatSync(fd);
+      if (
+        growthStep < 2 &&
+        opened.dev === journalIdentity.dev &&
+        opened.ino === journalIdentity.ino
+      ) {
+        appendFileSync(journal, growthStep === 0 ? encoded.slice(0, split) : encoded.slice(split));
+        growthStep += 1;
+      }
+      return count;
+    }) as typeof fs.readSync);
+
+    const inventory = readConversationSourceInventory({
+      artifactRoot: artifacts,
+      traceRoot: traces,
+    });
+    expect(growthStep).toBe(2);
+    expect(inventory).toMatchObject({ state: "ready", authoritative: true, diagnostics: [] });
+    expect(inventory.sources[0]?.journal_head.last_seq).toBe(3);
+    expect(inventory.sources[0]?.journal_records).toHaveLength(3);
+    expect(readdirSync(join(traces, "conversations"))).toEqual([
+      basename(traceJournalPath(traces, "growing")),
+    ]);
+  } finally {
+    readSpy?.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("source inventory does not retry replacement, shrink, or stable corruption", async () => {
+  for (const mutation of ["replace", "shrink", "stable-corruption"] as const) {
+    const root = await mkdtemp(join(tmpdir(), `vf-lineage-${mutation}-`));
+    let readSpy: ReturnType<typeof spyOn> | undefined;
+    try {
+      const artifacts = join(root, "artifacts");
+      const traces = join(root, "trace");
+      const record = durableRecord(mutation);
+      writeLegacy(artifacts, traces, record);
+      const journal = traceJournalPath(traces, mutation);
+      if (mutation === "stable-corruption") appendFileSync(journal, "{unterminated");
+      else {
+        const original = readFileSync(journal);
+        const identity = statSync(journal);
+        let mutated = false;
+        const realRead = fs.readSync;
+        readSpy = spyOn(fs, "readSync").mockImplementation(((
+          fd,
+          buffer,
+          offset,
+          length,
+          position,
+        ) => {
+          const count = realRead(fd, buffer, offset, length, position);
+          const opened = fs.fstatSync(fd);
+          if (!mutated && opened.dev === identity.dev && opened.ino === identity.ino) {
+            mutated = true;
+            if (mutation === "shrink") truncateSync(journal, Math.floor(original.length / 2));
+            else {
+              renameSync(journal, `${journal}.replaced`);
+              writeFileSync(journal, original, { mode: 0o600 });
+            }
+          }
+          return count;
+        }) as typeof fs.readSync);
+      }
+
+      const inventory = readConversationSourceInventory({
+        artifactRoot: artifacts,
+        traceRoot: traces,
+      });
+      expect(inventory.sources).toEqual([]);
+      expect(inventory).toMatchObject({ state: "degraded", authoritative: false });
+      expect(inventory.diagnostics).toContainEqual(
+        expect.objectContaining({ code: "invalid-journal", record_id: mutation }),
+      );
+    } finally {
+      readSpy?.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -621,6 +733,42 @@ test("lineage writer installs deterministic initial authority and restart reads 
   }
 });
 
+test("initial head remains authoritative as the selected leaf journal advances", () => {
+  const source = memorySource("root");
+  const initial = deriveConversationLineages({
+    schema_version: "1.0",
+    state: "ready",
+    authoritative: true,
+    sources: [source],
+    diagnostics: [],
+    observed_source_digest: `sha256:${"d".repeat(64)}`,
+  }).lineages[0];
+  if (!initial?.initial_head_candidate) throw new Error("missing initial lineage head");
+  const installed = initial.initial_head_candidate;
+  const advancedSource = structuredClone(source);
+  advancedSource.journal_head.updated_at = "2026-08-25T00:00:01.000Z";
+  advancedSource.journal_head.last_seq = 1;
+  const advanced = deriveConversationLineages({
+    schema_version: "1.0",
+    state: "ready",
+    authoritative: true,
+    sources: [advancedSource],
+    diagnostics: [],
+    observed_source_digest: `sha256:${"e".repeat(64)}`,
+  }).lineages[0];
+  if (!advanced) throw new Error("missing advanced lineage");
+  expect(validateLineageHeadForRead(installed, advanced)).toEqual(installed);
+
+  const { content_digest: _digest, ...futureBody } = {
+    ...installed,
+    updated_at: "2026-08-25T00:00:02.000Z",
+  };
+  const future = { ...futureBody, content_digest: lineageHeadDigest(futureBody) };
+  expect(() => validateLineageHeadForRead(future, advanced)).toThrow(
+    "initial lineage head differs from deterministic candidate",
+  );
+});
+
 test("an explicit first-head deferral persists unclaimed without changing an installed winner", async () => {
   const root = await mkdtemp(join(tmpdir(), "vf-lineage-deferred-"));
   try {
@@ -723,6 +871,22 @@ test("lineage service resolves any revision ID and paginates the selected ancest
       cursorCodec: new CatalogCursorCodec(Buffer.alloc(32, 8)),
       readInventory: () => inventory,
     });
+    const head = service.head("root");
+    expect(head).toMatchObject({
+      schema_version: "1.0",
+      root_session_id: "root",
+      head_status: "committed",
+      head_epoch: 0,
+      active: {
+        conversation_id: "child",
+        revision_id: "revision-child",
+        revision_ordinal: 1,
+        last_seq: 0,
+      },
+    });
+    expect(head.head_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(head.active?.lock_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(() => service.head("child")).toThrow(ConversationLineageNotFoundError);
     const first = service.read("child", { limit: 1 });
     expect(first).toMatchObject({
       root_session_id: "root",

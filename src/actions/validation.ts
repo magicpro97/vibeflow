@@ -21,6 +21,7 @@ const DIRECT_KEYS: Record<string, readonly string[]> = {
   "conversation.remove_participant": ["participant_id"],
   "conversation.update_participant": ["participant_id", "changes"],
   "conversation.update_settings": ["changes"],
+  "conversation.continue_message": ["content", "target_participants"],
   "conversation.select_lineage_head": [
     "root_session_id",
     "candidate_conversation_id",
@@ -60,6 +61,10 @@ const DIRECT_KEYS: Record<string, readonly string[]> = {
   "registry.trust_key": ["scope", "change"],
   "authority.repair": ["repair_id", "plan_digest"],
 };
+const OPTIONAL_KEYS: Partial<Record<HostActionRequestV1["type"], readonly string[]>> = {
+  "conversation.continue_message": ["quote_refs"],
+};
+const DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 function stringArray(value: unknown, path: string, allowEmpty = true): string[] {
   if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.length > 256)
@@ -68,6 +73,20 @@ function stringArray(value: unknown, path: string, allowEmpty = true): string[] 
   if (new Set(output).size !== output.length)
     throw new ActionValidationError("duplicate array item", path);
   return output;
+}
+
+function targetParticipants(value: unknown, path: string): void {
+  if (value === "all") return;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64)
+    throw new ActionValidationError("expected all or a bounded participant array", path);
+  const targets = value.map((item, index) =>
+    boundedString(item, `${path}[${index}]`, { max: 200 }),
+  );
+  if (new Set(targets).size !== targets.length)
+    throw new ActionValidationError("duplicate target participant", path);
+  const canonical = [...targets].sort();
+  if (canonical.some((target, index) => target !== targets[index]))
+    throw new ActionValidationError("target participants are not in canonical order", path);
 }
 
 function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>, path: string): T {
@@ -171,7 +190,7 @@ export function validateHostActionRequest(value: unknown, browser = false): Host
   const discriminant = exactObject(
     value,
     ["type"],
-    Object.values(DIRECT_KEYS).flat(),
+    [...Object.values(DIRECT_KEYS).flat(), ...Object.values(OPTIONAL_KEYS).flat()],
     "$.candidate",
   ).type;
   if (typeof discriminant !== "string" || !isHostActionKind(discriminant))
@@ -186,7 +205,12 @@ export function validateHostActionRequest(value: unknown, browser = false): Host
       "$.candidate.type",
       "target_unsupported",
     );
-  const row = exactObject(value, ["type", ...(DIRECT_KEYS[discriminant] ?? [])], [], "$.candidate");
+  const row = exactObject(
+    value,
+    ["type", ...(DIRECT_KEYS[discriminant] ?? [])],
+    [...(OPTIONAL_KEYS[discriminant] ?? [])],
+    "$.candidate",
+  );
   validateCandidateFields(discriminant, row);
   return value as HostActionRequestV1;
 }
@@ -212,6 +236,7 @@ function validateCandidateFields(
         "grant",
         "replacement_authority_subtree",
         "change",
+        "target_participants",
       ].includes(key),
   );
   for (const key of strings) if (row[key] !== null) boundedString(row[key], `${path}.${key}`);
@@ -244,6 +269,54 @@ function validateCandidateFields(
       safeInteger(changes.max_rounds, `${path}.changes.max_rounds`, 1);
     if (changes.baseline_enabled !== undefined && typeof changes.baseline_enabled !== "boolean")
       throw new ActionValidationError("expected boolean", `${path}.changes.baseline_enabled`);
+  }
+  if (type === "conversation.continue_message") {
+    const content = boundedString(row.content, `${path}.content`, { max: 65_536 });
+    if (!content.trim()) throw new ActionValidationError("message content cannot be blank", path);
+    targetParticipants(row.target_participants, `${path}.target_participants`);
+    if (row.quote_refs !== undefined) {
+      if (!Array.isArray(row.quote_refs) || row.quote_refs.length < 1 || row.quote_refs.length > 8)
+        throw new ActionValidationError("invalid quote reference count", `${path}.quote_refs`);
+      const seen = new Set<string>();
+      for (const [index, item] of row.quote_refs.entries()) {
+        const quote = exactObject(
+          item,
+          [
+            "root_session_id",
+            "conversation_id",
+            "revision_id",
+            "target_event_id",
+            "target_kind",
+            "content_digest",
+            "author_public_id",
+          ],
+          [],
+          `${path}.quote_refs[${index}]`,
+        );
+        for (const key of [
+          "root_session_id",
+          "conversation_id",
+          "revision_id",
+          "target_event_id",
+          "author_public_id",
+        ])
+          boundedString(quote[key], `${path}.quote_refs[${index}].${key}`, { max: 512 });
+        if (
+          (quote.target_kind !== "user-message" &&
+            quote.target_kind !== "completed-agent-response") ||
+          typeof quote.content_digest !== "string" ||
+          !DIGEST.test(quote.content_digest)
+        )
+          throw new ActionValidationError(
+            "invalid quote reference",
+            `${path}.quote_refs[${index}]`,
+          );
+        const semantic = `${quote.target_event_id}\0${quote.content_digest}`;
+        if (seen.has(semantic))
+          throw new ActionValidationError("duplicate quote reference", `${path}.quote_refs`);
+        seen.add(semantic);
+      }
+    }
   }
   if (type === "conversation.associate_lineages")
     stringArray(row.root_session_ids, `${path}.root_session_ids`, false);

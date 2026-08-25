@@ -194,6 +194,7 @@ function validateTarget(
       "applied",
       "failed",
       "manual",
+      "required-user-action",
       "unsupported",
       "omitted",
       "reversed",
@@ -234,20 +235,20 @@ function validatePhaseState(
   if (targetBearing !== (event.target !== null))
     throw new Error("operation phase target nullability mismatch");
   if (event.target) {
-    const outcomes: Record<string, string> = {
-      "target-applied": "applied",
-      "target-omitted": "omitted",
-      "target-reversed": "reversed",
-      "target-degraded": "degraded",
-      "target-failed": "failed",
-      "target-blocked": "blocked",
-      "target-needs-recovery": "needs-recovery",
-      "participant-start:accepted": "applied",
-      "participant-start:failed": "failed",
-      "participant-start:canceled": "reversed",
-      "participant-start:uncertain": "needs-recovery",
+    const outcomes: Record<string, readonly string[]> = {
+      "target-applied": ["applied"],
+      "target-omitted": ["omitted"],
+      "target-reversed": ["reversed"],
+      "target-degraded": ["degraded"],
+      "target-failed": ["failed"],
+      "target-blocked": ["blocked", "manual", "required-user-action", "unsupported"],
+      "target-needs-recovery": ["needs-recovery"],
+      "participant-start:accepted": ["applied"],
+      "participant-start:failed": ["failed"],
+      "participant-start:canceled": ["reversed"],
+      "participant-start:uncertain": ["needs-recovery"],
     };
-    if (event.target.outcome !== outcomes[phase])
+    if (!outcomes[phase]?.includes(event.target.outcome))
       throw new Error("operation phase target outcome mismatch");
     if (
       phase.startsWith("participant-start:") &&

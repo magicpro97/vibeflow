@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { ENGINES, type Engine } from "../../core/types.js";
-import { isSafeNativeSessionId } from "../../dispatch/public-redaction.js";
-import type { InternalResumeBinding } from "../../dispatch/session-types.js";
+import {
+  type PersistedResumeBinding,
+  assertPersistedResumeBinding,
+} from "./artifact-resume-validation.js";
+export type { PersistedResumeBinding } from "./artifact-resume-validation.js";
 import type {
   ArtifactCreateRequest,
   ArtifactUpdateRequest,
@@ -26,9 +29,6 @@ export interface BindingAuthoritySnapshot {
   role_hash: string;
   skill_hashes: string[];
 }
-export interface PersistedResumeBinding extends InternalResumeBinding {
-  participant_id: string;
-}
 export interface ConversationDurableRecord {
   manifest: ConversationManifest;
   binding_authorities: BindingAuthoritySnapshot[];
@@ -51,6 +51,7 @@ const ARTIFACT_TYPES = new Set([
   "tests",
   "synthesis",
   "transcript",
+  "compaction",
 ]);
 const SESSION_MODES = new Set(["exact", "replay", "fresh"]);
 
@@ -246,19 +247,6 @@ const assertAuthority: (value: unknown) => asserts value is BindingAuthoritySnap
     fail();
 };
 
-const assertResume: (value: unknown) => asserts value is PersistedResumeBinding = (value) => {
-  if (
-    !plain(value) ||
-    !exact(value, ["attemptId", "engine", "nativeSessionId", "participant_id"]) ||
-    !ref(value.participant_id) ||
-    !ref(value.attemptId) ||
-    !ENGINES.includes(value.engine as Engine) ||
-    typeof value.nativeSessionId !== "string" ||
-    !isSafeNativeSessionId(value.engine as Engine, value.nativeSessionId)
-  )
-    fail();
-};
-
 const assertArtifact: (value: unknown) => asserts value is ConversationArtifactEntry = (value) => {
   if (
     !plain(value) ||
@@ -325,7 +313,7 @@ export function assertConversationDurableRecord(value: unknown, expectedId?: str
   if (
     !list(resumeBindings, (item): item is PersistedResumeBinding => {
       try {
-        assertResume(item);
+        assertPersistedResumeBinding(item);
         return true;
       } catch {
         return false;

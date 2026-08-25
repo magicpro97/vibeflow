@@ -13,6 +13,14 @@ import {
   gateResult,
   persistImplementationFingerprints,
 } from "../verify/core.js";
+import { CAPABILITY_DESIGN_PATH } from "../verify/normative-matrix-source.js";
+import { checkNormativeMatrix } from "../verify/normative-matrix.js";
+import {
+  type NormativeAsyncSpawner,
+  defaultNormativeAsyncSpawner,
+  runNormativeProofsAsync,
+} from "../verify/normative-proof-run-async.js";
+import type { NormativeProofRunV2 } from "../verify/normative-proof-run.js";
 import {
   e2eEvaluateDynamicImportWarning,
   e2eUnicodeSelectorWarning,
@@ -21,7 +29,6 @@ import {
   join,
   readFileSync,
   readState,
-  spawn,
   writeFileSafe,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
@@ -182,7 +189,7 @@ export type VerifyReport = VerifyCoreReport;
 export async function collectVerifyReportAsync(
   base: string,
   inject: {
-    spawner?: (cmd: string, args: string[], opts: object) => Promise<{ status: number | null }>;
+    spawner?: NormativeAsyncSpawner;
     coverage?: boolean;
     goal?: string; // ADR-003
     goalEvalFn?: (
@@ -192,17 +199,11 @@ export async function collectVerifyReportAsync(
     requireReviewEvidence?: boolean;
     reviewBase?: string; // #748: pushed-range fallback base
     catalogDir?: string;
+    normativeProofRun?: NormativeProofRunV2;
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
-  const run =
-    inject.spawner ??
-    ((cmd: string, args: string[], opts: object): Promise<{ status: number | null }> =>
-      new Promise((resolve) => {
-        const child = spawn(cmd, args, opts as object);
-        child.on("close", (code: number | null) => resolve({ status: code }));
-        child.on("error", () => resolve({ status: 1 }));
-      }));
+  const run: NormativeAsyncSpawner = inject.spawner ?? defaultNormativeAsyncSpawner;
 
   const runGate = async (label: string, cmd: string, args: string[], dir = base) => {
     const r = await run(cmd, args, { stdio: "ignore", cwd: dir });
@@ -277,6 +278,11 @@ export async function collectVerifyReportAsync(
     review.ok ? (review.reason.includes("(warn)") ? "warn" : "pass") : "fail",
     review.reason,
   );
+  let normativeProofRun = inject.normativeProofRun;
+  if (!normativeProofRun && existsSync(join(base, CAPABILITY_DESIGN_PATH))) {
+    normativeProofRun = await runNormativeProofsAsync(base, { spawner: run });
+  }
+  const normative = checkNormativeMatrix(base, { proofRun: normativeProofRun });
   const e2eWarnings = [
     ...e2eUnicodeSelectorWarning(base),
     ...e2eEvaluateDynamicImportWarning(base),
@@ -290,6 +296,11 @@ export async function collectVerifyReportAsync(
     waiver: waiverResult,
     registryLock: registryResult,
     reviewEvidence: reviewResult,
+    normativeMatrix: gateResult(
+      !normative.applicable ? "skipped" : normative.ok ? "pass" : "fail",
+      normative.details,
+      normative.evidence_refs,
+    ),
     advisoryE2e: e2eWarnings.length
       ? gateResult("warn", e2eWarnings.join("\n"))
       : gateResult("pass", "advisory E2E scan passed"),

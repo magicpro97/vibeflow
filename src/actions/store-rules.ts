@@ -199,6 +199,7 @@ export function assertDispatchHeaderRule(proposal: ActionProposalV1, header: str
     "conversation.remove_participant",
     "conversation.update_participant",
     "conversation.update_settings",
+    "conversation.continue_message",
     "conversation.abandon_revision_operation",
     "conversation.retry_revision_operation",
     "conversation.reconcile_revision_operation",

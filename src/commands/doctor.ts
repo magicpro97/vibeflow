@@ -42,6 +42,7 @@ import {
   statSync,
   table,
 } from "./_shared.js";
+import { legacyWriterFence } from "./capability/legacy-fence.js";
 
 /** Shape written by `ensureCtx7Auth` (issue #630). Untrusted on-disk JSON —
  *  callers must not assume the fields are present/well-typed. */
@@ -228,6 +229,13 @@ export async function doctor(
     c.yellow(
       "  codex hook coverage: native Bash/shell only; config is global at ~/.codex/ (Edit/Write/apply_patch/MCP calls remain unguarded)",
     ),
+  );
+  const legacyFence = legacyWriterFence(base);
+  out(
+    "vf",
+    `  compatibility writers: ${
+      legacyFence.blocked ? c.yellow(`BLOCKED — ${legacyFence.details}`) : c.green("clear")
+    }`,
   );
   printCtx7AuthStatus(base);
 

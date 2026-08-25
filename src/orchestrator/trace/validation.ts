@@ -51,6 +51,7 @@ export const isValidParticipantModel = (value: unknown): value is string =>
   !localModelPath.test(value) &&
   !modelCredential.test(value);
 const model = union(nil, isValidParticipantModel);
+const digest: Rule = (value) => typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value);
 const tools = array(literal("read", "write", "edit", "bash", "grep", "glob", "web"));
 const lifecycle = literal("INIT", "ACTIVE", "PAUSED", "COMPLETED", "STOPPED", "FAILED", "ABORTED");
 
@@ -92,7 +93,15 @@ const rules: Record<string, Rule> = {
   lifecycle,
   terminalLifecycle: literal("COMPLETED", "STOPPED", "FAILED", "ABORTED"),
   operationState: literal("requested", "dispatched", "acknowledged", "completed", "ambiguous"),
-  artifactType: literal("decision_matrix", "plan", "diff", "tests", "synthesis", "transcript"),
+  artifactType: literal(
+    "decision_matrix",
+    "plan",
+    "diff",
+    "tests",
+    "synthesis",
+    "transcript",
+    "compaction",
+  ),
   true: literal(true),
   sandbox: literal("read-only", "workspace-write", "danger-full-access"),
   skillSource: literal("repo", "shared", "builtin"),
@@ -143,6 +152,19 @@ rules.approvalDecision = compileShape(
   "approval_id:reference operation_id:reference actor:reference outcome:approvalOutcome reason:nullableText",
   rules,
 );
+rules.publicMessageLocator = compileShape(
+  "root_session_id:reference conversation_id:reference revision_id:reference target_event_id:reference target_kind:messageTargetKind content_digest:digest author_public_id:reference",
+  {
+    ...rules,
+    digest,
+    messageTargetKind: literal("user-message", "completed-agent-response"),
+  },
+);
+rules.quoteReferenceArray = (value) =>
+  Array.isArray(value) &&
+  value.length >= 1 &&
+  value.length <= 8 &&
+  value.every(rules.publicMessageLocator as Rule);
 const eventSchemas = {
   conversation_configured: "topic:text participants:participantArray policy:text max_rounds:number",
   coordinator_decision: "selected_policy:text reason:text",
@@ -155,7 +177,8 @@ const eventSchemas = {
   tool_action:
     "tool:reference action:text status:toolStatus input_ref:nullableReference output_ref:nullableReference",
   evaluator_assessment: "round_id:reference stage:assessmentStage assessment:assessment",
-  user_message: "content:text target_participants:targetParticipants",
+  user_message:
+    "content:text target_participants:targetParticipants quote_refs?:quoteReferenceArray",
   consensus_update: "round_id:reference decision:decision",
   round_boundary: "round_id:reference phase:roundPhase",
   state_change: "lifecycle:lifecycle health:health terminal:boolean reason:nullableText",

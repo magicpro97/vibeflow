@@ -116,6 +116,11 @@ export function previewAgentPolicyContext(
     ),
     signal: new AbortController().signal,
     messages: () => Promise.resolve(Object.freeze([])),
+    prepareTurn: () => Promise.reject(new Error("dry-run context is read-only")),
+    publishSocialIntent: () => ({
+      accepted: false,
+      diagnostic_code: "dry_run_context",
+    }),
     emit: () => Promise.reject(new Error("dry-run context is read-only")),
     launchAttempt: denied,
     createArtifact: () => Promise.reject(new Error("dry-run context is read-only")),
@@ -136,6 +141,11 @@ export function previewPolicyContext(
     ...policyContextView(manifest, snapshotMaterializedBindings(bindings)),
     signal: new AbortController().signal,
     messages: () => Promise.resolve(Object.freeze([])),
+    prepareTurn: () => Promise.reject(new Error("dry-run context is read-only")),
+    publishSocialIntent: () => ({
+      accepted: false,
+      diagnostic_code: "dry_run_context",
+    }),
     emit: () => Promise.reject(new Error("dry-run context is read-only")),
     launchAttempt: denied,
     createArtifact: () => Promise.reject(new Error("dry-run context is read-only")),

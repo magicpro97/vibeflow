@@ -1,5 +1,5 @@
 import { readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   type ProcessLock,
   type VffrDomain,
@@ -90,21 +90,27 @@ function strictRecord(value: unknown): Record<string, unknown> {
 }
 
 export class ActionFilePersistence {
+  readonly actionRoot: string;
   readonly root: string;
   private readonly proposals: string;
   private readonly operations: string;
   private readonly idempotency: string;
   private readonly challenges: string;
   private readonly dispatches: string;
+  private readonly oversizedHandoffIssuance: string;
   private readonly lockPath: string;
 
   constructor(actionRoot: string) {
     this.root = ensurePrivateDirectory(join(actionRoot, "actions", "v1"));
+    this.actionRoot = dirname(dirname(this.root));
     this.proposals = ensurePrivateDirectory(join(this.root, "proposals"));
     this.operations = ensurePrivateDirectory(join(this.root, "operations"));
     this.idempotency = ensurePrivateDirectory(join(this.root, "idempotency"));
     this.challenges = ensurePrivateDirectory(join(this.root, "challenges"));
     this.dispatches = ensurePrivateDirectory(join(this.root, "dispatch"));
+    this.oversizedHandoffIssuance = ensurePrivateDirectory(
+      join(this.root, "oversized-handoff-issuance"),
+    );
     this.lockPath = join(this.root, "writer.lock");
   }
 
@@ -132,6 +138,14 @@ export class ActionFilePersistence {
   idempotencyPath(fileKey: string): string {
     if (!/^[a-f0-9]{64}$/.test(fileKey)) throw new Error("invalid idempotency file key");
     return join(this.idempotency, `${fileKey}.frames`);
+  }
+
+  hasOversizedHandoffIssuance(fileKey: string): boolean {
+    if (!/^[a-f0-9]{64}$/.test(fileKey)) throw new Error("invalid oversized issuance key");
+    return (
+      privateFileBytes(join(this.oversizedHandoffIssuance, `${fileKey}.frames`), MAX_FILE_BYTES) !==
+      null
+    );
   }
 
   dispatchPath(operationId: string): string {

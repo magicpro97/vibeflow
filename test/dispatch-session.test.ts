@@ -832,7 +832,12 @@ describe("attempt lifecycle and cleanup", () => {
     const req = request("claude", { attemptId: "attempt-pre-spawn-failure" });
     expect(() => adapter.start(req)).toThrow(/spawn exploded/);
     const files = readdirSync(root);
-    expect(files).toEqual(["attempt-pre-spawn-failure.json"]);
+    expect(files.sort()).toEqual(["attempt-pre-spawn-failure.json", "start-authority"]);
+    expect(adapter.startAuthority?.read("attempt-pre-spawn-failure")).toMatchObject({
+      attempt_id: "attempt-pre-spawn-failure",
+      outcome: "unknown",
+      process_quiescent: true,
+    });
     expect(statSync(join(root, files[0] as string)).size).toBeGreaterThan(0);
     const evidence = JSON.parse(readFileSync(join(root, files[0] as string), "utf8")) as Record<
       string,
@@ -1651,6 +1656,14 @@ describe("native resume evidence and history reconciliation", () => {
     const evidence = readFileSync(internalEvidence?.internalRef as string, "utf8");
     expect(evidence).not.toContain(nativeId);
     expect(evidence).not.toContain("thread.started");
+    expect(adapter.startAuthority?.read("attempt-immutable-1")).toMatchObject({
+      attempt_id: "attempt-immutable-1",
+      engine: "codex",
+      outcome: "accepted",
+      native_session_id: nativeId,
+      evidence_ref: internalEvidence?.internalRef,
+      process_quiescent: true,
+    });
     expect(() => adapter.start(request("codex", { attemptId: "attempt-immutable-1" }))).toThrow(
       /immutable attempt evidence already exists/,
     );

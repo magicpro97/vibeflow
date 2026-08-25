@@ -12,6 +12,7 @@ export const VFFR_DOMAINS = Object.freeze([
   "registry-trust",
   "secret-revocation",
   "literal-staging",
+  "private-file-range-staging",
   "conversation-action-receipt",
   "authority-change-terminal",
   "authority-repair",

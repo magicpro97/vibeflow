@@ -36,9 +36,9 @@ import {
 
 export type { ProcessLockOwnerV1 } from "./lock-owner.js";
 export { processStartIdentity } from "./lock-owner.js";
-
 export interface AcquireProcessLockOptions {
   operation: string;
+  coverageRoot?: string;
   timeoutMs?: number;
   pollIntervalMs?: number;
   fault?: (point: LockPublicationFaultPoint) => void;
@@ -65,6 +65,7 @@ export type ProcessLockStatus =
 
 interface LockState {
   root: PinnedDirectory;
+  coverageRoot: PinnedDirectory | null;
   name: string;
   fd: number;
   expected: Buffer;
@@ -129,6 +130,7 @@ function assertEntry(root: PinnedDirectory, name: string, fd: number): void {
 function assertStateHeld(state: LockState): void {
   if (state.released) durabilityError("lock_lost", "process lock is released");
   assertEntry(state.root, state.name, state.fd);
+  if (state.coverageRoot) assertPinnedDirectory(state.coverageRoot);
   const current = readStableLockRecord(state.fd, state.name);
   if (
     current.generation !== state.generation ||
@@ -143,7 +145,7 @@ export function assertProcessLockCovers(lock: ProcessLock, targetPath: string): 
   const state = stateOf(lock);
   assertStateHeld(state);
   const target = canonicalDurabilityPath(targetPath);
-  const relationship = relative(state.root.path, dirname(target));
+  const relationship = relative((state.coverageRoot ?? state.root).path, dirname(target));
   if (isAbsolute(relationship) || relationship === ".." || relationship.startsWith(`..${sep}`))
     durabilityError("lock_lost", "process lock does not cover the target path");
 }
@@ -157,7 +159,7 @@ export function withLockedParent<T>(
   assertProcessLockCovers(lock, targetPath);
   const state = stateOf(lock);
   const target = canonicalDurabilityPath(targetPath);
-  const directory = openPinnedDescendant(state.root, dirname(target), create);
+  const directory = openPinnedDescendant(state.coverageRoot ?? state.root, dirname(target), create);
   return withCleanup(() => {
     assertStateHeld(state);
     const result = callback(directory, basename(target));
@@ -172,7 +174,12 @@ function wait(milliseconds: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
-function closeAttempt(root: PinnedDirectory, fd: number, unlock: boolean): void {
+function closeAttempt(
+  root: PinnedDirectory,
+  coverageRoot: PinnedDirectory | null,
+  fd: number,
+  unlock: boolean,
+): void {
   try {
     if (unlock) releaseAdvisoryLock(fd);
   } catch {
@@ -187,6 +194,13 @@ function closeAttempt(root: PinnedDirectory, fd: number, unlock: boolean): void 
     closePinnedDirectory(root);
   } catch {
     // Acquisition already failed; cleanup must preserve that primary error.
+  }
+  if (coverageRoot) {
+    try {
+      closePinnedDirectory(coverageRoot);
+    } catch {
+      // Acquisition already failed; cleanup must preserve that primary error.
+    }
   }
 }
 
@@ -210,6 +224,13 @@ function finishRelease(state: LockState): void {
     closePinnedDirectory(state.root);
   } catch (error) {
     failure ??= error;
+  }
+  if (state.coverageRoot) {
+    try {
+      closePinnedDirectory(state.coverageRoot);
+    } catch (error) {
+      failure ??= error;
+    }
   }
   if (failure) throw failure;
 }
@@ -287,6 +308,19 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
   const deadline = Date.now() + timeoutMs;
   const target = canonicalDurabilityPath(path);
   const root = openPrivateDirectory(dirname(target), true);
+  let coverageRoot: PinnedDirectory | null = null;
+  try {
+    if (options.coverageRoot !== undefined) {
+      const coveragePath = canonicalDurabilityPath(options.coverageRoot);
+      const relationship = relative(coveragePath, dirname(target));
+      if (isAbsolute(relationship) || relationship === ".." || relationship.startsWith(`..${sep}`))
+        durabilityError("invalid_value", "process lock coverage root does not own the lock path");
+      if (coveragePath !== root.path) coverageRoot = openPrivateDirectory(coveragePath, false);
+    }
+  } catch (error) {
+    closePinnedDirectory(root);
+    throw error;
+  }
   const name = basename(target);
   const canonicalPath = `${root.path}/${name}`;
   let fd: number | undefined;
@@ -299,6 +333,7 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
     return cleanupThenThrow(error, [
       ...(opened === undefined ? [] : [() => fs.closeSync(opened)]),
       () => closePinnedDirectory(root),
+      ...(coverageRoot ? [() => closePinnedDirectory(coverageRoot as PinnedDirectory)] : []),
     ]);
   }
   let locked = false;
@@ -326,6 +361,7 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
     }
     const state: LockState = {
       root,
+      coverageRoot,
       name,
       fd,
       expected,
@@ -358,7 +394,7 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
     assertStateHeld(state);
     return makeHandle(canonicalPath, owner, state);
   } catch (error) {
-    closeAttempt(root, fd, locked);
+    closeAttempt(root, coverageRoot, fd, locked);
     throw error;
   }
 }

@@ -79,9 +79,6 @@ function fixture(
       finalized.push(result);
       return result;
     },
-    async () => undefined,
-    () => "2026-08-22T00:00:00.000Z",
-    (task) => task(),
   );
   return {
     continuations,

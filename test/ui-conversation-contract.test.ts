@@ -1,230 +1,164 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import {
-  OPAQUE_ARTIFACT_PATTERN,
-  OPAQUE_SESSION_PATTERN,
-  createConversationStreamAttemptGuard,
-  recoverConversationStreamAttempt,
-} from "../src/ui/src/conversation-types.js";
+import { existsSync, readFileSync } from "node:fs";
 
-const apiSource = readFileSync(
-  new URL("../src/ui/src/conversation-api.ts", import.meta.url),
-  "utf8",
-);
-const storeSource = readFileSync(
-  new URL("../src/ui/src/conversation-store.ts", import.meta.url),
-  "utf8",
-);
-const streamSource = readFileSync(
-  new URL("../src/ui/src/composables/useConversationStream.ts", import.meta.url),
-  "utf8",
-);
-const workspaceLogicSource = readFileSync(
-  new URL("../src/ui/src/composables/useConversationWorkspace.ts", import.meta.url),
-  "utf8",
-);
-const typeSource = readFileSync(
-  new URL("../src/ui/src/conversation-types.ts", import.meta.url),
-  "utf8",
-);
-const workspaceSource = readFileSync(
-  new URL("../src/ui/src/components/ChatWorkspace.vue", import.meta.url),
-  "utf8",
-);
-const panelSource = readFileSync(
-  new URL("../src/ui/src/components/ConversationPanel.vue", import.meta.url),
-  "utf8",
-);
-const traceSource = readFileSync(
-  new URL("../src/ui/src/components/TraceDrawer.vue", import.meta.url),
-  "utf8",
-);
-const artifactSource = readFileSync(
-  new URL("../src/ui/src/components/ArtifactCard.vue", import.meta.url),
-  "utf8",
-);
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+const app = read("../src/ui/src/App.vue");
+const home = read("../src/ui/src/components/ConversationHome.vue");
+const rail = read("../src/ui/src/components/HomeSessionRail.vue");
+const timeline = read("../src/ui/src/components/HomeTimeline.vue");
+const composer = read("../src/ui/src/components/HomeComposer.vue");
+const quoteSelection = read("../src/ui/src/components/HomeQuoteSelectionList.vue");
+const action = read("../src/ui/src/components/HomeActionCard.vue");
+const anchoredActions = read("../src/ui/src/components/HomeAnchoredOperations.vue");
+const capability = read("../src/ui/src/components/HomeCapabilityDrawer.vue");
+const preferences = read("../src/ui/src/components/HomePreferencesDrawer.vue");
+const trace = read("../src/ui/src/components/HomeTraceDrawer.vue");
+const api = read("../src/ui/src/conversation-home-api.ts");
+const store = read("../src/ui/src/conversation-home-store.ts");
+const queryActive = read("../src/ui/src/conversation-home-query-active.ts");
+const queryRuntime = read("../src/ui/src/conversation-home-query-runtime.ts");
+const commandRuntime = read("../src/ui/src/conversation-home-command-runtime.ts");
+const streamRuntime = read("../src/ui/src/conversation-home-stream.ts");
+const pagination = read("../src/ui/src/conversation-home-pagination.ts");
+const authoring = read("../src/ui/src/conversation-home-authoring.ts");
+const operationStream = read("../src/ui/src/conversation-home-operation-stream.ts");
+const state = read("../src/ui/src/conversation-home-state.ts");
+const types = read("../src/ui/src/conversation-home-types.ts");
+const rootStore = read("../src/ui/src/store.ts");
+const workUnitDetails = read("../src/ui/src/components/WorkUnitExpandedDetails.vue");
 
-function conversationEventsUrl(conversationId: string, streamToken: string, cursor = 0): string {
-  const params = new URLSearchParams({ stream_token: streamToken });
-  if (cursor > 0) params.set("since", String(cursor));
-  return `/api/conversations/${encodeURIComponent(conversationId)}/events?${params.toString()}`;
-}
-
-function conversationArtifactUrl(conversationId: string, opaqueId: string): string {
-  return `/api/conversations/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(
-    opaqueId,
-  )}`;
-}
-
-describe("ui conversation API contract", () => {
-  test("events URL carries memory-only stream token and cursor", () => {
-    expect(conversationEventsUrl("conversation-1", "token-abc")).toBe(
-      "/api/conversations/conversation-1/events?stream_token=token-abc",
+describe("AI-first Home source contract", () => {
+  test("App mounts the conversation Home directly and removes the modal workspace", () => {
+    expect(app).toContain("<ConversationHome");
+    expect(app).toContain('import ConversationHome from "./components/ConversationHome.vue"');
+    expect(app).not.toMatch(/ChatWorkspace|WorkflowDashboard|Stage1Describe|askOpen/);
+    expect(existsSync(new URL("../src/ui/src/components/ChatWorkspace.vue", import.meta.url))).toBe(
+      false,
     );
-    expect(conversationEventsUrl("conversation/1", "token-abc", 42)).toBe(
-      "/api/conversations/conversation%2F1/events?stream_token=token-abc&since=42",
-    );
-  });
-
-  test("artifact URL is opaque and conversation scoped", () => {
     expect(
-      conversationArtifactUrl(
-        "conversation/1",
-        "artifact_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      ),
-    ).toBe(
-      "/api/conversations/conversation%2F1/artifacts/artifact_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    );
+      existsSync(new URL("../src/ui/src/components/ConversationPanel.vue", import.meta.url)),
+    ).toBe(false);
   });
 
-  test("SSE parsing stays a plain public JSON decode", () => {
-    expect(apiSource).toContain("JSON.parse(raw)");
-    expect(apiSource).not.toMatch(/native_session_id|prompt_template|raw_env/);
+  test("session rail is persistent, searchable, and generation-safe", () => {
+    expect(home).toContain("<HomeSessionRail />");
+    expect(rail).toContain('aria-label="Conversations"');
+    expect(rail).toContain('placeholder="Search conversations"');
+    expect(rail).toContain("store.selectSession(rootSessionId)");
+    expect(api).toContain("/api/conversations?");
+    expect(store).toContain("new ActivationEpoch()");
+    expect(queryRuntime).toContain("token.isCurrent()");
+    expect(queryRuntime).toContain("loadMoreSessions");
+    expect(pagination).toContain("mergeHomePage");
+    expect(pagination).toContain("staleHomeCursor");
   });
 
-  test("opaque id patterns accept public IDs and reject raw paths", () => {
-    expect(
-      OPAQUE_ARTIFACT_PATTERN.test("artifact_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
-    ).toBe(true);
-    expect(OPAQUE_ARTIFACT_PATTERN.test("../tmp/secret.txt")).toBe(false);
-    expect(OPAQUE_SESSION_PATTERN.test("session_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")).toBe(
-      true,
-    );
-    expect(OPAQUE_SESSION_PATTERN.test("session-local-dev")).toBe(false);
+  test("timeline and composer are natural, IME-safe, and memory-only", () => {
+    expect(timeline).toContain('aria-label="Conversation timeline"');
+    expect(timeline).toContain("projectHomeTimeline");
+    expect(composer).toContain('@compositionstart="composing = true"');
+    expect(composer).toContain("event.isComposing");
+    expect(composer).toContain("Shift+Enter");
+    expect(composer).toContain("will not send itself");
+    expect(state).toContain('kind: "add-participant"');
+    expect(state).toContain('kind: "install-capability"');
+    expect(store).not.toContain("privateFileIntent");
+    for (const source of [home, rail, timeline, composer, store, state, rootStore])
+      expect(source).not.toMatch(/localStorage|sessionStorage|document\.cookie/);
   });
-});
 
-describe("ui conversation client source contract", () => {
-  test("conversation files avoid browser persistence and private runtime fields", () => {
+  test("actions and capabilities use real shared browser authorities", () => {
+    expect(api).toContain("/action-proposals");
+    expect(api).toContain("/approval-challenge");
+    expect(api).toContain("/approval");
+    expect(api).toContain("/commit");
+    expect(api).toContain("/api/capabilities?");
+    expect(operationStream).toContain("BrowserEventSource");
+    expect(operationStream).toContain("globalThis.EventSource");
+    expect(operationStream).toContain("new (url: string) => EventSource");
+    expect(operationStream).not.toContain("as unknown as");
+    expect(operationStream).toContain("isHomeActionOperationState");
+    expect(queryRuntime).toContain("refreshHomeActiveSelection");
+    expect(queryActive).toContain("watchHomeOperation");
+    expect(action).toContain("Review impact");
+    expect(action).toContain("Run approved action");
+    expect(action).toContain("planHomeRecovery");
+    expect(timeline).toContain("<HomeAnchoredOperations");
+    expect(anchoredActions).toContain('aria-label="Durable action updates"');
+    expect(capability).toContain("No honest adapter exists");
+    expect(capability).toContain("store.proposeCapabilityRepair");
+    expect(capability).not.toMatch(/mock|fake installer/i);
+  });
+
+  test("settings changes stay in a drawer and go through reviewed conversation authority", () => {
+    expect(app).toContain("<HomePreferencesDrawer");
+    expect(preferences).toContain("conversation.update_settings");
+    expect(preferences).toContain("store.proposeSettings");
+    expect(preferences).toContain('aria-label="Conversation settings"');
+    expect(preferences).not.toContain("api.settings.set");
+    expect(preferences).not.toContain('role="dialog"');
+  });
+
+  test("private file ranges are handed to Home in memory and modal ask ownership is gone", () => {
+    expect(rootStore).not.toMatch(/askOpen|askPrefill|openAsk|closeAsk/);
+    expect(workUnitDetails).toContain("Use in conversation");
+    expect(workUnitDetails).toContain("stagePrivateFileRange");
+    expect(store).toContain("privateFileRange");
+    expect(composer).toContain("Private file range selected");
+    expect(commandRuntime).toContain("private_file_range");
+  });
+
+  test("quotes and reactions use typed seams instead of markdown simulation", () => {
+    expect(timeline).toContain("Counts update only after the public fold returns");
+    expect(timeline).toContain("Remove quote");
+    expect(composer).toContain("<HomeQuoteSelectionList");
+    expect(quoteSelection).toContain("Quoted sources");
+    expect(quoteSelection).toContain("Jump to source");
+    expect(authoring).toContain("target_event_id");
+    expect(authoring).toContain("content_digest");
+    expect(authoring).toContain("toHomeCanonicalQuoteReference");
+    expect(types).toContain("target_event_id");
+    expect(types).toContain("content_digest");
+    expect(types).toContain("message_locator");
+    expect(types).toContain("quote_order");
+    expect(api).toContain("quote_refs");
+    expect(api).toContain("/events/");
+    expect(commandRuntime).toContain("toggleReaction");
+    expect(commandRuntime).not.toContain("HOME_QUOTE_API_BLOCKER");
+    expect(commandRuntime).not.toContain("HOME_REACTION_API_BLOCKER");
+    expect(streamRuntime).toContain("watchHomeConversationStream");
+    expect(api).not.toMatch(/markdown|md simulation/i);
+  });
+
+  test("trace and evidence open as a real public-timeline drawer", () => {
+    expect(app).toContain("<HomeTraceDrawer");
+    expect(home).toContain('aria-label="Open trace and evidence"');
+    expect(trace).toContain('aria-label="Trace and evidence"');
+    expect(trace).toContain("projectHomeTrace");
+    expect(trace).toContain("store.timeline.head_digest");
+    expect(trace).not.toContain("JSON.stringify");
+  });
+
+  test("new Home files keep public DTOs free of private runtime fields and HTML injection", () => {
     for (const source of [
-      apiSource,
-      storeSource,
-      streamSource,
-      workspaceLogicSource,
-      typeSource,
-      workspaceSource,
-      panelSource,
-      artifactSource,
+      app,
+      home,
+      rail,
+      timeline,
+      composer,
+      action,
+      anchoredActions,
+      capability,
+      trace,
+      api,
+      store,
+      queryRuntime,
+      commandRuntime,
+      operationStream,
     ]) {
-      expect(source).not.toMatch(/sessionStorage|document\.cookie/);
-      expect(source).not.toMatch(
-        /\bnative_session_id\b|\bprompt_template\b|\braw_env\b|\btoken_count\b/,
-      );
+      expect(source).not.toMatch(/\bnative_session_id\b|\bprompt_template\b|\braw_env\b/);
+      expect(source).not.toContain("v-html");
     }
-  });
-
-  test("API client stays on public fetch DTOs and does not import server internals", () => {
-    expect(apiSource).toContain('from "./conversation-types.js"');
-    expect(apiSource).toContain("fetch(");
-    expect(apiSource).not.toMatch(/readFile|node:fs|src\/server|orchestrator\/conversation/);
-  });
-
-  test("stream composable reconnects using cursor and renewal cleanup", () => {
-    expect(streamSource).toContain("conversationEventsUrl");
-    expect(streamSource).toContain("bindings.currentCursor()");
-    expect(streamSource).toContain("conversationApi.renewStreamToken");
-    expect(streamSource).toContain("closeStream()");
-    expect(streamSource).toContain("onUnmounted");
-  });
-
-  test("fatal typed stream errors suppress the following transport recovery", async () => {
-    for (const code of ["conversation_not_found", "stream_unavailable"]) {
-      const attempt = createConversationStreamAttemptGuard();
-      let renewals = 0;
-      let reconnects = 0;
-      expect(attempt.acceptTypedError(JSON.stringify({ code, message: "terminal" }))).toEqual({
-        fatal: true,
-        message: "terminal",
-      });
-      expect(attempt.canRecover()).toBe(false);
-      expect(
-        await recoverConversationStreamAttempt(
-          attempt,
-          async () => {
-            renewals += 1;
-            return false;
-          },
-          () => {
-            reconnects += 1;
-          },
-        ),
-      ).toBe("terminal");
-      expect({ renewals, reconnects }).toEqual({ renewals: 0, reconnects: 0 });
-    }
-    const malformed = createConversationStreamAttemptGuard();
-    expect(malformed.acceptTypedError("null")).toEqual({
-      fatal: false,
-      message: "conversation stream failed",
-    });
-    expect(malformed.canRecover()).toBe(true);
-    expect(streamSource).toContain("attemptGuard.canRecover()");
-  });
-
-  test("pending approval authority is forwarded unchanged", () => {
-    const approvalHandler = workspaceLogicSource.slice(
-      workspaceLogicSource.indexOf("const resolveApproval"),
-      workspaceLogicSource.indexOf("const cancelOperation"),
-    );
-    expect(panelSource).toContain("approval.actor");
-    expect(approvalHandler).toContain("actor,");
-    expect(approvalHandler).not.toContain('actor: "web-ui"');
-    expect(
-      workspaceLogicSource.slice(workspaceLogicSource.indexOf("const cancelOperation")),
-    ).toContain('actor: "web-ui"');
-  });
-
-  test("approval resolution is disabled and guarded when lifecycle authority is terminal", () => {
-    const controlsProjection = storeSource.slice(
-      storeSource.indexOf("export function conversationControls"),
-      storeSource.indexOf("export type ConversationApprovalView"),
-    );
-    const approvalProjection = controlsProjection.slice(
-      controlsProjection.indexOf("canResolveApproval"),
-      controlsProjection.indexOf("hasPendingApproval"),
-    );
-    expect(approvalProjection).toContain('lifecycle === "ACTIVE"');
-    expect(approvalProjection).toContain("approval.approval_id === approvalId");
-    expect(approvalProjection).toContain("approval.operation_id === operationId");
-    expect(approvalProjection).toContain("operation.operation_id === operationId");
-    expect(approvalProjection).not.toContain('operation.state !== "completed"');
-    expect(
-      panelSource.match(
-        /pending \|\| !controls\.canResolveApproval\(approval\.approval_id, approval\.operation_id\)/g,
-      ),
-    ).toHaveLength(2);
-    const approvalHandler = workspaceLogicSource.slice(
-      workspaceLogicSource.indexOf("const resolveApproval"),
-      workspaceLogicSource.indexOf("const cancelOperation"),
-    );
-    expect(approvalHandler).toContain(
-      "workspace.controls.value.canResolveApproval(approvalId, operationId)",
-    );
-  });
-
-  test("nested trace drawer owns Tab and Escape keyboard events", () => {
-    expect(traceSource).toContain("data-trace-drawer");
-    expect(traceSource).toContain("@keydown.esc.capture.stop=\"$emit('close')\"");
-    expect(traceSource).toContain('@keydown.tab.capture.stop="trapFocus"');
-    expect(workspaceSource).toContain('closest("[data-trace-drawer]")');
-  });
-
-  test("composer clears only through the async success callback", () => {
-    expect(panelSource).toContain("onSuccess: () => void");
-    expect(panelSource).toContain('emit("submit-message", content, targets, clearComposer)');
-    expect(workspaceLogicSource).toContain("onSuccess();");
-  });
-
-  test("completed message flow follows child conversation revisions", () => {
-    const messageHandler = workspaceLogicSource.slice(
-      workspaceLogicSource.indexOf("const submitMessage"),
-      workspaceLogicSource.indexOf("const pauseConversation"),
-    );
-    expect(messageHandler).toContain("response.child_conversation_id");
-    expect(messageHandler).toContain("workspace.state.childConversationId");
-    expect(messageHandler).toContain("!response.location?.trim()");
-    expect(messageHandler).toContain("location: response.location");
-    expect(messageHandler).toContain("parentLocation");
-    expect(workspaceSource).toContain("workspace.state.parentConversationId");
-    expect(panelSource).toContain("Create child revision");
+    expect(api).not.toMatch(/node:fs|src\/server|orchestrator\/conversation/);
   });
 });

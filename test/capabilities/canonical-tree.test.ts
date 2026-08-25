@@ -12,7 +12,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { base32lowerNoPad, sourcePermissionId } from "../../src/capabilities/canonical/index.js";
-import { computePackageTree, readPackageTree } from "../../src/capabilities/source/index.js";
+import {
+  computePackageTree,
+  readPackageTree,
+  validateArchiveEntries,
+} from "../../src/capabilities/source/index.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -78,5 +82,25 @@ describe("capability canonical identity", () => {
         { path: "a", bytes: Buffer.from("b") },
       ]),
     ).toThrow("case-fold-colliding");
+  });
+
+  test("rejects every archive path collision class before extraction", () => {
+    const file = (path: string) => ({
+      path,
+      kind: "file" as const,
+      expanded_size: 1,
+      transport_sha256: "a".repeat(64),
+    });
+    const directory = (path: string) => ({
+      path,
+      kind: "directory" as const,
+      expanded_size: 0,
+      transport_sha256: null,
+    });
+    expect(() => validateArchiveEntries([file("a"), file("a")])).toThrow("sorted and unique");
+    expect(() => validateArchiveEntries([file("a"), directory("a")])).toThrow("sorted and unique");
+    expect(() => validateArchiveEntries([file("A"), directory("a")])).toThrow("case-fold");
+    expect(() => validateArchiveEntries([file("a"), file("a/b")])).toThrow("ancestor");
+    expect(() => validateArchiveEntries([directory("a"), file("a/b")])).not.toThrow();
   });
 });

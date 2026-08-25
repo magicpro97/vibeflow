@@ -174,6 +174,15 @@ export interface EvaluatorAssessmentPayload {
 export interface UserMessagePayload {
   content: string;
   target_participants: string[] | "all";
+  quote_refs?: Array<{
+    root_session_id: string;
+    conversation_id: string;
+    revision_id: string;
+    target_event_id: string;
+    target_kind: "user-message" | "completed-agent-response";
+    content_digest: string;
+    author_public_id: string;
+  }>;
 }
 export interface ConsensusUpdatePayload {
   round_id: string;
@@ -234,7 +243,14 @@ export interface CallerCancelledPayload {
 }
 export interface ArtifactCreatedPayload {
   artifact_id: string;
-  artifact_type: "decision_matrix" | "plan" | "diff" | "tests" | "synthesis" | "transcript";
+  artifact_type:
+    | "decision_matrix"
+    | "plan"
+    | "diff"
+    | "tests"
+    | "synthesis"
+    | "transcript"
+    | "compaction";
   ref: string;
 }
 export interface ArtifactUpdatedPayload {

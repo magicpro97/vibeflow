@@ -20,6 +20,7 @@ function identity(source: ValidatedConversationSourceV1, ordinal: number): Linea
 export function buildValidatedLineage(
   root: ValidatedConversationSourceV1,
   children: ReadonlyMap<string, ValidatedConversationSourceV1[]>,
+  recoveryOnlyChildren: ReadonlySet<string> = new Set(),
 ): ConversationLineageReadV1 {
   const nodes: ValidatedLineageNodeV1[] = [];
   const pending: Array<{
@@ -73,12 +74,19 @@ export function buildValidatedLineage(
       .filter(
         (item) =>
           Object.keys(item.source.manifest_record.child_revisions).length > 0 ||
-          (children.get(item.node.conversation_id)?.length ?? 0) > 0,
+          (children
+            .get(item.node.conversation_id)
+            ?.some((child) => !recoveryOnlyChildren.has(child.manifest.conversation_id)) ??
+            false),
       )
       .map((item) => item.node.conversation_id),
   );
   const leaves = nodes
-    .filter((item) => !parentIds.has(item.node.conversation_id))
+    .filter(
+      (item) =>
+        !parentIds.has(item.node.conversation_id) &&
+        !recoveryOnlyChildren.has(item.node.conversation_id),
+    )
     .sort((left, right) => compareLineageNodes(left.node, right.node));
   if (leaves.length > LINEAGE_LIMITS.maxCandidates)
     throw new Error("lineage exceeds candidate bound");

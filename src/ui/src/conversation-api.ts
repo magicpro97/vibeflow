@@ -14,8 +14,10 @@ import type {
   StreamTokenRenewalResponse,
 } from "./conversation-types.js";
 
-const CSRF =
-  globalThis.document?.querySelector<HTMLMetaElement>('meta[name="vf-token"]')?.content ?? "";
+const browserGlobal = globalThis as unknown as {
+  document?: { querySelector(selector: string): { content?: string } | null };
+};
+const CSRF = browserGlobal.document?.querySelector('meta[name="vf-token"]')?.content ?? "";
 const JSON_HEADERS = { "content-type": "application/json" } as const;
 const WEIGHTS = {
   responses: 0.2,
@@ -61,7 +63,7 @@ export class ConversationApiError extends Error {
   }
 }
 
-function requestHeaders(write: boolean): HeadersInit {
+function requestHeaders(write: boolean): Record<string, string> {
   if (!write || !CSRF) return { ...JSON_HEADERS };
   return { ...JSON_HEADERS, "x-vibeflow-token": CSRF };
 }

@@ -102,6 +102,24 @@ export function actionIdempotencyFileKey(
   );
 }
 
+export function oversizedHandoffIssuanceFileKey(
+  principalDigest: string,
+  authorityScopeDigest: string,
+  keyDigest: string,
+): string {
+  assertDigest(principalDigest, "$.issuance.principal_digest");
+  assertDigest(authorityScopeDigest, "$.issuance.authority_scope_digest");
+  assertDigest(keyDigest, "$.issuance.idempotency_key_digest");
+  return digestHex(
+    digestV1("VF-OVERSIZED-HANDOFF-ISSUANCE-FILE-KEY\0v1\0", {
+      schema_version: "1.0",
+      principal_digest: principalDigest,
+      authority_scope_digest: authorityScopeDigest,
+      idempotency_key_digest: keyDigest,
+    }),
+  );
+}
+
 export function assertCanonicalRequestAuthority(
   request: CanonicalActionRequestV1,
   authority: ActionRequestAuthorityV1,

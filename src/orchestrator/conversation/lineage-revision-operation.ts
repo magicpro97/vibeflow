@@ -1,4 +1,5 @@
 import { digestV1 } from "../../durability/index.js";
+import { MAX_CANONICAL_HANDOFF_BYTES } from "./handoff-limits.js";
 import type { RevisionReservationRecordV1 } from "./lineage-reservation.js";
 import {
   type LineageNodeIdentityV1,
@@ -183,7 +184,7 @@ export function assertRevisionPreparationPlanV1(
       !isLineageDigest(participant.wrapper_descriptor_digest) ||
       !Number.isSafeInteger(participant.max_shared_prompt_bytes) ||
       (participant.max_shared_prompt_bytes as number) < 1 ||
-      (participant.max_shared_prompt_bytes as number) > 16 * 1024 * 1024 ||
+      (participant.max_shared_prompt_bytes as number) > MAX_CANONICAL_HANDOFF_BYTES ||
       (index > 0 &&
         Buffer.compare(
           Buffer.from(participants[index - 1]?.participant_id ?? ""),

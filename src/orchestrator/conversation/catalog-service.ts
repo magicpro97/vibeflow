@@ -1,7 +1,5 @@
-import type { ConversationLifecycle } from "../trace/types.js";
 import {
   type CatalogCursorBoundaryV1,
-  type CatalogCursorCodec,
   StaleCatalogCursorError,
   catalogQueryDigest,
 } from "./catalog-cursor.js";
@@ -12,6 +10,12 @@ import {
   catalogRowOrder,
   queryCatalogRow,
 } from "./catalog-query.js";
+import {
+  CatalogDegradedError,
+  type ConversationCatalogListInputV1,
+  ConversationCatalogNotFoundError,
+  type ConversationCatalogServiceOptions,
+} from "./catalog-service-contract.js";
 import {
   CatalogProjectionCorruptError,
   type ConversationCatalogDeltaV1,
@@ -25,10 +29,7 @@ import {
   assertConversationListResponseV1,
   normalizeConversationCatalogQuery,
 } from "./catalog-types.js";
-import {
-  type PublishedRevisionTransitionInputV1,
-  publishedRevisionAuthorityMap,
-} from "./lineage-published-transition.js";
+import { publishedRevisionAuthorityMap } from "./lineage-published-transition.js";
 import { deriveConversationLineages } from "./lineage-reader.js";
 import type {
   ConversationLineageDerivationV1,
@@ -38,49 +39,14 @@ import { LineageAuthorityStore } from "./lineage-store.js";
 import type { LineageHeadRecordV1 } from "./lineage-types.js";
 import {
   type ConversationSourceInventoryV1,
-  type ReadConversationSourceInventoryOptions,
   readConversationSourceInventory,
 } from "./source-inventory.js";
-
-export class CatalogDegradedError extends Error {
-  readonly code = "catalog_degraded" as const;
-  constructor(
-    readonly recoverableById: boolean,
-    options?: ErrorOptions,
-  ) {
-    super("conversation catalog is degraded", options);
-    this.name = "CatalogDegradedError";
-  }
-}
-
-export class ConversationCatalogNotFoundError extends Error {
-  readonly code = "not_found" as const;
-  constructor() {
-    super("conversation is not present in validated sources");
-    this.name = "ConversationCatalogNotFoundError";
-  }
-}
-
-export interface ConversationCatalogListInputV1 {
-  query?: string;
-  lifecycle?: ConversationLifecycle[];
-  policy?: string[];
-  cursor?: string;
-  limit?: number;
-}
-
-export interface ConversationCatalogServiceOptions {
-  artifactRoot: string;
-  traceRoot: string;
-  scopeId: string;
-  cursorCodec: CatalogCursorCodec;
-  readInventory?(options: ReadConversationSourceInventoryOptions): ConversationSourceInventoryV1;
-  headTransitions?(lineage: ConversationLineageReadV1): ReadonlyMap<string, unknown>;
-  reservationHistory?(lineage: ConversationLineageReadV1): ReadonlyMap<string, unknown>;
-  associationAuthorities?(records: readonly unknown[]): readonly unknown[];
-  publishedRevisionTransitions?(): readonly PublishedRevisionTransitionInputV1[];
-  onRebuild?(): void;
-}
+export {
+  CatalogDegradedError,
+  type ConversationCatalogListInputV1,
+  ConversationCatalogNotFoundError,
+  type ConversationCatalogServiceOptions,
+} from "./catalog-service-contract.js";
 
 export class ConversationCatalogService {
   private readonly options: ConversationCatalogServiceOptions;
@@ -216,6 +182,67 @@ export class ConversationCatalogService {
 
   async rebuild(): Promise<PublishedConversationCatalogV1> {
     return this.startRebuild();
+  }
+
+  /**
+   * Append a projection-only invalidation after a conversation source was durably committed.
+   * The notifier boundary swallows failures so catalog projection cannot roll back authority.
+   */
+  recordConversationSourceCommitted(conversationId: string, recordedAt: string): void {
+    const inventory = this.inventory();
+    if (!inventory.authoritative) throw new CatalogDegradedError(inventory.sources.length > 0);
+    const lineages = deriveConversationLineages(inventory, {
+      publishedRevisionTransitions: this.options.publishedRevisionTransitions?.() ?? [],
+    });
+    if (!lineages.authoritative) throw new CatalogDegradedError(inventory.sources.length > 0);
+    const rootSessionId = lineages.root_by_conversation.get(conversationId);
+    const source = inventory.sources.find(
+      (candidate) => candidate.manifest.conversation_id === conversationId,
+    );
+    if (!rootSessionId || !source) throw new ConversationCatalogNotFoundError();
+    const priorHead = this.lineageStore.readHead(rootSessionId);
+    const authority = this.authorityInputs(lineages);
+    const projection = projectConversationCatalog({
+      inventory,
+      lineages,
+      cursorCodec: this.options.cursorCodec,
+      scopeId: this.options.scopeId,
+      limit: 100,
+      headRecords: authority.heads,
+      headTransitionAuthorities: authority.transitions,
+      reservationRecords: authority.reservations,
+      reservationHistory: authority.reservationHistory,
+      associationRecords: authority.associations,
+    });
+    if (!projection.authoritative) throw new CatalogDegradedError(true);
+    const installedHead = authority.heads.get(rootSessionId);
+    if (!installedHead) throw new CatalogDegradedError(true);
+    if (priorHead === null) {
+      this.store.appendDelta({
+        root_session_id: rootSessionId,
+        cause: "lineage-head-committed",
+        source_record: {
+          source_kind: "lineage-head",
+          root_session_id: rootSessionId,
+          record_id: rootSessionId,
+          record_digest: installedHead.content_digest,
+        },
+        source_inventory_digest: projection.source_inventory_digest,
+        recorded_at: installedHead.updated_at,
+      });
+    }
+    this.store.appendDelta({
+      root_session_id: rootSessionId,
+      cause: "conversation-source-committed",
+      source_record: {
+        source_kind: "conversation-journal-head",
+        root_session_id: rootSessionId,
+        record_id: source.journal_head.record_id,
+        record_digest: source.journal_head.record_digest,
+      },
+      source_inventory_digest: projection.source_inventory_digest,
+      recorded_at: recordedAt,
+    });
   }
 
   async list(input: ConversationCatalogListInputV1 = {}): Promise<ConversationListResponseV1> {

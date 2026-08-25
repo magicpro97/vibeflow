@@ -1,13 +1,10 @@
-import * as fs from "node:fs";
 import { basename } from "node:path";
 import { digestV1 } from "../../durability/index.js";
-import { auditJournal } from "../trace/journal-cursor.js";
 import { traceJournalPath } from "../trace/store.js";
 import type {
   ConversationHealth,
   ConversationLifecycle,
   InternalTraceStoreRecord,
-  PublicStoredTraceEvent,
 } from "../trace/types.js";
 import {
   type ConversationDurableRecord,
@@ -23,6 +20,7 @@ import type {
   ConversationSourceInventoryV1,
   ValidatedConversationSourceV1,
 } from "./catalog-source-types.js";
+import { readConversationRevisionVisibility } from "./revision-artifact-store.js";
 export type {
   ConversationJournalHeadV1,
   ConversationSourceInventoryV1,
@@ -30,9 +28,7 @@ export type {
 } from "./catalog-source-types.js";
 import {
   type PrivateDirectorySnapshotV1,
-  type PrivateFileSnapshotV1,
   assertPrivateDirectorySnapshot,
-  assertPrivateFileSnapshot,
   closePrivateDirectorySnapshot,
   inspectPrivateDirectoryReadOnly,
   openPrivateChildDirectoryReadOnly,
@@ -45,19 +41,27 @@ import {
   unsafeCatalogSourceIdentityDiagnostic,
 } from "./catalog-source-identity.js";
 import type { PublicParticipantSummaryV1 } from "./catalog-types.js";
+import type { ConversationReviewedActionAuthorityV1 } from "./conversation-reviewed-action.js";
 import { conversationManifestPath } from "./durable-operation-authority.js";
-import { foldConversation } from "./fold.js";
 import {
   type ConversationSourceDiagnosticV1,
   compareConversationDiagnostics,
   diagnostic,
 } from "./lineage-types.js";
+import { foldConversationJournal } from "./source-inventory-fold.js";
+import {
+  MAX_CONVERSATION_JOURNAL_BYTES,
+  readStableConversationJournal,
+} from "./source-inventory-journal.js";
 
 const MANIFEST_NAME = /^[0-9a-f]{64}\.json$/;
 
 export interface ReadConversationSourceInventoryOptions {
   artifactRoot: string;
   traceRoot: string;
+  includeHiddenRevisions?: boolean;
+  includeHiddenRevisionOperationIds?: ReadonlySet<string>;
+  actionAuthority?: ConversationReviewedActionAuthorityV1;
 }
 
 const compareBytes = (left: string, right: string): number =>
@@ -79,41 +83,15 @@ function manifestVersion(value: unknown): unknown {
     : undefined;
 }
 
-function foldOnlyJournal(records: readonly InternalTraceStoreRecord[]): {
-  lifecycle: ConversationLifecycle;
-  health: ConversationHealth;
-} {
-  const projected = records.map((record) => {
-    const stored = structuredClone(record.stored_event) as unknown as Record<string, unknown>;
-    const event = stored.event as { type: string; payload: Record<string, unknown> };
-    if (event.type === "capability_action_projection") {
-      stored.event = { type: "coordinator_decision", payload: { projection_only: true } };
-    }
-    const publicSessionRef =
-      record.native_session_id === null
-        ? null
-        : event.type === "native_history_reconciled" &&
-            typeof event.payload.public_session_ref === "string"
-          ? event.payload.public_session_ref
-          : "vf-fold-session";
-    return { ...stored, public_session_ref: publicSessionRef } as unknown as PublicStoredTraceEvent;
-  });
-  const folded = foldConversation(projected);
-  return { lifecycle: folded.lifecycle, health: folded.health };
-}
-
 function validateJournal(
-  snapshot: PrivateFileSnapshotV1,
+  initialSnapshot: Parameters<typeof readStableConversationJournal>[0],
   record: ConversationDurableRecord,
+  artifactRoot: string,
+  actionAuthority?: ConversationReviewedActionAuthorityV1,
 ): { head: ConversationJournalHeadV1; records: InternalTraceStoreRecord[] } {
   const id = record.manifest.conversation_id;
-  let records: InternalTraceStoreRecord[];
-  try {
-    records = auditJournal(snapshot.fd, false, id).records;
-    assertPrivateFileSnapshot(snapshot);
-  } finally {
-    fs.closeSync(snapshot.fd);
-  }
+  const stable = readStableConversationJournal(initialSnapshot, id);
+  const records = stable.records;
   const manifest = record.manifest;
   if (
     records.some(
@@ -161,7 +139,12 @@ function validateJournal(
     )
       throw new Error("journal participants do not match manifest authority");
     participants = projectPublicParticipantSummaries(configured.payload.participants);
-    ({ lifecycle, health } = foldOnlyJournal(records));
+    ({ lifecycle, health } = foldConversationJournal(
+      records,
+      artifactRoot,
+      record.artifacts,
+      actionAuthority,
+    ));
   } else {
     participants = record.binding_authorities
       .map((authority, index) => ({
@@ -188,7 +171,7 @@ function validateJournal(
     revision_id: manifest.revision_id,
     last_seq: last?.seq ?? 0,
     last_record_digest: previousRecordDigest,
-    bytes_length: snapshot.size,
+    bytes_length: stable.bytesLength,
   });
   return {
     head: {
@@ -213,6 +196,9 @@ function addManifest(
   name: string,
   sources: ValidatedConversationSourceV1[],
   diagnostics: ConversationSourceDiagnosticV1[],
+  includeHiddenRevisions: boolean,
+  includeHiddenRevisionOperationIds: ReadonlySet<string> | undefined,
+  actionAuthority: ConversationReviewedActionAuthorityV1 | undefined,
 ): void {
   if (!MANIFEST_NAME.test(name)) {
     diagnostics.push(
@@ -272,6 +258,14 @@ function addManifest(
     return;
   }
   const id = record.manifest.conversation_id;
+  const visibility = readConversationRevisionVisibility(artifactRoot, id);
+  if (
+    visibility?.state === "hidden" &&
+    (!includeHiddenRevisions ||
+      (includeHiddenRevisionOperationIds !== undefined &&
+        !includeHiddenRevisionOperationIds.has(visibility.operation_id)))
+  )
+    return;
   if (basename(conversationManifestPath(artifactRoot, id)) !== name) {
     diagnostics.push(
       diagnostic(
@@ -286,7 +280,12 @@ function addManifest(
   const journalName = basename(traceJournalPath(traceRoot, id));
   const journal =
     journalDirectory?.state === "valid"
-      ? tryOpenPrivateFileReadOnlyAt(journalDirectory, journalName, 16 * 1024 * 1024, true)
+      ? tryOpenPrivateFileReadOnlyAt(
+          journalDirectory,
+          journalName,
+          MAX_CONVERSATION_JOURNAL_BYTES,
+          true,
+        )
       : null;
   if (!journal) {
     diagnostics.push(
@@ -300,7 +299,7 @@ function addManifest(
     return;
   }
   try {
-    const validatedJournal = validateJournal(journal, record);
+    const validatedJournal = validateJournal(journal, record, artifactRoot, actionAuthority);
     sources.push({
       manifest: structuredClone(record.manifest),
       manifest_record: structuredClone(record),
@@ -352,6 +351,9 @@ export function readConversationSourceInventory(
           name,
           sources,
           diagnostics,
+          options.includeHiddenRevisions === true,
+          options.includeHiddenRevisionOperationIds,
+          options.actionAuthority,
         );
       }
       assertPrivateDirectorySnapshot(artifactRoot);

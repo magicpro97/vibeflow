@@ -24,6 +24,23 @@ export function readVerifiedActionSnapshot(
   return snapshot;
 }
 
+/** Reads the concrete local WAL/dispatch closure without recursively consulting its domain. */
+export function readRecordedActionSnapshot(
+  files: ActionFilePersistence,
+  proposalId: string,
+): ActionAuthoritySnapshotV1 | null {
+  const events = files.readAuthority(proposalId);
+  if (!events.length) return null;
+  const snapshot = foldActionAuthority(events);
+  const stored = files.readProposal(proposalId);
+  if (!stored || !equalCanonical(stored, snapshot.proposal))
+    throw new Error("action authority proposal closure is missing or mismatched");
+  const visible = assertVisibleIdempotency(files, snapshot);
+  assertConsumedChallenge(files, snapshot, visible);
+  assertDispatchAndTerminal(files, null, snapshot, false);
+  return snapshot;
+}
+
 function assertVisibleIdempotency(
   files: ActionFilePersistence,
   snapshot: ActionAuthoritySnapshotV1,
@@ -98,6 +115,7 @@ function assertDispatchAndTerminal(
   files: ActionFilePersistence,
   resolver: ActionAuthorityResolverV1 | null,
   snapshot: ActionAuthoritySnapshotV1,
+  validateTerminal = true,
 ): void {
   const approval = snapshot.approval;
   if (!approval || approval.decision !== "approved") return;
@@ -117,10 +135,11 @@ function assertDispatchAndTerminal(
     throw new Error("action operation dispatch closure mismatches authority");
   assertDispatchHeaderRule(snapshot.proposal, dispatch.domain_header_digest);
   if (!snapshot.domain_terminal_digest) return;
-  if (!resolver) throw new Error("domain terminal authority resolver is required for read");
   const terminalEvent = snapshot.events.at(-1);
   if (!terminalEvent || terminalEvent.payload.kind !== "state-transition")
     throw new Error("action terminal event is missing");
+  if (!validateTerminal) return;
+  if (!resolver) throw new Error("domain terminal authority resolver is required for read");
   const proof = resolver.validateRecordedTerminal({
     proposal: snapshot.proposal,
     approval,

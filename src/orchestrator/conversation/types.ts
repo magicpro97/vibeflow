@@ -15,6 +15,15 @@ import type {
   TraceCorrelation,
   TraceEvent,
 } from "../trace/types.js";
+import type {
+  AgentSocialIntentRequestV1,
+  PublicQuoteReferenceV1,
+} from "./conversation-interaction-types.js";
+import type { PrivateFileRangeHandoffBindingV1 } from "./private-file-range-staging-store.js";
+import type {
+  ConversationTurnPreparationRequestV1,
+  PreparedConversationTurnV1,
+} from "./turn-delivery-types.js";
 
 export type {
   ApprovalDecision,
@@ -37,7 +46,8 @@ export type ConversationArtifactType =
   | "diff"
   | "tests"
   | "synthesis"
-  | "transcript";
+  | "transcript"
+  | "compaction";
 
 export interface ArtifactCreateRequest {
   artifact_type: ConversationArtifactType;
@@ -74,6 +84,7 @@ export interface PolicyAttemptRequest {
   bindingIndex: number;
   purpose: PolicyAttemptPurpose;
   promptInput: string;
+  delivery?: PreparedConversationTurnV1;
   parent?: AttemptRef;
 }
 
@@ -118,6 +129,12 @@ export interface ConversationContext {
   }>[];
   readonly signal: AbortSignal;
   messages(): Promise<readonly MessageRequest[]>;
+  prepareTurn(request: ConversationTurnPreparationRequestV1): Promise<PreparedConversationTurnV1>;
+  publishSocialIntent(input: {
+    participant_id: string;
+    response_event_id: string;
+    request: AgentSocialIntentRequestV1;
+  }): { accepted: boolean; diagnostic_code: string | null };
   emit(emission: CoordinatorEmission): Promise<StoredTraceEvent>;
   launchAttempt(request: PolicyAttemptRequest): PolicyAttempt;
   createArtifact(request: ArtifactCreateRequest): Promise<ArtifactCreateResult>;
@@ -234,6 +251,7 @@ export interface ConversationCreateRequest {
   policy?: string;
   participants?: ConversationCreateParticipant[];
   max_rounds?: number;
+  private_file_range?: PrivateFileRangeHandoffBindingV1;
 }
 
 export interface ConversationCreateResponse {
@@ -263,6 +281,8 @@ export interface ConversationStartResult {
 export interface MessageRequest {
   content: string;
   target_participants?: string[] | "all";
+  quote_refs?: PublicQuoteReferenceV1[];
+  private_file_range?: PrivateFileRangeHandoffBindingV1;
 }
 
 export interface MessageResponse {

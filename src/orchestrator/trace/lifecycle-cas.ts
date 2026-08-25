@@ -16,6 +16,13 @@ const canonicalLifecycleKey = (key: string): boolean =>
   key === "conversation:terminal-state" ||
   key === "conversation:terminal";
 
+const reviewedPostTerminalAction = (stored: StoredTraceEvent): boolean =>
+  (stored.event.type === "artifact_created" &&
+    stored.event.payload.artifact_type === "compaction" &&
+    stored.idempotency_key.startsWith("action-context-compaction:vf-proposal-")) ||
+  (stored.event.type === "user_message" &&
+    stored.idempotency_key.startsWith("action-public-literal:vf-proposal-"));
+
 export class TraceLifecycleConflictError extends Error {
   override readonly name = "TraceLifecycleConflictError";
   constructor(
@@ -119,7 +126,11 @@ export function assertCanonicalLifecycleAppend(
   }
   for (const { stored_event } of pending) {
     const canonical = canonicalLifecycleKey(stored_event.idempotency_key);
-    if (!canonical && (cursor.terminal || cursor.awaitingTerminal)) {
+    if (
+      !canonical &&
+      (cursor.terminal || cursor.awaitingTerminal) &&
+      !reviewedPostTerminalAction(stored_event)
+    ) {
       throw new TraceLifecycleConflictError(cursor.lifecycle, cursor.lifecycle);
     }
     apply(cursor, stored_event, true);

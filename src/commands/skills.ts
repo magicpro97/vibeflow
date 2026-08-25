@@ -54,6 +54,7 @@ import {
   verifySkillSync,
   writeFileSafe,
 } from "./_shared.js";
+import { guardLegacyWriter } from "./capability/legacy-fence.js";
 import { handleDraftSkill } from "./skills-draft.js";
 export function skills(sub: string | undefined, rest: string[] = []): number {
   const repo = cwd();
@@ -109,7 +110,6 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 0;
   }
   if (sub === "resolve") {
-    // Derive needs from repo scan and intake; report local versus on-demand skills.
     const state = readState(repo);
     const needs = resolveSkillNeeds({
       repo,
@@ -125,7 +125,8 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "audit-log") return handleSkillAuditLog(repo, rest);
   if (sub === "audit-duplicates") return handleAuditDuplicatesSubcommand(repo, rest);
   if (sub === "sync") {
-    // Parse sync flags; default pointer mode targets copilot.
+    const fence = guardLegacyWriter(repo, "vf skills sync");
+    if (fence !== null) return fence;
     let mode: "pointer" | "full" = "pointer";
     let fromRegistry = false;
     for (let i = 0; i < rest.length; i++) {

@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { ProcessLock } from "../../durability/index.js";
-import { assertNoSymlinkComponents, createOrVerifyPrivateFile } from "../../durability/index.js";
+import {
+  assertNoSymlinkComponents,
+  assertProcessLockCovers,
+  createOrVerifyPrivateFile,
+  ensurePrivateDirectory,
+  syncPrivateDirectory,
+} from "../../durability/index.js";
 import { inTreePath } from "../manifest/validation-helpers.js";
 import { CapabilityValidationError, assertSortedUnique, bytewise } from "../wire/primitives.js";
 
@@ -11,6 +17,7 @@ const MAX_FILES = 10_000;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_DEPTH = 64;
+const VALIDATED_TREES = new WeakSet<object>();
 
 export interface PackageTreeEntryV1 {
   path: string;
@@ -101,13 +108,46 @@ export function computePackageTree(entries: readonly PackageTreeEntryV1[]): Pack
     path: entry.path,
     bytes: Buffer.from(entry.bytes),
   }));
-  return {
+  const result = {
     content_sha256: hash.digest("hex"),
     entry_count: immutable.length,
     expanded_byte_length: immutable.reduce((sum, entry) => sum + entry.bytes.byteLength, 0),
     entries: immutable,
     files: new Map(immutable.map((entry) => [entry.path, Buffer.from(entry.bytes)])),
   };
+  VALIDATED_TREES.add(result);
+  return result;
+}
+
+export function assertValidatedPackageTree(value: PackageTreeV1): PackageTreeV1 {
+  if (!VALIDATED_TREES.has(value))
+    throw new CapabilityValidationError("package tree is not validator-derived", "package_tree");
+  const recomputed = computePackageTree(value.entries);
+  if (
+    recomputed.content_sha256 !== value.content_sha256 ||
+    recomputed.entry_count !== value.entry_count ||
+    recomputed.expanded_byte_length !== value.expanded_byte_length
+  )
+    throw new CapabilityValidationError(
+      "validated package tree record was mutated",
+      "package_tree",
+      "integrity_failure",
+    );
+  if (value.files.size !== recomputed.entries.length)
+    throw new CapabilityValidationError(
+      "package tree file map is incomplete",
+      "package_tree.files",
+    );
+  for (const entry of recomputed.entries) {
+    const bytes = value.files.get(entry.path);
+    if (!bytes || !Buffer.from(bytes).equals(entry.bytes))
+      throw new CapabilityValidationError(
+        "package tree file map differs from validated entries",
+        `package_tree.files.${entry.path}`,
+        "integrity_failure",
+      );
+  }
+  return value;
 }
 
 function readRegularFile(path: string, expected: fs.Stats): Buffer {
@@ -181,6 +221,9 @@ export function materializePackageTree(
   destination: string,
   tree: PackageTreeV1,
   lock: ProcessLock,
+  options: {
+    fault?: (point: "after-staging-fsync" | "before-publication" | "after-publication") => void;
+  } = {},
 ): void {
   const validated = computePackageTree(tree.entries);
   if (validated.content_sha256 !== tree.content_sha256)
@@ -189,10 +232,81 @@ export function materializePackageTree(
       "content_sha256",
       "integrity_failure",
     );
+  const target = resolve(destination);
+  assertProcessLockCovers(lock, target);
+  lock.assertHeld();
+
+  const verifyExact = (path: string, label: string): void => {
+    let observed: PackageTreeV1;
+    try {
+      observed = readPackageTree(path);
+    } catch (error) {
+      throw new CapabilityValidationError(
+        `${label} package tree is dirty or unsafe: ${error instanceof Error ? error.message : "invalid"}`,
+        path,
+        "integrity_failure",
+      );
+    }
+    if (
+      observed.content_sha256 !== validated.content_sha256 ||
+      observed.entry_count !== validated.entry_count ||
+      observed.expanded_byte_length !== validated.expanded_byte_length
+    )
+      throw new CapabilityValidationError(
+        `${label} package tree is dirty or differs from the approved tree`,
+        path,
+        "integrity_failure",
+      );
+  };
+
+  try {
+    fs.lstatSync(target);
+    verifyExact(target, "existing destination");
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  const parent = dirname(target);
+  ensurePrivateDirectory(parent);
+  assertNoSymlinkComponents(parent);
+  const stage = join(parent, `.${basename(target)}.${validated.content_sha256}.materializing`);
+  try {
+    const stageStat = fs.lstatSync(stage);
+    if (!stageStat.isDirectory() || stageStat.isSymbolicLink())
+      throw new CapabilityValidationError(
+        "materialization staging path is not a real directory",
+        stage,
+      );
+    fs.rmSync(stage, { recursive: true, force: false });
+    syncPrivateDirectory(parent);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  ensurePrivateDirectory(stage);
   for (const entry of validated.entries) {
-    createOrVerifyPrivateFile(join(destination, ...entry.path.split("/")), entry.bytes, {
+    createOrVerifyPrivateFile(join(stage, ...entry.path.split("/")), entry.bytes, {
       lock,
       maxBytes: MAX_FILE_BYTES,
     });
   }
+  const directories = new Set<string>([stage]);
+  for (const entry of validated.entries) {
+    let cursor = dirname(join(stage, ...entry.path.split("/")));
+    while (cursor.startsWith(`${stage}${sep}`)) {
+      directories.add(cursor);
+      cursor = dirname(cursor);
+    }
+  }
+  for (const directory of [...directories].sort((a, b) => b.length - a.length))
+    syncPrivateDirectory(directory);
+  verifyExact(stage, "staged");
+  options.fault?.("after-staging-fsync");
+  lock.assertHeld();
+  options.fault?.("before-publication");
+  fs.renameSync(stage, target);
+  syncPrivateDirectory(parent);
+  options.fault?.("after-publication");
+  lock.assertHeld();
+  verifyExact(target, "published");
 }

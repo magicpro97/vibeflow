@@ -1,4 +1,10 @@
 import { canonicalJson, digestV1 } from "../../durability/index.js";
+import { foldGrantFrames, validateAuthorityHead } from "../authority/index.js";
+import type { AuthorityEpochHeadV1, GrantFrameV1 } from "../authority/index.js";
+import {
+  type DurableAuthorityStateV1,
+  assertDurableAuthorityState,
+} from "../source/durable-authority-state.js";
 import {
   CapabilityValidationError,
   assertSortedUnique,
@@ -6,11 +12,13 @@ import {
   timestamp,
 } from "../wire/primitives.js";
 import { permissionContains } from "./containment.js";
+import { canonicalPermissionUnion, permissionRowSortKey } from "./containment.js";
 import type {
   CapabilityGrantAuthorizationWitnessV1,
   EffectiveGrantFrameV1,
   GrantedPermissionBindingV1,
   PermissionBindingRowV1,
+  ValidatedGrantAuthorityPrefixV1,
 } from "./types.js";
 
 export function grantedPermissionBindingDigest(binding: GrantedPermissionBindingV1): string {
@@ -33,12 +41,58 @@ export function requestedPermissionRowDigest(row: PermissionBindingRowV1): strin
 }
 
 interface WitnessContextV1 {
-  grant_state_digest: string;
   evaluated_at: string;
-  principal_digest: string;
+  principal: EffectiveGrantFrameV1["principal"];
   scope: "project" | "user";
   action_type: string;
   target_engines: string[];
+}
+
+const VALIDATED_PREFIXES = new WeakMap<object, { frames: readonly EffectiveGrantFrameV1[] }>();
+
+export function grantAuthorityPrefixFromDurableState(
+  durableState: DurableAuthorityStateV1,
+): ValidatedGrantAuthorityPrefixV1 {
+  const state = assertDurableAuthorityState(durableState);
+  const frames: readonly GrantFrameV1[] = state.grants;
+  const head: AuthorityEpochHeadV1 = state.current;
+  validateAuthorityHead(head);
+  const fold = foldGrantFrames(frames, head.scope, head.scope_identity_digest);
+  if (
+    fold.head_frame_digest !== head.grant_head_digest ||
+    fold.grant_digest !== head.grant_digest ||
+    frames.some((frame) => frame.authority_epoch > head.authority_epoch)
+  )
+    throw new CapabilityValidationError(
+      "grant prefix does not derive the selected authority head",
+      "grant_prefix",
+      "integrity_failure",
+    );
+  const value = Object.freeze({
+    schema_version: "1.0" as const,
+    scope: head.scope,
+    scope_identity_digest: head.scope_identity_digest,
+    authority_epoch: head.authority_epoch,
+    authority_head_digest: head.content_digest,
+    grant_head_digest: head.grant_head_digest,
+    grant_state_digest: head.grant_digest,
+  });
+  VALIDATED_PREFIXES.set(value, {
+    frames: [...fold.latest.values()].map((frame) => ({
+      grant_id: frame.grant_id,
+      frame_digest: frame.frame_digest,
+      transition: frame.transition,
+      principal: structuredClone(frame.principal),
+      scope: frame.scope,
+      action_types: [...frame.action_types],
+      target_engines: [...frame.target_engines],
+      permissions: structuredClone(frame.permissions),
+      not_before: frame.not_before,
+      expires_at: frame.expires_at,
+      revoked_at: frame.revoked_at,
+    })),
+  });
+  return value;
 }
 
 interface Selection {
@@ -52,7 +106,7 @@ function effective(frame: EffectiveGrantFrameV1, context: WitnessContextV1, at: 
   return (
     (frame.transition === "issued" || frame.transition === "renewed") &&
     frame.revoked_at === null &&
-    frame.principal_digest === context.principal_digest &&
+    canonicalJson(frame.principal) === canonicalJson(context.principal) &&
     frame.scope === context.scope &&
     frame.action_types.includes(context.action_type) &&
     context.target_engines.every((engine) => frame.target_engines.includes(engine)) &&
@@ -123,12 +177,34 @@ function select(
 
 export function buildGrantAuthorizationWitness(
   requests: readonly PermissionBindingRowV1[],
-  frames: readonly EffectiveGrantFrameV1[],
+  prefix: ValidatedGrantAuthorityPrefixV1,
   context: WitnessContextV1,
 ): CapabilityGrantAuthorizationWitnessV1 {
+  const authority = VALIDATED_PREFIXES.get(prefix);
+  if (!authority)
+    throw new CapabilityValidationError(
+      "grant witness requires a validated historical authority prefix",
+      "grant_prefix",
+      "integrity_failure",
+    );
+  if (context.scope !== prefix.scope)
+    throw new CapabilityValidationError(
+      "grant witness scope differs from authority prefix",
+      "scope",
+    );
   const evaluated = timestamp(context.evaluated_at, "evaluated_at");
   assertSortedUnique(context.target_engines, bytewise, "target_engines");
-  const selections = requests.map((request) => select(request, frames, context, evaluated));
+  const canonical = canonicalPermissionUnion(requests);
+  const identities = requests.map(permissionRowSortKey);
+  assertSortedUnique(identities, bytewise, "permissions");
+  if (canonicalJson(canonical) !== canonicalJson(requests))
+    throw new CapabilityValidationError(
+      "grant witness requests are not the canonical permission union",
+      "permissions",
+    );
+  const selections = requests.map((request) =>
+    select(request, authority.frames, context, evaluated),
+  );
   const groups = new Map<string, Selection[]>();
   for (const selection of selections) {
     const key = `${selection.frame.grant_id}\0${selection.frame.frame_digest}`;
@@ -167,7 +243,7 @@ export function buildGrantAuthorizationWitness(
     );
   const draft = {
     schema_version: "1.0" as const,
-    grant_state_digest: context.grant_state_digest,
+    grant_state_digest: prefix.grant_state_digest,
     evaluated_at: context.evaluated_at,
     grants,
   };

@@ -219,7 +219,7 @@ function httpAuthority(bootstrap: ConversationBootstrap) {
       now: () => streamNow,
     }),
     artifacts: {
-      registry: bootstrap.authorities.artifactRegistry,
+      ancestry: bootstrap.authorities.browser.artifactResolver,
       store: bootstrap.authorities.artifactStore,
     },
     csrf: (request) => request.headers.get("x-vibeflow-token") === "acceptance-csrf",
@@ -248,6 +248,10 @@ function httpAuthority(bootstrap: ConversationBootstrap) {
     cookie,
     request,
     route,
+    artifactSha(conversationId: string, artifactId: string) {
+      return bootstrap.authorities.browser.artifactResolver.resolve(conversationId, artifactId)
+        ?.reference.content_sha256;
+    },
     advanceStreamClock(ms: number) {
       streamNow += ms;
     },
@@ -274,10 +278,12 @@ async function artifactText(
   conversationId: string,
   opaqueId: string,
 ): Promise<string> {
+  const expected = http.artifactSha(conversationId, opaqueId);
+  if (!expected) throw new Error("published artifact ancestry is absent");
   const response = await http.route(
     http.request(
       "GET",
-      `/api/conversations/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(opaqueId)}`,
+      `/api/conversations/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(opaqueId)}?expected_sha256=${expected}`,
     ),
   );
   expect(response.status).toBe(200);

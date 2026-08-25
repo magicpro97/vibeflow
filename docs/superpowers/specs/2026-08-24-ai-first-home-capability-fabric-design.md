@@ -1,7 +1,7 @@
 # AI-first Home and CLI Capability Fabric design
 
 Date: 2026-08-24
-Status: design approved and fresh-reader tested; implementation pending plan
+Status: implementation complete; production release remains gated by live whole-repository verification
 Product boundary: VibeFlow remains a local-first harness for AI CLIs
 
 ## Decision
@@ -16,6 +16,13 @@ Capability Fabric: packages describe skills, MCP servers, tools, hooks, roles, a
 VibeFlow resolves, approves, installs, verifies, updates, removes, and rolls them back through
 VF-owned engine adapters. Packages never inject arbitrary HTML, microfrontends, or executable
 lifecycle code into the VibeFlow UI.
+
+The standalone Ask modal is retired as a product surface. Questions, steering, and reviewed actions
+all enter through Conversation Home. During the compatibility window, `vf ask` and `/api/ask`
+remain thin compatibility frontends for existing scripts and integrations. They own no Home UI or
+session state and gain no independent mutation path: any persisted create/resume interaction must
+use the same Conversation Service authority. They may be removed only through a separately approved
+breaking release.
 
 The complete program has two subsystems with one stable integration contract:
 
@@ -842,6 +849,240 @@ does not mean copying unbounded private provider transcripts into new sessions.
 Handoff generation fails closed before publication on redaction failure, source-sequence drift, or
 digest mismatch. Participant-start failure occurs only after valid lineage is published, remains visible
 as `start_failed`, and cannot give any participant a different shared payload.
+
+### Same-revision structured turn delivery
+
+Native session history is an optimization only when the host can prove it. After the initial start of a
+revision, every non-isolated participant attempt receives one canonical structured turn envelope rather
+than an ad-hoc Markdown transcript:
+
+```ts
+interface ConversationTurnMessageV1 {
+  message_id: string;
+  public_seq: number;
+  author_public_id: "human";
+  content: string;
+  target_participants: "all" | string[];
+  content_digest: string;
+}
+
+interface ConversationTurnResponseV1 {
+  message_id: string;
+  public_seq: number;
+  author_public_id: string;
+  role_ref: string;
+  round_id: string;
+  answer: string | null;
+  claim: string | null;
+  evidence: string[];
+  artifact_refs: string[];
+  content_digest: string;
+}
+
+interface ConversationTurnEnvelopeV1 {
+  schema_version: "1.0";
+  projection_profile: "vf-public-turn/1";
+  conversation_id: string;
+  revision_id: string;
+  recipient_participant_id: string;
+  delivery_mode: "exact-delta" | "full-history";
+  after_public_seq: number;
+  through_public_seq: number;
+  prior_delivery_digest: string | null;
+  interaction_state: "ready" | "degraded";
+  after_interaction_sequence: number;
+  through_interaction_sequence: number;
+  prior_interaction_head_digest: string | null;
+  interaction_head_digest: string | null;
+  instruction:
+    | { kind: "direct"; topic: string | null }
+    | { kind: "debate-participant"; topic: string; round: number };
+  user_messages: ConversationTurnMessageV1[];
+  public_responses: ConversationTurnResponseV1[];
+  quoted_messages: ConversationTurnQuoteProjectionV1[];
+  peer_reactions: PublicReactionProjectionV1[];
+}
+
+interface ConversationTurnQuoteProjectionV1 {
+  quoting_message_id: string;
+  quote_order: number;
+  target: PublicQuoteReferenceV1 | PublicQuoteProjectionV1;
+}
+
+interface ConversationTurnDeliveryReceiptV1 {
+  schema_version: "1.0";
+  participant_id: string;
+  prior_attempt_id: string | null;
+  delivery_mode: ConversationTurnEnvelopeV1["delivery_mode"];
+  after_public_seq: number;
+  through_public_seq: number;
+  interaction_state: ConversationTurnEnvelopeV1["interaction_state"];
+  after_interaction_sequence: number;
+  through_interaction_sequence: number;
+  prior_interaction_head_digest: string | null;
+  interaction_head_digest: string | null;
+  envelope_digest: string;
+}
+```
+
+The prompt segment is exactly
+`UTF8("VF-TURN/1\n") || RFC8785(ConversationTurnEnvelopeV1)`, with no BOM or trailing newline.
+`content_digest` values omit themselves and use respectively
+`VF-PUBLIC-TURN-MESSAGE\0v1\0` and `VF-PUBLIC-TURN-RESPONSE\0v1\0`.
+`envelope_digest` uses `VF-CONVERSATION-TURN-ENVELOPE\0v1\0` over the complete envelope. A response
+digest must recompute from the exact fields delivered; a fallback text used only during digest
+calculation but absent from the delivered object is corruption.
+
+Delivery is normative:
+
+- `exact-delta` is permitted only when a validated private resume binding proves the same participant,
+  engine, native session, prior attempt, revision, last delivered public sequence, and prior delivery
+  digest. Structural resemblance to a resume record is not authority.
+- An exact delta contains newly applicable user messages and concise completed public responses from
+  **other** participants after the receipt-bound cursor. It excludes the recipient's own prior output
+  and already delivered user messages because the exact native session contains them.
+- Targeted user messages are delivered only to their intended participants. Public peer responses are
+  ordered by completed-response public sequence and preserve author, role, claim, evidence, artifact
+  references, and an exact digest. The host may use an agent's validated structured result to keep this
+  compact, but it must never invent a summary. An unstructured response is included as exact bounded
+  public text or an explicit content-addressed omission reference.
+- `full-history` is mandatory when exact resume authority is absent, incomplete, ambiguous, changed, or
+  belongs to another revision. It includes the recipient's public prior output as well as peer context;
+  the host must not omit history merely because a provider usually supports resume.
+- A delivery cursor advances only after the adapter has completed the attempt, durably captured the
+  exact native resume binding, and receipt-bound the delivered envelope. Crash recovery either restores
+  that complete tuple or does not advance it. Replay of the same receipt is idempotent.
+- Interaction delivery has its own receipt-bound cursor because a reaction may change after the public
+  message sequence has stopped advancing. The interaction tuple is the exact append-only sequence and
+  head digest observed by the envelope. `exact-delta` includes the current folded peer projection only
+  for targets touched after the validated prior interaction cursor; `full-history` starts at interaction
+  sequence zero. A changed, absent, future, or non-ancestral interaction cursor falls back to the full
+  visible interaction projection. The recipient's own actor is removed from exact peer counts and actor
+  lists, and an empty group is omitted. Advancing the public cursor never silently advances this cursor.
+- `interaction_state: "ready"` requires a non-null current interaction head digest and, for an exact
+  delta whose `after_interaction_sequence` is greater than zero, a non-null prior digest bound by the
+  persisted delivery receipt. `interaction_state: "degraded"` requires both interaction digests to be
+  null and both interaction sequences to be zero; it disables interaction exactness and forces
+  `full-history` while preserving the underlying conversation messages. `prior_delivery_digest` is
+  non-null only for a validated exact delta and is null on every full-history fallback.
+- A child revision still starts every participant fresh with the byte-identical `VF-HANDOFF/1` segment.
+  If that start yields an exact native binding, the first policy turn is an exact delta rooted at the
+  handoff digest and contains only new child-revision events. Otherwise the fresh turn contains the
+  required public history; it never assumes that the failed start remembered the handoff.
+- The exact bytes passed to an adapter include any handoff segment, separator, and turn segment. Their
+  combined UTF-8 length must fit the participant's declared prompt budget after its fixed wrapper
+  reservation. Child planning reserves the initial turn before admitting the handoff. At the boundary
+  the exact maximum is accepted and one byte more fails closed; concatenating two independently valid
+  1 MiB objects is not a valid budget check.
+- Baseline and evaluator attempts remain deliberately isolated and fresh. They receive only their
+  purpose-specific structured input and cannot claim a participant delivery cursor.
+
+Participant- or engine-specific prose may exist in the fixed wrapper, but it must not restate, quote,
+summarize, or reorder the structured turn segment. The CLI transport remains stdin or a bounded prompt
+file/argument according to the adapter; JSON is the versioned prompt payload and does not depend on a
+provider-specific native JSON-input flag.
+
+### Reactions and multi-source quotes
+
+Friendly interaction is typed conversation data, not emoji or quote syntax embedded in Markdown. The
+closed reaction set is `👍`, `👎`, `❤️`, `🎉`, `👀`, `🤔`, `✅`, and `❗` (including the exact Unicode
+variation selector shown here). Message targets and social operations are:
+
+```ts
+type ReactionEmojiV1 = "👍" | "👎" | "❤️" | "🎉" | "👀" | "🤔" | "✅" | "❗";
+
+interface PublicMessageLocatorV1 {
+  root_session_id: string;
+  conversation_id: string;
+  revision_id: string;
+  target_event_id: string;
+  target_kind: "user-message" | "completed-agent-response";
+  content_digest: string;
+}
+
+interface PublicQuoteReferenceV1 extends PublicMessageLocatorV1 {
+  author_public_id: string;
+}
+
+interface PublicQuoteProjectionV1 extends PublicQuoteReferenceV1 {
+  preview_text: string;
+  created_at: string;
+}
+
+interface ConversationTurnQuoteProjectionV1 {
+  quoting_message_id: string;
+  quote_order: number;
+  target: PublicQuoteReferenceV1 | PublicQuoteProjectionV1;
+}
+
+interface PublicReactionProjectionV1 {
+  target: PublicMessageLocatorV1;
+  emoji: ReactionEmojiV1;
+  count: number;
+  reacted_by_recipient: boolean;
+  actor_public_ids: string[];
+}
+
+interface ConversationReactionOperationV1 {
+  schema_version: "1.0";
+  operation_id: string;
+  root_session_id: string;
+  actor_public_id: string;
+  actor_kind: "human" | "participant";
+  operation: "add" | "remove";
+  target: PublicMessageLocatorV1;
+  emoji: ReactionEmojiV1;
+  prior_interaction_head_digest: string;
+  created_at: string;
+  operation_digest: string;
+}
+```
+
+`content_digest` uses `VF-PUBLIC-MESSAGE-LOCATOR-CONTENT\0v1\0` over the exact public-safe target
+event/group projection. A completed streamed response is named by its final `completes_response:true`
+event, while UI-only grouping keys remain non-authoritative. `operation_digest` omits itself and uses
+`VF-CONVERSATION-REACTION-OPERATION\0v1\0`. The append-only interaction head and operation frames are
+owned by a conversation interaction authority under the root lineage; they are not HostAction
+proposals and never grant tool, capability, approval, or instruction authority.
+
+Reaction rules are closed:
+
+- A human may add or remove only that authenticated human's reaction. A participant may emit reactions
+  only as part of its validated completed turn and may never react to its own message.
+- A participant may add at most one reaction to any target message and at most three reaction adds on
+  distinct targets per completed turn. Repeated add/remove churn cannot reset that bound.
+- `(target_event_id, actor_public_id, emoji, operation)` retries are idempotent. The public fold contains
+  at most one active reaction per `(target_event_id, actor_public_id)` for participants; remove requires
+  an active reaction owned by the same actor. Unknown emoji, duplicate active add, foreign actor,
+  partial response target, future event, or invisible target fails without changing the fold.
+- Reactions are social signals. They are never promoted to a user instruction, approval, consensus
+  vote, or action candidate. A bounded `peer_reactions` projection may help conversational tone, but it
+  always remains explicitly typed and subordinate to user messages.
+
+A user or participant response may quote between one and eight ordered visible messages. References
+may cross authors and revisions only within the same verified root lineage. The host validates every
+locator, target type, ancestry, visibility at the actor's source sequence, and content digest before
+publication; stale, missing, foreign, corrupt, or unauthorized targets fail closed and are
+non-enumerating. Duplicate references are rejected. Quotes may include the quoting participant's own
+prior public message, because quote attribution is explicit and does not rely on hidden session memory.
+
+Quote bodies are not copied into durable response text. The UI resolves `PublicQuoteProjectionV1`,
+shows author/source attribution and a compact preview, and jumps to the immutable source event. The
+structured turn envelope wraps each occurrence as `ConversationTurnQuoteProjectionV1`, so
+`quoting_message_id` and dense `quote_order` preserve who quoted which source and the order selected.
+It projects quote occurrences from both user messages and completed participant responses. It includes
+the target preview only when the target has not already been delivered. A future typed instruction may
+explicitly request a cited preview; prose alone never grants that exception. Otherwise the occurrence
+remains present with its immutable locator and source attribution without duplicating the target body.
+Missing older content uses the existing
+conversation-scoped resolver and content-addressed omission rules.
+
+Agent output may request `quote_refs` and `reactions` alongside its normal structured answer. The host
+publishes the answer even when the social intent is invalid, but rejects the entire social-intent batch
+atomically, records a public-safe diagnostic, and performs no partial interaction mutation. Browser
+reaction mutation requires the existing authenticated loopback/CSRF authority and an idempotency key.
+Interaction corruption degrades the social projection and fences further social writes without hiding
+the underlying conversation messages or granting broader repair authority.
 
 ### Action proposal model
 

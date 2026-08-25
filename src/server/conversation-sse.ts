@@ -1,3 +1,9 @@
+import {
+  type PublicErrorCode,
+  httpStatusForPublicError,
+  publicActionError,
+} from "../actions/errors.js";
+import { canonicalJsonBytes, digestV1 } from "../durability/index.js";
 import type {
   ConversationListener,
   ConversationService,
@@ -44,19 +50,68 @@ export function parseConversationCursor(request: Request, url: URL): Conversatio
 
 export function serializeConversationSseFrame(frame: ConversationSseFrame): string {
   const id = "id" in frame ? `id: ${frame.id}\n` : "";
-  const data = frame.data === "" ? "" : JSON.stringify(frame.data);
+  const data = frame.data === "" ? "" : canonicalJsonBytes(frame.data).toString("utf8");
   return `${id}event: ${frame.event}\ndata: ${data}\n\n`;
 }
 
-const jsonError = (status: number, code: string): Response =>
-  Response.json({ code }, { status, headers: { "cache-control": "no-store" } });
+function httpError(
+  conversationId: string,
+  code: Extract<
+    PublicErrorCode,
+    "unauthenticated" | "invalid_request" | "not_found" | "service_unavailable"
+  >,
+): Response {
+  const unavailable = code === "service_unavailable";
+  const body = publicActionError({
+    code,
+    message:
+      code === "unauthenticated"
+        ? "Authentication is required."
+        : code === "invalid_request"
+          ? "The event cursor is invalid."
+          : code === "not_found"
+            ? "The conversation was not found."
+            : "The stream is unavailable.",
+    correlation_id: `vf-stream-${digestV1("VF-CONVERSATION-STREAM-HTTP-ERROR\0v1\0", {
+      schema_version: "1.0",
+      conversation_id: conversationId,
+      code,
+    }).slice(7)}`,
+    retryable: unavailable,
+    recovery_action: unavailable ? "retry" : null,
+    details: null,
+  });
+  return Response.json(body, {
+    status: httpStatusForPublicError(code),
+    headers: { "cache-control": "no-store" },
+  });
+}
 
 function validEvent(event: PublicStoredTraceEvent, id: string): boolean {
   return event.conversation_id === id && Number.isSafeInteger(event.seq) && event.seq > 0;
 }
 
-function snapshotFrame(value: ConversationSnapshot, cursor: number): ConversationSseFrame {
-  return { id: String(Math.max(value.last_seq, cursor)), event: "snapshot", data: value };
+function snapshotFrame(value: ConversationSnapshot): ConversationSseFrame {
+  return { id: String(value.last_seq), event: "snapshot", data: value };
+}
+
+function streamPublicError(
+  conversationId: string,
+  code: Extract<PublicErrorCode, "not_found" | "service_unavailable">,
+) {
+  return publicActionError({
+    code,
+    message:
+      code === "not_found" ? "The conversation was not found." : "The stream is unavailable.",
+    correlation_id: `vf-stream-${digestV1("VF-CONVERSATION-STREAM-ERROR\0v1\0", {
+      schema_version: "1.0",
+      conversation_id: conversationId,
+      code,
+    }).slice(7)}`,
+    retryable: code === "service_unavailable",
+    recovery_action: code === "service_unavailable" ? "retry" : null,
+    details: null,
+  }).error;
 }
 
 type ReplayAwareUnsubscribe = Unsubscribe & { readonly replayReady?: Promise<void> };
@@ -78,16 +133,28 @@ export async function handleConversationSse(
     !credentials[0] ||
     !authority.tokens.authorize(conversationId, credentials[0])
   )
-    return jsonError(401, "unauthorized");
+    return httpError(conversationId, "unauthenticated");
   const parsed = parseConversationCursor(request, url);
-  if (!parsed.ok) return jsonError(400, parsed.code);
+  if (!parsed.ok) return httpError(conversationId, "invalid_request");
   let snapshot: ConversationSnapshot | null;
   try {
     snapshot = await authority.service.snapshot(conversationId);
   } catch {
-    return jsonError(500, "stream_unavailable");
+    return httpError(conversationId, "service_unavailable");
   }
-  if (!snapshot) return jsonError(404, "conversation_not_found");
+  if (!snapshot) return httpError(conversationId, "not_found");
+  if (parsed.cursor > snapshot.last_seq)
+    return Response.json(
+      publicActionError({
+        code: "future_event_cursor",
+        message: "The event cursor is ahead of the current conversation.",
+        correlation_id: `vf-stream-${conversationId}`,
+        retryable: false,
+        recovery_action: "restart-pagination",
+        details: { current_last_seq: snapshot.last_seq },
+      }),
+      { status: 409, headers: { "cache-control": "no-store" } },
+    );
 
   const encoder = new TextEncoder();
   const heartbeatMs = authority.heartbeatMs ?? 15_000;
@@ -155,7 +222,7 @@ export async function handleConversationSse(
       } catch {
         enqueue({
           event: "error",
-          data: { code: "stream_unavailable", message: "stream unavailable" },
+          data: streamPublicError(conversationId, "service_unavailable"),
         });
         cleanup();
         return;
@@ -163,7 +230,7 @@ export async function handleConversationSse(
       if (!unsubscribe) {
         enqueue({
           event: "error",
-          data: { code: "conversation_not_found", message: "conversation not found" },
+          data: streamPublicError(conversationId, "not_found"),
         });
         cleanup();
         return;
@@ -178,7 +245,7 @@ export async function handleConversationSse(
       if (!completion) {
         enqueue({
           event: "error",
-          data: { code: "stream_unavailable", message: "stream unavailable" },
+          data: streamPublicError(conversationId, "service_unavailable"),
         });
         cleanup();
         return;
@@ -192,7 +259,7 @@ export async function handleConversationSse(
           for (const event of buffered) {
             if (event.seq <= boundary) enqueueTrace(event);
           }
-          enqueue(snapshotFrame(snapshot as ConversationSnapshot, parsed.cursor));
+          enqueue(snapshotFrame(snapshot as ConversationSnapshot));
           lastSeq = Math.max(lastSeq, boundary, parsed.cursor);
           for (const event of buffered) if (event.seq > boundary) enqueueTrace(event);
           if (heartbeatMs > 0 && active) {
@@ -202,7 +269,7 @@ export async function handleConversationSse(
         () => {
           enqueue({
             event: "error",
-            data: { code: "stream_unavailable", message: "stream unavailable" },
+            data: streamPublicError(conversationId, "service_unavailable"),
           });
           cleanup();
         },
@@ -214,7 +281,7 @@ export async function handleConversationSse(
   });
   return new Response(stream, {
     headers: {
-      "cache-control": "no-cache, no-store",
+      "cache-control": "no-store",
       connection: "keep-alive",
       "content-type": "text/event-stream; charset=utf-8",
       "x-accel-buffering": "no",

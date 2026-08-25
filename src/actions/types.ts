@@ -41,6 +41,7 @@ export type HostActionKind =
   | "conversation.remove_participant"
   | "conversation.update_participant"
   | "conversation.update_settings"
+  | "conversation.continue_message"
   | "conversation.select_lineage_head"
   | "conversation.associate_lineages"
   | "conversation.publish_suspected_literal"

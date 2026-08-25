@@ -42,11 +42,99 @@ export function verifyFile(
   return bytes;
 }
 
+function quantified(pattern: string, index: number): { end: number; variable: boolean } | null {
+  const token = pattern[index];
+  if (token === "*" || token === "+" || token === "?") return { end: index + 1, variable: true };
+  if (token !== "{") return null;
+  const match = pattern.slice(index).match(/^\{(\d+)(?:,(\d*))?\}/);
+  if (!match) return null;
+  const minimum = Number(match[1]);
+  const maximum =
+    match[2] === undefined
+      ? minimum
+      : match[2] === ""
+        ? Number.POSITIVE_INFINITY
+        : Number(match[2]);
+  if (minimum > 256 || maximum > 256 || maximum < minimum)
+    throw new CapabilityValidationError(
+      "pattern repetition exceeds linear matcher bounds",
+      "pattern",
+    );
+  return { end: index + match[0].length, variable: minimum !== maximum };
+}
+
+function assertLinearPattern(pattern: string, path: string): void {
+  let variableQuantifiers = 0;
+  let lastAtom: "atom" | "group" | "none" = "none";
+  let depth = 0;
+  for (let index = 0; index < pattern.length; ) {
+    const current = pattern[index] as string;
+    if (current === "\\") {
+      if (index + 1 >= pattern.length)
+        throw new CapabilityValidationError("invalid input pattern", path);
+      lastAtom = "atom";
+      index += 2;
+      continue;
+    }
+    if (current === "[") {
+      let closed = false;
+      for (index += 1; index < pattern.length; index += 1) {
+        if (pattern[index] === "\\") index += 1;
+        else if (pattern[index] === "]") {
+          closed = true;
+          index += 1;
+          break;
+        }
+      }
+      if (!closed) throw new CapabilityValidationError("invalid input pattern", path);
+      lastAtom = "atom";
+      continue;
+    }
+    if (current === "|")
+      throw new CapabilityValidationError(
+        "pattern alternation is outside the guaranteed-linear grammar",
+        path,
+      );
+    if (current === "(" && pattern[index + 1] === "?")
+      throw new CapabilityValidationError("pattern uses an unsupported group construct", path);
+    if (current === "(") {
+      depth += 1;
+      lastAtom = "none";
+      index += 1;
+      continue;
+    }
+    if (current === ")") {
+      if (depth === 0) throw new CapabilityValidationError("invalid input pattern", path);
+      depth -= 1;
+      lastAtom = "group";
+      index += 1;
+      continue;
+    }
+    const repetition = quantified(pattern, index);
+    if (repetition) {
+      if (lastAtom === "none" || lastAtom === "group")
+        throw new CapabilityValidationError(
+          "pattern repeats an unsupported or grouped expression",
+          path,
+        );
+      if (repetition.variable && ++variableQuantifiers > 1)
+        throw new CapabilityValidationError("pattern has more than one variable repetition", path);
+      lastAtom = "none";
+      index = repetition.end;
+      continue;
+    }
+    lastAtom = current === "^" || current === "$" ? "none" : "atom";
+    index += 1;
+  }
+  if (depth !== 0) throw new CapabilityValidationError("invalid input pattern", path);
+}
+
 function safePattern(value: unknown, path: string): string | null {
   if (value === null) return null;
   const pattern = text(value, path, { max: 1_024 });
-  if (/\\[1-9]|\(\?|(?:\*|\+|\?|\{\d+(?:,\d*)?\})(?:\*|\+|\?|\{)/.test(pattern))
-    throw new CapabilityValidationError("pattern uses a non-linear or unsupported construct", path);
+  if (/\\[1-9]/.test(pattern))
+    throw new CapabilityValidationError("pattern uses a backreference", path);
+  assertLinearPattern(pattern, path);
   try {
     new RegExp(`^(?:${pattern})$`, "u");
   } catch {

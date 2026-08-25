@@ -13,6 +13,11 @@ import type {
   TraceEvent,
 } from "../trace/types.js";
 import type { BindingAuthoritySnapshot, ConversationArtifactStore } from "./artifact-store.js";
+import { assertPublicQuoteReferenceV1 } from "./conversation-interaction-validation.js";
+import {
+  type PrivateFileRangeHandoffBindingV1,
+  assertPrivateFileRangeHandoffBindingV1,
+} from "./private-file-range-staging-store.js";
 // biome-ignore format: production file ceiling
 import type {
   ConversationBinding, ConversationHealth, ConversationManifest, ConversationOrchestrationResult, ConversationPolicy, MessageRequest, TerminalLifecycle,
@@ -35,6 +40,14 @@ export interface RuntimeEmission {
 }
 const digest = (value: unknown): string =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+function privateFileRangeAuthority(request: MessageRequest) {
+  const privateFileRange = request.private_file_range;
+  if (!privateFileRange) return undefined;
+  assertPrivateFileRangeHandoffBindingV1(privateFileRange);
+  return structuredClone(privateFileRange);
+}
+
 export const canonicalMessageRequest = (request: MessageRequest): MessageRequest => {
   if (
     typeof request.content !== "string" ||
@@ -52,18 +65,40 @@ export const canonicalMessageRequest = (request: MessageRequest): MessageRequest
     )
       throw new Error("invalid target participants");
   }
+  const quoteRefs = request.quote_refs;
+  if (quoteRefs !== undefined) {
+    if (!Array.isArray(quoteRefs) || quoteRefs.length < 1 || quoteRefs.length > 8)
+      throw new Error("invalid quote reference count");
+    const seen = new Set<string>();
+    for (const quote of quoteRefs) {
+      assertPublicQuoteReferenceV1(quote);
+      const key = `${quote.target_event_id}\0${quote.content_digest}`;
+      if (seen.has(key)) throw new Error("duplicate quote reference");
+      seen.add(key);
+    }
+  }
   return Object.freeze({
     content: request.content,
     target_participants:
       !targets || targets === "all" ? "all" : Object.freeze([...new Set(targets)].sort()),
+    ...(quoteRefs ? { quote_refs: Object.freeze(structuredClone(quoteRefs)) } : {}),
+    ...(privateFileRangeAuthority(request)
+      ? { private_file_range: privateFileRangeAuthority(request) }
+      : {}),
   }) as MessageRequest;
 };
 export const messageRevisionKey = (request: MessageRequest): string =>
-  digest(canonicalMessageRequest(request));
-export const conversationChildId = (parentId: string, request: MessageRequest): string =>
-  `conversation-${digest({ parentId, request: canonicalMessageRequest(request) }).slice(0, 32)}`;
-export const conversationChildOperationId = (childId: string): string =>
-  `operation-${digest({ authority: "conversation-child-operation-v1", childId }).slice(0, 32)}`;
+  digest(
+    (() => {
+      const canonical = canonicalMessageRequest(request);
+      return {
+        content: canonical.content,
+        target_participants: canonical.target_participants,
+        quote_refs: canonical.quote_refs ?? [],
+        private_file_range: canonical.private_file_range ?? null,
+      };
+    })(),
+  );
 export const conversationMessages = (
   records: readonly InternalTraceStoreRecord[],
 ): readonly MessageRequest[] =>
@@ -315,6 +350,7 @@ export interface RuntimeCreateRequest {
   phase: number;
   bindings: RuntimeBinding[];
   parent?: { conversationId: string; revisionId: string };
+  private_file_range?: PrivateFileRangeHandoffBindingV1;
 }
 export interface RuntimePreviewRequest extends Omit<RuntimeCreateRequest, "bindings" | "parent"> {
   bindings: Array<{

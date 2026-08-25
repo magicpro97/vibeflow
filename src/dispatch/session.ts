@@ -5,7 +5,6 @@ import {
   createProcessTerminator,
   normalizedAttemptError,
   observeAttemptLifecycle,
-  persistFailedAttemptEvidence,
   reserveAttemptEvidence,
   snapshotSessionAdapterOptions,
 } from "./attempt-handle.js";
@@ -25,6 +24,10 @@ import {
 import { assertSpawnProjection, reconcileSessionHistory, sessionInvocation } from "./session-argv.js";
 import { SessionStdoutState } from "./session-output.js";
 import { bridgeSessionInvocation } from "./session-protocol.js";
+import {
+  persistSynchronousStartFailure,
+  recordCompletedStartOutcome,
+} from "./session-start-recording.js";
 import { isCanonicalSpawnOptionsProjection } from "./session-types.js";
 import type {
   AttemptHandle,
@@ -36,6 +39,10 @@ import type {
   OperationLifecycleState,
 } from "./session-types.js";
 import { defaultEngineProcessSpawner } from "./spawners.js";
+import {
+  AttemptStartAuthorityStore,
+  createDurableAttemptStartAuthorityReaderV1,
+} from "./start-authority.js";
 
 export function createEngineSessionAdapter(
   options: EngineSessionAdapterOptions = {},
@@ -45,8 +52,11 @@ export function createEngineSessionAdapter(
   const sourceEnv = config.sourceEnv as NodeJS.ProcessEnv;
   const startedAttempts = new Set<string>();
   const evidenceRoot = config.evidenceRoot ?? join(process.cwd(), ".vibeflow", "attempts");
+  const startAuthorityStore = new AttemptStartAuthorityStore(evidenceRoot);
+  const startAuthority = createDurableAttemptStartAuthorityReaderV1(startAuthorityStore);
 
   return {
+    startAuthority,
     start(request): AttemptHandle {
       const { attemptId, spawn, nativeSessionId, signal, onChunk, onLifecycle } = request;
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(attemptId)) {
@@ -84,30 +94,21 @@ export function createEngineSessionAdapter(
       let claimedProjection: typeof spawn.isolation = null;
       let claimedLease: ReturnType<typeof claimIsolationLease> | undefined;
       let initialPrivate: string[] = [];
-      const persistPreSpawnFailure = (error: Error) => {
-        const evidence = sanitizePublicValue(
-          {
-            attempt_id: attemptId,
+      const persistStartFailure = (failure: Error, outcome: "proved-absent" | "unknown") => {
+        evidenceBinding =
+          persistSynchronousStartFailure({
+            store: startAuthorityStore,
+            attemptId,
             engine,
-            lifecycle: [...lifecycle],
-            state: "engine_start",
-            error_kind: "engine_start",
-            ok: false,
-            reason: error.message,
-            native_session_status: "unavailable",
-          },
-          nativeSessionId ? [nativeSessionId] : [],
-          initialPrivate,
-        );
-        persistFailedAttemptEvidence(
-          reservation,
-          config.writeEvidence,
-          attemptId,
-          evidence,
-          (internalRef) => {
-            evidenceBinding = { attemptId, internalRef };
-          },
-        );
+            lifecycle,
+            nativeSessionId,
+            privateValues: initialPrivate,
+            reservation,
+            evidence: evidenceBinding,
+            writer: config.writeEvidence,
+            failure,
+            outcome,
+          }) ?? evidenceBinding;
       };
 
       let invocation: ReturnType<typeof sessionInvocation>;
@@ -162,7 +163,7 @@ export function createEngineSessionAdapter(
       } catch (error) {
         const failure = normalizedAttemptError(error);
         try {
-          persistPreSpawnFailure(failure);
+          persistStartFailure(failure, "proved-absent");
         } finally {
           if (claimedProjection) void releaseIsolationLease(claimedProjection).catch(() => {});
         }
@@ -182,7 +183,7 @@ export function createEngineSessionAdapter(
       } catch (error) {
         const failure = normalizedAttemptError(error);
         try {
-          persistPreSpawnFailure(failure);
+          persistStartFailure(failure, "unknown");
         } finally {
           if (claimedProjection) void releaseIsolationLease(claimedProjection).catch(() => {});
         }
@@ -346,7 +347,7 @@ export function createEngineSessionAdapter(
             const internalRef = await config.writeEvidence(attemptId, evidence);
             evidenceBinding = { attemptId, internalRef };
           }
-          return {
+          const result: EngineSessionResult = {
             attemptId,
             engine: spawn.engine,
             ok,
@@ -362,6 +363,14 @@ export function createEngineSessionAdapter(
             evidenceStatus: "persisted",
             nativeSessionStatus: resumeBinding ? "captured" : "unavailable",
           };
+          recordCompletedStartOutcome({
+            store: startAuthorityStore,
+            result,
+            lifecycle,
+            resume: resumeBinding,
+            evidence: evidenceBinding,
+          });
+          return result;
         } finally {
           if (hardTimer) clearTimeout(hardTimer);
           if (idleTimer) clearTimeout(idleTimer);

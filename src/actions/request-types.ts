@@ -17,6 +17,15 @@ export interface ConversationSettingDeltaV1 {
   max_rounds?: number;
   baseline_enabled?: boolean;
 }
+export interface ConversationPublicQuoteReferenceV1 {
+  root_session_id: string;
+  conversation_id: string;
+  revision_id: string;
+  target_event_id: string;
+  target_kind: "user-message" | "completed-agent-response";
+  content_digest: string;
+  author_public_id: string;
+}
 export interface PackageSelectorV1 {
   id: string;
   version?: string;
@@ -120,6 +129,12 @@ export type HostActionRequestV1 =
     }
   | { type: "conversation.update_settings"; changes: ConversationSettingDeltaV1 }
   | {
+      type: "conversation.continue_message";
+      content: string;
+      target_participants: "all" | string[];
+      quote_refs?: ConversationPublicQuoteReferenceV1[];
+    }
+  | {
       type: "conversation.select_lineage_head";
       root_session_id: string;
       candidate_conversation_id: string;
@@ -214,6 +229,7 @@ export const HOST_ACTION_KINDS: ReadonlySet<HostActionKind> = new Set<HostAction
   "conversation.remove_participant",
   "conversation.update_participant",
   "conversation.update_settings",
+  "conversation.continue_message",
   "conversation.select_lineage_head",
   "conversation.associate_lineages",
   "conversation.publish_suspected_literal",

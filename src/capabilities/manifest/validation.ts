@@ -28,6 +28,7 @@ import type {
 import { inTreePath, validateInputDeclaration, verifyFile } from "./validation-helpers.js";
 
 const ENGINES: EngineName[] = ["claude", "codex", "copilot", "opencode", "antigravity"];
+const VALIDATED_MANIFESTS = new WeakSet<object>();
 
 function assertExactManifestShapes(manifest: CapabilityManifestV1): void {
   exactKeys(
@@ -372,10 +373,23 @@ export function parseCapabilityManifest(
   const parsed = parseStrictJson(source) as unknown as CapabilityManifestV1;
   const manifest = validateCapabilityManifest(parsed, files);
   const canonicalBytes = canonicalJsonBytes(manifest, { maxBytes: 512 * 1024 });
-  return {
+  const result = {
     manifest,
     manifest_digest: digestV1("VF-CAPABILITY-MANIFEST\0v1\0", manifest),
     canonical_bytes: canonicalBytes,
     source_bytes: Buffer.from(sourceBytes),
   };
+  VALIDATED_MANIFESTS.add(result);
+  return result;
+}
+
+export function assertValidatedCapabilityManifest(
+  value: ValidatedCapabilityManifestV1,
+): ValidatedCapabilityManifestV1 {
+  if (!VALIDATED_MANIFESTS.has(value))
+    throw new CapabilityValidationError(
+      "manifest record is not parser-validated",
+      "manifest_record",
+    );
+  return value;
 }

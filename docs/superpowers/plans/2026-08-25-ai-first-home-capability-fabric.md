@@ -105,7 +105,7 @@ Catalog DTOs and read APIs may land while Capability core is built. The UI may i
 
 **Owns:**
 
-- new `src/orchestrator/conversation/{conversation-lock,handoff-*,revision-*,conversation-action-*,conversation-home-authorities}.ts`
+- new `src/orchestrator/conversation/{conversation-lock,handoff-*,revision-*,turn-delivery-*,conversation-interaction-*,conversation-action-*,conversation-home-authorities}.ts`
 - additive trace projection changes in `src/orchestrator/trace/{types,validation,store}.ts`
 - narrow delegation changes in `src/orchestrator/conversation/{bootstrap,service,continuation-runtime,runtime,fold,policy-registry,types}.ts`
 - `src/server/{public-api-error,conversation-handoff-route,conversation-action-route,conversation-action-events,conversation-principal}.ts`
@@ -116,6 +116,8 @@ Catalog DTOs and read APIs may land while Capability core is built. The UI may i
 
 - Semantic conversation lock excluding projection-only records.
 - Deterministic canonical handoff selection, budget/compaction, content-addressed bytes, ancestry-bound resolution, and identical handoff for every fresh child participant.
+- Receipt-bound `VF-TURN/1` delivery: exact native resumes receive only newly applicable user messages and concise peer deltas, while fresh/unproved sessions receive complete public context; combined handoff+turn bytes obey the participant budget. Public and interaction sequence/head cursors advance independently and survive restart, so a new reaction on an older message is not lost or replayed as self context. Interaction delivery carries an explicit `ready|degraded` state: ready digests are receipt-bound, while degraded uses null digests/zero sequences and forces full-history without hiding conversation messages.
+- A separate append-only social interaction authority for the closed emoji reaction set and immutable one-to-eight multi-source quote locators, with lineage/visibility/content-digest validation, agent anti-spam limits, no HostAction authority, and quote-occurrence bindings that preserve the quoting message plus dense source order.
 - Complete binding deltas, immutable revision plans/headers, hidden child preparation, root reservation, WAL, source lock checks, head CAS, participant-start barrier, cancellation/quiescence, honest unsupported reconciliation, and restart recovery.
 - Shared action planning/execution for add/remove agent, settings changes, selection/association, stop, compaction, retry/reconcile/abandon, with stale-plan rejection and approval semantics.
 - Pending/action/operation APIs and exact operation SSE cursor behavior; artifact download requires expected SHA and validated ancestry.
@@ -123,7 +125,7 @@ Catalog DTOs and read APIs may land while Capability core is built. The UI may i
 
 **Forbidden:** retaining native sessions across changed bindings, mutating participants in place, exposing caller-selected trace IDs, changing semantic state from projection-only events.
 
-**Verify:** source-lock, handoff determinism, lineage continuity, crash-boundary, duplicate-start, unsupported-adapter, action/API/SSE/artifact and existing child-race regression tests.
+**Verify:** source-lock, handoff/turn determinism and exact/full public-plus-interaction resume boundaries, old-target reaction delivery/self exclusion, multi-source quote occurrence order, lineage continuity, reaction/quote authorization and restart folds, crash-boundary, duplicate-start, unsupported-adapter, action/API/SSE/artifact and existing child-race regression tests.
 
 ## Unit 4 — `capability-core`
 
@@ -220,6 +222,7 @@ Catalog DTOs and read APIs may land while Capability core is built. The UI may i
 
 - Persistent searchable session rail, safe generation-bound A-to-B switching that aborts every stale fetch/token/SSE/timer callback, center timeline, sticky memory-only composer, first-run inline onboarding, and drawers for secondary evidence/settings.
 - Natural `+`, `@`, optional slash autocomplete with IME-safe keyboard behavior; proposals/permissions/approvals/progress/recovery inline in chat; no mutation auto-replay while offline.
+- Accessible restrained emoji reactions plus ordered multi-source quote selection/previews/jump-to-source; UI references canonical target event IDs and content digests and remains disabled with an explicit typed-backend blocker rather than simulating either feature in Markdown.
 - Real pending action recovery, operation streaming, capability search/status/health and all manual/unsupported/partial/rollback/drift states.
 - Warm stone/amber production visual system, readable ~65ch timeline, explicit loading/empty/no-results/offline/error/degraded states, 18rem/collapsed/narrow/320px layouts, 200% zoom, reduced motion, keyboard order, focus restoration, labeled landmarks/log/listbox/live regions, and 44px touch targets.
 
@@ -241,7 +244,7 @@ Catalog DTOs and read APIs may land while Capability core is built. The UI may i
 
 **Must implement/prove:**
 
-- First-run and populated Home; search/pagination/restart; rapid-switch stale suppression; offline draft and explicit resend; proposal reload/edit/stale/double-confirm; revision lineage/context; capability success/manual/unsupported/partial/undo/drift/repair.
+- First-run and populated Home; search/pagination/restart; rapid-switch stale suppression; offline draft and explicit resend; proposal reload/edit/stale/double-confirm; revision lineage/context; exact-resume peer-only deltas and fresh full handoff; bounded reactions and multi-author/multi-revision quotes; capability success/manual/unsupported/partial/undo/drift/repair.
 - Desktop/collapsed/narrow/320px/200%/reduced-motion screenshots, zero console errors, axe automation, keyboard/IME/focus, and recorded manual screen-reader evidence.
 - Legacy fixture migration/rollback rehearsal, newer/corrupt read-only handling, active writer fencing, restart/crash/fault injection, secret-canary scan, and no machine-specific tracked paths.
 - A machine-checked matrix mapping every normative design clause/state/action/domain/digest/negative rule to current live test/evidence IDs; no missing, stale, skipped, or unconsumed row.

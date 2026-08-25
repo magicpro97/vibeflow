@@ -51,6 +51,7 @@ import {
   writeSettings,
 } from "./_shared.js";
 import type { SelftestReport } from "./_shared.js";
+import { guardLegacyWriter } from "./capability/legacy-fence.js";
 import { type LastVerify, readLastVerify } from "./tools-detect.js";
 
 /**
@@ -704,6 +705,8 @@ export function hooks(
         return 0;
       }
       // --yes: write per-engine hook configs into the active repo, all delegating to `vf hook`.
+      const fence = guardLegacyWriter(cwd(), "vf hooks emit --yes");
+      if (fence !== null) return fence;
       for (const rel of emit(cwd())) {
         out("vf", `${c.green("+")} ${rel}`);
       }

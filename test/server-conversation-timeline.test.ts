@@ -4,8 +4,11 @@ import { TimelineHeadUnresolvedError } from "../src/orchestrator/conversation/ti
 import { handleConversationTimelineRoute } from "../src/server/conversation-timeline-route.js";
 
 const HEAD = { conversation_id: "child", revision_id: "revision-child", revision_ordinal: 1 };
+const session = Buffer.alloc(32, 4).toString("base64url");
 const requestFor = (query = "") =>
-  new Request(`http://localhost/api/conversation-sessions/root/timeline${query}`);
+  new Request(`http://localhost/api/conversation-sessions/root/timeline${query}`, {
+    headers: { cookie: `vf_conversation_session=${session}` },
+  });
 
 test("timeline route authenticates before parsing and returns successful no-store DTOs", async () => {
   let calls = 0;

@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api } from "./api.js";
-import type { AskPrefill } from "./lib/ask-prefill.js";
 import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
 import { resolveRepoPath } from "./lib/resolve-repo-path.js";
 import { createReleaseProposalState } from "./store-release.js";
@@ -54,8 +53,6 @@ export const useVfStore = defineStore("vf", () => {
   const domains = ref<DomainRootView[]>([]);
   const domainsLoading = ref(false);
   const domainsError = ref<string | null>(null);
-  const askOpen = ref(false);
-  const askPrefill = ref<AskPrefill | null>(null);
   const selectedWorkflowKey = ref<string | null>(null);
   const selectedUnit = ref<string | null>(null);
   const dashboardWorkflows = ref<WorkflowDashboardItem[]>([]);
@@ -182,15 +179,6 @@ export const useVfStore = defineStore("vf", () => {
       createdBy: { type: "user" as const, id: "user", name: "User" },
     });
     await loadRevisions();
-  }
-
-  function openAsk(prefill: AskPrefill | null = null) {
-    askPrefill.value = prefill;
-    askOpen.value = true;
-  }
-  function closeAsk() {
-    askOpen.value = false;
-    askPrefill.value = null;
   }
 
   async function loadSkills() {
@@ -343,10 +331,6 @@ export const useVfStore = defineStore("vf", () => {
     version,
     projects,
     reuseGoal,
-    askOpen,
-    askPrefill,
-    openAsk,
-    closeAsk,
     loadState,
     loadSettings,
     loadProjects,

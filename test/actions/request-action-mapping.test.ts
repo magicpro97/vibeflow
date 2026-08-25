@@ -32,6 +32,11 @@ const direct: HostActionRequestV1[] = [
   { type: "conversation.update_participant", participant_id: "p1", changes: { model: null } },
   { type: "conversation.update_settings", changes: { max_rounds: 2 } },
   {
+    type: "conversation.continue_message",
+    content: "continue from the durable terminal state",
+    target_participants: ["participant-1"],
+  },
+  {
     type: "conversation.select_lineage_head",
     root_session_id: "root",
     candidate_conversation_id: "child",
@@ -107,8 +112,8 @@ const direct: HostActionRequestV1[] = [
 ];
 
 describe("canonical request to immutable action mapping", () => {
-  test("binds all nineteen direct variants byte-for-byte", () => {
-    expect(direct).toHaveLength(19);
+  test("binds all twenty direct variants byte-for-byte", () => {
+    expect(direct).toHaveLength(20);
     for (const request of direct) {
       expect(() =>
         assertRequestActionMapping(request, structuredClone(request) as HostActionV1),

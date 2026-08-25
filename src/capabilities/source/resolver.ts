@@ -1,16 +1,16 @@
-import type { CapabilityConflictV1, CapabilityDependencyV1 } from "../manifest/types.js";
 import { CapabilityValidationError, bytewise, packageId } from "../wire/primitives.js";
 import { validateImmutablePackagePin } from "./pins.js";
+import {
+  type ResolutionCandidateV1,
+  assertValidatedResolutionCandidate,
+} from "./resolution-records.js";
+export type {
+  ResolutionCandidateV1,
+  ResolutionCompatibilityContextV1,
+  ValidatedResolutionCompatibilityV1,
+} from "./resolution-records.js";
 import { compareSemver, validateVersionRange, versionSatisfiesRange } from "./semver.js";
 import type { PackagePinV1 } from "./types.js";
-
-export interface ResolutionCandidateV1 {
-  source_identity: string;
-  pin: PackagePinV1;
-  manifest_digest: string;
-  dependencies: CapabilityDependencyV1[];
-  conflicts: CapabilityConflictV1[];
-}
 
 export interface ResolutionRequestV1 {
   package_id: string;
@@ -170,7 +170,10 @@ export function resolveDependencies(options: {
     packageId(request.package_id, "request.package_id");
     validateVersionRange(request.version_range);
   }
-  for (const candidate of options.candidates) validateImmutablePackagePin(candidate.pin);
+  for (const candidate of options.candidates) {
+    assertValidatedResolutionCandidate(candidate);
+    validateImmutablePackagePin(candidate.pin);
+  }
   assertNoDuplicateVersionContent(options.candidates);
   const allowedTrust = new Set<PackagePinV1["trust"]>(
     options.allowed_trust ?? ["verified", "source-pinned", "legacy-verified"],

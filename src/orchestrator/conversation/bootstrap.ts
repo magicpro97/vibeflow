@@ -1,43 +1,37 @@
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-  type AgentBinding,
-  materializeAgentBinding,
-  previewAgentBinding,
-} from "../../agents/binding.js";
-import { conversationRoleSpecs } from "../../agents/role.js";
-import { ENGINES, type Engine } from "../../core.js";
+import { materializeAgentBinding, previewAgentBinding } from "../../agents/binding.js";
 import type { EngineSessionAdapterOptions } from "../../dispatch/session-types.js";
 import { createEngineSessionAdapter } from "../../dispatch/session.js";
-import { preflightAll } from "../../preflight.js";
-import { DurableArtifactRegistry } from "../trace/artifacts.js";
-import { TRACE_LIMITS, utf8Bytes } from "../trace/limits.js";
+import type { DurableArtifactRegistry } from "../trace/artifacts.js";
 import { ensurePrivateDirectory } from "../trace/path-safety.js";
-import { TraceStore, type TraceStoreOptions } from "../trace/store.js";
-import { ConversationArtifactStore } from "./artifact-store.js";
+import type { TraceStore, TraceStoreOptions } from "../trace/store.js";
+import type { ConversationArtifactStore } from "./artifact-store.js";
 import {
   type ConversationIsolationAuthority,
   bindWithIsolation,
   defaultConversationIsolationAuthority,
   withAttemptIsolation,
 } from "./bootstrap-isolation.js";
+import { createConversationPersistence } from "./bootstrap-persistence.js";
+import { persistedPlanLocator } from "./bootstrap-plan-locator.js";
+import {
+  type ConversationBindingFactory,
+  type ConversationRequestResolutionOptions,
+  createConversationRequestResolvers,
+} from "./bootstrap-request-resolution.js";
+import { createConversationSocialAuthority } from "./bootstrap-social-authority.js";
+import { registerCapabilityConversationProposalBase } from "./capability-proposal-base.js";
+import type { ConversationActionDomainPlannerExecutorV1 } from "./conversation-action-domain.js";
+import type { ConversationActionService } from "./conversation-action-service.js";
+import { createConversationBrowserAuthorities } from "./conversation-browser-authorities.js";
+import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import { DebateConversationPolicy } from "./debate-policy.js";
 import { DirectConversationPolicy } from "./direct-policy.js";
 import { OrchestrateConversationPolicy } from "./orchestrate-policy.js";
 import { PlanConversationPolicy } from "./plan-policy.js";
-import {
-  ConversationPolicyRegistry,
-  type RuntimeCreateRequest,
-  type RuntimePreviewRequest,
-} from "./policy-registry.js";
+import { ConversationPolicyRegistry } from "./policy-registry.js";
 import { ReviewConversationPolicy, createReviewEvidenceAuthority } from "./review-policy.js";
-import {
-  type ConversationDomainRole,
-  type ConversationEngineReadiness,
-  type ConversationRoutingAuthority,
-  type ConversationRoutingInput,
-  routeConversation,
-} from "./router.js";
 import { ConversationOrchestrator } from "./service.js";
 import {
   InjectedOrchestrateService,
@@ -45,18 +39,12 @@ import {
   InjectedReviewService,
   InjectedVerifyService,
   type OrchestrateLibrary,
-  type PlanArtifact,
-  type PlanArtifactLocator,
   type PlanLibrary,
   type ReviewEvidenceAuthority,
   type ReviewLibrary,
   type VerifyLibrary,
 } from "./services.js";
-import type {
-  ConversationContext,
-  ConversationCreateRequest,
-  ConversationService,
-} from "./types.js";
+import type { ConversationService } from "./types.js";
 import { VerifyConversationPolicy } from "./verify-policy.js";
 
 export interface ConversationBootstrapLibraries {
@@ -65,16 +53,7 @@ export interface ConversationBootstrapLibraries {
   verify: VerifyLibrary;
   orchestrate: Omit<OrchestrateLibrary, "cancel">;
 }
-interface RoutingContext {
-  workflowReady?: boolean;
-  attachments?: readonly string[];
-  skillDomains?: readonly string[];
-}
-interface BindingFactory {
-  materialize: typeof materializeAgentBinding;
-  preview: typeof previewAgentBinding;
-}
-export interface ConversationBootstrapOptions {
+export interface ConversationBootstrapOptions extends ConversationRequestResolutionOptions {
   repoRoot: string;
   libraries: ConversationBootstrapLibraries;
   stateDir?: string;
@@ -85,14 +64,14 @@ export interface ConversationBootstrapOptions {
   now?: () => string;
   schedule?: (task: () => void) => void;
   actor?: string;
-  routingContext?: (request: ConversationCreateRequest) => RoutingContext | Promise<RoutingContext>;
-  readiness?: () => readonly ConversationEngineReadiness[];
-  domainRoles?: readonly ConversationDomainRole[];
-  registeredRoles?: readonly string[];
   /** Unit-test seam. Production always uses the canonical current-HEAD evidence checker. */
   reviewEvidenceAuthority?: ReviewEvidenceAuthority;
-  bindingFactory?: BindingFactory;
+  bindingFactory?: ConversationBindingFactory;
   isolationAuthority?: ConversationIsolationAuthority;
+  actionDomains?: readonly ConversationActionDomainPlannerExecutorV1[];
+  actionDomainFactories?: readonly ((
+    actions: ConversationActionService,
+  ) => ConversationActionDomainPlannerExecutorV1)[];
 }
 export interface ConversationBootstrap {
   service: ConversationService;
@@ -106,135 +85,16 @@ export interface ConversationBootstrap {
     artifactRegistry: DurableArtifactRegistry;
     traceStore: TraceStore;
     artifactStore: ConversationArtifactStore;
+    homeAuthorities: ConversationHomeAuthorities;
     policies: ConversationPolicyRegistry;
+    browser: ReturnType<typeof createConversationBrowserAuthorities>;
   }>;
 }
 const fail = (message: string): never => {
   throw new Error(`conversation bootstrap: ${message}`);
 };
 
-function persistedPlanLocator(store: ConversationArtifactStore): PlanArtifactLocator {
-  return (context: ConversationContext): PlanArtifact | null => {
-    let conversationId: string | null = context.correlation.conversation_id;
-    const visited = new Set<string>();
-    while (conversationId && !visited.has(conversationId) && visited.size < 64) {
-      visited.add(conversationId);
-      const record = store.readRecord(conversationId);
-      if (!record) return null;
-      const plan = record.artifacts.filter((entry) => entry.artifact_type === "plan").at(-1);
-      if (plan) {
-        return Object.freeze({
-          artifact_id: plan.artifact_id,
-          revision_id: record.manifest.revision_id,
-          ref: plan.ref,
-        });
-      }
-      conversationId = record.manifest.parent_conversation_id;
-    }
-    return null;
-  };
-}
-const validEngine = (value: string): value is Engine => ENGINES.includes(value as Engine);
-
-function explicitParticipants(request: ConversationCreateRequest) {
-  return request.participants?.map((participant) => {
-    const engine = participant.engine;
-    if (!validEngine(engine)) fail(`unsupported engine: ${engine}`);
-    return {
-      roleRef: participant.role_ref,
-      engine: engine as Engine,
-      ...(participant.model === undefined ? {} : { model: participant.model }),
-    };
-  });
-}
-/** Testable projection for the production no-probe readiness default. */
-export function defaultConversationReadiness(
-  repoRoot: string,
-  phase: number,
-): ConversationEngineReadiness[] {
-  return preflightAll([...ENGINES], { probe: false, cacheKey: repoRoot }).map((status) => ({
-    engine: status.engine,
-    ready: status.level === "ready",
-    admitted: phase > 1 || status.engine === "claude" || status.engine === "codex",
-  }));
-}
-function authority(
-  options: ConversationBootstrapOptions,
-  repoRoot: string,
-  phase: number,
-): ConversationRoutingAuthority {
-  const roles = [
-    ...conversationRoleSpecs().map((role) => role.name),
-    ...(options.registeredRoles ?? []),
-  ];
-  return {
-    registeredPolicies: ["direct", "debate", "plan", "review", "verify", "orchestrate"],
-    registeredRoles: [...new Set(roles)],
-    engines: [...(options.readiness?.() ?? defaultConversationReadiness(repoRoot, phase))],
-    domainRoles: [...(options.domainRoles ?? [])],
-  };
-}
-async function selectedRoute(
-  request: ConversationCreateRequest,
-  options: ConversationBootstrapOptions,
-  repoRoot: string,
-  phase: number,
-) {
-  const extra = (await options.routingContext?.(request)) ?? {};
-  const input: ConversationRoutingInput = {
-    topic: request.topic,
-    explicitPolicy: request.policy,
-    participants: explicitParticipants(request),
-    workflowReady: extra.workflowReady,
-    attachments: extra.attachments,
-    skillDomains: extra.skillDomains,
-  };
-  const routeAuthority = authority(options, repoRoot, phase);
-  const route = routeConversation(input, routeAuthority);
-  const participants = [...route.participants];
-  let evaluatorAutoAdded = false;
-  if (
-    route.policy === "debate" &&
-    !participants.some((item) => item.roleRef === "brainstorm-evaluator")
-  ) {
-    const engine =
-      participants[0]?.engine ??
-      routeAuthority.engines.find((item) => item.ready && item.admitted)?.engine;
-    participants.push({ roleRef: "brainstorm-evaluator", ...(engine ? { engine } : {}) });
-    evaluatorAutoAdded = true;
-  }
-  if (participants.some((participant) => participant.engine === undefined)) {
-    fail("no ready admitted engine");
-  }
-  return { route, participants, evaluatorAutoAdded };
-}
-
-function bindingInput(participant: {
-  roleRef: string;
-  engine?: Engine;
-  model?: string;
-}): AgentBinding {
-  const engine = participant.engine;
-  if (!engine) fail("participant engine is missing");
-  return {
-    roleRef: participant.roleRef,
-    engine: engine as Engine,
-    sessionMode: "fresh",
-    ...(participant.model === undefined ? {} : { modelOverride: participant.model }),
-  };
-}
-
-function requestedMaxRounds(request: ConversationCreateRequest): number {
-  if (!request.topic.trim() || utf8Bytes(request.topic) > TRACE_LIMITS.maxTextBytes) {
-    fail("invalid topic");
-  }
-  if ((request.participants?.length ?? 0) > 64) fail("too many participants");
-  const maxRounds = request.max_rounds ?? 3;
-  if (!Number.isSafeInteger(maxRounds) || maxRounds < 1 || maxRounds > TRACE_LIMITS.maxArrayItems) {
-    fail("invalid max rounds");
-  }
-  return maxRounds;
-}
+export { defaultConversationReadiness } from "./bootstrap-request-resolution.js";
 
 /** Compose the one production conversation authority used by CLI and HTTP adapters. */
 export function createConversationBootstrap(
@@ -247,14 +107,25 @@ export function createConversationBootstrap(
     resolve(options.stateDir ?? join(repoRoot, ".vibeflow", "conversation")),
     fail,
   );
-  const artifactRegistry = new DurableArtifactRegistry({ dir: join(root, "opaque") });
-  const traceStore = new TraceStore({
-    dir: join(root, "trace"),
+  const {
     artifactRegistry,
+    traceStore,
+    artifactStore,
+    homeAuthorities,
+    artifactRoot,
+    traceRoot,
+    browserAuthorityKey,
+  } = createConversationPersistence({
+    root,
     ...(options.mirror ? { mirror: options.mirror } : {}),
     ...(options.now ? { now: options.now } : {}),
   });
-  const artifactStore = new ConversationArtifactStore({ dir: join(root, "artifacts") });
+  const socialAuthority = createConversationSocialAuthority({
+    artifactRoot,
+    traceRoot,
+    artifactRegistry,
+    home: homeAuthorities,
+  });
   const isolationAuthority = options.isolationAuthority ?? defaultConversationIsolationAuthority;
   const bindingIsolation =
     options.bindingFactory && !options.isolationAuthority ? undefined : isolationAuthority;
@@ -305,72 +176,27 @@ export function createConversationBootstrap(
     materialize: materializeAgentBinding,
     preview: previewAgentBinding,
   };
-  const resolveCreateRequest = async (
-    request: ConversationCreateRequest,
-  ): Promise<RuntimeCreateRequest> => {
-    const maxRounds = requestedMaxRounds(request);
-    const selection = await selectedRoute(request, options, repoRoot, phase);
-    return {
-      topic: request.topic,
-      policy: selection.route.policy,
-      maxRounds,
-      evaluatorAutoAdded: selection.evaluatorAutoAdded,
-      repoRoot,
-      phase,
-      bindings: await Promise.all(
-        selection.participants.map(async (participant, index) => {
-          const input = bindingInput(participant);
-          return {
-            participantId: `participant-${index + 1}`,
-            input,
-            materialized: await bindWithIsolation(
-              bindingIsolation,
-              repoRoot,
-              phase,
-              request.topic,
-              (bindingOptions) => binder.materialize(input, bindingOptions),
-            ),
-          };
-        }),
-      ),
-    };
-  };
-  const resolveDryRunRequest = async (
-    request: ConversationCreateRequest,
-  ): Promise<RuntimePreviewRequest> => {
-    const maxRounds = requestedMaxRounds(request);
-    const selection = await selectedRoute(request, options, repoRoot, phase);
-    return {
-      topic: request.topic,
-      policy: selection.route.policy,
-      maxRounds,
-      evaluatorAutoAdded: selection.evaluatorAutoAdded,
-      repoRoot,
-      phase,
-      bindings: await Promise.all(
-        selection.participants.map(async (participant, index) => {
-          const input = bindingInput(participant);
-          return {
-            participantId: `participant-${index + 1}`,
-            input,
-            preview: await bindWithIsolation(
-              bindingIsolation,
-              repoRoot,
-              phase,
-              request.topic,
-              (bindingOptions) => binder.preview(input, bindingOptions),
-            ),
-          };
-        }),
-      ),
-    };
-  };
+  const { resolveCreateRequest, resolveDryRunRequest } = createConversationRequestResolvers({
+    options,
+    repoRoot,
+    phase,
+    binder,
+    ...(bindingIsolation ? { isolationAuthority: bindingIsolation } : {}),
+  });
+  let recordConversationSource: ((conversationId: string, recordedAt: string) => void) | null =
+    null;
   const service = new ConversationOrchestrator({
     traceStore,
     artifactRegistry,
     artifactStore,
+    artifactRoot,
+    traceRoot,
+    homeAuthorities,
+    socialAuthority,
     sessionAdapter,
     policies,
+    onConversationSourceCommitted: (event) =>
+      recordConversationSource?.(event.conversation_id, event.ts),
     resolveCreateRequest,
     resolveDryRunRequest,
     rehydrateBinding: (binding, manifest) =>
@@ -386,10 +212,40 @@ export function createConversationBootstrap(
     ...(options.schedule ? { schedule: options.schedule } : {}),
   });
   serviceHolder.current = service;
+  registerCapabilityConversationProposalBase({
+    actions: homeAuthorities.actions,
+    artifactRoot,
+    traceRoot,
+    home: homeAuthorities,
+  });
+  const additionalActionDomains = [
+    ...(options.actionDomains ?? []),
+    ...(options.actionDomainFactories ?? []).map((factory) => factory(homeAuthorities.actions)),
+  ];
+  const browser = createConversationBrowserAuthorities({
+    artifactRoot,
+    traceRoot,
+    traceStore,
+    browserAuthorityKey,
+    artifactRegistry,
+    artifactStore,
+    home: homeAuthorities,
+    service,
+    ...(additionalActionDomains.length > 0 ? { additionalActionDomains } : {}),
+  });
+  recordConversationSource = (conversationId, recordedAt) =>
+    browser.catalog.recordConversationSourceCommitted(conversationId, recordedAt);
   return Object.freeze({
     service,
     services: Object.freeze({ plan, review, verify, orchestrate }),
-    authorities: Object.freeze({ artifactRegistry, traceStore, artifactStore, policies }),
+    authorities: Object.freeze({
+      artifactRegistry,
+      traceStore,
+      artifactStore,
+      homeAuthorities,
+      policies,
+      browser,
+    }),
   });
 }
 

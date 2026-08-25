@@ -1,3 +1,4 @@
+import type { HomePrivateFileRangeBinding } from "./conversation-home-types.js";
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
 import type {
   DashboardSelection,
@@ -11,7 +12,12 @@ import type {
   WorkflowDashboardItem,
   WorkflowState,
 } from "./types.js";
-const CSRF = document.querySelector<HTMLMetaElement>('meta[name="vf-token"]')?.content ?? "";
+type BrowserDocument = {
+  querySelector(selector: string): { content?: string } | null;
+};
+
+const browserDocument = (globalThis as unknown as { document?: BrowserDocument }).document;
+const CSRF = browserDocument?.querySelector('meta[name="vf-token"]')?.content ?? "";
 
 /** Warn once in console if CSRF token is missing — all write requests will 403 */
 if (!CSRF) {
@@ -216,6 +222,17 @@ export const api = {
       "GET",
       `/api/file?path=${encodeURIComponent(path)}${line ? `&line=${line}` : ""}`,
     ),
+  stagePrivateFileRange: (path: string, startLine: number, endLine: number, signal?: AbortSignal) =>
+    req<HomePrivateFileRangeBinding>(
+      "POST",
+      "/api/home/private-file-range-handoffs",
+      {
+        path,
+        start_line: startLine,
+        end_line: endLine,
+      },
+      signal,
+    ),
   // #557: a unit's append-only status-transition ledger (token-guarded, name-sanitized).
   unitTimeline: (name: string) =>
     req<{ ok: boolean; timeline: TimelineEntry[] }>(
@@ -314,40 +331,6 @@ export const api = {
           "DELETE",
           `/api/plan-review/comments/${encodeURIComponent(id)}?repoPath=${encodeURIComponent(repoPath)}&workflowId=${encodeURIComponent(workflowId)}`,
         ),
-    },
-  },
-  // #562: ask an engine about a code snippet (Web-UI surface for `vf ask`).
-  ask: {
-    run: (payload: {
-      path: string;
-      start: number;
-      end: number;
-      question: string;
-      engine?: string;
-    }) =>
-      req<{ ok: boolean; engine: string; answer: string; code: number }>(
-        "POST",
-        "/api/ask",
-        payload,
-      ),
-    streamUrl: (payload: {
-      path?: string;
-      start?: number;
-      end?: number;
-      question: string;
-      engine?: string;
-      resume?: boolean;
-    }) => {
-      const p = new URLSearchParams({ question: payload.question, token: CSRF });
-      if (payload.engine) p.set("engine", payload.engine);
-      if (payload.resume) {
-        p.set("resume", "true");
-      } else {
-        p.set("path", payload.path ?? "");
-        p.set("start", String(payload.start ?? ""));
-        p.set("end", String(payload.end ?? ""));
-      }
-      return `/api/ask/stream?${p.toString()}`;
     },
   },
 };

@@ -1,10 +1,13 @@
 import { assertPublicProjectionSafe } from "../../actions/public-safety.js";
-import type { ActionOperationViewV1 } from "../../actions/public-types.js";
 import { digestHex, digestV1 } from "../../durability/index.js";
 import type { ArtifactRegistry } from "../trace/artifacts.js";
 import type { PublicStoredTraceEvent } from "../trace/types.js";
 import { CatalogCursorError } from "./catalog-cursor.js";
 import type { TimelineCursorCodec, TimelineCursorTupleV1 } from "./catalog-timeline-cursor.js";
+import type {
+  ConversationInteractionProjectionV1,
+  ConversationTimelineInteractionV1,
+} from "./conversation-interaction-types.js";
 import type {
   ConversationLineageService,
   ResolvedConversationLineageV1,
@@ -17,17 +20,18 @@ import {
   isLineageDigest,
 } from "./lineage-types.js";
 import { projectConversationEvents } from "./policy-registry.js";
+import {
+  type AnchoredActionOperationsPageV1,
+  assertTimelineActionOperations,
+  emptyTimelineActionOperations,
+} from "./timeline-action-operations.js";
+import { timelineInteractionProjection } from "./timeline-interaction-projection.js";
+
+export type { AnchoredActionOperationsPageV1 } from "./timeline-action-operations.js";
 
 const HANDOFF_ID = /^vf-handoff-[0-9a-f]{64}$/;
 const bytewise = (left: string, right: string): number =>
   Buffer.compare(Buffer.from(left), Buffer.from(right));
-
-export interface AnchoredActionOperationsPageV1 {
-  schema_version: "1.0";
-  items: ActionOperationViewV1[];
-  next_cursor: string | null;
-  proposal_set_watermark: string;
-}
 
 export interface RevisionBoundaryAuthorityV1 {
   from: LineageNodeIdentityV1;
@@ -57,6 +61,7 @@ export type ConversationTimelineItemV1 =
       kind: "conversation-event";
       revision_ordinal: number;
       event: PublicStoredTraceEvent;
+      interaction: ConversationTimelineInteractionV1;
       action_operations: AnchoredActionOperationsPageV1;
     };
 
@@ -108,6 +113,10 @@ export interface ConversationTimelineServiceOptions {
     to: LineageNodeIdentityV1,
   ): MaybePromise<RevisionBoundaryAuthorityV1 | null>;
   actionOperations?(anchor: ActionAnchorV1): MaybePromise<AnchoredActionOperationsPageV1>;
+  interactionProjection?(
+    conversationId: string,
+    recipientPublicId: string | null,
+  ): ConversationInteractionProjectionV1;
 }
 
 type BaseItem =
@@ -208,34 +217,13 @@ function boundaryItem(
   };
 }
 
-function emptyOperations(anchor: ActionAnchorV1): AnchoredActionOperationsPageV1 {
-  return {
-    schema_version: "1.0",
-    items: [],
-    next_cursor: null,
-    proposal_set_watermark: digestV1("VF-ANCHORED-ACTION-PROPOSAL-SET\0v1\0", {
-      schema_version: "1.0",
-      ...anchor,
-      proposals: [],
-    }),
-  };
-}
-
-function assertOperationsPage(value: AnchoredActionOperationsPageV1): void {
-  if (
-    value.schema_version !== "1.0" ||
-    !Array.isArray(value.items) ||
-    (value.next_cursor !== null && typeof value.next_cursor !== "string") ||
-    !isLineageDigest(value.proposal_set_watermark)
-  )
-    throw new TimelineAuthorityCorruptError("invalid anchored action operation page");
-  assertPublicProjectionSafe(value, "$.timeline.action_operations", { maxBytes: 8 * 1024 * 1024 });
-}
-
 export class ConversationTimelineService {
   constructor(private readonly options: ConversationTimelineServiceOptions) {}
 
-  private async baseItems(resolved: ResolvedConversationLineageV1): Promise<BaseItem[]> {
+  private async baseItems(
+    resolved: ResolvedConversationLineageV1,
+    interactions?: ConversationInteractionProjectionV1,
+  ): Promise<BaseItem[]> {
     const items: BaseItem[] = [];
     for (const [index, revision] of resolved.selected_nodes.entries()) {
       const identity = revision.node;
@@ -305,7 +293,12 @@ export class ConversationTimelineService {
             revision_id: identity.revision_id,
             origin_event_id: event.event_id,
           },
-          value: { kind: "conversation-event", revision_ordinal: identity.revision_ordinal, event },
+          value: {
+            kind: "conversation-event",
+            revision_ordinal: identity.revision_ordinal,
+            event,
+            interaction: timelineInteractionProjection(event.event_id, interactions),
+          },
           tuple: {
             revision_ordinal: identity.revision_ordinal,
             item_kind_order: 2,
@@ -331,8 +324,10 @@ export class ConversationTimelineService {
     if (item.kind === "boundary") return structuredClone(item.value);
     const operations = this.options.actionOperations
       ? await this.options.actionOperations(item.anchor)
-      : emptyOperations(item.anchor);
-    assertOperationsPage(operations);
+      : emptyTimelineActionOperations(item.anchor);
+    assertTimelineActionOperations(operations, (message) => {
+      throw new TimelineAuthorityCorruptError(message);
+    });
     return { ...structuredClone(item.value), action_operations: structuredClone(operations) } as
       | Extract<ConversationTimelineItemV1, { kind: "conversation-start" }>
       | Extract<ConversationTimelineItemV1, { kind: "conversation-event" }>;
@@ -340,7 +335,7 @@ export class ConversationTimelineService {
 
   async read(
     rootSessionId: string,
-    input: { cursor?: string; limit?: number } = {},
+    input: { cursor?: string; limit?: number; recipient_public_id?: string } = {},
   ): Promise<ConversationTimelineResponseV1> {
     const limit = input.limit ?? 50;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
@@ -354,7 +349,13 @@ export class ConversationTimelineService {
       throw new TimelineAuthorityCorruptError(
         "timeline selected ancestry does not end at the head",
       );
-    const all = await this.baseItems(resolved);
+    const all = await this.baseItems(
+      resolved,
+      this.options.interactionProjection?.(
+        head.active.conversation_id,
+        input.recipient_public_id ?? null,
+      ),
+    );
     const binding = {
       scope_id: this.options.scopeId,
       root_session_id: rootSessionId,

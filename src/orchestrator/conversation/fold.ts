@@ -1,10 +1,21 @@
-import type { RoundDecision } from "../consensus.js";
 import type {
   ConversationHealth,
   ConversationLifecycle,
   OpaqueSessionRef,
   PublicStoredTraceEvent,
 } from "../trace/types.js";
+
+import {
+  type ReviewedActionEventAuthorityV1,
+  assertReviewedActionEventAuthorityV1,
+} from "./conversation-reviewed-action.js";
+import {
+  type FoldRoundState,
+  createRound,
+  precommitsComplete,
+  publicRound,
+  respondersComplete,
+} from "./fold-round.js";
 import {
   applyState,
   exact,
@@ -20,55 +31,17 @@ import {
   validateEnvelope,
   validateParticipantBound,
   validateParticipantCorrelation,
+  validateTerminalAppend,
   validateTerminalScore,
 } from "./fold-validation.js";
-import type { ConversationSnapshot, Round, RoundAssessment, RoundResponse } from "./types.js";
+import type { ConversationSnapshot, RoundAssessment } from "./types.js";
 export { ConversationFoldError } from "./fold-validation.js";
-
-type ResponseState = RoundResponse & { completionCount: number };
-
-interface RoundState {
-  round_id: string;
-  responses: Map<string, ResponseState>;
-  precommits: Set<string>;
-  assessments: RoundAssessment[];
-  stages: Set<RoundAssessment["stage"]>;
-  decision: RoundDecision | null;
-  complete: boolean;
-}
-
-function publicRound(round: RoundState): Round {
-  return {
-    round_id: round.round_id,
-    participant_responses: [...round.responses.values()].map(
-      ({ completionCount: _completionCount, ...response }) => ({
-        ...response,
-        evidence: [...response.evidence],
-      }),
-    ),
-    evaluator_assessments: round.assessments.map((item) => structuredClone(item)),
-    decision: round.decision ? structuredClone(round.decision) : null,
-    complete: round.complete,
-  };
-}
-
-const createRound = (roundId: string): RoundState => ({
-  round_id: roundId,
-  responses: new Map(),
-  precommits: new Set(),
-  assessments: [],
-  stages: new Set(),
-  decision: null,
-  complete: false,
-});
-const respondersComplete = (round: RoundState, responders: ReadonlySet<string>) =>
-  round.responses.size === responders.size &&
-  [...responders].every((id) => round.responses.get(id)?.completionCount === 1);
-const precommitsComplete = (round: RoundState, responders: ReadonlySet<string>) =>
-  round.precommits.size === responders.size &&
-  [...responders].every((id) => round.precommits.has(id));
 /** Deterministically reconstruct one public snapshot from its complete projected journal. */
-export function foldConversation(records: readonly PublicStoredTraceEvent[]): ConversationSnapshot {
+export function foldConversation(
+  records: readonly PublicStoredTraceEvent[],
+  reviewedPostTerminalEvents?: ReviewedActionEventAuthorityV1,
+): ConversationSnapshot {
+  if (reviewedPostTerminalEvents) assertReviewedActionEventAuthorityV1(reviewedPostTerminalEvents);
   const first = validateEnvelope(records);
   const configured = validateConfigured(first);
   const participants = new Map(
@@ -85,18 +58,20 @@ export function foldConversation(records: readonly PublicStoredTraceEvent[]): Co
       .map((participant) => participant.participant_id),
   );
   const direct = configured.policy === "direct";
-  const rounds: RoundState[] = [];
+  const rounds: FoldRoundState[] = [];
   const roundIds = new Set<string>();
-  let activeRound: RoundState | undefined;
+  let activeRound: FoldRoundState | undefined;
   let lifecycle: ConversationLifecycle = "INIT";
   let health: ConversationHealth = "healthy";
   let terminalRecorded = false;
   let consensusScore: number | null = null;
   for (const record of records.slice(1)) {
-    if (terminalRecorded) return fail("terminal lifecycle is immutable");
-    if (terminal(lifecycle) && record.event.type !== "conversation_terminal") {
-      return fail("terminal lifecycle is immutable until its terminal record");
-    }
+    validateTerminalAppend(
+      lifecycle,
+      terminalRecorded,
+      record,
+      reviewedPostTerminalEvents?.has(record.event_id) === true,
+    );
     if (record.event.type === "conversation_configured") {
       return fail("duplicate conversation configuration");
     }

@@ -5,6 +5,11 @@ import {
 import { buildValidatedLineage } from "./lineage-build.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
 import {
+  type PreparedRevisionRecoveryLinkInputV1,
+  type PreparedRevisionRecoveryLinkV1,
+  preparedRevisionRecoveryLinkMap,
+} from "./lineage-prepared-revision.js";
+import {
   type PublishedRevisionTransitionInputV1,
   type PublishedRevisionTransitionV1,
   publishedRevisionTransitionMap,
@@ -51,6 +56,8 @@ export interface ConversationLineageDerivationV1 {
 
 export interface DeriveConversationLineagesOptionsV1 {
   publishedRevisionTransitions?: readonly PublishedRevisionTransitionInputV1[];
+  /** Exact prepared links admitted only for private revision recovery; never head candidates. */
+  recoveryPreparedRevisionLinks?: readonly PreparedRevisionRecoveryLinkInputV1[];
 }
 
 const compareBytes = (left: string, right: string): number =>
@@ -116,6 +123,7 @@ function validateLinks(
   excluded: Set<string>,
   diagnostics: ConversationSourceDiagnosticV1[],
   published: ReadonlyMap<string, PublishedRevisionTransitionV1>,
+  recoveryPrepared: ReadonlyMap<string, PreparedRevisionRecoveryLinkV1>,
 ): void {
   for (const source of sources) {
     const id = source.manifest.conversation_id;
@@ -136,16 +144,23 @@ function validateLinks(
       ? Object.values(parent.manifest_record.child_revisions).filter((child) => child === id).length
       : 0;
     const transition = published.get(id);
+    const recovery = recoveryPrepared.get(id);
     const publishedClaim =
       transition !== undefined &&
       transition.parent.conversation_id === parentId &&
       transition.parent.revision_id === source.manifest.parent_revision_id &&
       transition.child.conversation_id === source.manifest.conversation_id &&
       transition.child.revision_id === source.manifest.revision_id;
+    const recoveryClaim =
+      recovery !== undefined &&
+      recovery.parent.conversation_id === parentId &&
+      recovery.parent.revision_id === source.manifest.parent_revision_id &&
+      recovery.child.conversation_id === source.manifest.conversation_id &&
+      recovery.child.revision_id === source.manifest.revision_id;
     if (
       !parent ||
       parent.manifest.revision_id !== source.manifest.parent_revision_id ||
-      (claims !== 1 && !publishedClaim) ||
+      (claims !== 1 && !publishedClaim && !recoveryClaim) ||
       claims > 1
     ) {
       recordExclusion(
@@ -185,8 +200,14 @@ export function deriveConversationLineages(
   const diagnostics = inventory.diagnostics.map((item) => structuredClone(item));
   const excluded = new Set<string>();
   let published = new Map<string, PublishedRevisionTransitionV1>();
+  let recoveryPrepared = new Map<string, PreparedRevisionRecoveryLinkV1>();
   try {
     published = new Map(publishedRevisionTransitionMap(options.publishedRevisionTransitions ?? []));
+    recoveryPrepared = new Map(
+      preparedRevisionRecoveryLinkMap(options.recoveryPreparedRevisionLinks ?? []),
+    );
+    for (const childId of recoveryPrepared.keys())
+      if (published.has(childId)) throw new Error("prepared revision is already published");
   } catch {
     diagnostics.push(
       diagnostic(
@@ -217,7 +238,7 @@ export function deriveConversationLineages(
         "revision identity is duplicated",
       );
   }
-  validateLinks(inventory.sources, byId, excluded, diagnostics, published);
+  validateLinks(inventory.sources, byId, excluded, diagnostics, published, recoveryPrepared);
   removeCycles(inventory.sources, byId, excluded, diagnostics);
 
   let changed = true;
@@ -261,7 +282,7 @@ export function deriveConversationLineages(
   const lineages: ConversationLineageReadV1[] = [];
   for (const root of roots) {
     try {
-      const lineage = buildValidatedLineage(root, children);
+      const lineage = buildValidatedLineage(root, children, new Set(recoveryPrepared.keys()));
       const transitions = [...published.values()]
         .filter((item) => item.root_session_id === lineage.root_session_id)
         .sort((left, right) => left.committed_head.head_epoch - right.committed_head.head_epoch);

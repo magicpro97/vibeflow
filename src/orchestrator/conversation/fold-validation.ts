@@ -33,6 +33,22 @@ export const stringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 export const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => key in value);
+
+export function validateTerminalAppend(
+  lifecycle: ConversationLifecycle,
+  terminalRecorded: boolean,
+  record: PublicStoredTraceEvent,
+  reviewed: boolean,
+): void {
+  const reviewedAction =
+    reviewed &&
+    ((record.event.type === "artifact_created" &&
+      record.event.payload.artifact_type === "compaction") ||
+      record.event.type === "user_message");
+  if (terminalRecorded && !reviewedAction) fail("terminal lifecycle is immutable");
+  if (terminal(lifecycle) && !terminalRecorded && record.event.type !== "conversation_terminal")
+    fail("terminal lifecycle is immutable until its terminal record");
+}
 export const terminal = (value: ConversationLifecycle) => TERMINAL.has(value);
 
 export type ParticipantState = ConversationParticipantSnapshot & { bound: boolean };

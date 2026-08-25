@@ -1,0 +1,2338 @@
+{
+  "schema_version": "2.0",
+  "profile": "vf-normative-proof-manifest/2",
+  "design": {
+    "path": "docs/superpowers/specs/2026-08-24-ai-first-home-capability-fabric-design.md",
+    "sha256": "7ad044d46a36dc71fcda51331f9df51c15392fbb77a80c37746ae0134b705541"
+  },
+  "proof_catalog": [
+    {
+      "id": "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/actions/authority-hardening.test.ts",
+      "title": "rejects missing WAL proof, tampered dispatch bytes, and arbitrary terminal proof",
+      "production_paths": [
+        "src/actions",
+        "src/durability"
+      ],
+      "test_sha256": "ebfd4cedc8abe3d0b0d54270aae537f4391bd018414ce26008a27a3f3d9edd86",
+      "production_sha256": "53e758c2ebbba021c50e370898be7e272dab4a455bd8ae99b3b94592404cbedf"
+    },
+    {
+      "id": "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/actions/package-preview-hardening.test.ts",
+      "title": "rejects nested credential, private-key, and absolute-path canaries before proposal publication",
+      "production_paths": [
+        "src/actions"
+      ],
+      "test_sha256": "beaf50397fba027361b0867e3db36d44e3476d4424a01823b72a83ad5479e4fd",
+      "production_sha256": "b704b9c14e2dcbab84c43759901e4133d216b8045ed00be4d4427f523864f6b7"
+    },
+    {
+      "id": "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/durability/canonical.test.ts",
+      "title": "digestV1 is domain-separated, length-prefixed, and has stable golden vectors",
+      "production_paths": [
+        "src/durability"
+      ],
+      "test_sha256": "a6e690df8f1f535905552e31429b911d6aec32996e0ab7810ae37790028747f5",
+      "production_sha256": "03ce54d66ac8dc98f24233d81c5231a601c8b1276d3286cfc42e06154c0922df"
+    },
+    {
+      "id": "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/durability/frame.test.ts",
+      "title": "VFFR reader accepts a dense verified chain and rejects sequence or digest-chain tampering",
+      "production_paths": [
+        "src/durability"
+      ],
+      "test_sha256": "fe61f4c5936fa4bbe186b22a310beda838c57c5d7818350dfda3368c36a8d918",
+      "production_sha256": "03ce54d66ac8dc98f24233d81c5231a601c8b1276d3286cfc42e06154c0922df"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+      "owner": "conversation-catalog-lineage",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-catalog.test.ts",
+      "title": "degraded sources are explicit read-only state, never an authoritative empty catalog",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "eb4d9642dd996344dcd554429c512bd5a61c9097f3dd08c6612558d26bf69164",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+      "owner": "conversation-catalog-lineage",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-lineage.test.ts",
+      "title": "source inventory retries same-inode complete and partial journal growth without degrading",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "85a0a194ca28b34799bb088a779ce83803ea50602027c81e1e2277608f6684e4",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
+      "owner": "conversation-catalog-lineage",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-timeline.test.ts",
+      "title": "timeline cursor is limit-bound and a head change returns an exact stale restart",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "d3e02717d898de49a939373aff451600c27b9f8bf4e1802fff563ab7ccedb631",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-handoff.test.ts",
+      "title": "is deterministic, ordered and byte-identical for every participant",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "6df67b2861a4035b4ea6e8f797f55c7650ad393e6a591bf3852e6ed4912be89a",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-interaction.test.ts",
+      "title": "participant social intent rejects self reactions and more than three distinct adds atomically",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "60727a4e46c76d4bf46d76cbfb8ab5a0084e7cdab0920bf23c43e492a9b36fe2",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-message-delivery.test.ts",
+      "title": "private file range handoff reaches the target CLI without leaking into public events",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "b5933a03a13ea9a9c18589eb87097e96b61af4486184cb7f7eed15aff54a4be9",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-revision.test.ts",
+      "title": "rejects forged authorizers, effect switches, and terminal cardinality",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "7e2a3b586bed16924d7d1d423b840af352696654c9a559fc68bd0eb4767ec16b",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-revision-start-owner.test.ts",
+      "title": "an unprovable live cross-process owner cannot be claimed and becomes claimable after death",
+      "production_paths": [
+        "src/orchestrator/conversation",
+        "src/durability"
+      ],
+      "test_sha256": "4dba3c6d36bb6966672cee5c9cdebac831d7ff8d3ae9eca78a8b3f2badeefecf",
+      "production_sha256": "977d07b87ae9a1daf714b69ede969a6bb7df97ec9dbec0579e33e884ebc7e685"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-runtime.test.ts",
+      "title": "a published revision retries its exact Action Authority terminal after two failures",
+      "production_paths": [
+        "src/orchestrator/conversation",
+        "src/actions",
+        "src/durability"
+      ],
+      "test_sha256": "2a42b508694bb5ce5bd503b82852afe8856bb01fef83c947234521c17832b9d7",
+      "production_sha256": "39784619f797a5f27d86fbe1f1f1968b5071c9957405f600daea77d6bbd30c3c"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-runtime.test.ts",
+      "title": "a fresh service reconciles a published revision terminal without replaying start effects",
+      "production_paths": [
+        "src/orchestrator/conversation",
+        "src/actions",
+        "src/durability"
+      ],
+      "test_sha256": "2a42b508694bb5ce5bd503b82852afe8856bb01fef83c947234521c17832b9d7",
+      "production_sha256": "39784619f797a5f27d86fbe1f1f1968b5071c9957405f600daea77d6bbd30c3c"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-runtime.test.ts",
+      "title": "a reviewed abandon closes a prepared revision after process restart",
+      "production_paths": [
+        "src/orchestrator/conversation",
+        "src/actions",
+        "src/durability"
+      ],
+      "test_sha256": "2a42b508694bb5ce5bd503b82852afe8856bb01fef83c947234521c17832b9d7",
+      "production_sha256": "39784619f797a5f27d86fbe1f1f1968b5071c9957405f600daea77d6bbd30c3c"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-turn-delivery.test.ts",
+      "title": "uses a receipt-bound exact delta and excludes self and untargeted content",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "bc8e100a967d6c5de4e796b2fa30a445a326c4770443f08d175a7f9bf166486c",
+      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+    },
+    {
+      "id": "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/server-conversation-route.test.ts",
+      "title": "authenticates before parsing and keeps loopback CSRF separate from session auth",
+      "production_paths": [
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "04a3ad479cc18467f991e125ea3435abe92e3c80a2a6f4113a8468febc213bc5",
+      "production_sha256": "0600792beb8b428388a0cec7d13fc67a69afc55af235405e3e5e1b70c6396624"
+    },
+    {
+      "id": "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+      "owner": "capability-core",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/authority-audit.test.ts",
+      "title": "authority activation resumes every ordered crash frontier without regenerating identity",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "a1b730ecef1332164e10e01cf2208cb5333a9e218243dd504bfc57d38855f93c",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+      "owner": "capability-core",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/core-storage-security.test.ts",
+      "title": "portable lock validation is recursive and rejects private/absolute canaries",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "50107fd79bd49652570290926e2dda18de7b2cef8e0abca9cd84377c714782ba",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
+      "owner": "capability-core",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/manifest.test.ts",
+      "title": "validates a strict bounded manifest and derives its normative digest",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "86e00527b41f4f46dc0be032e0043450de101b858a72cb60bb0159d0468429d0",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+      "owner": "capability-core",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/permissions.test.ts",
+      "title": "forms a deterministic minimal union and exact delta",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "3b46291b5df5ece1e396ca41286b12d30979583b6deee1fa0a28223b8e4218d7",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
+      "owner": "capability-core",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/registry-resolver.test.ts",
+      "title": "fails closed on ambiguous sources and cycles",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "ce694e5ea8894beceb119d37ddf37d6bc6b9f7b210ba67cc9e7abf9708ce562b",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+      "owner": "capability-runtime",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/action-domain-runtime.test.ts",
+      "title": "uses the real conversation HTTP proposal, approval, commit, and SSE routes across restart",
+      "production_paths": [
+        "src/capabilities",
+        "src/server"
+      ],
+      "test_sha256": "fa3efab4b228cc4de448cad3d1668f2d3df144e04e944b760d6ae9c1622bb5d6",
+      "production_sha256": "891e5ab620924f49cac68987b3ed11486df1aee767c15c8131bf543ba2ce373c"
+    },
+    {
+      "id": "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+      "owner": "capability-runtime",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/capability-operation-runtime.test.ts",
+      "title": "publishes history/health/current lock only after WAL receipts and is idempotent",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "e06661f2ccdd61b2b8ecb156f52ae26ba053abfb6218a90a51548622cbfbb6d4",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
+      "owner": "capability-runtime",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/capability-planning-runtime.test.ts",
+      "title": "inspectPlan is zero-write, immutable, deterministic, and binds exact preimages",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "2b0b4662489319e1e24c3fc13ea18627da4e70aeb2993532fdd774dfbd6127e9",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
+      "owner": "capability-runtime",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/execution-graph-runtime.test.ts",
+      "title": "rejects cross-scope, action-step, and private-input sentinel substitutions",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "42cfa76b9437cbdd90dc6a7b1e08ea1ae194de848faafceaa49113c00b22e1df",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
+      "owner": "capability-runtime",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/production-broker-runtime.test.ts",
+      "title": "reports scoped/manual/native and secret-slot outcomes without host descriptors",
+      "production_paths": [
+        "src/capabilities"
+      ],
+      "test_sha256": "5c5f929e35305c04de1890d42e28d009e995281dd48a24874e01c7017d04fc25",
+      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+    },
+    {
+      "id": "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
+      "owner": "capability-cli-compat",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capability-cli-parser.test.ts",
+      "title": "collects repeatable --for/--set/--private flags before generic collapse",
+      "production_paths": [
+        "src/commands/capability.ts",
+        "src/commands/capability",
+        "src/commands/authority.ts",
+        "src/cli.ts"
+      ],
+      "test_sha256": "d55046fb6daae00ce8fe9e3a69b6ad0cdc789204393818814a20af53645f072f",
+      "production_sha256": "6b53c4d76bef7f16863065c7d7d0f380e73e3704a674024f4bf6180e15dec3f2"
+    },
+    {
+      "id": "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+      "owner": "capability-cli-compat",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capability-cli-routing.test.ts",
+      "title": "cli routes capability and authority before generic parseFlags collapse",
+      "production_paths": [
+        "src/commands/capability.ts",
+        "src/commands/capability",
+        "src/commands/authority.ts",
+        "src/cli.ts"
+      ],
+      "test_sha256": "3b02b8134fe89d265d65f6195ce52167b3df277f0c645f3f26e11d8920f37ebe",
+      "production_sha256": "6b53c4d76bef7f16863065c7d7d0f380e73e3704a674024f4bf6180e15dec3f2"
+    },
+    {
+      "id": "proof:bun:test/capability-command.test.ts#private-input-no-echo",
+      "owner": "capability-cli-compat",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capability-command.test.ts",
+      "title": "private-input bind accepts stdin JSON and never echoes the secret",
+      "production_paths": [
+        "src/commands/capability.ts",
+        "src/commands/capability"
+      ],
+      "test_sha256": "73c2205a2aaa9514ee3bb56f1676c9ad420376a7d6f0b3a05abb2871308caeb7",
+      "production_sha256": "770dc7f32f4b2a3e60b76f3571eb48c637b7e2609fd3f2f33237dd3693e0d7f3"
+    },
+    {
+      "id": "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+      "owner": "capability-cli-compat",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capability-mutation-contract.test.ts",
+      "title": "non-interactive mutations without --yes stay zero-write and do not call the durable port",
+      "production_paths": [
+        "src/commands/capability.ts",
+        "src/commands/capability"
+      ],
+      "test_sha256": "cb783beffefb4551b578bf144539a8be1e66b2f356b4719ac636c55c96aaf0b5",
+      "production_sha256": "770dc7f32f4b2a3e60b76f3571eb48c637b7e2609fd3f2f33237dd3693e0d7f3"
+    },
+    {
+      "id": "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
+      "owner": "ai-home-ui",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/ui-conversation-home.test.ts",
+      "title": "switching sessions invalidates stale callbacks and resources",
+      "production_paths": [
+        "src/ui/src"
+      ],
+      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
+      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+    },
+    {
+      "id": "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
+      "owner": "ai-home-ui",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/ui-conversation-home.test.ts",
+      "title": "pagination loads stay bound to the active session during a rapid A-to-B switch",
+      "production_paths": [
+        "src/ui/src"
+      ],
+      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
+      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+    },
+    {
+      "id": "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
+      "owner": "ai-home-ui",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/ui-conversation-home-pagination-authority.test.ts",
+      "title": "timeline pagination restarts instead of merging a page from another authoritative head",
+      "production_paths": [
+        "src/ui/src"
+      ],
+      "test_sha256": "68016b03c2926fc32db368a48039c0a9c8d45974c0905c911427a266aaad77bd",
+      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+    },
+    {
+      "id": "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
+      "owner": "ai-home-ui",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/ui-conversation-home.test.ts",
+      "title": "private file ranges survive a failed send and clear after a successful reply send",
+      "production_paths": [
+        "src/ui/src"
+      ],
+      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
+      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+    },
+    {
+      "id": "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
+      "owner": "ai-home-ui",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/ui-conversation-home.test.ts",
+      "title": "quote selection caps at eight visible messages and can be reordered",
+      "production_paths": [
+        "src/ui/src"
+      ],
+      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
+      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "creates through the real service and restores durable context from the catalog",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "keeps creation, agents, capabilities, trace, and settings inside the Home interaction",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "drops stale older timeline and action pages after a rapid A-to-B session switch",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "sends canonical quote refs and applies the returned reaction fold",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "stages inline private file ranges without browser persistence and clears them after one send",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "restores focus for Conversation Details and keeps a collapsed rail inert",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "keeps action review state durable, focused, and exact across terminal states",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server",
+        "src/actions"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "ef577c319b2dd8c40fbeeec400ab67d994ae96a4fa1cac4c447a2d23012e2d98"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "renders typed creation errors without discarding the draft or opening a modal",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "keeps offline and IME drafts inert until the user explicitly sends",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "keeps the quote tray scrollable and the composer visible at mobile sizes and 200% zoom",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "reflows at 320x740, 390x844, and 200% text zoom with viewport-safe composer controls",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
+      "owner": "ai-home-ui",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/conversation-home.spec.ts",
+      "title": "has no automated accessibility violations in the primary Home",
+      "production_paths": [
+        "src/ui/src",
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
+      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+    },
+    {
+      "id": "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
+      "owner": "product-acceptance-ship",
+      "runner": "playwright",
+      "assurance": "behavioral",
+      "path": "e2e/bun-serve-compat.e2e.ts",
+      "title": "bounds response production and stop(true) closes an active stream",
+      "production_paths": [
+        "src/server.ts",
+        "src/server"
+      ],
+      "test_sha256": "4906b6507b49290476193951f5ab2e72197091401326a46201f7c950ff87448d",
+      "production_sha256": "0600792beb8b428388a0cec7d13fc67a69afc55af235405e3e5e1b70c6396624"
+    }
+  ],
+  "section_dispositions": [
+    {
+      "section_id": "section:ai-first-home-and-cli-capability-fabric-design:8a60f8b1f424",
+      "heading": "AI-first Home and CLI Capability Fabric design",
+      "semantic_atom_count": 3,
+      "semantic_atom_sha256": "f6a7a89393f97eabaa8b41bc5fd061fd5328d404958219e1e6d284ba915f80fa",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "capability-runtime",
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner"
+      ],
+      "rationale": "Top-level product contract is exercised through the real Home, shared capability action domain, and durable revision-start owner.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:decision:640ae4baf960",
+      "heading": "Decision",
+      "semantic_atom_count": 26,
+      "semantic_atom_sha256": "9d190bfca41025546edd1281839df8f72fcb144433cee7b07b2e490933f98242",
+      "candidate_count": 10,
+      "candidate_sha256": "7c06284148ba7ee68d482efcead060f0c136e54345f9a16ea2faeab0c92f8d02",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "capability-runtime",
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing"
+      ],
+      "rationale": "The selected AI-first Home, capability runtime, and compatibility CLI are exercised at their real boundaries.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:why-this-change-is-necessary:ed22165c693a",
+      "heading": "Why this change is necessary",
+      "semantic_atom_count": 24,
+      "semantic_atom_sha256": "86b9bebaecdab807641e2a6a08c2c2f9918c6fba37cf5e17ffb36b5d04519f46",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "conversation-revisions-api",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "Durable continuity and host-owned extension behavior are covered by real runtime proofs.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:goals:116cd3982a9b",
+      "heading": "Goals",
+      "semantic_atom_count": 13,
+      "semantic_atom_sha256": "664260ecfbaa2cf3b82069951a7c143c8b9a03c88ec3d2309e507e06ec641da5",
+      "candidate_count": 3,
+      "candidate_sha256": "a540cd0be26279fff7ca308e2313dc5922c08eb0eddbda9cd56fb63de696078a",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "conversation-revisions-api",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "The product goals map to executable Home, context delivery, action-domain, and broker proofs.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:non-goals:185e74bc1685",
+      "heading": "Non-goals",
+      "semantic_atom_count": 10,
+      "semantic_atom_sha256": "23da407391f6f04e83bcf21b93daedfcdd48fca0f13ab8d2669020d68890bbf1",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "The absence of a generic plugin dashboard and the host-owned broker boundary are exercised by the selected behavior.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:product-and-authority-principles:ace80ea7883a",
+      "heading": "Product and authority principles",
+      "semantic_atom_count": 24,
+      "semantic_atom_sha256": "847219f388b644f1a2fbe687801589e7fd67c43dc4b5fbd5abff2c9bff6d9c62",
+      "candidate_count": 7,
+      "candidate_sha256": "ce13136f32a1bd53cb4be436f0d5cb106c64b7b4182add8c6d14549c63bafe45",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-revisions-api",
+        "capability-core",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain"
+      ],
+      "rationale": "Shared authority, immutable review, process-bound revision ownership, and host-owned effects are exercised across all three domains.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:system-architecture:b6a6e848dc5d",
+      "heading": "System architecture",
+      "semantic_atom_count": 28,
+      "semantic_atom_sha256": "02716e05485178cd169e915d8fb1730de4194faf1f61ac73ba766e9f79a63ad5",
+      "candidate_count": 10,
+      "candidate_sha256": "b75df1dccb525ab05aa61b8f60354f40698ec1a179e5857a6d0a296f937cd6bb",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "Each architecture boundary has a real reader, delivery, action-domain, or broker proof.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:subsystem-1-ai-first-conversation-home:64de12b77280",
+      "heading": "Subsystem 1: AI-first Conversation Home",
+      "semantic_atom_count": 0,
+      "semantic_atom_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls"
+      ],
+      "rationale": "The Home subsystem is exercised through the real browser interaction.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:information-architecture:ffcf612a00a5",
+      "heading": "Information architecture",
+      "semantic_atom_count": 18,
+      "semantic_atom_sha256": "20505dbd944ce6ec9345e8e3f7a66ca933c64bf2fd2665883d7c224552fa5e81",
+      "candidate_count": 1,
+      "candidate_sha256": "f0696aa4de1169310aef2b6503d89eb180bd3602c64c375219bc7d9fa213fa34",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create"
+      ],
+      "rationale": "The rail, timeline, composer, and inline controls are exercised in the real Home.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:durable-session-catalog:3d0e1be90bcc",
+      "heading": "Durable session catalog",
+      "semantic_atom_count": 290,
+      "semantic_atom_sha256": "eb310ee14d045b7dd625fbacbbf8200a2369ae714f96d72bc55d9cc673b9cc92",
+      "candidate_count": 31,
+      "candidate_sha256": "fbc45c09c97d68976f1adf28c38b4f30f6208fe1d05c32525aa6995f0b2bde42",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create"
+      ],
+      "rationale": "Catalog rebuild, lineage, cursor, and browser restore semantics have exact behavioral proofs.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:safe-session-switching:0266266f588c",
+      "heading": "Safe session switching",
+      "semantic_atom_count": 7,
+      "semantic_atom_sha256": "874700cf70653b94de2eb6ebf075d5ffde0703021c71cb0f8fb47a7cb37ebe44",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
+        "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
+        "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch"
+      ],
+      "rationale": "Unit and browser races prove activation-bound cancellation, authoritative-head restart, and late-page rejection.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:natural-language-and-friendly-actions:e0d3c97fd54a",
+      "heading": "Natural language and friendly actions",
+      "semantic_atom_count": 43,
+      "semantic_atom_sha256": "8629ff3abc7802237f97fb4d5fd70d374302a1ef25b62637a045b03831ffd50b",
+      "candidate_count": 7,
+      "candidate_sha256": "8fba7be3e8122d491cb0b7a3ae84c956f4cf613fda27fbc14cb02a8715dba7da",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "capability-runtime",
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal"
+      ],
+      "rationale": "Friendly controls route through the real reviewed action authority.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:action-lifecycle-in-the-ui:b3c9a628e345",
+      "heading": "Action lifecycle in the UI",
+      "semantic_atom_count": 8,
+      "semantic_atom_sha256": "12d7507dde9b230adbe8d778060d1e4bcbce697cbaeedef1ed3af1c623f78db5",
+      "candidate_count": 6,
+      "candidate_sha256": "4f3d0ce9524e0aa48087524516011186031fb334c278740a6ff3db9b18dab735",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error"
+      ],
+      "rationale": "Review, exact streamed operation folding, terminal presentation, and draft-preserving failure are exercised through real authorities.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:visual-production-standard:b2781158b82b",
+      "heading": "Visual production standard",
+      "semantic_atom_count": 14,
+      "semantic_atom_sha256": "bc3f0a5d5e49d09ac5092fff3a5cb879d4ab80fcf7258b1864c93765966c5c92",
+      "candidate_count": 2,
+      "candidate_sha256": "a79776c45f3cdbc7b4171de352791cec0d395b1c1e9ff6423645fc2b89ecfc9f",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility"
+      ],
+      "rationale": "The production Home, mobile/200% reflow, and automated accessibility browser oracles cover rendered standards.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:accessibility-contract:25329480e3df",
+      "heading": "Accessibility contract",
+      "semantic_atom_count": 9,
+      "semantic_atom_sha256": "7a4eea2f41d9fa804442048bd458422d34b6f02af9ac6ac5acbc4bb62788f37e",
+      "candidate_count": 6,
+      "candidate_sha256": "5fb0a44229b2ab02ee8ba9d7bba341dddea2b89fb6bacac6ce19a33015bf3218",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
+        "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort"
+      ],
+      "rationale": "Browser accessibility, focus restoration, zoom-safe controls, draft preservation, and activation tests exercise this contract.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:conversation-authority-and-context-continuity:3003796a5646",
+      "heading": "Conversation authority and context continuity",
+      "semantic_atom_count": 0,
+      "semantic_atom_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile"
+      ],
+      "rationale": "The context and revision authority umbrella is bound to exact delivery, ownership, terminal-mirroring, and fresh-replay proofs.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:generalized-child-revisions:23a4704c9957",
+      "heading": "Generalized child revisions",
+      "semantic_atom_count": 112,
+      "semantic_atom_sha256": "6232356fb20048c864afcb9ad051126c38e618f36a718a9429e798211f2edab0",
+      "candidate_count": 32,
+      "candidate_sha256": "4c44807505dddc14307f4d51a52a7d133dfb18fc15fb3e2ef0ea2f98edd8f2cc",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api",
+        "conversation-catalog-lineage",
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal"
+      ],
+      "rationale": "Child reservation, durable start ownership, exact terminal recovery, failed-operation idempotency, lineage head, and action WAL behavior are executable.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:canonical-context-handoff:92ae1f7f9b1d",
+      "heading": "Canonical context handoff",
+      "semantic_atom_count": 76,
+      "semantic_atom_sha256": "71d44ffb04bc858d17580f4ad4177bc7ce728a5574bf421e2c66f9a0a044a16b",
+      "candidate_count": 8,
+      "candidate_sha256": "9d306fbcc45ba8d74a653e9d6cb414aeb052aa7074bf6d232169336ec455e607",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta"
+      ],
+      "rationale": "Canonical shared handoff and exact self-excluding turn deltas are directly exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:same-revision-structured-turn-delivery:444bc2c76fbe",
+      "heading": "Same-revision structured turn delivery",
+      "semantic_atom_count": 118,
+      "semantic_atom_sha256": "0a49da0bbd3487b0df62049f2c44f753d68e80a2c93fdbd4f98fe9a08098612d",
+      "candidate_count": 14,
+      "candidate_sha256": "8b5f2b4ffd36141c68ffcd2440a1e31c91889741cf50edf0115bd0f197ca5db4",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target"
+      ],
+      "rationale": "Receipt-bound public deltas and target-only private file delivery are directly exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:reactions-and-multi-source-quotes:1c136903f85e",
+      "heading": "Reactions and multi-source quotes",
+      "semantic_atom_count": 84,
+      "semantic_atom_sha256": "bbacfaed797a432048c434e8747dd7a54c9bc00a76e6e84477e6c48d40f12841",
+      "candidate_count": 10,
+      "candidate_sha256": "5a95c55885aeb6f6dbfd67a3ab3197d83b8ef18ddd745d8f940b2ca55579f87d",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
+        "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold"
+      ],
+      "rationale": "Authority fold, UI selection, and real browser request/response are all exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:action-proposal-model:2454c73b904f",
+      "heading": "Action proposal model",
+      "semantic_atom_count": 155,
+      "semantic_atom_sha256": "4beafea7fabb022520e7b4c504a3a57988142f3ef0ccc5b8a6c06e08f4b4e58c",
+      "candidate_count": 26,
+      "candidate_sha256": "e27b5eb18db20ddc978ccfd9f3c452ef6bd7a64f22a36c59949f321bc2cb9526",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-runtime",
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper"
+      ],
+      "rationale": "Immutable proposal and commit behavior is exercised by shared action and revision authorities.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:actor-policy-grant-and-approval-authority:f09eaf631ae5",
+      "heading": "Actor, policy, grant, and approval authority",
+      "semantic_atom_count": 89,
+      "semantic_atom_sha256": "bc616a550605b9c4f87da0ff1fd16480133a3ebb0d9a9c9716ea106348b4e833",
+      "candidate_count": 22,
+      "candidate_sha256": "a28a7586f70dc3e0269649d161a79ffcc531bee5066f79e8362b7b4a66780fbb",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-core"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta"
+      ],
+      "rationale": "Actor approval, capability authority, and minimal permission proofs bind this section.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:public-api:ab3aa426f807",
+      "heading": "Public API",
+      "semantic_atom_count": 246,
+      "semantic_atom_sha256": "790cfec1a11055fd8297f43d0adf5d8458be7405d8a13aef15b2cdd6b906033a",
+      "candidate_count": 72,
+      "candidate_sha256": "50ffca42210032d4127ebadb728f256e523e917e89f70b6deb4c57ccc8ff324f",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api",
+        "capability-runtime",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create"
+      ],
+      "rationale": "Authenticated HTTP, capability action routes, and the real browser client exercise public API behavior.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:cross-domain-outbox-and-reconciliation:06429f9bb514",
+      "heading": "Cross-domain outbox and reconciliation",
+      "semantic_atom_count": 32,
+      "semantic_atom_sha256": "830343c4880180e0ec6851917eb4db80edb87599c0705a9004d51209ad703e67",
+      "candidate_count": 4,
+      "candidate_sha256": "98dd970caf454519e34641ace1560fb385918ee897dd40f7e8f63147f4606f17",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-runtime",
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper"
+      ],
+      "rationale": "Cross-domain commit, publication recovery, and revision authority are executable.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:public-private-boundary:895ae1f0546a",
+      "heading": "Public/private boundary",
+      "semantic_atom_count": 959,
+      "semantic_atom_sha256": "7139ac20c4843338eb92d7ced72735d8fd52bb3c1bdaed8039f0e72d4217095b",
+      "candidate_count": 119,
+      "candidate_sha256": "3b4a78b622a3bec7cc1fe1545ab67deea04c1faf07bc5396307e9bbe32e1c855",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-revisions-api",
+        "ai-home-ui",
+        "capability-cli-compat",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
+        "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
+        "proof:bun:test/capability-command.test.ts#private-input-no-echo",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "Public scanning, target-only and browser-memory-only one-shot private delivery, no-echo CLI, and scrubbed broker projections are exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:subsystem-2-cli-capability-fabric:9f8f2eb77137",
+      "heading": "Subsystem 2: CLI Capability Fabric",
+      "semantic_atom_count": 0,
+      "semantic_atom_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-runtime",
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing"
+      ],
+      "rationale": "The capability subsystem is exercised through its real action domain and CLI routing.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:package-model:e5d1b00e1593",
+      "heading": "Package model",
+      "semantic_atom_count": 419,
+      "semantic_atom_sha256": "56900f1ebee7435ba8c34dd58676c7c4727179ee059bd885a7ad4bdf8fec6934",
+      "candidate_count": 65,
+      "candidate_sha256": "dbe7e7991979dfe9737035bff3f5fcf7abae4dba73a53a85aae144193ebdea3d",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-core",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
+        "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
+        "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
+        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution"
+      ],
+      "rationale": "Manifest, source resolution, immutable planning, and exact graph preimages cover package behavior.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:three-durable-sources-of-truth:2939bd546dd3",
+      "heading": "Three durable sources of truth",
+      "semantic_atom_count": 78,
+      "semantic_atom_sha256": "ccd723e9c5964f476f1d5d93379ec01a549fda2f128210daa6cfe1645572ef5d",
+      "candidate_count": 13,
+      "candidate_sha256": "4795e52e87c8f63dae5240e76e9661d0aa40dc6a2900c02b2468f5b0b0c91e22",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-core",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+      ],
+      "rationale": "Authority, portable lock, and WAL publication proofs cover all durable sources.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:adapter-contract:5e7d29fc44a8",
+      "heading": "Adapter contract",
+      "semantic_atom_count": 587,
+      "semantic_atom_sha256": "bfdd4ec37de7bfe0a003508925b51b609449817bfca43639e87cec9fd2135b11",
+      "candidate_count": 79,
+      "candidate_sha256": "d6ab806366b041e7599c98c47dbf62a5547f3e1f59687213ea3659c661cd76dc",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
+        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+      ],
+      "rationale": "Inspection, graph closure, production broker, and effect receipts exercise the adapter contract.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:existing-implementation-to-reuse:a609ac7aa4f6",
+      "heading": "Existing implementation to reuse",
+      "semantic_atom_count": 15,
+      "semantic_atom_sha256": "ca62fba987b977c3fbe57bd8853588afab5df27e1ccef13853e618b3bf9dc015",
+      "candidate_count": 1,
+      "candidate_sha256": "9013403f3c36dbe18359b06196b22b178aaf9a610a5805fa1dc77cc8b340c39e",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
+        "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal"
+      ],
+      "rationale": "Reused canonicalization, framing, and action authority paths are directly tested.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:permission-model:7e13e8df4eba",
+      "heading": "Permission model",
+      "semantic_atom_count": 121,
+      "semantic_atom_sha256": "044262ceb8f9b1abafe65bc004975cbea3f5a5c83fb22aba3d23bd25d1c51f82",
+      "candidate_count": 21,
+      "candidate_sha256": "89a8c0bc7f5b65c752dfd7cfcf30492870281f6a0db97ece45595572c4741572",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-core",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+      ],
+      "rationale": "Minimal union, authority activation, and commit-bound revalidation cover permission behavior.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:install-lifecycle:c04846cfbb11",
+      "heading": "Install lifecycle",
+      "semantic_atom_count": 88,
+      "semantic_atom_sha256": "ee2d590f7bb59aaeb88cf4dffeb1d0f3c7f10d9f08736614e6629eb884a5bbf9",
+      "candidate_count": 31,
+      "candidate_sha256": "c3c870a53f0c3f9928d1a12c73a909818841e56c877c9cbb4e244abce9647a9b",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "Real proposal, zero-write inspection, WAL commit, and broker effect behavior cover installation.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:update-remove-rollback-repair-and-status:030064ec54dd",
+      "heading": "Update, remove, rollback, repair, and status",
+      "semantic_atom_count": 65,
+      "semantic_atom_sha256": "9820a20d59961f71f0d70abece084a5a1f1b2babb1a8aa29aebdb59756dac528",
+      "candidate_count": 11,
+      "candidate_sha256": "4091334d60f1328e3b21a66bebd7609a221051ec09951c2439a05da94b20a173",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-runtime",
+        "capability-core",
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing"
+      ],
+      "rationale": "Recovery/rollback publication, durable storage, and command routing exercise lifecycle mutations.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:friendly-cli-surface:4bb48b30168a",
+      "heading": "Friendly CLI surface",
+      "semantic_atom_count": 22,
+      "semantic_atom_sha256": "485ada3b1936f3692d2460f5df7c22e3d78de09b3667fa179b9584b81b6e4d66",
+      "candidate_count": 4,
+      "candidate_sha256": "0410fa47dcd53654a77015cf2c2b98cb7594955d831c78fa9465931c17fbee77",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:bun:test/capability-command.test.ts#private-input-no-echo",
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write"
+      ],
+      "rationale": "Parser, early routing, private-input no-echo, and noninteractive zero-write proofs cover the CLI surface.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:shared-non-tty-direct-mode-suffix:6163a9391d20",
+      "heading": "shared non-TTY direct-mode suffix",
+      "semantic_atom_count": 1,
+      "semantic_atom_sha256": "c33063366b26596b6518cee4cec44ee57f73b9887e5e99699c195abe11cc8741",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write"
+      ],
+      "rationale": "The direct-mode grammar and noninteractive admission rule are executable.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:request-file-mode-is-the-exclusive-alternative-its-dto-owns-the-key-auth:964be6b3ce16",
+      "heading": "request-file mode is the exclusive alternative; its DTO owns the key (authority repair excluded)",
+      "semantic_atom_count": 106,
+      "semantic_atom_sha256": "c6d97b6bf7cd8f91715a57141d79886a0a8ce652629262609e4bf383e9698790",
+      "candidate_count": 41,
+      "candidate_sha256": "4900808dd65449df0b9c87ec74c16fc0082ea18dc5343bec71d3b9a7a99e50a8",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write"
+      ],
+      "rationale": "Exclusive request-file parsing, routing, and zero-write refusal are directly exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:migration-and-cutover:74f000ca6040",
+      "heading": "Migration and cutover",
+      "semantic_atom_count": 1,
+      "semantic_atom_sha256": "876a3ed85b7a6ad6724d77d04a2d35e4e222a10a05bc630bd9fab7f95a4a7f40",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "capability-runtime",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls"
+      ],
+      "rationale": "Reader compatibility, shared authority, and Home cutover are exercised by final-state behavior.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:phase-1-characterization-and-reader-compatibility:8dec9cf0e91e",
+      "heading": "Phase 1: characterization and reader compatibility",
+      "semantic_atom_count": 8,
+      "semantic_atom_sha256": "87f6f7b658df61607d71f301a6d3a6dd89853661d6f8dac6cef4aa9158f4c3da",
+      "candidate_count": 2,
+      "candidate_sha256": "39637f7e99d1c621e28ad55c6f15400342630623cf831842aa9247f4a83b0196",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper"
+      ],
+      "rationale": "Reader behavior and durable framing are characterized by exact tests.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:phase-2-derived-catalog-and-shared-action-authority:a72e0015bfc0",
+      "heading": "Phase 2: derived catalog and shared action authority",
+      "semantic_atom_count": 22,
+      "semantic_atom_sha256": "2f69d66135ddc5076600681b8b23d25d3f34de0f584e19ebf40033471bca9f7f",
+      "candidate_count": 4,
+      "candidate_sha256": "469cb8b020b599728cbeb7cb5b2ec591773d48abf8f367375d0187d060ac76ee",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal"
+      ],
+      "rationale": "Derived reads and shared action authority are directly exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:phase-3-revision-continuity-and-capability-fabric:bcfee721a849",
+      "heading": "Phase 3: revision continuity and Capability Fabric",
+      "semantic_atom_count": 135,
+      "semantic_atom_sha256": "ac79bd7aa617dfef9f559bcda1f1c188afa2d92586e45cb7534ace6a7bf5e7f6",
+      "candidate_count": 43,
+      "candidate_sha256": "cc3fe27dcf0de8dc9b41c5ce294dece3fd9a75609d9ffc9add8774ec5d5fecb1",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-core",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
+        "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
+        "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
+        "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+        "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
+        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "Revision continuity and the full capability authority/runtime surface have executable proofs.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:phase-4-ai-home-cutover:7f81f95a5383",
+      "heading": "Phase 4: AI Home cutover",
+      "semantic_atom_count": 8,
+      "semantic_atom_sha256": "8942268a073312f065cc24937679d0723e5a3ac03d55cb7330583635f34bc5fc",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
+        "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
+        "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
+        "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
+        "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility"
+      ],
+      "rationale": "Unit and browser Home acceptance proofs cover the cutover.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:phase-5-delete-duplicate-implementations:7e07ecdb1652",
+      "heading": "Phase 5: delete duplicate implementations",
+      "semantic_atom_count": 13,
+      "semantic_atom_sha256": "ed437a956ca6eef3873d6e215ff88d987a04e3fbebedc53e9f20b08a4c3b2950",
+      "candidate_count": 2,
+      "candidate_sha256": "7f68ead728ab3832f1ec443b4a51504453cde88bcb41dac294a571a84e1dee9c",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-cli-compat",
+        "ai-home-ui",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain"
+      ],
+      "rationale": "Single routing, Home, and action-domain behavior prove the surviving paths.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:normative-wire-and-storage-contract:8049de246ac8",
+      "heading": "Normative wire and storage contract",
+      "semantic_atom_count": 2,
+      "semantic_atom_sha256": "2b25eeb8b1f803f02fbdc28208700cb7684a2cf6bb6ef2601d7f34b2bfbe7ab7",
+      "candidate_count": 1,
+      "candidate_sha256": "f3c4f995bd0905de914186c0c024486219b330c5601ebd8c47512a5f09940514",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-core"
+      ],
+      "proof_ids": [
+        "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
+        "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets"
+      ],
+      "rationale": "Canonical digest, framing, and portable storage validators exercise the wire/storage umbrella.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:canonical-values-and-bounds:c04074a55273",
+      "heading": "Canonical values and bounds",
+      "semantic_atom_count": 47,
+      "semantic_atom_sha256": "58dabce9f3543de1cf554677766d34fcd5d27c6bb76522a2b9b2c73d5e7e939e",
+      "candidate_count": 14,
+      "candidate_sha256": "9136ca01b30dd998af1322e8dfb3d3fef8ccb00b88339a18440426a53cb59d5f",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-core"
+      ],
+      "proof_ids": [
+        "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
+        "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
+        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner"
+      ],
+      "rationale": "Canonical value, bounded manifest, and public projection validators exercise exact bounds.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:handoff-wire-contract:4b062d57e2cf",
+      "heading": "Handoff wire contract",
+      "semantic_atom_count": 349,
+      "semantic_atom_sha256": "60510f7bc34284478d4b33772fef44e5d89833a5a8c93a52541bb173fb055568",
+      "candidate_count": 55,
+      "candidate_sha256": "2a55ff1620020aa6f5068a6c9250e223cdbaf5b64b25bf2943ff22160d2c91cd",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target"
+      ],
+      "rationale": "Shared handoff, exact turn delta, and target-only private delivery cover the wire contract.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:action-enums-and-preview:0890ae5f93b0",
+      "heading": "Action enums and preview",
+      "semantic_atom_count": 3597,
+      "semantic_atom_sha256": "e7553b77932db8621ca94b8541e45271eea6bede7f5d619309cc3f244eb10ce5",
+      "candidate_count": 590,
+      "candidate_sha256": "236f4d07c78bcb344f5782cac36bf3c72f480b437e5eb7178780076d6f8a6d7e",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-runtime",
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper"
+      ],
+      "rationale": "Action authority, safe preview projection, real domain routes, and revision actions exercise enum arms.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:proposal-and-operation-wire-bodies:96731e9d398a",
+      "heading": "Proposal and operation wire bodies",
+      "semantic_atom_count": 446,
+      "semantic_atom_sha256": "b681f332b1803c4abdff7075f84bfefe7796df4f287c65a2ed849e74c3ff34b1",
+      "candidate_count": 75,
+      "candidate_sha256": "f538e44c1c0ab9609976d21f724c6092b4dfdb32a76812f069cd429d1fb8c46c",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+      ],
+      "rationale": "Proposal validation, real action-domain transport, and WAL operation publication cover body schemas.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:action-approval-and-challenge-authority-records:b30cf5d9e880",
+      "heading": "Action, approval, and challenge authority records",
+      "semantic_atom_count": 236,
+      "semantic_atom_sha256": "e31f4127866383dc2b0676098cd5fa4101dc1a465690d95ff7d7845e9324a94c",
+      "candidate_count": 51,
+      "candidate_sha256": "80d0aa41116072c35a1ce40623a269554055707f867f1c902bec9af4cbe7fcd9",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain"
+      ],
+      "rationale": "Exact approval/WAL tamper and real route commit proofs exercise authority records.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:authoritative-capability-records:4187611fc949",
+      "heading": "Authoritative capability records",
+      "semantic_atom_count": 1061,
+      "semantic_atom_sha256": "c115feddab1f0507efae2d3de9a7e7d47698898ceecf1ece47b9a01095db3926",
+      "candidate_count": 164,
+      "candidate_sha256": "97cc01b5582403085e7a7ca89af7da660e1fd3824f5c37437f26eb7cab4c11a4",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-core",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+        "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+      ],
+      "rationale": "All authoritative capability record families have concrete validators and runtime proofs.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:lineage-revision-start-and-grant-authority-records:d3cdb272d2fe",
+      "heading": "Lineage, revision-start, and grant authority records",
+      "semantic_atom_count": 1755,
+      "semantic_atom_sha256": "dccdf769a1c0534cc16b4a2d8de3dfd36546f2e6dd4aa2d52a3ba11e7da45d41",
+      "candidate_count": 470,
+      "candidate_sha256": "0ade94070d9290e58ba43635a559f889c1173d8a348969e431149bd191f6c484",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-core",
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal"
+      ],
+      "rationale": "Lineage, process-bound revision ownership, exact terminal mirroring, delivery receipt, grant, and action authority records are exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:http-errors-and-status-mapping:c36fa1a9bfdb",
+      "heading": "HTTP errors and status mapping",
+      "semantic_atom_count": 272,
+      "semantic_atom_sha256": "7c6cab2791d4b1543dbf517f3e52f75728264d52dcf8ecec34613f60884360b9",
+      "candidate_count": 8,
+      "candidate_sha256": "d14956efe92bdd7e8ecfbd8f60c1e5c927eecba0b23c416556881bbb6b1b4329",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api",
+        "capability-runtime",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error"
+      ],
+      "rationale": "Server status mapping, capability HTTP routes, and browser error preservation are executable.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:cli-json-and-exit-contract:ed80509e174e",
+      "heading": "CLI JSON and exit contract",
+      "semantic_atom_count": 471,
+      "semantic_atom_sha256": "eaa4f66ff1dbf53794b831ee401b4975575a2ee34f5ff0630108efaee601e6e5",
+      "candidate_count": 33,
+      "candidate_sha256": "b8efbaf22197a5f6df4eca834340aa5bb4d564a5a2df24fdd63173c730a5c1ed",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:bun:test/capability-command.test.ts#private-input-no-echo",
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write"
+      ],
+      "rationale": "Parser, routing, JSON no-echo, and noninteractive exit behavior are directly tested.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:storage-framing-and-permissions:40a57a65427c",
+      "heading": "Storage framing and permissions",
+      "semantic_atom_count": 306,
+      "semantic_atom_sha256": "ede0980cfc40921736a422aaa0dbb1e79484b8954a3bfefe2c84db1c747bd1c8",
+      "candidate_count": 66,
+      "candidate_sha256": "a5f09a034179439e700b8adca2e79a6f1e6973ac750b86216cf8414ae0ad5307",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "capability-core",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+      ],
+      "rationale": "VFFR, portable storage, permission witness, and durable operation receipts cover storage.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:error-and-recovery-contract:2fb3df9f09a7",
+      "heading": "Error and recovery contract",
+      "semantic_atom_count": 29,
+      "semantic_atom_sha256": "c7bb5d11e354e1906dd5d842acf5302305164288974d8a4be867de0af9a7b570",
+      "candidate_count": 31,
+      "candidate_sha256": "1c3e4b094a55522e7ff0cbb54cc54a5e7ff1916857c993718a6e0b1401ed143f",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+      ],
+      "rationale": "Each durable domain has tamper, owner-loss, mirror-failure, idempotent terminal, or crash-recovery behavior under test.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:security-requirements:bc4ab2b454b6",
+      "heading": "Security requirements",
+      "semantic_atom_count": 24,
+      "semantic_atom_sha256": "881a70216657c9a949041a8370b52064d77e0963b553ef4efb2ba90ef36cf90c",
+      "candidate_count": 9,
+      "candidate_sha256": "4de25bf0467c82d26b379c17b61aeaa5999a49fa3f6eef8c53a33d4a403e60da",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-revisions-api",
+        "capability-core",
+        "capability-runtime",
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
+        "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
+        "proof:bun:test/capability-command.test.ts#private-input-no-echo"
+      ],
+      "rationale": "Secret projection, authentication, portable storage, graph substitution, and CLI no-echo are exercised.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:verification-strategy:7abdee05b280",
+      "heading": "Verification strategy",
+      "semantic_atom_count": 0,
+      "semantic_atom_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-runtime",
+        "capability-cli-compat",
+        "ai-home-ui",
+        "product-acceptance-ship"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream"
+      ],
+      "rationale": "The strategy umbrella references executable proofs across every work unit and the pinned server runtime.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:characterization-tests:73c09992b026",
+      "heading": "Characterization tests",
+      "semantic_atom_count": 8,
+      "semantic_atom_sha256": "020ed5723d7a50b53510f3936c46c45979cc311cd95faeab2b328611ed95ca6b",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "capability-cli-compat"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing"
+      ],
+      "rationale": "Legacy reader and compatibility routing behavior is characterized.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:unit-and-property-tests:1d706bff3f0d",
+      "heading": "Unit and property tests",
+      "semantic_atom_count": 252,
+      "semantic_atom_sha256": "6f4ab52f3d670d3cc024d46933c1ada3ba5b06d1e767253403701589e21ffc8d",
+      "candidate_count": 49,
+      "candidate_sha256": "19869ceddf2a3e92730bde6cf6f0c50a7a35d7719c6b02fcc313063a13754ef8",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-core",
+        "capability-runtime",
+        "capability-cli-compat",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
+        "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
+        "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
+        "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
+        "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
+        "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+        "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
+        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
+        "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:bun:test/capability-command.test.ts#private-input-no-echo",
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+        "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
+        "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
+        "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
+        "proof:bun:test/ui-conversation-home.test.ts#home-quotes"
+      ],
+      "rationale": "The explicit catalog binds unit/property oracles across every implementation domain.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:integration-and-fault-injection-tests:9cc1eaa72e6c",
+      "heading": "Integration and fault-injection tests",
+      "semantic_atom_count": 168,
+      "semantic_atom_sha256": "f21e41ed57904864627b3ed57f017b086cb325aa3b0046334e8acd88bf32857a",
+      "candidate_count": 48,
+      "candidate_sha256": "1cf9fea239a21f40cac89043061742e5af772264b7945162f9263466a226573e",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-runtime",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority"
+      ],
+      "rationale": "Crash, race, owner-loss, terminal-mirror, restart, route, and real browser integration proofs are selected.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:ui-and-end-to-end-tests:ddcadd3a61e0",
+      "heading": "UI and end-to-end tests",
+      "semantic_atom_count": 17,
+      "semantic_atom_sha256": "558e6ceb53972976a8524329177e81ac424d89a2271483879b9b75f600c3c851",
+      "candidate_count": 2,
+      "candidate_sha256": "f3d995922fb558653fc8076240d215649ec0a18a56da31b96a624bd734d91a2c",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
+        "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
+        "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
+        "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
+        "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility"
+      ],
+      "rationale": "Home unit races and real Chromium acceptance/accessibility proofs cover UI behavior.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:migration-and-release-rehearsal:a1883e32b951",
+      "heading": "Migration and release rehearsal",
+      "semantic_atom_count": 11,
+      "semantic_atom_sha256": "db9e6e6cbef27e1d9b39c2647860929dae44e04caf788792d8362208e04f1fc0",
+      "candidate_count": 2,
+      "candidate_sha256": "fb6b095b7d89a648b7897727a0563256b1bf33ad650089d079a76e53a4b867f8",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage",
+        "capability-cli-compat",
+        "ai-home-ui",
+        "capability-runtime",
+        "product-acceptance-ship"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream"
+      ],
+      "rationale": "Reader compatibility, CLI compatibility, browser restore, restart publication, and pinned Bun server behavior cover rehearsal.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:whole-repository-gate:0dfabe20ccbf",
+      "heading": "Whole-repository gate",
+      "semantic_atom_count": 10,
+      "semantic_atom_sha256": "4c6b08ca09861fa1123f46428df4fc7023e1beca23e1229e698c155ac068c5aa",
+      "candidate_count": 5,
+      "candidate_sha256": "466533c67d9dfc097e3c06d7c2c42b863abe51b3c82c7377e34e368fbf61c21f",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-runtime",
+        "capability-cli-compat",
+        "ai-home-ui",
+        "product-acceptance-ship"
+      ],
+      "proof_ids": [
+        "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
+        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream"
+      ],
+      "rationale": "Representative exact proofs from every unit and the pinned Bun server runtime are re-executed in the same verify invocation.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:implementation-boundaries-and-sequencing:65577cf5d6d1",
+      "heading": "Implementation boundaries and sequencing",
+      "semantic_atom_count": 32,
+      "semantic_atom_sha256": "fce213239c699ec395aee696ba4e71486b0750516d8b5d399f2cfea844adb87c",
+      "candidate_count": 1,
+      "candidate_sha256": "c81357f03d603344c0a98ff448ce7313e34559d880a0bac5f0ed11ab6db87ad3",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-runtime",
+        "capability-cli-compat",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls"
+      ],
+      "rationale": "The final owned boundaries are exercised after sequencing converges.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:alternatives-considered:73534cb410e6",
+      "heading": "Alternatives considered",
+      "semantic_atom_count": 0,
+      "semantic_atom_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "The chosen Home and broker behavior supply evidence for the rejected umbrella alternatives.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:general-plugin-ui-platform:6603f9128587",
+      "heading": "General plugin UI platform",
+      "semantic_atom_count": 3,
+      "semantic_atom_sha256": "75c3af23b67f717bfd29f7e07d753d6102e2a9f9b1cb0a3b0ad8180ab174fbb1",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "ai-home-ui",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+      ],
+      "rationale": "The inline Home and host broker prove the selected alternative.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:mcp-for-every-capability:a2b50d9ee3e2",
+      "heading": "MCP for every capability",
+      "semantic_atom_count": 2,
+      "semantic_atom_sha256": "8517598eb1f6ad2e5afc1a158b1da7606c24a0b5e9e669bf9edc956707906023",
+      "candidate_count": 1,
+      "candidate_sha256": "0f1a19549cc5f248155ac5d6333448e0b25aebfa45016c5df9eec82f7bf8161b",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain"
+      ],
+      "rationale": "Broker outcome classification and the shared action domain exercise the narrower integration choice.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:independent-installers-behind-chat-cards:6de17146a98c",
+      "heading": "Independent installers behind chat cards",
+      "semantic_atom_count": 2,
+      "semantic_atom_sha256": "155f075941977558e708b93023bd8b255d1e9a0f009209bd69a9e686a6713bfa",
+      "candidate_count": 1,
+      "candidate_sha256": "5c46c4943c3365b7874097a2fb76b0bb2d32fb284b076a60d954312638fe54b4",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-runtime",
+        "ai-home-ui"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls"
+      ],
+      "rationale": "Shared action authority, WAL publication, and inline UI prove the non-independent installer model.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:in-place-participant-mutation-or-retained-native-sessions:2c958eccfd3d",
+      "heading": "In-place participant mutation or retained native sessions",
+      "semantic_atom_count": 3,
+      "semantic_atom_sha256": "9b336522b95d4e9f9f22b4a3ecaba60a88ef638c09491da6e212707edc6c6c09",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta"
+      ],
+      "rationale": "Child revision authority and exact resumed delta exercise the selected continuity model.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:in-memory-session-list-or-journal-fold-on-every-request:a22e96fca75e",
+      "heading": "In-memory session list or journal fold on every request",
+      "semantic_atom_count": 3,
+      "semantic_atom_sha256": "acfe752f2c343bdbd743b50092baf8d6e27678a03269526f0b253f544c7413ea",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-catalog-lineage"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head"
+      ],
+      "rationale": "Derived catalog, stable inventory, and bounded timeline prove the durable read model.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:big-bang-cutover-or-permanent-dual-implementation:2ea159c0b751",
+      "heading": "Big-bang cutover or permanent dual implementation",
+      "semantic_atom_count": 3,
+      "semantic_atom_sha256": "0901ffcd0a033d2a075b68574baf13db92d33cd10bbc4a41691662362face9c8",
+      "candidate_count": 0,
+      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "disposition": "behavioral",
+      "owners": [
+        "capability-cli-compat",
+        "ai-home-ui",
+        "capability-runtime"
+      ],
+      "proof_ids": [
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain"
+      ],
+      "rationale": "Single CLI routing, Home, and action-domain paths prove the final cutover.",
+      "waiver_id": null
+    },
+    {
+      "section_id": "section:completion-criteria:74382a22fa1f",
+      "heading": "Completion criteria",
+      "semantic_atom_count": 20,
+      "semantic_atom_sha256": "3f24981102ee261449d54bab13f647e49bd5583a67d18906355dae4ec4c17a15",
+      "candidate_count": 2,
+      "candidate_sha256": "ed69264f27c774106b3786a85ac08b15888b02f588945fe1ff8633581761b085",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions",
+        "conversation-catalog-lineage",
+        "conversation-revisions-api",
+        "capability-core",
+        "capability-runtime",
+        "capability-cli-compat",
+        "ai-home-ui",
+        "product-acceptance-ship"
+      ],
+      "proof_ids": [
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
+        "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
+        "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
+        "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
+        "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
+        "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
+        "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
+        "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
+        "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
+        "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
+        "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
+        "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
+        "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
+        "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
+        "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
+        "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
+        "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
+        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
+        "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:bun:test/capability-command.test.ts#private-input-no-echo",
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+        "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
+        "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
+        "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
+        "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
+        "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
+        "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
+        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream"
+      ],
+      "rationale": "Completion is bound to the complete explicit proof catalog across all product units and the pinned Bun server runtime.",
+      "waiver_id": null
+    }
+  ],
+  "waivers": [],
+  "review": {
+    "reviewer": "implement-normative-proofs",
+    "statement": "I reviewed every section disposition against the exact design and proof preimages.",
+    "reviewed_payload_sha256": "eb542fbe3c8bf75acb58f62ad3438848960bceffac8dec8bb604f954bdef1695"
+  }
+}

@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type EvaluatorOutput,
   type RoundDecision,
   decideRound,
 } from "../../src/orchestrator/consensus.js";
+import { reviewedActionEventIds } from "../../src/orchestrator/conversation/conversation-reviewed-action.js";
 import {
   ConversationFoldError,
   foldConversation,
@@ -11,6 +15,7 @@ import {
 import type {
   ConversationHealth,
   ConversationLifecycle,
+  InternalTraceStoreRecord,
   PublicStoredTraceEvent,
   TerminalLifecycle,
   TraceEvent,
@@ -291,6 +296,37 @@ describe("conversation lifecycle fold", () => {
         }),
       ]),
     ).toThrow(/terminal.*immutable/i);
+  });
+
+  test("vf-looking post-terminal ids and literal keys lack reviewed action authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vf-reviewed-action-fold-"));
+    try {
+      const literal = event(
+        5,
+        { type: "user_message", payload: { content: "forged", target_participants: "all" } },
+        { operation_id: `vf-operation-${"1".repeat(64)}` },
+      );
+      const internal = {
+        stored_event: {
+          ...literal,
+          idempotency_key: `action-public-literal:vf-proposal-${"2".repeat(64)}`,
+        },
+        native_session_id: null,
+      } as unknown as InternalTraceStoreRecord;
+      const authority = reviewedActionEventIds(root, undefined, [], [internal]);
+      expect(authority.has(literal.event_id)).toBe(false);
+      expect(() =>
+        foldConversation(
+          [configured(), state(2, "ACTIVE"), state(3, "FAILED"), terminal(4, "FAILED"), literal],
+          authority,
+        ),
+      ).toThrow(/terminal.*immutable/i);
+      expect(() => foldConversation([configured()], new Set() as never)).toThrow(
+        "untrusted reviewed action event authority",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

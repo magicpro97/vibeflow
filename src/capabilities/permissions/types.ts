@@ -25,7 +25,10 @@ export interface EffectiveGrantFrameV1 {
   grant_id: string;
   frame_digest: string;
   transition: "issued" | "renewed" | "revoked";
-  principal_digest: string;
+  principal: {
+    public_actor_id: string;
+    credential_class: "loopback-session" | "interactive-tty" | "automation-grant" | "recovery";
+  };
   scope: "project" | "user";
   action_types: string[];
   target_engines: string[];
@@ -33,6 +36,16 @@ export interface EffectiveGrantFrameV1 {
   not_before: string;
   expires_at: string;
   revoked_at: string | null;
+}
+
+export interface ValidatedGrantAuthorityPrefixV1 {
+  schema_version: "1.0";
+  scope: "project" | "user";
+  scope_identity_digest: string;
+  authority_epoch: number;
+  authority_head_digest: string;
+  grant_head_digest: string | null;
+  grant_state_digest: string;
 }
 
 export interface CapabilityGrantAuthorizationWitnessV1 {

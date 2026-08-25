@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
 } from "../wire/primitives.js";
+import { assertDurableRegistryTrustSnapshot } from "./durable-registry-authority.js";
 import { parseSemver } from "./semver.js";
 import type {
   RegistryCapabilityIndexV1,
@@ -20,11 +21,19 @@ import type {
   RegistryTrustKeyV1,
   VerifiedRegistryEnvelopeV1,
 } from "./types.js";
+import type { RegistryTrustSnapshotV1 } from "./types.js";
 import {
   assertCanonicalHttpsUrl,
   assertCanonicalRegistryOrigin,
   assertCanonicalSourceUrl,
 } from "./url.js";
+
+interface VerifiedRegistryAuthorityV1 {
+  mode: "resolution" | "locked";
+  statement: RegistryPackageStatementV1;
+}
+
+const VERIFIED_REGISTRY_ENVELOPES = new WeakMap<object, VerifiedRegistryAuthorityV1>();
 
 function u64(value: number): Buffer {
   const bytes = Buffer.alloc(8);
@@ -134,7 +143,7 @@ function trustKeyBytes(key: RegistryTrustKeyV1): Buffer {
 export function verifyRegistryEnvelope(
   envelope: RegistrySignatureEnvelopeV1,
   options: {
-    trust_keys: readonly RegistryTrustKeyV1[];
+    trust_snapshot: RegistryTrustSnapshotV1;
     at: string;
     mode: "resolution" | "locked";
     expected?: {
@@ -159,6 +168,7 @@ export function verifyRegistryEnvelope(
       "unsupported_schema_version",
     );
   validateRegistryStatement(envelope.statement);
+  const trustSnapshot = assertDurableRegistryTrustSnapshot(options.trust_snapshot);
   digest(envelope.signature.key_id, "envelope.signature.key_id");
   const expected = options.expected;
   if (
@@ -173,7 +183,7 @@ export function verifyRegistryEnvelope(
       "envelope.statement",
       "integrity_failure",
     );
-  const candidates = options.trust_keys.filter((key) => key.key_id === envelope.signature.key_id);
+  const candidates = trustSnapshot.keys.filter((key) => key.key_id === envelope.signature.key_id);
   if (candidates.length !== 1)
     throw new CapabilityValidationError(
       "trusted key is absent or ambiguous",
@@ -213,6 +223,11 @@ export function verifyRegistryEnvelope(
       "integrity_failure",
     );
   const now = timestamp(options.at, "at");
+  if (timestamp(envelope.statement.issued_at, "statement.issued_at") > now)
+    throw new CapabilityValidationError(
+      "registry statement issuance is in the future",
+      "statement.issued_at",
+    );
   const expired =
     now >= timestamp(envelope.statement.expires_at, "statement.expires_at") ||
     now >= timestamp(key.valid_until, "key.valid_until");
@@ -224,11 +239,39 @@ export function verifyRegistryEnvelope(
         : "verified";
   if (options.mode === "resolution" && status !== "verified")
     throw new CapabilityValidationError(`registry authenticity is ${status}`, "envelope.signature");
-  return {
+  const result = Object.freeze({
     envelope_digest: registryEnvelopeDigest(envelope),
     key_id: key.key_id,
     statement_expires_at: envelope.statement.expires_at,
     status,
+    scope: trustSnapshot.scope,
+    scope_identity_digest: trustSnapshot.scope_identity_digest,
+    authority_epoch: trustSnapshot.authority_epoch,
+    authority_head_digest: trustSnapshot.authority_head_digest,
+    trust_head_digest: trustSnapshot.trust_head_digest,
+    trust_epoch: trustSnapshot.trust_epoch,
+    trust_snapshot_digest: trustSnapshot.snapshot_digest,
+  });
+  VERIFIED_REGISTRY_ENVELOPES.set(result, {
+    mode: options.mode,
+    statement: structuredClone(envelope.statement),
+  });
+  return result;
+}
+
+export function assertSignatureVerifiedRegistryEnvelope(
+  value: VerifiedRegistryEnvelopeV1,
+): VerifiedRegistryAuthorityV1 {
+  const authority = VERIFIED_REGISTRY_ENVELOPES.get(value);
+  if (!authority)
+    throw new CapabilityValidationError(
+      "registry envelope authority is not signature-verified",
+      "registry_signature",
+      "integrity_failure",
+    );
+  return {
+    mode: authority.mode,
+    statement: structuredClone(authority.statement),
   };
 }
 
@@ -270,7 +313,7 @@ function validateHint(entry: RegistryCapabilityIndexV1["entries"][number], path:
 
 export function validateRegistryIndex(
   index: RegistryCapabilityIndexV1,
-  options?: { trust_keys: readonly RegistryTrustKeyV1[]; at: string },
+  options?: { trust_snapshot: RegistryTrustSnapshotV1; at: string },
 ): RegistryCapabilityIndexV1 {
   exactKeys(
     index,
@@ -311,7 +354,7 @@ export function validateRegistryIndex(
       );
     if (options)
       verifyRegistryEnvelope(entry.signature_envelope, {
-        trust_keys: options.trust_keys,
+        trust_snapshot: options.trust_snapshot,
         at: options.at,
         mode: "resolution",
       });

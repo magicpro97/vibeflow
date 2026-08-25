@@ -9,6 +9,7 @@ export interface CapabilityStorePathsV1 {
   currentLock: string;
   identity: string;
   writerLock: string;
+  authorityWriterLock: string;
 }
 
 export function projectCapabilityPaths(projectRoot: string): CapabilityStorePathsV1 {
@@ -20,6 +21,7 @@ export function projectCapabilityPaths(projectRoot: string): CapabilityStorePath
     currentLock: join(root, ".vibeflow", "CAPABILITIES.lock.json"),
     identity: join(root, ".vibeflow", "PROJECT_ID.json"),
     writerLock: join(privateRoot, "writer.lock"),
+    authorityWriterLock: join(privateRoot, "authority", "v1", "writer.lock"),
   };
 }
 
@@ -33,6 +35,7 @@ export function userCapabilityPaths(
     currentLock: join(privateRoot, "CAPABILITIES.lock.json"),
     identity: join(privateRoot, "authority", "USER_IDENTITY.json"),
     writerLock: join(privateRoot, "writer.lock"),
+    authorityWriterLock: join(privateRoot, "authority", "v1", "writer.lock"),
   };
 }
 

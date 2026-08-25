@@ -14,6 +14,9 @@ import {
   gateResult,
   persistImplementationFingerprints,
 } from "../verify/core.js";
+import { CAPABILITY_DESIGN_PATH } from "../verify/normative-matrix-source.js";
+import { checkNormativeMatrix } from "../verify/normative-matrix.js";
+import { type NormativeProofRunV2, runNormativeProofs } from "../verify/normative-proof-run.js";
 import {
   appendJournal,
   c,
@@ -43,6 +46,7 @@ export function verify(
     catalogDir?: string;
     sandbox?: SandboxRequest;
     sandboxRuntime?: SandboxRuntime;
+    normativeProofRun?: NormativeProofRunV2;
   } = {},
 ): number {
   const base = inject.projectDir ?? cwd();
@@ -174,6 +178,22 @@ export function verify(
       defaultGit,
       inject.reviewBase,
     );
+    let normativeProofRun = inject.normativeProofRun;
+    if (!normativeProofRun && existsSync(join(base, CAPABILITY_DESIGN_PATH))) {
+      out("vf", c.cyan("▶ exact normative proof run"));
+      normativeProofRun = runNormativeProofs(base, { spawner: inject.spawner });
+      const proofPassed =
+        normativeProofRun.errors.length === 0 &&
+        normativeProofRun.proofs.length > 0 &&
+        normativeProofRun.proofs.every((proof) => proof.executed && proof.status === "passed");
+      out(
+        "vf",
+        proofPassed
+          ? c.green("✓ exact normative proofs")
+          : c.red("✗ exact normative proofs failed"),
+      );
+    }
+    const normative = checkNormativeMatrix(base, { proofRun: normativeProofRun });
     const report = evaluateVerifyCore({
       base,
       state: st,
@@ -193,6 +213,11 @@ export function verify(
       reviewEvidence: gateResult(
         review.ok ? (review.reason.includes("(warn)") ? "warn" : "pass") : "fail",
         review.reason,
+      ),
+      normativeMatrix: gateResult(
+        !normative.applicable ? "skipped" : normative.ok ? "pass" : "fail",
+        normative.details,
+        normative.evidence_refs,
       ),
       advisoryE2e: e2eWarnings.length
         ? gateResult("warn", e2eWarnings.join("\n"))

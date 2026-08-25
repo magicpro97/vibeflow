@@ -6,6 +6,7 @@ import {
   actionIdempotencyScopeDigest,
   assertCanonicalRequestAuthority,
   canonicalActionRequestDigest,
+  oversizedHandoffIssuanceFileKey,
 } from "./idempotency.js";
 import type { ActionFilePersistence } from "./persistence.js";
 import { assertProposalPublicationProof } from "./proposal-publication-proof.js";
@@ -40,6 +41,20 @@ export function createActionProposal(
     actionIdempotencyFileKey(input.authority.principal_digest, authorityScopeDigest, keyDigest),
   );
   return files.withLock(`action-proposal:${input.proposal.proposal_id}`, (lock) => {
+    if (
+      files.hasOversizedHandoffIssuance(
+        oversizedHandoffIssuanceFileKey(
+          input.authority.principal_digest,
+          authorityScopeDigest,
+          keyDigest,
+        ),
+      )
+    )
+      throw new ActionConflictError(
+        "idempotency_conflict",
+        "Idempotency key was used for an oversized handoff candidate.",
+        input.proposal.proposal_id,
+      );
     const existing = files.readIdempotency(path);
     if (existing.length) {
       const prepared = existing[0];

@@ -159,7 +159,19 @@ describe("conversation server final behavioral coverage", () => {
       url,
       "conversation-a",
     );
-    expect(snapshotFailure.status).toBe(500);
+    expect(snapshotFailure.status).toBe(503);
+    expect(snapshotFailure.headers.get("cache-control")).toBe("no-store");
+    expect(await snapshotFailure.json()).toEqual({
+      schema_version: "1.0",
+      error: {
+        code: "service_unavailable",
+        message: "The stream is unavailable.",
+        correlation_id: expect.stringMatching(/^vf-stream-[0-9a-f]{64}$/),
+        retryable: true,
+        recovery_action: "retry",
+        details: null,
+      },
+    });
 
     const throws = await handleConversationSse(
       {
@@ -175,7 +187,7 @@ describe("conversation server final behavioral coverage", () => {
       url,
       "conversation-a",
     );
-    expect(await responseText(throws)).toContain('"code":"stream_unavailable"');
+    expect(await responseText(throws)).toContain('"code":"service_unavailable"');
 
     const missing = await handleConversationSse(
       {
@@ -187,7 +199,7 @@ describe("conversation server final behavioral coverage", () => {
       url,
       "conversation-a",
     );
-    expect(await responseText(missing)).toContain('"code":"conversation_not_found"');
+    expect(await responseText(missing)).toContain('"code":"not_found"');
   });
 
   test("closes immediately when the request arrives already aborted", async () => {

@@ -1,6 +1,6 @@
 import { canonicalJsonBytes } from "../durability/index.js";
 import type { HostRenderedPreviewV1 } from "./preview-types.js";
-import { assertPublicProjectionSafe } from "./public-safety.js";
+import { assertPublicProjectionSafe, isPublicConfigTarget } from "./public-safety.js";
 import {
   assertDigest,
   assertOpaqueId,
@@ -233,6 +233,8 @@ function validateConfigDiffs(
       path,
     );
     boundedString(row.target, `${path}.target`, { max: 512 });
+    if (!isPublicConfigTarget(row.target))
+      invalid("config diff target is not canonical public form");
     const ids = assertStringArray(row.target_ids, `${path}.target_ids`, { max: 64, sorted: true });
     if (ids.some((id) => !targetIds.includes(id))) invalid("config diff names an unknown target");
     if (!new Set(["surgical", "full-file", "manual"]).has(row.mode))

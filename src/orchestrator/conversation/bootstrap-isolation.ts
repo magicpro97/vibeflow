@@ -112,6 +112,7 @@ export function withAttemptIsolation(
   repoRoot: string,
 ): EngineSessionAdapter {
   return Object.freeze({
+    ...(delegate.startAuthority ? { startAuthority: delegate.startAuthority } : {}),
     start(request: Parameters<EngineSessionAdapter["start"]>[0]) {
       if (!request.spawn.isolation) return delegate.start(request);
       const isolation = authority.acquire(repoRoot);

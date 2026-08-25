@@ -140,6 +140,7 @@ export class ControlRuntime {
         payload: {
           content: request.content,
           target_participants: request.target_participants ?? "all",
+          ...(request.quote_refs ? { quote_refs: structuredClone(request.quote_refs) } : {}),
         },
       },
     });

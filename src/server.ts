@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { productionCapabilityRuntimeV1 } from "./capabilities/runtime-factory.js";
+import type { CapabilityRuntimeFactoryOptionsV1 } from "./capabilities/runtime-factory.js";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
 import { askStreamResponse } from "./server/ask-route.js";
+import { handleCapabilityRoute } from "./server/capability-route.js";
 import { conversationUrlHost, isConversationLoopbackHost } from "./server/conversation-host.js";
 import {
   type ConversationHttpAuthority,
@@ -22,6 +25,7 @@ import {
   settingsView,
   toolViews,
 } from "./server/handlers.js";
+import { handleHomePrivateFileRangeRoute } from "./server/home-private-file-range-route.js";
 import {
   clearPending,
   getPending,
@@ -71,6 +75,8 @@ export function startServer(
     repoDir?: string;
     /** One process authority; callers reuse this object across server hot restarts. */
     conversation?: ConversationHttpAuthority;
+    /** Host-owned user roots for the lazy Capability Fabric runtime. */
+    capability?: Omit<CapabilityRuntimeFactoryOptionsV1, "projectRoot">;
   } = {},
 ): Promise<{
   server: { stop: (closeActiveConnections?: boolean) => Promise<void> };
@@ -149,8 +155,54 @@ export function startServer(
         );
       }
 
+      // Capability browser is read-only. Mutations use the shared conversation action API.
+      if (path === "/api/capabilities" || path.startsWith("/api/capabilities/")) {
+        const rawPackageId =
+          path === "/api/capabilities" ? undefined : path.slice("/api/capabilities/".length);
+        let packageIdFromPath = rawPackageId;
+        if (rawPackageId !== undefined) {
+          try {
+            packageIdFromPath = decodeURIComponent(rawPackageId);
+          } catch {
+            packageIdFromPath = "%";
+          }
+        }
+        return handleCapabilityRoute(
+          {
+            sessions: conversation?.sessions ?? { authorize: guarded },
+            capabilities: {
+              query: (input) =>
+                productionCapabilityRuntimeV1({
+                  ..._opts.capability,
+                  projectRoot: activeRepo,
+                }).query(input),
+              detail: (input) =>
+                productionCapabilityRuntimeV1({
+                  ..._opts.capability,
+                  projectRoot: activeRepo,
+                }).detail(input),
+            },
+          },
+          req,
+          url,
+          packageIdFromPath,
+        );
+      }
+
+      if (method === "POST" && path === "/api/home/private-file-range-handoffs") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (!conversation?.privateFileRanges)
+          return Response.json({ error: "conversation_authority_unavailable" }, { status: 500 });
+        return handleHomePrivateFileRangeRoute(conversation.privateFileRanges, activeRepo, req);
+      }
+
       // --- GET / (HTML page) ---
       if (method === "GET" && (path === "/" || path === "/index.html")) {
+        if (conversationLoopback && !isConversationLoopbackHost(req.headers.get("host") ?? ""))
+          return new Response("Forbidden", {
+            status: 403,
+            headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+          });
         const headers = new Headers({
           "content-type": "text/html; charset=utf-8",
           // no-cache: revalidate on every navigation so new asset hashes are picked up
@@ -158,7 +210,10 @@ export function startServer(
           "content-security-policy": CSP,
           "x-content-type-options": "nosniff",
         });
-        const cookie = conversationLoopback ? conversation?.sessions.issueCookie() : null;
+        const cookie =
+          conversationLoopback && conversation && !conversation.sessions.authorize(req)
+            ? conversation.sessions.issueCookie()
+            : null;
         if (cookie) headers.append("set-cookie", cookie);
         return new Response(serveHtml(), {
           headers,

@@ -49,11 +49,30 @@ export interface RegistryTrustKeyV1 {
   frame_digest: string;
 }
 
+export interface RegistryTrustSnapshotV1 {
+  schema_version: "1.0";
+  scope: "project" | "user";
+  scope_identity_digest: string;
+  authority_epoch: number;
+  authority_head_digest: string;
+  trust_head_digest: string | null;
+  trust_epoch: number;
+  keys: RegistryTrustKeyV1[];
+  snapshot_digest: string;
+}
+
 export interface VerifiedRegistryEnvelopeV1 {
   envelope_digest: string;
   key_id: string;
   statement_expires_at: string;
   status: "verified" | "stale" | "blocked";
+  scope: "project" | "user";
+  scope_identity_digest: string;
+  authority_epoch: number;
+  authority_head_digest: string;
+  trust_head_digest: string | null;
+  trust_epoch: number;
+  trust_snapshot_digest: string;
 }
 
 export type PackagePinSourceV1 =
@@ -98,3 +117,24 @@ export interface PackageAuthenticityBindingV1 {
   } | null;
   authenticity_digest: string;
 }
+
+export interface LegacyInspectionEvidenceV1 {
+  schema_version: "1.0";
+  legacy_source: Extract<PackagePinSourceV1, { kind: "legacy-adopt" }>["legacy_source"];
+  raw_identifier_nfc: string;
+  adapter_fingerprint: string;
+  source_records: Array<{
+    record_kind: "lock" | "managed-sidecar" | "sentinel" | "renderer-marker" | "descriptor";
+    logical_id: string;
+    content_sha256: string;
+    record_digest: string;
+  }>;
+  owned_resources: Array<{
+    ownership_key: string;
+    public_target: string;
+    expected_preimage_sha256: string;
+  }>;
+  evidence_digest: string;
+}
+
+export interface ValidatedLegacyInspectionEvidenceV1 extends LegacyInspectionEvidenceV1 {}

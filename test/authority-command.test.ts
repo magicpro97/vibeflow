@@ -1,0 +1,177 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { CapabilityCliMutationInputV1 } from "../src/capabilities/cli/ports.js";
+import type {
+  CapabilityCliResultV1,
+  FabricCliAuthorityMutationCommandV1,
+} from "../src/capabilities/wire/cli.js";
+import { authority } from "../src/commands/authority.js";
+import { digestV1 } from "../src/durability/index.js";
+
+function tempDir() {
+  return mkdtempSync(join(tmpdir(), "vf-authority-command-"));
+}
+
+function success(command: FabricCliAuthorityMutationCommandV1) {
+  return {
+    schema_version: "1.0" as const,
+    kind: "mutation" as const,
+    command,
+    status: "succeeded" as const,
+    changed: true as const,
+    operation_id: "vf-op",
+    proposal_id: "vf-proposal",
+    plan_digest: `sha256:${"1".repeat(64)}`,
+    generation_id: null,
+    targets: [],
+    recovery_actions: [],
+    error: null,
+  } satisfies CapabilityCliResultV1;
+}
+
+function grantPayload(scope: "project" | "user") {
+  const permission = {
+    schema_version: "1.0" as const,
+    permission_id: "acme.token",
+    kind: "secret" as const,
+    scope: { input_ids: ["token"] },
+    target_ids: [`vf-target-${"a".repeat(64)}`],
+    enforcement: "brokered" as const,
+  };
+  return {
+    scope,
+    principal_id: "vf-principal-demo",
+    action_types: ["capability.install"],
+    permissions: [
+      {
+        ...permission,
+        binding_digest: digestV1("VF-GRANTED-PERMISSION-BINDING\0v1\0", permission),
+      },
+    ],
+    target_engines: ["codex"],
+    expires_at: "2026-08-26T00:00:00.000Z",
+  };
+}
+
+describe("authority CLI durable mutation contract", () => {
+  test("grant create forwards the exact request DTO to the mutation port", async () => {
+    const root = tempDir();
+    try {
+      const grantFile = join(root, "grant.json");
+      writeFileSync(grantFile, JSON.stringify(grantPayload("project")));
+      const seen: CapabilityCliMutationInputV1[] = [];
+      const code = await authority(
+        [
+          "grant",
+          "create",
+          "--grant-file",
+          grantFile,
+          "--idempotency-key",
+          "grant-create-1",
+          "--yes",
+          "--json",
+        ],
+        {
+          stdinIsTTY: true,
+          stdinHasData: false,
+          mutationPort: {
+            execute(input) {
+              seen.push(input);
+              return success("authority.grant.create");
+            },
+          },
+          writer: () => undefined,
+        },
+      );
+      expect(code).toBe(0);
+      expect(seen).toHaveLength(1);
+      const input = seen[0];
+      if (!input) throw new Error("expected captured input");
+      expect(input.command).toBe("authority.grant.create");
+      if (!("request" in input)) throw new Error("expected request execution");
+      expect(input.request.idempotency_key).toBe("grant-create-1");
+      expect(input.request.scope).toBe("project");
+      expect(input.request.action.type).toBe("grant.create");
+      if (input.request.action.type !== "grant.create") throw new Error("unreachable");
+      expect(input.request.action.grant.scope).toBe("project");
+      expect("request" in input).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("secret revoke preserves the unresolved candidate selector for runtime resolution", async () => {
+    const seen: CapabilityCliMutationInputV1[] = [];
+    const code = await authority(
+      [
+        "secret",
+        "revoke",
+        "--scope",
+        "project",
+        "--candidate-id",
+        "vf-secret-revocation-binding-id",
+        "--candidate-digest",
+        `sha256:${"2".repeat(64)}`,
+        "--idempotency-key",
+        "secret-revoke-1",
+        "--yes",
+        "--json",
+      ],
+      {
+        stdinIsTTY: false,
+        stdinHasData: false,
+        mutationPort: {
+          execute(input) {
+            seen.push(input);
+            return success("authority.secret.revoke");
+          },
+        },
+        writer: () => undefined,
+      },
+    );
+    expect(code).toBe(0);
+    expect(seen).toHaveLength(1);
+    const input = seen[0];
+    if (!input) throw new Error("expected captured input");
+    expect(input.command).toBe("authority.secret.revoke");
+    if ("request" in input || input.command !== "authority.secret.revoke")
+      throw new Error("expected secret revoke execution");
+    expect(input.idempotency_key).toBe("secret-revoke-1");
+    expect(input.secret).toEqual({
+      kind: "candidate",
+      candidate_id: "vf-secret-revocation-binding-id",
+      candidate_digest: `sha256:${"2".repeat(64)}`,
+    });
+    expect(input.context.actor.credential_class).toBe("automation-grant");
+  });
+
+  test("authority repair uses recovery credentials and never accepts request-file automation", async () => {
+    const seen: CapabilityCliMutationInputV1[] = [];
+    const code = await authority(
+      ["repair", "--scope", "user", "--conversation", "conv-1", "--json"],
+      {
+        stdinIsTTY: true,
+        stdinHasData: false,
+        mutationPort: {
+          execute(input) {
+            seen.push(input);
+            return success("authority.repair");
+          },
+        },
+        writer: () => undefined,
+      },
+    );
+    expect(code).toBe(0);
+    expect(seen).toHaveLength(1);
+    const input = seen[0];
+    if (!input) throw new Error("expected captured input");
+    expect(input.command).toBe("authority.repair");
+    if (input.command !== "authority.repair") throw new Error("unreachable");
+    expect(input.scope).toBe("user");
+    expect(input.conversation_id).toBe("conv-1");
+    expect(input.context.actor.credential_class).toBe("recovery");
+    expect(input.context.stdin_is_tty).toBe(true);
+  });
+});
