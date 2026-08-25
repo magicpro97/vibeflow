@@ -76,11 +76,11 @@ export async function runMemoryPhase(
   const targets = engines.length ? engines : (["claude"] as Engine[]);
 
   out("vf");
-  out("vf", c.bold("claude-mem"));
+  out("vf", c.bold("memory"));
   out(
     "vf",
     c.cyan(
-      `  ▶ Wiring claude-mem for ${targets.join(", ")} — first run downloads the plugin (~1–2 min)…`,
+      `  ▶ Wiring memory for ${targets.join(", ")} — claude/codex use claude-mem, copilot uses /memory…`,
     ),
   );
   const { wired, failed } = wireEngines(targets, { cwd: base });
@@ -88,8 +88,11 @@ export async function runMemoryPhase(
   for (const f of failed) {
     out("vf", c.yellow(`  ! ${f.engine} failed — continuing (${f.reason})`));
   }
-  // The store + guide are shared, so append once any engine wired successfully.
-  if (wired.length && appendGuide(base)) {
+  // The claude-mem search guide is for claude/codex only. Append it once any
+  // claude-mem engine wired. (Copilot's own /memory guide is appended by the
+  // wiring step.)
+  const claudeMemWired = wired.some((e) => e === "claude" || e === "codex");
+  if (claudeMemWired && appendGuide(base)) {
     out("vf", c.green("  + memory guide added to WORKFLOW_POLICY.md"));
   }
 }

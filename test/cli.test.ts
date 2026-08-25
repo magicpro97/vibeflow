@@ -198,6 +198,22 @@ describe("adapters", () => {
     }
   });
 
+  test("engine instruction files document how to use memory (always present at init)", () => {
+    const ctx = defaultContext();
+    // claude/codex use claude-mem; the generated file must say so + show the query.
+    for (const engine of ["claude", "codex"] as const) {
+      const body = Object.values(engineFiles(engine, ctx, false)).join("\n");
+      expect(body).toContain("Memory:");
+      expect(body).toContain("claude-mem");
+      expect(body).toContain("claude-mem search");
+    }
+    // copilot uses its native /memory feature, NOT claude-mem.
+    const copilot = Object.values(engineFiles("copilot", ctx, false)).join("\n");
+    expect(copilot).toContain("Memory:");
+    expect(copilot).toContain("/memory on");
+    expect(copilot).not.toContain("claude-mem search");
+  });
+
   test("canonical WORKFLOW_POLICY documents VibeFlow's own commands", () => {
     const policy = canonicalFiles(defaultContext())[`${CTX_DIR}/WORKFLOW_POLICY.md`] as string;
     expect(policy).toContain("VibeFlow commands");

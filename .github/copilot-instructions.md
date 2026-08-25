@@ -17,3 +17,11 @@ Project: vibeflow-hermes-execution · Goal: Complete Draft v7 brainstorming/deba
 Full workflow guide: load the `vf` skill (or `/vf` in a CLI) — Flow A–D, pitfalls, and hooks live there.
 Powered by VibeFlow v0.15.0 — https://github.com/magicpro97/vibeflow
 <!-- vibeflow:end -->
+
+<claude-mem-context>
+# claude-mem: Cross-Session Memory
+
+*No context yet. Complete your first session and context will appear here.*
+
+Use claude-mem's MCP search tools for manual memory queries.
+</claude-mem-context>

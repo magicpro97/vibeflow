@@ -16,13 +16,16 @@
 // runs bun/npm install; a silent spawnSync looked like a hang.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { type Engine, ctxPathIn, hasCommand, writeFileSafe } from "./core.js";
+import { type Engine, ctxPathIn, cwd, hasCommand, writeFileSafe } from "./core.js";
 
 /** Default bound for the (network-bound) installer; keeps init from hanging. */
 export const DEFAULT_INSTALL_TIMEOUT_MS = 180_000;
 
 /** The header the guide block is keyed on (idempotency + spec contract). */
 const GUIDE_HEADER = "## Memory: claude-mem";
+
+/** Header the copilot guide block is keyed on (idempotency). */
+const COPILOT_GUIDE_HEADER = "## Memory: GitHub Copilot";
 
 /**
  * VibeFlow engine → claude-mem `--ide` identifier. These are the exact IDs
@@ -50,13 +53,16 @@ export interface MemoryBackendOpts {
   spawner?: typeof spawnSync;
   /** Injectable PATH check. Defaults to the real {@link hasCommand}. */
   has?: (cmd: string) => boolean;
+  /** Injectable copilot guide appender. Defaults to {@link appendCopilotMemoryGuide}. */
+  appendCopilotGuide?: (base: string) => boolean;
   /**
    * Pinned claude-mem version (e.g. `"1.2.3"`, `"@1.2.3"`, or `"latest"`).
    * MUST-FIX (PR #160 review): default `npx -y claude-mem` always
    * fetches the latest, which is a supply-chain risk. Operators can
    * pin via `VF_CLAUDE_MEM_VERSION` env var or the `memory.version`
-   * field in `.vibeflow/SETTINGS.json`. Default is `"latest"` for
-   * backward compatibility; production deployments should pin.
+   * field in `.vibeflow/SETTINGS.json`. Default is `"12"` — the newest band
+   * before the account/email (better-auth) era; production deployments may
+   * pin tighter.
    */
   version?: string;
 }
@@ -90,7 +96,11 @@ export function installForEngine(
   // `npx -y claude-mem@<version>` installs a specific version;
   // `npx -y claude-mem` (the original) always fetches latest. The
   // version is read from the env first, then opts, then "latest".
-  const version = opts.version ?? process.env.VF_CLAUDE_MEM_VERSION ?? "latest";
+  // Default pin: "12" is the newest claude-mem band before the better-auth
+  // account/email login era (13.x). It carries the codex-cli/copilot-cli ide
+  // ids (added in 10.7.0) and never prompts for an account, so a fresh install
+  // is one-shot. Override: opts.version → VF_CLAUDE_MEM_VERSION → "12".
+  const version = opts.version ?? process.env.VF_CLAUDE_MEM_VERSION ?? "12";
   const pkg = version === "latest" ? "claude-mem" : `claude-mem@${version}`;
   try {
     const r = spawn(
@@ -128,12 +138,21 @@ export function ensureInstalledForEngines(
   engines: Engine[],
   opts: MemoryBackendOpts = {},
 ): MemoryWireResult {
+  const appendCopilot = opts.appendCopilotGuide ?? appendCopilotMemoryGuide;
   const seen = new Set<Engine>();
   const wired: Engine[] = [];
   const failed: Array<{ engine: Engine; reason: string }> = [];
   for (const engine of engines) {
     if (seen.has(engine)) continue;
     seen.add(engine);
+    if (engine === "copilot") {
+      // Copilot uses its own native /memory feature, not claude-mem. We only
+      // drop a guidance line; the append result is advisory (a missing policy
+      // file is not a failure), so copilot is always reported wired.
+      appendCopilot(opts.cwd ?? cwd());
+      wired.push(engine);
+      continue;
+    }
     const res = installForEngine(engine, opts);
     if (res.ok) wired.push(engine);
     else failed.push({ engine, reason: res.reason ?? "unknown" });
@@ -170,5 +189,38 @@ export function appendMemoryGuide(base: string): boolean {
   if (current.includes(GUIDE_HEADER)) return false;
   const sep = current.endsWith("\n") ? "\n" : "\n\n";
   writeFileSafe(path, `${current}${sep}${buildMemoryGuide()}`);
+  return true;
+}
+
+/** Render the markdown guide telling a Copilot session to enable native memory. Pure. */
+export function buildCopilotMemoryGuide(): string {
+  return `${COPILOT_GUIDE_HEADER} (VibeFlow)
+
+When running in GitHub Copilot CLI, enable session memory by typing the
+slash command at the start of your session:
+
+\`\`\`
+/memory on
+\`\`\`
+
+VibeFlow cannot enable this for you — it is an interactive command, not a
+headless flag. Once enabled, Copilot persists memory across this project's
+sessions.
+`;
+}
+
+/**
+ * Append the copilot guide to <base>/.vibeflow/WORKFLOW_POLICY.md when not
+ * already present. Idempotent (keyed on the copilot header) and best-effort:
+ * returns false when the policy file is absent or the block already exists.
+ * Never throws.
+ */
+export function appendCopilotMemoryGuide(base: string): boolean {
+  const path = ctxPathIn(base, "WORKFLOW_POLICY.md");
+  if (!existsSync(path)) return false;
+  const current = readFileSync(path, "utf8");
+  if (current.includes(COPILOT_GUIDE_HEADER)) return false;
+  const sep = current.endsWith("\n") ? "\n" : "\n\n";
+  writeFileSafe(path, `${current}${sep}${buildCopilotMemoryGuide()}`);
   return true;
 }

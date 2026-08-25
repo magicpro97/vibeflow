@@ -5,7 +5,9 @@ import { dirname, join } from "node:path";
 import { CTX_DIR, type Engine } from "../src/core.js";
 import {
   ENGINE_IDE,
+  appendCopilotMemoryGuide,
   appendMemoryGuide,
+  buildCopilotMemoryGuide,
   buildMemoryGuide,
   ensureInstalledForEngines,
   installForEngine,
@@ -65,7 +67,7 @@ describe("memory.installForEngine", () => {
     expect(calls[0]?.cmd).toBe("npx");
     expect(calls[0]?.args).toEqual([
       "-y",
-      "claude-mem",
+      "claude-mem@12",
       "install",
       "--ide",
       "codex-cli",
@@ -73,6 +75,24 @@ describe("memory.installForEngine", () => {
       "claude",
       "--no-auto-start",
     ]);
+  });
+
+  test("defaults the pinned version to 12 (pre-account era: no email/account prompt)", () => {
+    const orig = process.env.VF_CLAUDE_MEM_VERSION;
+    Reflect.deleteProperty(process.env, "VF_CLAUDE_MEM_VERSION");
+    try {
+      const calls: { args: readonly string[] }[] = [];
+      installForEngine("claude", {
+        spawner: ((_cmd: string, args: readonly string[]) => {
+          calls.push({ args });
+          return { status: 0 };
+        }) as never,
+      });
+      expect(calls[0]?.args[1]).toBe("claude-mem@12");
+    } finally {
+      if (orig === undefined) Reflect.deleteProperty(process.env, "VF_CLAUDE_MEM_VERSION");
+      else process.env.VF_CLAUDE_MEM_VERSION = orig;
+    }
   });
 
   test("pins claude-mem version when opts.version is set (MUST-FIX PR #160: supply-chain hardening)", () => {
@@ -100,7 +120,7 @@ describe("memory.installForEngine", () => {
       });
       expect(calls[0]?.args[1]).toBe("claude-mem@2.0.0");
     } finally {
-      if (orig === undefined) process.env.VF_CLAUDE_MEM_VERSION = undefined;
+      if (orig === undefined) Reflect.deleteProperty(process.env, "VF_CLAUDE_MEM_VERSION");
       else process.env.VF_CLAUDE_MEM_VERSION = orig;
     }
   });
@@ -159,27 +179,45 @@ describe("memory.installForEngine", () => {
 });
 
 describe("memory.ensureInstalledForEngines", () => {
-  test("wires every engine and records them in order", () => {
+  test("installs claude/codex but routes copilot to the guidance block (no spawn)", () => {
     const ides: string[] = [];
+    let copilotGuideCalls = 0;
     const res = ensureInstalledForEngines(["claude", "codex", "copilot"], {
       spawner: ((_cmd: string, args: readonly string[]) => {
         ides.push(args[args.indexOf("--ide") + 1] as string);
         return { status: 0 };
       }) as never,
+      appendCopilotGuide: () => {
+        copilotGuideCalls++;
+        return true;
+      },
     });
     expect(res.wired).toEqual(["claude", "codex", "copilot"]);
     expect(res.failed).toEqual([]);
-    // One installer invocation per engine, each with the matching --ide id.
-    expect(ides).toEqual(["claude-code", "codex-cli", "copilot-cli"]);
+    // Only claude + codex hit the installer; copilot never does.
+    expect(ides).toEqual(["claude-code", "codex-cli"]);
+    expect(copilotGuideCalls).toBe(1);
   });
 
-  test("is best-effort: one engine failing does not block the others", () => {
+  test("copilot wiring is advisory: a false guide append still reports copilot wired", () => {
+    const res = ensureInstalledForEngines(["copilot"], {
+      spawner: (() => {
+        throw new Error("installer must not run for copilot");
+      }) as never,
+      appendCopilotGuide: () => false, // policy file absent
+    });
+    expect(res.wired).toEqual(["copilot"]);
+    expect(res.failed).toEqual([]);
+  });
+
+  test("is best-effort: one claude-mem engine failing does not block the others", () => {
     const res = ensureInstalledForEngines(["claude", "codex", "copilot"], {
       spawner: ((_cmd: string, args: readonly string[]) => {
-        // codex fails, the rest succeed.
+        // codex fails, claude succeeds; copilot never spawns.
         const ide = args[args.indexOf("--ide") + 1];
         return ide === "codex-cli" ? { status: 1 } : { status: 0 };
       }) as never,
+      appendCopilotGuide: () => true,
     });
     expect(res.wired).toEqual(["claude", "copilot"]);
     expect(res.failed).toHaveLength(1);
@@ -252,6 +290,49 @@ describe("memory.appendMemoryGuide", () => {
     const dir = tmpRepo();
     try {
       expect(appendMemoryGuide(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("memory.buildCopilotMemoryGuide", () => {
+  test("renders the copilot header and the /memory on instruction", () => {
+    const guide = buildCopilotMemoryGuide();
+    expect(guide).toContain("## Memory: GitHub Copilot");
+    expect(guide).toContain("/memory on");
+  });
+});
+
+describe("memory.appendCopilotMemoryGuide", () => {
+  test("appends the copilot guide to an existing WORKFLOW_POLICY.md and returns true", () => {
+    const dir = tmpRepo();
+    try {
+      const p = writePolicy(dir, "# Workflow Policy\n");
+      expect(appendCopilotMemoryGuide(dir)).toBe(true);
+      const after = readFileSync(p, "utf8");
+      expect(after).toContain("## Memory: GitHub Copilot");
+      expect(after).toContain("/memory on");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("is idempotent — a second call does not duplicate the block", () => {
+    const dir = tmpRepo();
+    try {
+      writePolicy(dir, "# Workflow Policy\n");
+      expect(appendCopilotMemoryGuide(dir)).toBe(true);
+      expect(appendCopilotMemoryGuide(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("returns false when WORKFLOW_POLICY.md is absent (never throws)", () => {
+    const dir = tmpRepo();
+    try {
+      expect(appendCopilotMemoryGuide(dir)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -59,6 +59,24 @@ describe("runMemoryPhase — flag-driven decision", () => {
     }
   });
 
+  test("copilot-only wiring does NOT append the claude-mem search guide", async () => {
+    const dir = tmpRepo();
+    try {
+      seedPolicy(dir);
+      const { calls, inject } = spies();
+      await runMemoryPhase(dir, { memory: true }, ["copilot"], inject);
+      // copilot wired, but the "## Memory: claude-mem" search guide is for
+      // claude/codex only — copilot has no claude-mem binary to search.
+      expect(calls.wired).toEqual([["copilot"]]);
+      expect(calls.append).toBe(0);
+      expect(readFileSync(join(dir, ".vibeflow/WORKFLOW_POLICY.md"), "utf8")).not.toContain(
+        "## Memory: claude-mem",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("--no-memory persists memory:false and never wires", async () => {
     const dir = tmpRepo();
     try {

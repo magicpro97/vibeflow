@@ -3,6 +3,7 @@ import {
   VF_COMMANDS_SLIM,
   VF_WORKFLOW_SLIM,
   aiGenerate,
+  memoryPolicy,
   navigationPolicy,
 } from "../adapters/context-builders.js";
 import { type Engine, VERSION } from "../core.js";
@@ -32,6 +33,7 @@ function engineBody(engine: Engine, ctx: ProjectContext): string {
 Project: ${ctx.name} · Goal: ${goal}
 ${navLine}${guardrailNote}${VF_COMMANDS_SLIM}
 ${VF_WORKFLOW_SLIM}
+${memoryPolicy(engine)}
 Powered by VibeFlow v${VERSION} — https://github.com/magicpro97/vibeflow
 `;
 }

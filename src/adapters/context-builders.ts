@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { CTX_DIR, VERSION, cwd, statePath } from "../core.js";
+import { CTX_DIR, type Engine, VERSION, cwd, statePath } from "../core.js";
 import { type ToolTier, type VibeSettings, priorityRank } from "../settings.js";
 
 /** Banner shown in every generated instruction file so agents know VibeFlow is present. */
@@ -135,6 +135,20 @@ export const VF_COMMANDS_SLIM = `## VibeFlow commands (use these)
 export const VF_WORKFLOW_SLIM = `**Working with vf — Confidence gate (MANDATORY):** After ANY code edit, and BEFORE you claim a task is done, YOU MUST run \`vf verify\` and include its output as evidence. Nothing is "done" until \`vf verify\` passes at confidence 1.0 (command output, file path, or test result), within scope. No verification, no completion. Drive every task through vf — do not free-hand it. Arm the guardrail once with \`vf hooks emit --yes\` so this is enforced, not just advised.
 **Learn from the run:** capture a reusable procedure or worked-around mistake as a DRAFT skill (\`vf skills draft <name>\`), and record non-obvious decisions with \`vf decision add\`. \`vf orchestrate\` auto-crystallizes recurring patterns into a DRAFT for review.
 Full workflow guide: load the \`vf\` skill (or \`/vf\` in a CLI) — Flow A–D, pitfalls, and hooks live there.`;
+
+/**
+ * One-line memory-usage note injected into every generated engine instruction
+ * file (CLAUDE.md / AGENTS.md / .github/copilot-instructions.md) at `vf init`,
+ * so an agent always knows how cross-session memory works in this repo —
+ * whether or not memory is currently enabled. Per-engine because the mechanism
+ * differs: claude/codex use the claude-mem store (query with `claude-mem
+ * search`); copilot uses its own native `/memory` slash command.
+ */
+export function memoryPolicy(engine: Engine): string {
+  return engine === "copilot"
+    ? "**Memory:** cross-session memory is GitHub Copilot's native feature — run `/memory on` at session start to enable it (VibeFlow can't toggle it headlessly)."
+    : '**Memory:** claude-mem records cross-session context for this repo — query it with `claude-mem search "<topic>"` before writing a spec or plan (enable via `vf memory on`).';
+}
 
 /**
  * Options for {@link defaultContext}.

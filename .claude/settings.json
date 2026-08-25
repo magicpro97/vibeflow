@@ -23,7 +23,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["-e", "const t=JSON.parse(process.env.CLAUDE_TOOL_INPUT||'{}'); if(t.command&&/rm\\s+-rf/.test(t.command)){console.error('Blocked: rm -rf'); process.exit(2)}"]
+            "args": ["-e", "let c='';try{const t=JSON.parse(require('fs').readFileSync(0,'utf8')||'{}');c=t.tool_input&&t.tool_input.command||''}catch{process.exit(0)} if(/\\brm\\s+-[a-zA-Z]*r[a-zA-Z]*f|\\brm\\s+-[a-zA-Z]*f[a-zA-Z]*r/.test(c)){console.error('Blocked: rm -rf is denied by policy'); process.exit(2)}"]
           }
         ]
       }
