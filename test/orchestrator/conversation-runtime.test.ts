@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -6069,7 +6070,7 @@ test("a failed child configuration is never linked and a retry completes the sam
     expect(events?.some((event) => event.event.type === "user_message")).toBe(true);
     await waitFor(async () => (await runtime.snapshot(childId))?.lifecycle === "COMPLETED");
   } finally {
-    process.off("unhandledRejection", onUnhandled);
+    EventEmitter.prototype.off.call(process, "unhandledRejection", onUnhandled);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -6310,7 +6311,7 @@ test("subscriber replay failure deactivates the cursor instead of delivering a g
     release();
     await accepted.completion;
   } finally {
-    process.off("unhandledRejection", onUnhandled);
+    EventEmitter.prototype.off.call(process, "unhandledRejection", onUnhandled);
     release();
     await rm(root, { recursive: true, force: true });
   }

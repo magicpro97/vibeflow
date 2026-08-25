@@ -1,6 +1,7 @@
 {
   "name": "@magicpro97/vibeflow",
   "version": "0.15.0",
+  "packageManager": "bun@1.4.0",
   "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI with shared context, skills, hooks, and verification.",
   "type": "module",
   "bin": {
@@ -33,6 +34,7 @@
     "format": "biome format --write src test",
     "fix": "biome check --write src test",
     "test": "bun test --timeout 30000 test/coverage-anti-patterns.test.ts && bun test --timeout 30000",
+    "test:parallel": "bun test --timeout 30000 test/coverage-anti-patterns.test.ts && bun test --timeout 30000 --parallel=4",
     "test:patterns": "bun test test/coverage-anti-patterns.test.ts",
     "test:e2e": "playwright test",
     "smoke": "node scripts/smoke.mjs",
@@ -82,7 +84,7 @@
     "@biomejs/biome": "^1.9.4",
     "@playwright/cli": "^0.1.13",
     "@playwright/test": "^1.60.0",
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.0",
     "@types/node": "^22.10.0",
     "@types/proper-lockfile": "^4.1.4",
     "confbox": "^0.2.4",

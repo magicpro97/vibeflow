@@ -37,8 +37,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
 
       - name: Read local version
         id: local
@@ -58,7 +56,7 @@ jobs:
       - name: Install, verify, build
         if: steps.remote.outputs.exists == 'false'
         run: |
-          bun install --frozen-lockfile
+          bun ci
           bun run build
           bun run check
 

@@ -48,9 +48,7 @@ jobs:
           # `.agents/skills/skill-creator/`) see a clean state.
           clean: true
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun ci
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run file-size:check
@@ -76,9 +74,7 @@ jobs:
         with:
           clean: true
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun ci
       - run: bun run build
       - name: Skill validation gate
         run: node dist/cli.js skills ci-validation
@@ -91,9 +87,7 @@ jobs:
         with:
           clean: true
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun ci
       - run: bun run build
       - name: Skill security gate
         run: node dist/cli.js skills ci-security
@@ -106,9 +100,7 @@ jobs:
         with:
           clean: true
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun ci
       - run: bun run build
       - name: Domain integrity gate
         run: node dist/cli.js skills ci-domain-integrity
