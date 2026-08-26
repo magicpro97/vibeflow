@@ -11,6 +11,10 @@ import {
   materializeProposalPublicationProof,
   materializeReviewAuthorityProof,
 } from "../../actions/index.js";
+import { digestV1 } from "../../durability/index.js";
+import type { CapabilityConversationProposalBaseV1 } from "../../orchestrator/conversation/conversation-action-service-types.js";
+import type { ConversationCapabilityDispatchReservationStoreV1 } from "../../orchestrator/conversation/conversation-capability-dispatch-reservation.js";
+import { ConversationRevisionConflictError } from "../../orchestrator/conversation/revision-errors.js";
 import { CapabilityRuntimeError } from "../operations/errors.js";
 import type { CapabilityFabricServiceV1 } from "../service.js";
 import type { CapabilityActionObjectStoreV1 } from "./object-store.js";
@@ -20,11 +24,17 @@ import {
   readCapabilityDomainPreparedEvidence,
 } from "./operation-evidence.js";
 
+const RETAINED_CAPABILITY_RUNTIME_ERROR_CODES: ReadonlySet<string> = new Set([
+  "integrity-failure",
+  "invalid-plan",
+  "service-unavailable",
+]);
+
 function stale(error: unknown, now: string): never {
-  if (
-    error instanceof CapabilityRuntimeError &&
-    !["integrity-failure", "invalid-plan", "service-unavailable"].includes(error.runtime_code)
-  )
+  if (error instanceof ConversationRevisionConflictError)
+    throw new ActionAuthorityStaleError(now, "conversation-source-changed");
+  if (!(error instanceof CapabilityRuntimeError)) throw error;
+  if (!RETAINED_CAPABILITY_RUNTIME_ERROR_CODES.has(error.runtime_code))
     throw new ActionAuthorityStaleError(now, error.runtime_code);
   throw error;
 }
@@ -50,11 +60,16 @@ export class CapabilityActionAuthorityResolverV1 implements ActionAuthorityResol
     readonly serviceFor: (scope: "project" | "user") => CapabilityFabricServiceV1,
     readonly conversation: {
       authority: { reader: DurableActionAuthorityReaderV1 };
+      capabilityDispatches: ConversationCapabilityDispatchReservationStoreV1;
       resolveCapabilityActionRoot(conversationId: string): { root_session_id: string };
+      resolveCapabilityProposalBase(input: {
+        conversation_id: string;
+        expected: import("../../actions/index.js").ExpectedActionSourceV1;
+      }): CapabilityConversationProposalBaseV1;
     },
   ) {}
 
-  private current(proposal: ActionProposalV1, now: string) {
+  private source(proposal: ActionProposalV1, now: string): CapabilityConversationProposalBaseV1 {
     try {
       if (
         proposal.action_root_locator.kind !== "conversation" ||
@@ -75,13 +90,47 @@ export class CapabilityActionAuthorityResolverV1 implements ActionAuthorityResol
           "conversation capability proposal selected another action root",
           "authorization-mismatch",
         );
-      this.objects.roots.bind(proposal.action_root_locator, this.conversation.authority.reader);
-      const graph = this.objects.readGraph(proposal);
-      this.serviceFor(proposal.base.capability_scope).revalidateGraph(graph);
-      return graph;
+      if (
+        proposal.base.revision_id === null ||
+        proposal.base.last_seq === null ||
+        proposal.base.conversation_lock_digest === null ||
+        proposal.base.lineage_head_digest === null ||
+        proposal.base.lineage_head_epoch === null
+      )
+        throw new CapabilityRuntimeError(
+          "conversation capability proposal source is incomplete",
+          "authorization-mismatch",
+        );
+      const source = this.conversation.resolveCapabilityProposalBase({
+        conversation_id: proposal.base.conversation_id,
+        expected: {
+          mode: "writable-revision",
+          conversation_id: proposal.base.conversation_id,
+          revision_id: proposal.base.revision_id,
+          last_seq: proposal.base.last_seq,
+          conversation_lock_digest: proposal.base.conversation_lock_digest,
+        },
+      });
+      if (
+        source.root_session_id !== proposal.base.root_session_id ||
+        source.lineage_head_digest !== proposal.base.lineage_head_digest ||
+        source.lineage_head_epoch !== proposal.base.lineage_head_epoch
+      )
+        throw new ActionAuthorityStaleError(now, "conversation-source-changed");
+      return source;
     } catch (error) {
       return stale(error, now);
     }
+  }
+
+  private current(proposal: ActionProposalV1, now: string) {
+    const source = this.source(proposal, now);
+    if (proposal.action_root_locator.kind !== "conversation")
+      throw new Error("conversation capability locator changed after source validation");
+    this.objects.roots.bind(proposal.action_root_locator, this.conversation.authority.reader);
+    const graph = this.objects.readGraph(proposal);
+    this.serviceFor(proposal.base.capability_scope as "project" | "user").revalidateGraph(graph);
+    return { graph, source };
   }
 
   validateProposalPublication: ActionAuthorityResolverV1["validateProposalPublication"] = ({
@@ -94,7 +143,7 @@ export class CapabilityActionAuthorityResolverV1 implements ActionAuthorityResol
       proposal.producer_request_binding.digest !== canonical_request_digest
     )
       throw new Error("capability proposal request binding mismatch");
-    const graph = this.current(proposal, now);
+    const { graph } = this.current(proposal, now);
     return materializeProposalPublicationProof(
       proposal,
       canonical_request_digest,
@@ -106,6 +155,55 @@ export class CapabilityActionAuthorityResolverV1 implements ActionAuthorityResol
   review: ActionAuthorityResolverV1["review"] = ({ proposal, authority, now }) => {
     this.current(proposal, now);
     return materializeReviewAuthorityProof(proposal, authority, now, approvalExpiry(proposal, now));
+  };
+
+  prevalidateDispatch: NonNullable<ActionAuthorityResolverV1["prevalidateDispatch"]> = ({
+    proposal,
+    now,
+  }) => {
+    this.current(proposal, now);
+  };
+
+  reserveDispatch: NonNullable<ActionAuthorityResolverV1["reserveDispatch"]> = (input) => {
+    this.current(input.proposal, input.now);
+    const producerParticipantId =
+      input.proposal.requested_by.kind === "agent"
+        ? input.proposal.requested_by.public_actor_id
+        : null;
+    if ((producerParticipantId === null) !== (input.producer_authority_digest == null))
+      throw new Error("capability dispatch producer authority is incomplete");
+    this.conversation.capabilityDispatches.claim({
+      proposal: input.proposal,
+      approval: input.approval,
+      dispatch: input.dispatch,
+      now: input.now,
+      resolveSource: () => {
+        const source = this.source(input.proposal, input.now);
+        return {
+          root_session_id: source.root_session_id,
+          conversation_id: source.conversation_id,
+          revision_id: source.revision_id,
+          last_seq: source.last_seq,
+          conversation_lock_digest: source.conversation_lock_digest,
+          lineage_head_digest: source.lineage_head_digest,
+          lineage_head_epoch: source.lineage_head_epoch,
+          participant_binding_set_digest: source.participant_binding_set_digest,
+          target_set_digest: digestV1("VF-ACTION-TARGET-SET\0v1\0", input.proposal.target_set),
+          producer_participant_id: producerParticipantId,
+          producer_request_binding_digest: input.proposal.producer_request_binding.digest,
+          producer_host_tool_grant_digest: input.producer_authority_digest ?? null,
+          capability_grant_digest: input.proposal.grant_digest,
+        };
+      },
+    });
+  };
+
+  assertDispatchReserved: NonNullable<ActionAuthorityResolverV1["assertDispatchReserved"]> = ({
+    proposal,
+    approval,
+    dispatch,
+  }) => {
+    this.conversation.capabilityDispatches.assertActive(proposal, approval, dispatch);
   };
 
   prepareDispatch: ActionAuthorityResolverV1["prepareDispatch"] = ({ proposal, approval, now }) => {

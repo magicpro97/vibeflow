@@ -16,7 +16,14 @@ import {
 } from "../../actions/index.js";
 import type { ConversationActionService } from "./conversation-action-service.js";
 import type { ConversationReceiptActionAuthority } from "./conversation-receipt-action-authority.js";
+import { ConversationReceiptCandidateUnavailableError } from "./conversation-receipt-errors.js";
 import { isConversationRevisionMutation } from "./revision-action-manifest.js";
+import {
+  ConversationHandoffTooLargeError,
+  ConversationRevisionCandidateInvalidError,
+  ConversationRevisionConflictError,
+} from "./revision-errors.js";
+import { ConversationInvalidTargetParticipantError } from "./service-errors.js";
 import type { ConversationOrchestrator } from "./service.js";
 
 export interface ConversationActionProposalContextV1 {
@@ -34,7 +41,9 @@ interface ProposalMutationContextV1<T> {
 
 export interface ConversationActionDomainPlannerExecutorV1 {
   readonly domain: "conversation" | "capability";
+  recover?(): Promise<void>;
   supports(candidate: BrowserHostActionRequestV1): boolean;
+  candidateFailureDisposition(error: unknown): "reject" | "retry";
   propose(
     context: ConversationActionProposalContextV1,
   ): Promise<{ created: boolean; response: ActionProposalResponseV1 }>;
@@ -99,6 +108,20 @@ export class ConversationRevisionActionDomainV1
 
   supports(candidate: BrowserHostActionRequestV1): boolean {
     return isConversationRevisionMutation(candidate) || Boolean(this.receipts?.supports(candidate));
+  }
+
+  async recover(): Promise<void> {
+    this.receipts?.recoverCanceledLineageMutations();
+  }
+
+  candidateFailureDisposition(error: unknown): "reject" | "retry" {
+    return error instanceof ConversationRevisionCandidateInvalidError ||
+      error instanceof ConversationRevisionConflictError ||
+      error instanceof ConversationHandoffTooLargeError ||
+      error instanceof ConversationInvalidTargetParticipantError ||
+      error instanceof ConversationReceiptCandidateUnavailableError
+      ? "reject"
+      : "retry";
   }
 
   async propose(context: ConversationActionProposalContextV1) {
@@ -186,6 +209,11 @@ export class ConversationRevisionActionDomainV1
         "Proposal or approval authority changed.",
         context.proposal_id,
       );
+    this.actions.authority.assertMutationController({
+      proposal_id: context.proposal_id,
+      proposal_digest: context.request.proposal_digest,
+      authority: context.authority,
+    });
     const snapshot = this.actions.get(context.proposal_id);
     if (!snapshot) throw new Error("approved conversation action authority is absent");
     const action = snapshot.proposal.action;
@@ -220,6 +248,7 @@ export class ConversationRevisionActionDomainV1
       authority: context.authority,
       reason: context.request.reason,
     });
+    this.receipts?.releaseCanceledLineageMutation(context.proposal_id);
     return { schema_version: "1.0" as const, operation: view.operation };
   }
 }

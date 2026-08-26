@@ -1,7 +1,7 @@
 # AI-first Home and CLI Capability Fabric design
 
 Date: 2026-08-24
-Status: implementation complete; production release remains gated by live whole-repository verification
+Status: implementation in progress; production release remains gated by live whole-repository verification
 Product boundary: VibeFlow remains a local-first harness for AI CLIs
 
 ## Decision
@@ -18,11 +18,11 @@ VF-owned engine adapters. Packages never inject arbitrary HTML, microfrontends, 
 lifecycle code into the VibeFlow UI.
 
 The standalone Ask modal is retired as a product surface. Questions, steering, and reviewed actions
-all enter through Conversation Home. During the compatibility window, `vf ask` and `/api/ask`
-remain thin compatibility frontends for existing scripts and integrations. They own no Home UI or
-session state and gain no independent mutation path: any persisted create/resume interaction must
-use the same Conversation Service authority. They may be removed only through a separately approved
-breaking release.
+all enter through Conversation Home. During the compatibility window, `vf ask`, `POST /api/ask`, and
+`GET /api/ask/stream` remain thin compatibility frontends for existing scripts and integrations. They
+own no Home UI or session state and gain no independent mutation or message-delivery path: any
+persisted create/resume interaction must use the same Conversation Service and durable user-message
+queue authority as Home. They may be removed only through a separately approved breaking release.
 
 The complete program has two subsystems with one stable integration contract:
 
@@ -130,6 +130,9 @@ The implementation must preserve these invariants:
    the failed operation or rewrites history.
 10. **No permanent dual authority.** Compatibility commands may remain, but they call the same
     action/capability services rather than maintaining old writers.
+11. **Admission precedes execution.** Every accepted ordinary user message is durably enqueued under
+    its root authority before acknowledgement. Busy agents cannot cause a message to be dropped,
+    appended out of FIFO order, or injected directly into a native session.
 
 ## System architecture
 
@@ -385,6 +388,10 @@ interface ConversationCatalogCurrentV1 {
 type ConversationSseFrameV1 =
   | { id: string; event: "trace"; data: PublicStoredTraceEvent }
   | { id: string; event: "snapshot"; data: ConversationSnapshot }
+  | {
+      event: "message-queue-invalidated";
+      data: PublicConversationMessageQueueInvalidationV1;
+    }
   | { event: "heartbeat"; data: "" }
   | { event: "error"; data: PublicApiError["error"] };
 ```
@@ -523,6 +530,724 @@ ID and activation generation still match. A late A response after B is selected 
 Catalog summaries are kept separate from the active conversation state. The existing native
 reconciliation `sessions` map is not reused or renamed into the public catalog.
 
+### Durable user-message admission queue
+
+Every online ordinary user message enters one durable queue owned by its verified
+`root_session_id`, including a message sent while the root appears idle. The HTTP handler, Home, CLI,
+and compatibility Ask frontends may request admission, but none may append the message directly to a
+revision journal, an in-process worker list, or a native agent session. A successful response is
+returned only after the queue admission is fsynced. The dispatcher later claims the same durable item
+and passes it through the ordinary Conversation Service. Thus rapid sends are neither dropped nor
+injected into an operation that happened to be active when the browser clicked Send.
+
+Projection and classification precede queue admission. Only NFC-normalized, recursively projected
+public user-message bytes may enter the queue. A suspected private value remains in the separately
+authorized staging/broker flow; the queue represents only its safe presence boolean, never its bytes or
+identity. A valid deterministic or
+agent-produced `BrowserHostActionRequestV1`, action proposal, approval, denial, commit, cancellation,
+or capability mutation uses the Typed Action Service and is never queued as a user message. Ambiguous
+or non-action prose remains an ordinary queued message. This is a shared server authority, not a
+client-side delay list or optimistic UI workaround.
+
+Version 1 admits at most 32 non-terminal items (`queued` or `claimed`) per root. Public message content
+is 1–65,536 UTF-8 bytes after NFC normalization, a target list contains 1–32 unique current participant
+IDs or the literal `"all"`, and `quote_refs` contains 0–8 references under the existing quote contract.
+`queue_sequence` is a positive safe integer, is allocated monotonically under the root queue lock, and
+is never reused or changed. A full root returns typed `429 queue_full` without reserving a sequence,
+idempotency result, message ID, or browser-visible optimistic row. Terminal history remains in the
+authority journal; the browser snapshot contains every non-terminal item plus at most the 32 most
+recent terminal folds, all ordered by `queue_sequence ASC`.
+
+The queue wire shapes are closed. Types prefixed `Public` and the explicitly named request/snapshot
+types are the only browser shapes. Every `Private*` type below plus
+`ConversationMessageQueueAuthorityV1` is server authority and is never served directly:
+
+```ts
+type ConversationMessageQueueStateV1 = "queued" | "claimed" | "delivered" | "stale";
+
+type ConversationMessageQueueStaleReasonV1 =
+  | "predecessor_not_delivered"
+  | "lineage_head_changed"
+  | "participant_set_changed"
+  | "operation_changed"
+  | "causal_successor_mismatch";
+
+interface ConversationMessageQueueAuthorityV1 {
+  schema_version: "1.0";
+  root_session_id: string;
+  conversation_id: string;
+  revision_id: string;
+  lineage_head_digest: string;
+  lineage_head_epoch: number;
+  participant_set_digest: string;
+  active_operation_digest: string | null;
+  authority_digest: string;
+}
+
+interface PrivateConversationMessageQueueClaimOwnerV1 {
+  schema_version: "1.0";
+  pid: number;
+  process_start_identity: string;
+  host: string;
+  operation: string;
+  nonce: string;
+  durable_operation_id: string;
+  owner_digest: string;
+}
+
+interface PublicConversationPrivateContextPresenceV1 {
+  schema_version: "1.0";
+  private_context_present: boolean;
+}
+
+interface StageConversationMessagePrivateContextRequestV1 {
+  schema_version: "1.0";
+  enqueue_idempotency_key: string;
+  source_kind: "private-file-range";
+  repo_relative_path: string;
+  start_line: number;
+  end_line: number;
+}
+
+interface DiscardConversationMessagePrivateContextRequestV1 {
+  schema_version: "1.0";
+  idempotency_key: string;
+  enqueue_idempotency_key: string;
+  expected_private_context_present: true;
+}
+
+interface StageConversationDraftPrivateContextRequestV1 {
+  schema_version: "1.0";
+  create_idempotency_key: string;
+  source_kind: "private-file-range";
+  repo_relative_path: string;
+  start_line: number;
+  end_line: number;
+}
+
+interface DiscardConversationDraftPrivateContextRequestV1 {
+  schema_version: "1.0";
+  idempotency_key: string;
+  create_idempotency_key: string;
+  expected_private_context_present: true;
+}
+
+type PrivateConversationMessageContextStageV1 = {
+  schema_version: "1.0";
+  owner_principal_digest: string;
+  root_session_id: string;
+  enqueue_idempotency_key_digest: string;
+  staged_authority_digest: string;
+  canonical_request_digest: string;
+  source_kind: "private-file-range";
+  source_record_ref: string;
+  source_record_digest: string;
+  stage_sequence: number;
+  previous_record_digest: string | null;
+  staged_at: string;
+  updated_at: string;
+  record_digest: string;
+} & (
+  | {
+      stage_state: "available" | "discarded";
+      queue_item_id: null;
+      private_context_binding_digest: null;
+    }
+  | {
+      stage_state: "admission-owned" | "consumed" | "released";
+      queue_item_id: string;
+      private_context_binding_digest: string;
+    }
+);
+
+type PrivateConversationDraftContextStageV1 = {
+  schema_version: "1.0";
+  owner_principal_digest: string;
+  create_idempotency_key_digest: string;
+  canonical_request_digest: string;
+  source_kind: "private-file-range";
+  source_record_ref: string;
+  source_record_digest: string;
+  stage_sequence: number;
+  previous_record_digest: string | null;
+  staged_at: string;
+  updated_at: string;
+  record_digest: string;
+} & (
+  | {
+      stage_state: "available" | "discarded";
+      allocated_root_session_id: null;
+      allocated_conversation_id: null;
+      allocated_revision_id: null;
+      initial_turn_context_digest: null;
+    }
+  | {
+      stage_state: "transfer-owned" | "consumed";
+      allocated_root_session_id: string;
+      allocated_conversation_id: string;
+      allocated_revision_id: string;
+      initial_turn_context_digest: string;
+    }
+);
+
+interface ConversationHomeCreateRequestV1 {
+  schema_version: "1.0";
+  idempotency_key: string;
+  topic: string;
+  policy?: string;
+  participants?: ConversationCreateParticipant[];
+  max_rounds?: number;
+  private_context_present: boolean;
+}
+
+interface EnqueueConversationUserMessageRequestV1 {
+  schema_version: "1.0";
+  idempotency_key: string;
+  expected_authority_digest: string;
+  content: string;
+  target_participants: "all" | string[];
+  quote_refs: PublicQuoteReferenceV1[];
+  private_context_present: boolean;
+}
+
+interface EditQueuedUserMessageRequestV1 {
+  schema_version: "1.0";
+  idempotency_key: string;
+  expected_item_digest: string;
+  content: string;
+}
+
+interface PublicQueuedUserMessageV1 {
+  schema_version: "1.0";
+  queue_item_id: string;
+  queue_sequence: number;
+  root_session_id: string;
+  author_public_id: "human";
+  content: string;
+  content_digest: string;
+  target_participants: "all" | string[];
+  quote_refs: PublicQuoteReferenceV1[];
+  private_context_present: boolean;
+  predecessor_queue_item_id: string | null;
+  admitted_authority_digest: string;
+  effective_authority_digest: string;
+  state: ConversationMessageQueueStateV1;
+  stale_reason: ConversationMessageQueueStaleReasonV1 | null;
+  admitted_at: string;
+  updated_at: string;
+  item_digest: string;
+}
+
+interface ConversationMessageQueueSnapshotV1 {
+  schema_version: "1.0";
+  root_session_id: string;
+  current_authority_digest: string;
+  max_nonterminal_items: 32;
+  items: PublicQueuedUserMessageV1[];
+}
+
+interface PublicConversationMessageQueueInvalidationV1 {
+  schema_version: "1.0";
+  root_session_id: string;
+  queue_item_id: string;
+  state: ConversationMessageQueueStateV1;
+  item_digest: string;
+}
+
+interface PrivateConversationMessageQueueDeliveryProofV1 {
+  schema_version: "1.0";
+  queue_item_id: string;
+  queue_sequence: number;
+  claimed_item_digest: string;
+  public_event_id: string;
+  public_seq: number;
+  stable_operation_digest: string;
+  prior_effective_authority_digest: string;
+  successor_authority: ConversationMessageQueueAuthorityV1;
+  private_context_binding_digest: string | null;
+  private_context_disposition_digest: string | null;
+  proof_digest: string;
+}
+
+interface PrivateConversationMessageQueueContextBindingV1 {
+  schema_version: "1.0";
+  root_session_id: string;
+  queue_item_id: string;
+  queue_sequence: number;
+  owner_principal_digest: string;
+  enqueue_idempotency_key_digest: string;
+  source_kind: "private-file-range";
+  source_record_ref: string;
+  source_record_digest: string;
+  source_reservation_digest: string;
+  target_participant_ids: string[];
+  retained_at: string;
+  private_context_binding_digest: string;
+}
+
+type PrivateConversationMessageQueueContextDispositionV1 = {
+  schema_version: "1.0";
+  root_session_id: string;
+  queue_item_id: string;
+  private_context_binding_digest: string;
+  recorded_at: string;
+  disposition_digest: string;
+} & (
+  | {
+      queue_outcome: "delivered";
+      disposition: "consumed";
+      public_event_id: string;
+    }
+  | {
+      queue_outcome: "stale";
+      disposition: "released";
+      public_event_id: null;
+    }
+);
+
+type PrivateConversationMessageQueueEventPayloadV1 =
+  | {
+      kind: "admitted";
+      item: PublicQueuedUserMessageV1 & { state: "queued"; stale_reason: null };
+      owner_principal_digest: string;
+      admitted_authority: ConversationMessageQueueAuthorityV1;
+      private_context_binding_digest: string | null;
+      idempotency_key_digest: string;
+      canonical_request_digest: string;
+    }
+  | {
+      kind: "edited";
+      item: PublicQueuedUserMessageV1 & { state: "queued"; stale_reason: null };
+      expected_item_digest: string;
+      owner_principal_digest: string;
+      private_context_binding_digest: string | null;
+      idempotency_key_digest: string;
+      canonical_request_digest: string;
+    }
+  | {
+      kind: "claimed";
+      item: PublicQueuedUserMessageV1 & { state: "claimed"; stale_reason: null };
+      claim_epoch: number;
+      claim_owner: PrivateConversationMessageQueueClaimOwnerV1;
+      private_context_binding_digest: string | null;
+    }
+  | {
+      kind: "delivered";
+      item: PublicQueuedUserMessageV1 & { state: "delivered"; stale_reason: null };
+      claim_epoch: number;
+      claim_owner_digest: string;
+      private_context_binding_digest: string | null;
+      private_context_disposition: PrivateConversationMessageQueueContextDispositionV1 | null;
+      delivery_proof: PrivateConversationMessageQueueDeliveryProofV1;
+    }
+  | {
+      kind: "stale";
+      item: PublicQueuedUserMessageV1 & {
+        state: "stale";
+        stale_reason: ConversationMessageQueueStaleReasonV1;
+      };
+      prior_state: "queued" | "claimed";
+      claim_epoch: number | null;
+      claim_owner_digest: string | null;
+      private_context_binding_digest: string | null;
+      private_context_disposition: PrivateConversationMessageQueueContextDispositionV1 | null;
+    };
+
+interface PrivateConversationMessageQueueEventV1 {
+  schema_version: "1.0";
+  root_session_id: string;
+  journal_sequence: number;
+  payload: PrivateConversationMessageQueueEventPayloadV1;
+  previous_event_digest: string | null;
+  recorded_at: string;
+  event_digest: string;
+}
+```
+
+`authority_digest` omits itself and uses
+`VF-CONVERSATION-MESSAGE-QUEUE-AUTHORITY\0v1\0`; `content_digest` uses
+`VF-QUEUED-USER-MESSAGE-CONTENT\0v1\0` over exactly
+`{schema_version:"1.0",content,target_participants,quote_refs,private_context_present}`; and
+`item_digest` omits itself and uses
+`VF-QUEUED-USER-MESSAGE\0v1\0` over the complete public item fold. Internally,
+`queue_idempotency_key_digest = digestV1("VF-CONVERSATION-MESSAGE-QUEUE-IDEMPOTENCY\0v1\0",
+{schema_version:"1.0",idempotency_key})` after the ordinary idempotency grammar; for an enqueue this
+value is `enqueue_idempotency_key_digest`. The stable public ID is exactly
+`"vf-queued-message-" + digestHex(digestV1("VF-CONVERSATION-MESSAGE-QUEUE-ID\0v1\0",
+{schema_version:"1.0",root_session_id,queue_sequence,enqueue_idempotency_key_digest}))`. Editing changes
+the content and item digests but never the ID, sequence, predecessor, target participants, quote refs,
+`private_context_present`, admission authority, or admission time.
+
+The authority components and delivery identities have one exact preimage:
+
+```text
+participant_set_digest = digestV1(
+  "VF-CONVERSATION-PARTICIPANT-BINDING-SET\0v1\0",
+  manifest.bindings)
+
+active_operation_digest = ordinaryOperationHeaderDigest(conversation_id, active_operation_id)
+  = digestV1(
+      "VF-EXISTING-CONVERSATION-OPERATION-AUTHORITY\0v1\0",
+      {version:1,conversation_id,target_operation_id:active_operation_id})
+
+authority_digest = digestV1(
+  "VF-CONVERSATION-MESSAGE-QUEUE-AUTHORITY\0v1\0",
+  {schema_version:"1.0",root_session_id,conversation_id,revision_id,lineage_head_digest,
+   lineage_head_epoch,participant_set_digest,active_operation_digest})
+
+durable_operation_seed = digestV1(
+  "VF-CONVERSATION-MESSAGE-QUEUE-DURABLE-OPERATION-ID\0v1\0",
+  {schema_version:"1.0",root_session_id,queue_item_id,content_digest,
+   effective_authority_digest})
+durable_operation_id = "vf-operation-" + digestHex(durable_operation_seed)
+
+public_event_seed = digestV1(
+  "VF-CONVERSATION-MESSAGE-QUEUE-PUBLIC-TRACE-EVENT\0v1\0",
+  {schema_version:"1.0",queue_item_id,content_digest})
+```
+
+`manifest.bindings` above is the byte-identical validated active-revision manifest array; callers do
+not sort it, project it, or substitute participant summaries before hashing. `active_operation_id` is
+the newest validated ordinary-operation authority on that revision. Its header remains the active slot
+after a stable terminal until a newer ordinary operation is durably created, so normal progress within
+one operation cannot manufacture `operation_changed`; the field is null only before that revision has
+any ordinary operation. Missing, duplicate, or incomparable newest operation authority is corruption,
+not null or a timestamp tie.
+
+`durable_operation_id` must match `^vf-operation-[0-9a-f]{64}$`; claim epoch, owner, process, nonce,
+timestamp, retry count, and provider/native session never enter its preimage. The queue-derived
+operation's `stable_operation_digest` is exactly
+`foldOrdinaryConversationOperation({root_session_id,conversation_id,
+operation_id:durable_operation_id,conversation_lock_digest,events,cancellation_claimed})`'s
+`operation_state_digest`—equivalently the ordinary `operationFoldDigest`—over the checksum-valid trace
+prefix through its proved stable terminal. The fold's existing
+`VF-CONVERSATION-OPERATION-FOLDED-STATE\0v1\0` preimage, ordinary header digest, exact lock digest,
+ordered matching events, and cancellation claim are not resampled or renamed.
+
+To derive the public trace UUID, decode `digestHex(public_event_seed)` to 32 bytes, copy its first 16
+bytes to `b`, set `b[6] = (b[6] & 0x0f) | 0x50` and
+`b[8] = (b[8] & 0x3f) | 0x80`, then encode lowercase hexadecimal with hyphens after bytes 4, 6, 8,
+and 10. The result is the exact RFC UUID accepted as `public_event_id`. Exact replay uses that same UUID;
+an existing UUID with unequal projected event bytes, or unequal seeds producing the same UUID, is
+authority corruption.
+
+`proof_digest` omits itself under `VF-CONVERSATION-MESSAGE-QUEUE-DELIVERY-PROOF\0v1\0`;
+`event_digest` omits itself under `VF-CONVERSATION-MESSAGE-QUEUE-EVENT\0v1\0`. Queue event sequence is
+dense and zero-based, the first event has a null previous digest, and every successor points to the
+immediately preceding event. Payload kind and item state must match exactly as typed above. Claim epoch
+starts at one per item and increases by exactly one only when recovery supersedes a proved-dead owner.
+The admitted owner principal remains the item's sole edit owner; every edited payload must repeat it
+byte-for-byte, while later claim/delivery/stale folds recover it only from the validated ancestry.
+The admitted authority object's recomputed digest must equal both the request's expected digest and the
+item's `admitted_authority_digest`; at admission `effective_authority_digest` is the same digest.
+`owner_digest` omits itself under `VF-CONVERSATION-MESSAGE-QUEUE-CLAIM-OWNER\0v1\0`; its first six
+fields must byte-equal the existing canonical `ProcessLockOwnerV1` held for
+`operation === "message-queue-claim:" + durable_operation_id`. PID is a positive 32-bit process ID,
+the process-start identity/host/operation are bounded ASCII under the existing process-owner contract,
+and nonce is exactly 64 lowercase hex characters.
+
+`private_context_binding_digest` omits itself under
+`VF-CONVERSATION-MESSAGE-QUEUE-PRIVATE-CONTEXT\0v1\0`; `disposition_digest` omits itself under
+`VF-CONVERSATION-MESSAGE-QUEUE-PRIVATE-CONTEXT-DISPOSITION\0v1\0`. The source record ref resolves only
+the already-validated one-shot private file/range staging record beneath the same private conversation
+root; it is not a caller path or browser token. The source record and reservation digests, target set,
+queue identity, owner, and enqueue identity must all revalidate before use.
+
+Within the private conversation root selected by the verified root identity, the queue core owns exactly
+`message-queue/v1/events/<digestHex(event_digest)>.json`, `message-queue/v1/current.json`,
+`message-queue/v1/idempotency/<digestHex(queue_idempotency_file_key)>.json`,
+`message-queue/v1/private-contexts/<digestHex(private_context_binding_digest)>.json`,
+`message-queue/v1/private-context-dispositions/<digestHex(disposition_digest)>.json`, and
+`message-queue/v1/pending-mutation.json`, plus the non-authoritative
+`message-queue/v1/claims/<queue_item_id>.lock` and `message-queue/v1/writer.lock`. The pending-mutation
+record is an authoritative, root-scoped recovery barrier containing one exact event and its exact
+idempotency binding. Every writer reconciles that barrier through event, binding, and `current.json`
+before it may materialize another mutation; it clears the barrier only after the same winner is fully
+published. A crash at any publication boundary therefore cannot let another idempotency key advance
+the journal past an unrecovered winner. Event, private-context, disposition, and pending-mutation
+objects are canonical
+create-or-verify mode `0600` beneath
+mode-`0700` directories. `current.json` binds root ID, last journal sequence, and head event digest and
+advances by exact-prior CAS with file and directory fsync. An idempotency binding fixes mutation kind
+(`enqueue|edit`), authenticated-principal digest, root ID, key digest, canonical-request digest,
+queue-item ID, and winning event digest; it contains no message content. The writer lock selects only
+this root and cannot establish authority. It uses the existing no-follow exclusive-create/process-start
+owner-death primitive; age or PID reuse alone never breaks it. Each item claim lock uses that same
+primitive and its exact canonical owner bytes must recompute the current claimed event's owner digest.
+Readers validate the complete previous-digest ancestry from
+the current head, every item fold, ID/path preimage, dense sequence, and 512 KiB per-object limit before
+claiming. Unknown objects and unreachable valid objects are inert; a missing or invalid referenced
+object/head quarantines the queue instead of reconstructing it from public messages or browser state.
+`queue_idempotency_file_key = digestV1("VF-CONVERSATION-MESSAGE-QUEUE-IDEMPOTENCY-FILE-KEY\0v1\0",
+{schema_version:"1.0",mutation_kind,principal_digest,root_session_id,idempotency_key_digest})`. The
+binding's `binding_digest` omits itself under
+`VF-CONVERSATION-MESSAGE-QUEUE-IDEMPOTENCY-BINDING\0v1\0`; the binding tuple must recompute its filename.
+A second tuple at that path or the same principal/root/key/mutation tuple with another request digest is
+`idempotency_conflict`.
+
+Enqueue is serialized in the namespace `(authenticated principal, root_session_id, idempotency_key)`.
+Exact canonical-request replay returns the same logical item ID and its current folded projection;
+reuse with different request bytes returns `409 idempotency_conflict`. The authenticated principal and
+private idempotency digest are authority inputs but are not fields of `PublicQueuedUserMessageV1`.
+Admission captures the exact current authority tuple. `predecessor_queue_item_id` is the current
+non-terminal tail under the same root lock, or null when no such tail exists.
+
+A one-shot private file/range attachment is staged before admission through the private root-scoped
+broker. `POST /api/conversation-sessions/:root_session_id/messages/private-context` accepts exactly
+`StageConversationMessagePrivateContextRequestV1`; its path/range fields exist only in that transient
+control request and the private source record. The authenticated principal comes only from the control
+session, the path segment must be the exact verified root rather than a conversation/revision alias,
+and the route requires the ordinary loopback CSRF proof. Before reading, it resolves the one committed
+active lineage head and constructs the complete `ConversationMessageQueueAuthorityV1`; the resulting
+stage binds that principal, root, head/epoch, revision, participant set, active-operation slot, and
+enqueue-key digest. A head CAS loss before the stage commit returns `409 private_context_conflict` and
+writes no usable source.
+
+The root-stage key and request preimage are exact:
+
+```text
+message_context_stage_key = digestV1(
+  "VF-CONVERSATION-MESSAGE-PRIVATE-CONTEXT-STAGE-KEY\0v1\0",
+  {schema_version:"1.0",owner_principal_digest,root_session_id,
+   enqueue_idempotency_key_digest})
+
+message_context_stage_request_digest = digestV1(
+  "VF-CONVERSATION-MESSAGE-PRIVATE-CONTEXT-STAGE-REQUEST\0v1\0",
+  {schema_version:"1.0",owner_principal_digest,root_session_id,staged_authority_digest,
+   source_kind,repo_relative_path,start_line,end_line})
+```
+
+The stored `canonical_request_digest` equals that second value. Each
+`PrivateConversationMessageContextStageV1.record_digest` omits itself under
+`VF-CONVERSATION-MESSAGE-PRIVATE-CONTEXT-STAGE\0v1\0`; sequence zero has a null prior, and each legal
+state transition increments `stage_sequence` by one and names the exact prior record digest. Root-stage
+events live in
+`message-queue/v1/private-context-stage-events/<digestHex(message_context_stage_key)>/<digestHex(record_digest)>.json`,
+with a create-or-verify `0600` object and exact-prior fsynced `current.json` pointer in the stage-key
+`0700` directory. The
+opaque `source_record_ref` resolves a separate `0600` server-owned object and is never accepted back
+from a caller. Legal root-stage edges are exactly `available→admission-owned→consumed|released` and
+`available→discarded`; no terminal state can return to `available`.
+
+`repo_relative_path` is NFC UTF-8 of 1–4,096 bytes, contains no NUL, absolute/root escape, empty or dot
+segment, and resolves beneath the configured repository through the existing no-follow stable-read
+authority. `start_line` and `end_line` are positive safe integers with
+`start_line <= end_line` and at most 200 selected lines. The regular source file is at most 1 MiB and
+the exact selected UTF-8 bytes are 1–65,536 bytes; pre/post descriptor identity and content digest must
+match before the source record commits. A failed or changed read creates neither a stage nor an
+idempotency winner. Exact replay of the same key and canonical request returns the current boolean-only
+projection without reading the path again; another request under that key is
+`409 idempotency_conflict` and can never replace the stored source.
+
+There may be at most 32 `available` root stages per `(owner_principal_digest,root_session_id)`, each
+under a different enqueue key. The private broker reserves that slot under its cross-process lock
+before source commit; exhaustion returns the exact bounded `429 rate_limited` projection below.
+Admission-owned queue bindings are instead bounded by the queue's 32 non-terminal items. A retention
+timer may request exact-CAS cleanup of an `available` stage, but elapsed time never proves ownership,
+permits a conflicting stage, or releases an `admission-owned` source.
+
+The queue POST itself contains only `private_context_present`, never a handoff ID, record digest,
+repository-relative path, line range, content, or private locator. `true` must resolve exactly one
+`available` root stage at `(principal,root,enqueue key)` whose `staged_authority_digest` byte-equals the
+request's validated `expected_authority_digest`. Under the fixed queue→private-context lock order,
+admission reserves it with the deterministic queue item, appends/fsyncs the `admission-owned` stage
+record and one `PrivateConversationMessageQueueContextBindingV1`, then appends the admitted queue event
+with that exact `private_context_binding_digest`. `false` requires both a null binding and no
+`available` stage under the same tuple; an existing stage must be explicitly selected or discarded and
+is never attached implicitly. A crash after reservation but before admission completes the same
+idempotency-bound item/binding or returns the still-owned stage to `available` only after proving that
+no queue event or idempotency winner exists; an uncertain window remains owned and fails closed.
+
+Discard is a separate mutation, never a side effect of changing a checkbox. The root route is
+`POST /api/conversation-sessions/:root_session_id/messages/private-context/discard` and accepts exactly
+`DiscardConversationMessagePrivateContextRequestV1`. Its `idempotency_key` has the shared 1–128-byte
+grammar, is distinct from the selected `enqueue_idempotency_key`, and binds the canonical discard
+request in `(principal,root,idempotency key)`. Exactly:
+
+```text
+private_context_discard_idempotency_key_digest = digestV1(
+  "VF-CONVERSATION-PRIVATE-CONTEXT-DISCARD-IDEMPOTENCY\0v1\0",
+  {schema_version:"1.0",idempotency_key})
+
+message_context_discard_request_digest = digestV1(
+  "VF-CONVERSATION-MESSAGE-PRIVATE-CONTEXT-DISCARD-REQUEST\0v1\0",
+  {schema_version:"1.0",owner_principal_digest,root_session_id,
+   private_context_discard_idempotency_key_digest,enqueue_idempotency_key_digest,
+   expected_private_context_present:true})
+```
+
+The first exact `available→discarded` CAS plus secure
+source cleanup proof returns `200 {schema_version:"1.0",private_context_present:false}`; exact replay
+returns the same `200` without touching a source. Reuse with another request is
+`409 idempotency_conflict`. A missing/different stage, a non-available terminal, or a race returns the
+exact `409 private_context_conflict` projection below. Once admission owns a stage, discard never
+deletes, releases, or reassigns it; only that queue item's proved `delivered`/`stale` disposition may
+consume/release it.
+
+Replacing an unadmitted selection uses this lossless order: generate a fresh enqueue key, successfully
+stage the replacement under that key, switch the composer to the fresh key, then discard the old key
+with one fresh discard idempotency key. A failed secure read leaves the old selection intact; a failed
+discard is retried with the same discard key. Both stages may therefore remain safely pending until
+cleanup, and rapid messages may intentionally own different staged keys in the same root. Reusing the
+old enqueue key for new source bytes is forbidden.
+
+The initial-conversation case uses a separate pre-root broker rather than a full binding in Home.
+`POST /api/conversation-drafts/private-context` accepts exactly
+`StageConversationDraftPrivateContextRequestV1`, and
+`POST /api/conversation-drafts/private-context/discard` accepts exactly
+`DiscardConversationDraftPrivateContextRequestV1`. Both require authenticated loopback CSRF authority;
+their namespace is `(owner_principal_digest,create_idempotency_key_digest)` and has no client-supplied
+root. The create-key digest is
+`digestV1("VF-CONVERSATION-CREATE-IDEMPOTENCY\0v1\0",
+{schema_version:"1.0",idempotency_key:create_idempotency_key})`. Exactly:
+
+```text
+draft_stage_key = digestV1(
+  "VF-CONVERSATION-DRAFT-PRIVATE-CONTEXT-STAGE-KEY\0v1\0",
+  {schema_version:"1.0",owner_principal_digest,create_idempotency_key_digest})
+
+draft_context_stage_request_digest = digestV1(
+  "VF-CONVERSATION-DRAFT-PRIVATE-CONTEXT-STAGE-REQUEST\0v1\0",
+  {schema_version:"1.0",owner_principal_digest,create_idempotency_key_digest,
+   source_kind,repo_relative_path,start_line,end_line})
+```
+
+Its `canonical_request_digest` equals the second value, and its `record_digest` omits itself under
+`VF-CONVERSATION-DRAFT-PRIVATE-CONTEXT-STAGE\0v1\0`. The same source validation, response, idempotency,
+discard, replacement, private-storage, and immutable-chain rules apply. At most 32 `available` draft
+stages may exist per principal. Legal draft edges are exactly
+`available→transfer-owned→consumed` and `available→discarded`; TTL may exact-CAS only the latter edge
+from `available`. Its discard request digest uses
+`VF-CONVERSATION-DRAFT-PRIVATE-CONTEXT-DISCARD-REQUEST\0v1\0` over exactly
+`{schema_version:"1.0",owner_principal_digest,private_context_discard_idempotency_key_digest,
+create_idempotency_key_digest,expected_private_context_present:true}`; root/message keys cannot replay
+in this namespace. Under the existing private conversation artifact root, its logical event path is
+`conversation-drafts/v1/private-context-stage-events/<digestHex(draft_principal_key)>/<digestHex(draft_stage_key)>/<digestHex(record_digest)>.json`,
+where `draft_principal_key = digestV1("VF-CONVERSATION-DRAFT-PRIVATE-CONTEXT-PRINCIPAL-KEY\0v1\0",
+{schema_version:"1.0",owner_principal_digest})`; the stage-key directory has the same exact-prior
+`current.json` pointer and permissions as the root broker.
+
+Final Home `POST /api/conversations` accepts exactly `ConversationHomeCreateRequestV1` and the same
+body `idempotency_key` must byte-equal the draft's `create_idempotency_key`. With
+`private_context_present:true`, the create operation first validates the exact available draft stage,
+then durably fixes one allocated
+`(root_session_id,conversation_id,revision_id,workflow_id,run_id,operation_id)` and one stable
+`created_at` in the create idempotency record, transitions the stage to `transfer-owned` with those
+identities and the exact digest of the server-owned initial-turn-context record, fsyncs and revalidates
+that byte-identical context beneath the allocated root, completes the fixed-allocation create
+authority, transitions the stage to `consumed`, and only then publishes the root or
+returns it. Those steps are one recoverable atomic transfer: failure before allocation leaves the stage
+available; failure afterward causes same-key recovery to reuse the fixed IDs and resume the exact
+timestamp, context, and transfer, never allocate a second root or expose a context-free first turn.
+The initial trace journal is durable and correlation-validated before the manifest becomes visible to
+catalog discovery; a pre-manifest journal is inert, while a visible manifest can therefore never
+degrade solely because its initial journal is absent. `false` requires no
+available stage under that create tuple. Discard cannot win after `transfer-owned`. Home/Pinia retain
+only the boolean; `private_file_range`, a handoff binding, source ref/digest, path, lines, and bytes are
+unknown fields in this final request and response flow.
+
+The create idempotency record binds
+`conversation_create_request_digest = digestV1("VF-CONVERSATION-HOME-CREATE-REQUEST\0v1\0",
+{schema_version:"1.0",owner_principal_digest,create_idempotency_key_digest,topic,policy,
+participants,max_rounds,private_context_present})`, where absent optionals are omitted exactly as in
+`ConversationHomeCreateRequestV1`. Same-key unequal canonical request bytes return
+`409 idempotency_conflict`; exact replay resumes or returns only the fixed allocation.
+The existing create bounds and participant/engine validation remain in force; this final Home contract
+adds the schema/idempotency/boolean authority and removes only the full private binding.
+
+Every edit, claim, terminal event, and delivery proof must carry the admitted binding digest unchanged,
+with null if and only if the public `private_context_present` flag is false. A delivery proof's binding
+and disposition digests are jointly null for an item without private context; for an item with private
+context they are jointly non-null and the disposition must validate the same binding, item, root,
+`queue_outcome:"delivered"`, `disposition:"consumed"`, and public event ID. The PATCH body is
+content-only and cannot add, replace, clear, or retarget private context. Before the deterministic public
+message append, the claimant resolves the exact private binding and writes the existing private
+file/range turn-context record keyed by that message event and target participants. `delivered` requires
+a `consumed` disposition with that public event ID; `stale` before public append requires a `released`
+disposition with a null event ID. A committed or uncertain append is never released or made reusable:
+recovery consumes/reconciles the same binding or retains it while blocking the queue. Send-as-new after
+an edit race never inherits the old item's private context; the user must explicitly stage a new
+one-shot range.
+
+Claiming is FIFO authority, not scheduler preference:
+
+- under the per-root cross-process queue lock, a claimant may acquire only the lowest-sequence
+  non-terminal item; a `claimed` oldest item whose owner is live or unprovable blocks every later item
+  for any duration;
+- a claim owns a monotonically increasing claim epoch, one exact
+  `PrivateConversationMessageQueueClaimOwnerV1`, and the same deterministic durable Conversation
+  operation ID for its entire lifetime. Claim-owner/process metadata remains private; public queue data
+  contains no PID, process-start identity, host, nonce, owner digest, operation/native identifier,
+  resume binding, prompt, provider request, or private input;
+- the public user-message event ID is deterministic from `queue_item_id` and `content_digest`.
+  Re-appending the same ID and bytes is idempotent; the same ID with different bytes is authority
+  corruption;
+- `delivered` is recorded only after that exact public message append and its Conversation operation
+  reach a stable terminal and a durable delivery proof binds the resulting authority tuple. A failed or
+  stopped participant operation may be stable, but an uncertain operation is not delivery proof;
+- no later item may be claimed until the oldest item is `delivered` or durably `stale`. Legal folded
+  state edges are `queued→claimed`, `queued→stale`, and `claimed→delivered|stale`. The current owner may
+  replay/reconcile the same durable operation while it still holds the exact owner token without
+  changing claim epoch. A different process may append a higher claim epoch only after the existing
+  process-owner primitive proves the exact prior process-start identity dead and the contender
+  atomically replaces the exact observed owner bytes. Wall-clock age, timeout, heartbeat delay, PID
+  observations made outside that primitive, and PID reuse are never takeover evidence.
+
+Crash recovery reopens the same oldest item only under exact ownership evidence. A `live` owner keeps
+the claim. An `unprovable` or unexpectedly absent owner remains claimed and blocks later items; it is
+not normalized to dead. A proved-dead owner may be replaced under exact observed-owner CAS, increments
+claim epoch by one, and must reconcile/replay the same durable operation and public event ID. If no
+deterministic public event exists and operation reconciliation proves no accepted effect, that same
+operation may perform the append. If the exact event exists but the terminal proof does not, recovery
+resumes/reconciles it rather than appending another message. If both exist, recovery completes the
+missing `delivered` fold. A mismatched owner, event, claim, operation, private-context binding/disposition,
+proof, journal checksum, or item digest quarantines the root queue and starts no later item; process
+restart or elapsed time never infers owner death, delivery, release, or discard.
+
+A queued item may change authority only through its immediate predecessor's delivery proof. With a
+null predecessor, current authority must byte-equal the admitted authority. With a non-null predecessor,
+that predecessor must be `delivered`, its sequence must be lower and the nearest preceding non-terminal
+sequence at admission, and its proof must bind the exact predecessor item/content digest, public event,
+stable terminal operation, prior effective authority, and one observed successor authority. The
+successor may be unchanged or the exact direct revision/participant/operation successor causally bound
+to that predecessor's public event. The claimant sets `effective_authority_digest` to that proved
+successor before dispatch. It never walks catalog timestamps, chooses a current head, or treats a merely
+compatible participant list or completed operation as causality. Missing predecessor delivery yields
+`predecessor_not_delivered`; any unrelated head/revision, participant-set, or operation change yields
+the corresponding typed stale reason; a proof that does not close the exact edge yields
+`causal_successor_mismatch`. The item becomes durably `stale` and is not rebound or delivered.
+
+Quick edit is an authority-safe composer mode. When the focused composer is exactly empty—no text,
+attachment, quote selection, autocomplete, open menu/chooser/drawer, or active IME composition—
+`ArrowUp` selects only the highest-sequence item owned by the authenticated human in the active root
+whose folded state is still `queued`. It never selects another author's item or an item from another
+root. The UI loads its content, retains `queue_item_id + expected_item_digest`, labels the mode, and
+provides a visible Cancel control. If `private_context_present` is true it shows only a generic
+“Private context attached” status; it never loads the binding, path, line range, or digest. `Enter` in
+this mode calls the PATCH route below as a same-slot CAS; it does not enqueue a new item. `Escape`
+cancels editing without changing the queued item and returns focus to the composer. The server accepts
+only that principal's latest own `queued` item and CAS-compares `expected_item_digest` under the root
+lock. The content-only edit preserves FIFO position and all immutable fields above, including its
+private-context binding. Exact edit replay is idempotent; a different edit under the same key conflicts.
+
+If a claim/dequeue, another edit, or authority change wins before PATCH, the server returns typed
+`409 queued_message_not_editable` with only the public root/item IDs, current public state, and current
+item digest. In particular, a claimed/dequeued-item 409 preserves the replacement text as an ordinary
+unsent composer draft and never automatically enqueues it as a duplicate. The UI exits edit mode,
+announces the race politely, focuses the preserved draft, and offers an explicit Send-as-new action.
+
+Queue reads, sends, edits, responses, and SSE folds bind the active root ID and activation generation.
+On A→B selection, A's queue fetch/edit request and timers are aborted; any late A result is discarded and
+cannot populate, edit, announce, or focus B. An A edit draft may remain only in root-keyed process
+memory and never appears in B or in `localStorage`, `sessionStorage`, URL state, service-worker caches,
+or analytics. Queue public projections contain only projected message bytes, public quote/participant
+references, public opaque queue IDs/digests, `private_context_present`, state, and bounded timestamps.
+Pinia stores only that safe projection; raw file/range inputs may exist transiently inside the staging
+control but are cleared after the server confirms the opaque binding, and no private context ID, digest,
+path, lines, or content enters Pinia or browser persistence. Keyboard help exposes `ArrowUp`; focus and
+status do not rely on color; queue state uses coarse `aria-live="polite"`; controls meet the 44 px
+target; and IME/composition keystrokes are never intercepted.
+
 ### Natural language and friendly actions
 
 The composer accepts ordinary Vietnamese or English:
@@ -537,8 +1262,8 @@ accelerators, not visible syntax users must memorize.
 
 The intent pipeline is:
 
-1. classify/project the submitted bytes first; append the safe public message only after projection, or
-   keep a suspected/private value in the staging/broker flow defined below;
+1. classify/project the submitted bytes first; durably enqueue an ordinary safe public message only
+   after projection, or keep a suspected/private value in the staging/broker flow defined below;
 2. an agent or deterministic shortcut may emit an untrusted `BrowserHostActionRequestV1` candidate;
 3. the host resolves and validates the candidate against its action schema and current policy;
 4. ambiguous, quoted, negated, conditional, or malformed intent stays a message or asks for
@@ -617,6 +1342,8 @@ or blank panels are not sufficient.
 - Keyboard-only rail → timeline → composer → proposal flow.
 - A skip link and predictable focus restoration after drawers, confirmations, and autocomplete.
 - Escape closes transient autocomplete/drawers without clearing the draft.
+- In queued-message edit mode, Escape cancels only the edit, preserves the queued original, and returns
+  focus to the composer; a CAS race leaves replacement text focused as an unsent draft.
 - Shortcuts never steal IME composition or ordinary text input.
 - `aria-live="polite"` announces coarse lifecycle changes, not every streamed token.
 - 44 px interactive targets where touch applies, 200% zoom, and 320 px reflow.
@@ -1372,6 +2099,7 @@ The minimal additive browser API is:
 
 ```text
 GET  /api/conversations?q=&lifecycle=&policy=&cursor=&limit=
+POST /api/conversations                                  # final Home create/broker transfer
 GET  /api/conversations/:conversation_id/snapshot        # existing revision-scoped snapshot
 POST /api/conversations/:conversation_id/stream-token    # existing narrow stream credential
 GET  /api/conversations/:conversation_id/events?stream_token=&since= # existing revision-scoped SSE
@@ -1379,6 +2107,13 @@ GET  /api/conversations/:conversation_id/lineage?cursor=&limit=
 GET  /api/conversations/:conversation_id/context-handoff
 GET  /api/conversations/:conversation_id/artifacts/:artifact_id?expected_sha256=
 GET  /api/conversation-sessions/:root_session_id/timeline?cursor=&limit=
+GET  /api/conversation-sessions/:root_session_id/messages/queue
+POST /api/conversation-sessions/:root_session_id/messages/private-context
+POST /api/conversation-sessions/:root_session_id/messages/private-context/discard
+POST /api/conversation-sessions/:root_session_id/messages/queue
+PATCH /api/conversation-sessions/:root_session_id/messages/queue/:queue_item_id
+POST /api/conversation-drafts/private-context
+POST /api/conversation-drafts/private-context/discard
 GET  /api/capabilities?view=search|list|status&scope=project|user&q=&package_id=&status=&engine=&cursor=&limit=
 GET  /api/capabilities/:package_id?scope=project|user&package_pin_digest=&version=&content_sha256=
 
@@ -1405,6 +2140,12 @@ Success contracts are fixed:
 | stream-token renewal | `200` and the existing `StreamTokenRenewalResponse`, `Cache-Control: no-store` |
 | conversation events | `200 text/event-stream; charset=utf-8` using `ConversationSseFrameV1` |
 | list, lineage, root timeline | `200` and their versioned response DTO |
+| final Home conversation create | `202 ConversationCreateResponse`; exact create-idempotency replay is `200` with the same `conversation_id` and a freshly authorized stream credential, `Cache-Control: no-store` |
+| message queue get | `200 ConversationMessageQueueSnapshotV1`, `Cache-Control: no-store` |
+| root/draft private-context stage | `201 PublicConversationPrivateContextPresenceV1`; exact idempotent replay is `200` with the current boolean projection, `Cache-Control: no-store` |
+| root/draft private-context discard | `200 PublicConversationPrivateContextPresenceV1`; exact idempotent replay has the same false body, `Cache-Control: no-store` |
+| message enqueue | `201 PublicQueuedUserMessageV1`; exact idempotent replay is `200` with the current fold, `Cache-Control: no-store` |
+| queued message edit | `200 PublicQueuedUserMessageV1`; exact idempotent replay returns the same fold, `Cache-Control: no-store` |
 | child context handoff | `200 ContextHandoff`, `Cache-Control: no-store` |
 | conversation artifact | `200` exact raw artifact bytes under the resolver contract below, `Cache-Control: private, no-store` |
 | capability query | `200 CapabilityQueryResponseV1`, `Cache-Control: no-store` |
@@ -1421,6 +2162,54 @@ Success contracts are fixed:
 | commit | `202 ActionMutationResponseV1` while running, or `200` for an existing/terminal result |
 | cancel | `200 ActionMutationResponseV1` |
 | proposal operation events | `200 ActionOperationEventsResponseV1`, or the same items as SSE data frames when negotiated |
+
+The raw body limit for final Home create, both private-context stage/discard route families, message
+queue POST, and message queue PATCH is exactly 524,288 bytes. The reader enforces it incrementally even
+when `Content-Length` is absent or false, rejects a larger body with the exact typed `413` projection
+below before JSON decoding, and writes no source, stage, idempotency winner, queue sequence, or edit.
+This transport cap deliberately accommodates every legal 65,536-byte NFC message after worst-case JSON
+escaping plus 32 bounded participant IDs and eight bounded quote references; the decoded field limits
+remain independently mandatory. Unknown keys, duplicate JSON keys, invalid Unicode, non-NFC defined
+text, or a schema version other than the literal `"1.0"` reject rather than being ignored.
+
+Every message-queue route authenticates the exact root-session boundary and rejects a conversation or
+revision ID used as a root alias. GET returns only the bounded safe fold above. POST accepts exactly
+`EnqueueConversationUserMessageRequestV1`; PATCH accepts exactly `EditQueuedUserMessageRequestV1` and
+the path item ID must byte-equal the folded item. Both mutations require the ordinary loopback/CSRF
+authority—PATCH is not exempt—and perform projection, validation, idempotency lookup, and the winning
+root-lock CAS before returning. POST accepts only the safe `private_context_present` boolean for one
+already server-bound
+one-shot context; a private context ID, digest, ref, path, line range, or content field is unknown and
+rejects. PATCH has no private-context field. Queue state changes publish exactly the no-`id` frame
+`{event:"message-queue-invalidated",data:PublicConversationMessageQueueInvalidationV1}` on the
+currently authorized active-conversation SSE. Its `data` contains exactly `schema_version`,
+`root_session_id`, `queue_item_id`, `state`, and `item_digest`; it causes a no-store GET refresh and
+never embeds content, a claim-owner value, or private authority bytes. It is an invalidation hint, not a
+numeric-cursor authority: activation and reconnect always fetch the authoritative queue snapshot, so a
+missed invalidation cannot hide a durable queue transition.
+
+The private-context stage/discard routes return exactly
+`{schema_version:"1.0",private_context_present:boolean}` and no other key. For a successful first stage
+the boolean is true. On an exact stage replay it is true exactly while the private stage is
+`available|admission-owned|transfer-owned`, as applicable, and false after
+`consumed|released|discarded`; replay never reopens a terminal stage. Every successful discard response
+is false. No response, error, SSE frame, Pinia store, browser cache, URL, or analytics field contains a
+principal/key digest, private stage/source/binding/disposition ID or digest, repository path, line
+number, source bytes, allocated-but-unpublished root identity, or private storage locator.
+
+The former `POST /api/conversations/:conversation_id/messages` route remains only as a compatibility
+adapter. It accepts the legacy public message fields plus a required `Idempotency-Key` header matching
+the shared grammar, verifies that the path identity is the committed active revision, resolves its exact
+root/current authority under the same root lock, and invokes the queue admission service; it never
+calls the ordinary Conversation Service or a native session directly. A missing key rejects, a
+non-head revision uses `409 not_lineage_head`, and `private_file_range` or any private locator rejects.
+Compatibility CLI file/range input first uses the same draft/root private broker and passes only the
+boolean into create/enqueue. Standalone Ask UI remains retired. `vf ask`, `POST /api/ask`, and
+`GET /api/ask/stream` are compatibility frontends only: create/resume is normalized through the exact
+create broker and per-root queue adapters, and no Ask/CLI/old-message route may append directly, bypass
+queue idempotency/FIFO, or retain a full private binding. Final Home neither calls
+`/api/home/private-file-range-handoffs` nor decodes its legacy full binding; that old endpoint may exist
+only behind a bounded migration adapter until all supported compatibility clients use the broker.
 
 `POST /api/conversations/:conversation_id/private-input-bindings` returns `201` only after the
 binding object, every broker attachment, the atomic current-head CAS receipt, and the public issuance
@@ -1689,12 +2478,18 @@ Public projections may contain:
 - safe topic, policy, lifecycle, lineage, sequence, and opaque CAS digests;
 - public participant IDs, role references, engine names, and safe model IDs;
 - user messages, public responses, claims, evidence, consensus, and synthesis;
+- projected queued-message content, public queue item ID/sequence/state, public authority/item digests,
+  predecessor queue item ID, typed stale reason, `private_context_present` boolean, and bounded public
+  timestamps;
 - conversation-scoped opaque artifact references;
 - proposal deltas, permission descriptions, package identity/version/source hash, status, and health.
 
 The following are always private:
 
 - raw manifests, binding-authority snapshots, and internal artifact paths;
+- queue principal/idempotency preimages, claim epochs/owner metadata, claimant/process identity, private
+  context binding/disposition digests and source refs, file/range path/line/content bytes, and private
+  queue-journal or lock paths;
 - rendered system prompts, role/skill bodies, and provider request payloads;
 - native provider session IDs, resume bindings, and private provider history;
 - repository roots, environment variables, credentials, and secret values;
@@ -4648,8 +5443,11 @@ remain immutable history and are never deleted or relabeled as descendants of th
 - Extract reusable conversation rendering/state from the modal shell.
 - Mount exactly one persistent Conversation Home owner.
 - Make the session rail and central chat the default Home.
-- Move file-range intent into the typed one-shot Home handoff; do not persist private context in browser
-  storage.
+- Route every ordinary Home/CLI/Ask message through the durable per-root FIFO, expose safe queue
+  projections, and enable latest-own queued-message edit without direct injection.
+- Bind typed one-shot Home file/range intent to its admitted queue item in the private server-owned
+  queue store, retain or dispose it only through the proved queue outcome, and expose only
+  `private_context_present` to browser state or persistence.
 - Enable host-rendered action, capability, progress, health, and recovery cards.
 - Complete responsive, keyboard, screen-reader, offline, empty, loading, and error states.
 
@@ -4658,6 +5456,8 @@ Temporary rollout switches may exist only during migration and rollback rehearsa
 ### Phase 5: delete duplicate implementations
 
 - Remove modal overlay/focus-trap/close behavior and `askOpen` ownership.
+- Remove process-local/direct user-message writers; retain `vf ask` and Ask HTTP routes only as
+  compatibility callers of the same queue and Conversation Service.
 - Remove manual Create/Resume as a primary workspace; retain only an advanced recovery-by-ID action.
 - Remove old direct capability writers after compatibility commands call the Fabric.
 - Remove rollout switches once the final Home and shared authority path pass the release gate.
@@ -4685,8 +5485,9 @@ or generated validators differently, but it must preserve these wire/storage mea
 - A reader encountering a future major version preserves the bytes and degrades to read-only
   `unsupported`; it never applies defaults, rewrites, or interprets the record as empty.
 - Existing conversation ID/message/event bounds remain unchanged when stricter. New content-derived
-  IDs are `vf-<kind>-<64 lowercase hex>` for `proposal`, `approval`, `operation`, `handoff`, and
-  `generation`; the same form also applies to explicitly defined `outbox` and authority-record IDs.
+  IDs are `vf-<kind>-<64 lowercase hex>` for `proposal`, `approval`, `operation`, `handoff`,
+  `generation`, and `queued-message`; the same form also applies to explicitly defined `outbox` and
+  authority-record IDs.
 - New fields ending `_sha256` contain exactly 64 lowercase hex characters without a prefix. New fields
   ending `_digest` contain `sha256:` plus those 64 characters unless the field explicitly carries an
   existing opaque conversation digest. Validators do not accept uppercase or alternate encodings.
@@ -4706,7 +5507,7 @@ or generated validators differently, but it must preserve these wire/storage mea
   is at most 1 MiB. A revision has at most 32 participant start lanes.
 - A grant or trust frame is at most 256 KiB; a grant has at most 64 action types, 512 permissions, and
   32 target engines. IDs/digests/opaque references not otherwise bounded are at most 512 ASCII bytes.
-- Every action/candidate idempotency key is 1–128 ASCII bytes and matches
+- Every action/candidate/message-queue idempotency key is 1–128 ASCII bytes and matches
   `^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`; validation occurs before hashing or path selection.
 - A canonical handoff content artifact is at most 1 MiB. Public operation/error events are at most
   256 KiB/4 KiB respectively; larger raw evidence remains private and only a redacted digest/ref is
@@ -5263,6 +6064,7 @@ type ActionRisk = "low" | "medium" | "high" | "critical";
 type RecoveryAction =
   | "retry"
   | "edit"
+  | "send-as-new"
   | "refresh-proposal"
   | "restart-pagination"
   | "complete-challenge"
@@ -12857,6 +13659,7 @@ type PublicErrorCode =
   | "forbidden"
   | "not_found"
   | "stale_conversation"
+  | "stale_queued_message"
   | "stale_proposal"
   | "stale_catalog_cursor"
   | "stale_capability_cursor"
@@ -12867,6 +13670,10 @@ type PublicErrorCode =
   | "stale_operation_cursor"
   | "future_event_cursor"
   | "idempotency_conflict"
+  | "queued_message_not_editable"
+  | "queue_full"
+  | "private_context_conflict"
+  | "request_too_large"
   | "private_input_head_conflict"
   | "scope_locked"
   | "not_lineage_head"
@@ -13059,19 +13866,23 @@ Normative status classes:
 - `403`: CSRF, actor, grant, scope, or approval denial;
 - `404`: public resource not found within the authenticated boundary;
 - `409`: stale revision/sequence/lock/catalog/action/lineage/timeline/operation cursor, a future event
-  cursor, idempotency conflict, private-input head conflict, competing winner, non-head revision, exact-preimage drift,
-  or operation state race;
+  cursor, stale queued-message authority, a queued-message edit/dequeue race, idempotency conflict,
+  private-context or private-input head conflict, competing winner, non-head revision, exact-preimage drift, or operation
+  state race;
 - `410`: expired proposal/approval/challenge or unavailable retained rollback material;
+- `413`: a raw request body exceeded its route's fixed byte cap before decoding;
 - `422`: valid JSON with unsupported schema/action/package/target/permission combination;
 - `423`: `scope_locked`, corrupt authority, `needs_recovery`, or writer fenced by a newer schema;
-- `429`: bounded resolver/probe/rate limit;
+- `429`: bounded resolver/probe/rate limit, a full private-stage namespace, or a full per-root message queue;
 - `503`: catalog rebuilding, source unavailable, or required engine/health service unavailable.
 
-Required public codes include `stale_conversation`, `stale_proposal`, `stale_catalog_cursor`,
+Required public codes include `stale_conversation`, `stale_queued_message`, `stale_proposal`, `stale_catalog_cursor`,
 `stale_capability_cursor`,
 `stale_action_projection_cursor`, `stale_pending_proposal_cursor`, `stale_lineage_cursor`,
 `stale_timeline_cursor`, `stale_operation_cursor`, `future_event_cursor`,
-`idempotency_conflict`, `private_input_head_conflict`, `scope_locked`, `not_lineage_head`,
+`idempotency_conflict`, `queued_message_not_editable`, `queue_full`, `private_context_conflict`,
+`request_too_large`,
+`private_input_head_conflict`, `scope_locked`, `not_lineage_head`,
 `lineage_head_unresolved`, `approval_required`, `approval_expired`,
 `challenge_required`, `challenge_expired`, `permission_denied`, `handoff_too_large`,
 `handoff_mismatch`, `source_digest_changed`,
@@ -13082,6 +13893,28 @@ codes are displayed safely as an unsupported recoverable error; clients do not i
 `handoff_too_large` is always `422`, `retryable:false`, and `recovery_action:"edit"`; its details contain
 exactly the already-visible `PublicOversizedHandoffCandidateV1`. It is emitted only after that candidate's
 visible issuance frame is durable.
+
+Message-queue and private-context errors have these exact bounded projections:
+
+| Code | HTTP | Exact message | `retryable` | `recovery_action` | Exact details |
+|---|---:|---|---:|---|---|
+| `queue_full` | `429` | `This conversation already has 32 messages waiting.` | `true` | `retry` | `{root_session_id,max_nonterminal_items:32}` |
+| `queued_message_not_editable` | `409` | `That queued message changed before the edit could commit.` | `false` | `send-as-new` | `{root_session_id,queue_item_id,state,item_digest}` |
+| `stale_queued_message` | `409` | `That queued message no longer matches the conversation authority it followed.` | `false` | `send-as-new` | `{root_session_id,queue_item_id,stale_reason,item_digest}` |
+| `private_context_conflict` | `409` | `Private context changed before this request could commit.` | `false` | `edit` | `{private_context_present,queue_owned}` |
+| `request_too_large` | `413` | `The request body exceeds the 524288-byte limit.` | `false` | null | `{max_body_bytes:524288}` |
+| `rate_limited` (private-stage cap) | `429` | `Too many private context selections are waiting.` | `false` | `edit` | `{max_pending_private_contexts:32}` |
+
+`state` is one closed `ConversationMessageQueueStateV1` value and `stale_reason` is one closed
+`ConversationMessageQueueStaleReasonV1` value. These errors never include content, principal or
+idempotency digests, claim-owner data, head or participant bytes, operation/native identifiers, private
+paths, or provider data. The browser preserves the user's replacement as an unsent draft for both 409
+queued-message codes; `send-as-new` always requires a new explicit submission and never replays it automatically.
+For `private_context_conflict`, both detail values are booleans: `private_context_present` reports only
+whether the selected tuple still owns private context, and `queue_owned:true` means admission/transfer
+already owns it and discard is permanently forbidden. Neither value identifies the context. The body
+limit row applies to every route assigned the 524,288-byte cap above; an early transport rejection uses
+the same shape regardless of `Content-Length` framing.
 
 Failure of the automatic grant arm for `capability.discover` uses the existing `permission_denied` code
 with this exact projection:
@@ -13999,8 +14832,12 @@ toasts are not an acceptable terminal state.
 | Catalog missing/stale/corrupt | Manifests/journals/lineage-head records remain authoritative; rebuild atomically | Retry, Rebuild, inspect diagnostics, or resume by ID |
 | Catalog cursor generation changed | Do not continue a mixed-generation page | Restart pagination from the supplied cursor |
 | Rapid A→B session switch | Late A callbacks cannot mutate generation B | No action unless B fails; retry B |
-| Stream disconnect/gap | Resume from public `last_seq`; dedupe by sequence | Reconnect, explicit resend for a normal message |
-| Browser offline | Preserve in-memory draft; never queue a mutation | Reconnect and explicitly send/confirm |
+| Rapid user sends while an operation runs | Durably admit at most 32 under the root FIFO; claim only the oldest | Inspect queued state, edit the latest own queued item, or wait |
+| Queue claim/process crash | A live or unprovable exact process-start owner remains authoritative; only proved owner death permits a higher epoch that reconciles the same operation | Automatic exact-owner recovery; inspect trace if ownership is unprovable or authority is quarantined |
+| Queued private context failure | Retain the opaque binding through queued/claimed/uncertain state; consume only with delivered or release only with proved pre-append stale | Retry exact recovery; explicitly stage new context only after proved release |
+| Queue head/participant/operation drift | Rebind only from the immediate predecessor's exact delivery proof; otherwise fold typed `stale` | Review the typed reason and explicitly Send as new |
+| Stream disconnect/gap | Resume from public `last_seq`; dedupe by sequence and retry an uncertain enqueue with its original idempotency key | Reconnect; no duplicate admission |
+| Browser offline | Preserve an unadmitted root-keyed in-memory draft; never claim server admission or queue a mutation | Reconnect and explicitly send/confirm |
 | Ambiguous natural-language intent | No proposal or mutation | Clarify or choose a suggested typed action |
 | Proposal expired/stale/competing | Commit is rejected under current lock | Refresh/edit proposal; show winning change |
 | Approval challenge expired/replayed | No approval record is issued | Request a new challenge and confirm interactively |
@@ -14021,8 +14858,10 @@ toasts are not an acceptable terminal state.
 | External projection drift | Do not silently overwrite | Review repair diff or leave unmanaged |
 | Manual/unsupported target | Never report installed/ready | Complete documented step, choose another target, or omit optional target |
 
-Normal messages may offer an explicit idempotent resend after reconnect. Mutations and approvals are
-never queued or auto-replayed offline.
+An online ordinary message is acknowledged only after durable server admission. An offline draft may
+offer an explicit idempotent send after reconnect, but the browser never represents it as queued before
+that response. Typed mutations and approvals are never placed in the message FIFO or auto-replayed
+offline.
 
 ## Security requirements
 
@@ -14040,6 +14879,15 @@ Negative behavior is part of the contract:
 - SSE tokens cannot list, propose, commit, cancel, or cross conversation boundaries;
 - missing/expired authentication, CSRF violations, field tampering, replay, double confirm, and stale
   sequence/lock values are rejected;
+- concurrent queue workers cannot claim past the oldest non-terminal item; a live slow claimant is
+  never superseded by time, and only exact process-start owner-death proof permits takeover of the same
+  deterministic message/operation identity;
+- queued-message browser/SSE/error/persistence projections contain no principal/idempotency preimage,
+  claim owner/process metadata, private-context binding/disposition digest or source ref, file/range
+  bytes, native-provider identifier, prompt, private input, or cross-root bytes; Pinia receives only
+  `private_context_present`;
+- an HTTP, CLI, or Ask compatibility frontend cannot bypass queue admission to append or inject an
+  ordinary user message directly;
 - exactly one concurrent commit wins;
 - requesting and removed agents cannot approve;
 - revoked/expired grants and approvals cannot be revived by `--yes`, replay, or clock-skewed client data;
@@ -14060,6 +14908,9 @@ immediate stop-ship condition.
 Before structural changes, preserve:
 
 - current create/snapshot/control/SSE and stream-token boundaries;
+- `vf ask`, `POST /api/ask`, and `GET /api/ask/stream` compatibility behavior through the shared
+  create-broker/message-queue adapters and Conversation Service, without restoring an Ask modal,
+  independent message writer, or direct-injection bypass;
 - opaque ID and browser redaction rules;
 - durable restart behavior and supported conversation fixtures;
 - existing skill registry, skill sync, tool, MCP, hook, role, `doctor`, and verify behavior;
@@ -14072,6 +14923,22 @@ not mechanically updated to accept any new markup.
 
 - ConversationSessionSummary/revision projection, root/head identity, generation-bound cursor ordering,
   dedupe, catalog-delta chains, snapshot-plus-catch-up, and rebuild idempotency.
+- Message-queue digest/ID golden vectors include exact participant set, active-operation header,
+  authority, durable operation, stable ordinary-operation fold, and digest-to-RFC-UUID conversions;
+  they also cover the 32-item bound, 524,288-byte raw-body/65,536-byte decoded-content boundaries,
+  enqueue/edit idempotency namespaces, immutable sequence and predecessor fields, legal state folds,
+  latest-own edit CAS, and typed stale-reason exhaustiveness.
+- Cross-process queue properties prove that only the oldest non-terminal item can be claimed, a live
+  slow claim blocks later items without a timeout, unprovable/absent ownership fails closed, only exact
+  proved owner death increments the claim epoch, PID reuse cannot win, and every recovery reuses the
+  same deterministic message/operation identity.
+- Private-context queue vectors prove nullability equivalence with `private_context_present`, exact
+  root/principal/head/key stage binding, 32-stage caps, stage/discard idempotency, fresh-stage-before-old-
+  discard replacement, exact pre-root create allocation/transfer, immutable binding digest across
+  content edits/claims, delivered-only consume, proved-pre-append-stale-only release, uncertain
+  retention, and absence of every private binding/ref/path/line/content field from public DTOs, SSE,
+  errors, and Pinia state. Legal stage transitions, discard-after-ownership rejection, TTL non-authority,
+  exact replay after terminal disposition, and legacy-full-binding rejection are table-exhaustive.
 - Ordinary/revision `operationFoldDigest` golden vectors cover empty and every legal dense prefix,
   terminal cancellation claims, strict revision reconciliation prefixes, omitted/reordered/duplicated
   events, source-discriminant projection, correlation/payload attempt mismatch, wrong header/root/
@@ -14488,6 +15355,56 @@ not mechanically updated to accept any new markup.
   TTL/retention, taint propagation, and normal-export exclusion.
 - Adversarial bilingual intent, in-flight safe-boundary races, SSE-token/CSRF/cross-conversation probes,
   and strict `Cache-Control: no-store` assertions produce no unauthorized proposal, read, or mutation.
+- Fault injection at every queue object/current-head fsync, root/draft private-source read/stage/discard,
+  create-ID allocation/transfer, private-context reserve/binding/turn-context/disposition edge,
+  owner-lock acquisition/replacement, public append, operation-terminal,
+  delivery-proof, and state-fold boundary proves restart recovery never drops, duplicates, reorders,
+  leaks, loses the prior selection on failed replacement, releases uncertain or queue-owned private
+  context through discard/TTL, allocates two create roots, or directly injects a message. Compatibility
+  old-message/CLI/Ask routes and the retired full-binding Home route are negative-tested for bypass. A live claimant delayed past
+  30 seconds is never stolen; head/participant/operation drift accepts only the exact predecessor-proof
+  successor and otherwise records the matching typed stale reason.
+
+### Owned CLI process lifecycle and orphan recovery
+
+Every real engine launch is one attempt-owned process tree, not an untracked shell side effect. Before
+the engine can execute, VibeFlow durably reserves the attempt and an owned supervisor root. The runtime
+record then binds the attempt ID, engine, host, supervisor PID and process-start identity, CLI PID and
+process-start identity, platform strategy, owner PID and process-start identity, and record digest. The
+supervisor remains the stable root of every CLI/tool descendant even where the engine itself replaces or
+spawns processes. A missing PID binding after an engine could have executed is `unknown`, never silently
+`released`.
+
+The process strategy is explicit and portable: POSIX launches the supervisor as a new session/process
+group and terminates the exact owned group; Windows launches a hidden supervisor and terminates the exact
+root plus descendants with the platform tree primitive. Direct single-PID termination is not accepted as
+Windows tree-quiescence proof. PID values are never trusted alone: live checks, recovery, and termination
+must re-observe the matching process-start identity immediately before acting, so PID reuse cannot target
+an unrelated process. A foreign host, missing identity provider, identity mismatch, corrupt record, or
+ambiguous tree observation fails closed and is reported for manual recovery without sending a signal.
+
+An authenticated engine terminal record starts bounded exit/reap handling; it does not by itself mark the
+attempt released. Normal root exit also enters the same reap path so descendants retaining stdout/stderr
+cannot hang completion. The attempt becomes `completed` or `ambiguous` only after the owned tree is proved
+quiescent and a durable release record binds the terminal observation, exit result, release strategy, and
+exact runtime record. `AttemptStartAuthorityV1.process_quiescent: true` is valid only with that release
+proof. If a proved terminal engine remains live, VibeFlow terminates and reaps its owned tree without
+discarding the authenticated terminal result; timeout/cancel/startup failures retain their existing
+ambiguous semantics.
+
+On runtime startup, before accepting a new engine launch, VibeFlow scans nonterminal process records. A
+live matching owner means the attempt is active and must not be stolen. A proved-dead owner plus a live,
+identity-matching supervisor is an orphan and is automatically reaped through the recorded platform
+strategy; a root already absent is finalized only after descendant quiescence can be proved. `vf doctor`
+reports active, recovered, and uncertain CLI process records; `vf doctor --fix` performs the same
+identity-gated recovery. Recovery is idempotent across crash boundaries and never relies on record age or
+a timeout as proof of ownership.
+
+Contract tests use real nested children on POSIX and injected Windows process inspection/tree termination
+to prove: PID/runtime persistence precedes engine execution, structured terminal output cannot leave a
+hanging CLI, root exit cannot leave a pipe-holding descendant, cancellation and timeout reap once, restart
+recovers a proved orphan, a live owner is preserved, PID reuse/foreign/corrupt evidence is never killed,
+and every accepted attempt authority has a matching durable quiescence proof.
 
 Every mutating capability acceptance test must assert all four together:
 
@@ -14501,6 +15418,15 @@ Every mutating capability acceptance test must assert all four together:
 - First-run empty Home and populated/search/pagination flows.
 - Restart-safe session discovery and activation.
 - Rapid A→B switching with late snapshot/token/event suppression and timer cleanup.
+- Continuous sends during a live operation survive reload/restart in FIFO order; A's queue/fetch/edit
+  completion never reaches B; a full queue preserves the unsent draft.
+- On an empty non-IME composer with no active menu, `ArrowUp` edits only the latest own queued item;
+  `Enter` performs the same-slot ID/digest CAS without changing its sequence, `Escape` cancels and
+  restores focus, and a claimed/dequeued-item 409 preserves the replacement as an unsent draft with an
+  explicit Send-as-new recovery.
+- A queued message with one-shot file/range context survives wait/reload and content-only edit while
+  Pinia/UI traffic exposes only `private_context_present`; delivery receives the exact original private
+  turn context once, stale releases only before append, and Send-as-new never inherits it.
 - Offline/reconnect, explicit resend, persistent pending proposal, and stale-proposal refresh.
 - Cross-domain operation progress survives lost conversation delivery and page reconnect.
 - Add/remove agent child revision, continuous lineage, fresh sessions, and identical handoff digest.
@@ -14519,6 +15445,9 @@ Every mutating capability acceptance test must assert all four together:
 ### Migration and release rehearsal
 
 - Rebuild catalog from a copy of real pre-feature durable data.
+- Migrate final Home create/file-range selection to the principal-keyed pre-root broker and boolean-only
+  request; prove no Home/Pinia/browser persistence contains a legacy `private_file_range` binding and an
+  interrupted transfer resumes the same allocated root before catalog visibility.
 - Dry-run and approved import of existing VF-owned capability state.
 - Exercise every legacy synthetic identity/eligibility row, ownership conflict, exact-preimage drift,
   unverified lineage, user-confirmed association, and Adopt refusal case.
@@ -14555,8 +15484,8 @@ program:
 
 1. **Foundation:** characterization tests, versioned readers, shared action envelope, redaction and CAS
    primitives.
-2. **Conversation catalog/Home state:** durable projection/list API, session store, guarded activation,
-   and persistent shell.
+2. **Conversation catalog/Home state:** durable projection/list API, per-root message FIFO and recovery,
+   session store, guarded activation, queued-message edit, and persistent shell.
 3. **Revision continuity:** generalized binding delta, canonical handoff, durable lineage, proposal API,
    and agent/settings cards.
 4. **Capability core:** package schema/resolver, permission model, scope lock, operation journal, and
@@ -14631,6 +15560,15 @@ The program is complete only when all of the following are true:
 
 - AI conversation is the default Home and the modal workspace path is removed.
 - The durable searchable session rail survives process restart and safely handles rapid switching.
+- Continuous ordinary sends are durably admitted and delivered through the per-root bounded FIFO;
+  oldest-only cross-process claim, exact predecessor-proof rebind, restart recovery, typed stale folds,
+  and latest-own `ArrowUp` edit all pass without sequence change, message loss, or direct injection.
+- Queued one-shot private file/range context survives content-only edit and restart through its exact
+  server-owned binding, is consumed or released only by the proved queue outcome, and exposes no private
+  bytes or identifiers through public/browser persistence.
+- Initial-conversation private context uses the pre-root draft broker, lossless replacement/discard,
+  and one recoverable exact-ID transfer; final Home carries only `private_context_present` and never a
+  legacy full binding.
 - Existing conversations remain discoverable or recoverable without authoritative-data rewrite.
 - Add/remove agent produces a child revision with durable lineage and identical canonical context for
   every fresh child session.

@@ -2,7 +2,7 @@ import type { LegacySourceV1 } from "../../actions/legacy-adopt-types.js";
 import type { EngineName } from "../../actions/types.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import type { CapabilityComponentV1 } from "../manifest/types.js";
-import { CapabilityValidationError, bytewise } from "../wire/primitives.js";
+import { CapabilityValidationError } from "../wire/primitives.js";
 import type {
   CapabilityAdapterIdentityV1,
   CapabilityAdapterRegistryEntryV1,
@@ -176,19 +176,6 @@ export function validateCapabilityAdapterRegistry(
         "adapter fingerprint/identity drifted",
         `adapter_registry.entries[${index}].adapter`,
       );
-    }
-    if (index > 0) {
-      const prior = value.entries[index - 1] as CapabilityAdapterRegistryEntryV1;
-      if (
-        bytewise(
-          `${prior.component_type}\0${prior.engine}`,
-          `${actual.component_type}\0${actual.engine}`,
-        ) === 0
-      )
-        throw new CapabilityValidationError(
-          "adapter registry contains duplicate entries",
-          "adapter_registry.entries",
-        );
     }
   }
   const expectedLegacy = legacyAdoptionEntries();

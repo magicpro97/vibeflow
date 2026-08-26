@@ -77,28 +77,24 @@ function authorityCommand(positionals: string[]): {
   if (positionals.length === 0) usage("missing authority subcommand");
   const [first, second, third] = positionals;
   if (third !== undefined) usage("authority commands do not accept extra positionals");
-  if (first === "grant") {
-    if (second === "create")
-      return {
-        command: "authority.grant.create",
-        directFlagNames: ["grant-file"],
-        consumedCommandWords: 2,
-      };
-    if (second === "renew") {
-      return {
-        command: "authority.grant.renew",
-        directFlagNames: ["grant-id", "grant-file"],
-        consumedCommandWords: 2,
-      };
-    }
-    if (second === "revoke") {
-      return {
-        command: "authority.grant.revoke",
-        directFlagNames: ["grant-id", "scope"],
-        consumedCommandWords: 2,
-      };
-    }
-  }
+  if (first === "grant" && second === "create")
+    return {
+      command: "authority.grant.create",
+      directFlagNames: ["grant-file"],
+      consumedCommandWords: 2,
+    };
+  if (first === "grant" && second === "renew")
+    return {
+      command: "authority.grant.renew",
+      directFlagNames: ["grant-id", "grant-file"],
+      consumedCommandWords: 2,
+    };
+  if (first === "grant" && second === "revoke")
+    return {
+      command: "authority.grant.revoke",
+      directFlagNames: ["grant-id", "scope"],
+      consumedCommandWords: 2,
+    };
   if (first === "policy" && second === "update") {
     return {
       command: "authority.policy.update",

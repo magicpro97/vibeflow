@@ -17,7 +17,29 @@
         </dl>
       </section>
 
-      <div v-if="store.activationLoading && !store.timeline" class="home-capability-skeleton" aria-label="Loading trace"><span v-for="index in 5" :key="index" /></div>
+      <div
+        v-if="store.activationLoading && !store.timeline"
+        class="home-loading-panel home-loading-panel--drawer"
+        aria-label="Loading trace"
+        role="status"
+        aria-live="polite"
+      >
+        <header class="home-loading-panel__header">
+          <span>{{ traceLoading.eyebrow }}</span>
+          <strong>{{ traceLoading.title }}</strong>
+        </header>
+        <p class="home-loading-panel__copy">{{ traceLoading.detail }}</p>
+        <ul class="home-loading-panel__checkpoints" aria-label="Trace restore progress">
+          <li v-for="checkpoint in traceLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
+        </ul>
+        <div class="home-loading-trace" aria-hidden="true">
+          <article v-for="index in 3" :key="index">
+            <strong />
+            <small />
+            <span />
+          </article>
+        </div>
+      </div>
       <div v-else-if="!store.activeSession" class="home-drawer-state">
         <span class="home-drawer-state__glyph" aria-hidden="true">⌁</span><strong>No conversation selected</strong><span>Choose a session to inspect its durable public trace.</span>
       </div>
@@ -44,6 +66,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { describeHomeTraceLoading } from "../conversation-home-loading.js";
 import { projectHomeTrace } from "../conversation-home-projection.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 
@@ -52,6 +75,11 @@ defineEmits<{ close: [] }>();
 const store = useConversationHomeStore();
 const closeButton = ref<HTMLButtonElement | null>(null);
 const entries = computed(() => projectHomeTrace(store.timeline?.items ?? []));
+const traceLoading = computed(() =>
+  describeHomeTraceLoading(
+    store.activeSession?.active?.topic ?? store.activeSession?.root.topic ?? null,
+  ),
+);
 const short = (value: string) =>
   value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value;
 const clock = (value: string) =>

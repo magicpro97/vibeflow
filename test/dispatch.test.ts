@@ -174,13 +174,13 @@ describe("antigravity argv boundary", () => {
 });
 
 describe("runDispatch resumeSessionId threading (#618 PR2a)", () => {
-  test("runDispatch threads resumeSessionId to claude invocation (#618 PR2a)", () => {
+  test("runDispatch threads resumeSessionId to claude invocation (#618 PR2a)", async () => {
     let capturedArgs: string[] = [];
-    const spawner = (_c: string, a: string[], _i: string) => {
+    const spawner = async (_c: string, a: string[], _i: string) => {
       capturedArgs = a;
       return { status: 0, stdout: "", stderr: "" };
     };
-    runDispatch({
+    await runDispatch({
       engine: "claude",
       prompt: "x",
       mode: "cli",
@@ -190,13 +190,13 @@ describe("runDispatch resumeSessionId threading (#618 PR2a)", () => {
     expect(capturedArgs).toEqual(["-p", "-r", CLAUDE_UUID, "--output-format", "json"]);
   });
 
-  test("runDispatch without resumeSessionId → fresh claude args (#618 PR2a)", () => {
+  test("runDispatch without resumeSessionId → fresh claude args (#618 PR2a)", async () => {
     let capturedArgs: string[] = [];
-    const spawner = (_c: string, a: string[], _i: string) => {
+    const spawner = async (_c: string, a: string[], _i: string) => {
       capturedArgs = a;
       return { status: 0, stdout: "", stderr: "" };
     };
-    runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
+    await runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
     expect(capturedArgs).toEqual(["-p", "--output-format", "json"]);
   });
 
@@ -228,22 +228,27 @@ describe("runDispatch resumeSessionId threading (#618 PR2a)", () => {
 });
 
 describe("runDispatch — copilot-absent path (defect #1)", () => {
-  test("cli mode for absent copilot yields an unavailable reason, runs no command", () => {
+  test("cli mode for absent copilot yields an unavailable reason, runs no command", async () => {
     // Inject has:()=>false so this is deterministic and NEVER spawns a real engine (copilot may
     // be installed on the dev machine). Asserts the absent path → unavailable, no bogus `gh -p`.
-    const r = runDispatch({ engine: "copilot", prompt: "p", mode: "cli", has: () => false });
+    const r = await runDispatch({
+      engine: "copilot",
+      prompt: "p",
+      mode: "cli",
+      has: () => false,
+    });
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/copilot/i);
   });
 
-  test("cli mode passes Copilot a short file-pointer arg, not the raw prompt (#526)", () => {
+  test("cli mode passes Copilot a short file-pointer arg, not the raw prompt (#526)", async () => {
     const calls: { cmd: string; args: string[]; input: string }[] = [];
-    const spawner = (cmd: string, args: string[], input: string) => {
+    const spawner = async (cmd: string, args: string[], input: string) => {
       calls.push({ cmd, args, input });
       return { status: 0, stdout: "done" };
     };
     const written: { path: string; content: string }[] = [];
-    const r = runDispatch({
+    const r = await runDispatch({
       engine: "copilot",
       prompt: "hello copilot",
       mode: "cli",
@@ -303,15 +308,15 @@ describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () =
     expect(written[0]?.path).toBe("/repo/.vibeflow/dispatch/etc-passwd.md");
   });
 
-  test("pointer stays a few hundred bytes even for a 50KB prompt (argv bound)", () => {
+  test("pointer stays a few hundred bytes even for a 50KB prompt (argv bound)", async () => {
     const huge = "x".repeat(50_000);
     let captured = "";
-    const spawner = (_cmd: string, args: string[]) => {
+    const spawner = async (_cmd: string, args: string[]) => {
       captured = args.join(" ");
       return { status: 0, stdout: "" };
     };
     const written: { path: string; content: string }[] = [];
-    const r = runDispatch({
+    const r = await runDispatch({
       engine: "copilot",
       prompt: huge,
       mode: "cli",
@@ -328,14 +333,14 @@ describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () =
     expect(written[0]?.content.length).toBe(50_000);
   });
 
-  test("claude is unchanged — prompt goes to stdin, no dispatch file written", () => {
+  test("claude is unchanged — prompt goes to stdin, no dispatch file written", async () => {
     const calls: { cmd: string; args: string[]; input: string }[] = [];
-    const spawner = (cmd: string, args: string[], input: string) => {
+    const spawner = async (cmd: string, args: string[], input: string) => {
       calls.push({ cmd, args, input });
       return { status: 0, stdout: "done" };
     };
     let wrote = false;
-    const r = runDispatch({
+    const r = await runDispatch({
       engine: "claude",
       prompt: "claude prompt",
       mode: "cli",
@@ -523,7 +528,7 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
     }
   });
 
-  test("runDispatch sync bridge: stderr is routed to onStderrChunk (PR28 audit M5)", () => {
+  test("runDispatch bridge: stderr is routed to onStderrChunk (PR28 audit M5)", async () => {
     // Pre-fix: the sync bridge spawner captured stderr in the
     // return value but never called the caller's onStderrChunk
     // hook — stderr was silently dropped on the floor for the
@@ -534,7 +539,7 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
     process.env.VIBEFLOW_AI = "sh -c 'echo bridge-stderr-noise 1>&2'";
     try {
       const captured: string[] = [];
-      const r = runDispatch({
+      const r = await runDispatch({
         engine: "claude",
         prompt: "p",
         mode: "bridge",
@@ -1238,12 +1243,12 @@ describe("defaultSpawner (test seam)", () => {
     }
   });
 
-  test("runDispatch: claude with has(claude)=false returns 'claude CLI not found' (line 402)", () => {
+  test("runDispatch: claude with has(claude)=false returns 'claude CLI not found' (line 402)", async () => {
     // For non-copilot engines, engineCommand returns a successful
     // command object. Then runDispatch checks `!hasSpawner && !has(cmd)`.
     // With has=()=>false, the `claude` command is "not found" → 402 fires.
     const { runDispatch } = require("../src/dispatch.js");
-    const r = runDispatch({
+    const r = await runDispatch({
       engine: "claude",
       prompt: "p",
       mode: "cli",
@@ -1699,7 +1704,7 @@ describe("parseSessionId codex (#618 PR2b-2)", () => {
 });
 
 describe("internal dispatch resume binding (#618)", () => {
-  test("runDispatch never exposes the captured native session id structurally", () => {
+  test("runDispatch never exposes the captured native session id structurally", async () => {
     const envelope = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -1707,12 +1712,12 @@ describe("internal dispatch resume binding (#618)", () => {
       num_turns: 2,
       result: "",
     });
-    const spawner = (_c: string, _a: string[], _i: string) => ({
+    const spawner = async (_c: string, _a: string[], _i: string) => ({
       status: 0,
       stdout: envelope,
       stderr: "",
     });
-    const r = runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
+    const r = await runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
     const dispatchResultHasSessionId: "sessionId" extends keyof typeof r ? true : false = false;
     expect(dispatchResultHasSessionId).toBe(false);
     expect("sessionId" in r).toBe(false);
@@ -1725,13 +1730,13 @@ describe("internal dispatch resume binding (#618)", () => {
     expect(Object.isFrozen(binding)).toBe(true);
   });
 
-  test("runDispatch without a native envelope has no session identity property", () => {
-    const spawner = (_c: string, _a: string[], _i: string) => ({
+  test("runDispatch without a native envelope has no session identity property", async () => {
+    const spawner = async (_c: string, _a: string[], _i: string) => ({
       status: 0,
       stdout: "plain text no json",
       stderr: "",
     });
-    const r = runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
+    const r = await runDispatch({ engine: "claude", prompt: "x", mode: "cli", spawner });
     expect("sessionId" in r).toBe(false);
     expect(readDispatchResumeBinding(r)).toBeUndefined();
   });

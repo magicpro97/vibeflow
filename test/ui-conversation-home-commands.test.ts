@@ -5,6 +5,7 @@ import { computed, ref } from "vue";
 import { createHomeActionMutationRuntime } from "../src/ui/src/conversation-home-action-runtime.js";
 import { conversationHomeApi } from "../src/ui/src/conversation-home-api.js";
 import { createHomeCommandRuntime } from "../src/ui/src/conversation-home-command-runtime.js";
+import type { HomeQueueAdmissionSnapshot } from "../src/ui/src/conversation-home-message-queue-runtime.js";
 import { watchHomeOperation } from "../src/ui/src/conversation-home-operation-stream.js";
 import { terminalHomeOperation } from "../src/ui/src/conversation-home-runtime.js";
 import {
@@ -15,7 +16,6 @@ import type {
   HomeActionApproval,
   HomeActionView,
   HomePendingChallenge,
-  HomePrivateFileRangeBinding,
   HomeQuoteReference,
   HomeTimelineResponse,
 } from "../src/ui/src/conversation-home-types.js";
@@ -48,21 +48,6 @@ function revision(rootSessionId: string) {
     updated_at: "2026-08-25T00:00:00.000Z",
     last_seq: 1,
     lock_digest: `lock-${rootSessionId}`,
-  };
-}
-
-function privateRange(path = "src/private.ts"): HomePrivateFileRangeBinding {
-  return {
-    schema_version: "1.0",
-    handoff_id: "vf-file-range-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    handoff_record_digest:
-      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    repo_relative_path: path,
-    start_line: 10,
-    end_line: 12,
-    line_count: 3,
-    staged_at: "2026-08-25T00:00:00.000Z",
-    expires_at: "2026-08-25T00:10:00.000Z",
   };
 }
 
@@ -164,7 +149,34 @@ function commandHarness(initialRoot = "root-a", active = true) {
   const online = ref(true);
   const submitting = ref(false);
   const submittingToken = ref<string | null>(null);
-  const privateFileRangeState = ref<HomePrivateFileRangeBinding | null>(null);
+  const privateContextPresent = ref(false);
+  const privateContextKeys = new Map<string, string>();
+  const privateScope = () => activeRootId.value ?? "draft";
+  const syncPrivateContext = () => {
+    privateContextPresent.value = privateContextKeys.has(privateScope());
+  };
+  const setPrivateContext = (key = `private-${privateScope()}`) => {
+    privateContextKeys.set(privateScope(), key);
+    syncPrivateContext();
+  };
+  const capturePrivateContext = (scope: string) => {
+    const key = privateContextKeys.get(scope);
+    if (!key) return null;
+    return {
+      idempotency_key: key,
+      private_context_present: true as const,
+      clearIfCurrent() {
+        if (privateContextKeys.get(scope) === key) privateContextKeys.delete(scope);
+        syncPrivateContext();
+      },
+      restoreIfVacant() {
+        if (privateContextKeys.has(scope)) return false;
+        privateContextKeys.set(scope, key);
+        syncPrivateContext();
+        return true;
+      },
+    };
+  };
   const composerError = ref("");
   const activationError = ref("");
   const quoteRefs = ref<HomeQuoteReference[]>([]);
@@ -187,6 +199,13 @@ function commandHarness(initialRoot = "root-a", active = true) {
   }> = [];
   const authoritativeHeadResult = ref(true);
   const selectSessionCalls: string[] = [];
+  const queueAdmissions: HomeQueueAdmissionSnapshot[] = [];
+  const queueAdmissionHandler = ref<(admission: HomeQueueAdmissionSnapshot) => Promise<boolean>>(
+    async (admission) => {
+      admission.clearIfCurrent();
+      return true;
+    },
+  );
   const runtime = createHomeCommandRuntime({
     activation,
     activeRevision,
@@ -196,7 +215,11 @@ function commandHarness(initialRoot = "root-a", active = true) {
     online,
     submitting,
     submittingToken,
-    privateFileRange: privateFileRangeState,
+    privateContext: {
+      present: () => privateContextPresent.value,
+      captureForMessage: (rootSessionId) => capturePrivateContext(rootSessionId),
+      captureForCreate: () => capturePrivateContext("draft"),
+    },
     composerError,
     activationError,
     quoteRefs,
@@ -226,6 +249,14 @@ function commandHarness(initialRoot = "root-a", active = true) {
     },
     sessions,
     sessionQuery,
+    messageQueue: {
+      enqueue(admission) {
+        queueAdmissions.push(admission);
+        return queueAdmissionHandler.value(admission);
+      },
+      currentEdit: () => null,
+      saveEdit: async () => false,
+    },
   });
 
   return {
@@ -237,7 +268,10 @@ function commandHarness(initialRoot = "root-a", active = true) {
     online,
     submitting,
     submittingToken,
-    privateFileRangeState,
+    privateContextPresent,
+    privateContextKeys,
+    setPrivateContext,
+    syncPrivateContext,
     composerError,
     activationError,
     quoteRefs,
@@ -252,6 +286,8 @@ function commandHarness(initialRoot = "root-a", active = true) {
     refreshAuthoritativeHeadCalls,
     authoritativeHeadResult,
     selectSessionCalls,
+    queueAdmissions,
+    queueAdmissionHandler,
     runtime,
   };
 }
@@ -301,6 +337,7 @@ function switchCommandHarness(
   harness.activation.begin(rootSessionId);
   harness.activeRootId.value = options.active === false ? null : rootSessionId;
   harness.activeRevisionState.value = options.active === false ? null : revision(rootSessionId);
+  harness.syncPrivateContext();
   if (options.clearSubmitting) {
     harness.submitting.value = false;
     harness.submittingToken.value = null;
@@ -376,52 +413,40 @@ describe("conversation Home command races", () => {
     }
   });
 
-  test("reply sends ignore stale errors and preserve the next activation's submitting state", async () => {
-    const originalMessage = conversationHomeApi.message;
-    const first = deferred<{ message_id: string; accepted: true }>();
-    const second = deferred<{ message_id: string; accepted: true }>();
+  test("reply queue callbacks cannot clear the next activation's composer", async () => {
+    const first = deferred<boolean>();
+    const second = deferred<boolean>();
+    const harness = commandHarness("root-a");
     let calls = 0;
-    conversationHomeApi.message = (() => {
+    harness.queueAdmissionHandler.value = async (admission) => {
       calls += 1;
-      return calls === 1 ? first.promise : second.promise;
-    }) as typeof conversationHomeApi.message;
+      const accepted = await (calls === 1 ? first.promise : second.promise);
+      if (accepted) admission.clearIfCurrent();
+      else admission.restoreIfVacant();
+      return accepted;
+    };
+    harness.draft.value = "message A";
+    harness.setPrivateContext("private-a");
+    harness.quoteRefs.value = [quoteRef("root-a")];
 
-    try {
-      const harness = commandHarness("root-a");
-      harness.draft.value = "message A";
-      harness.privateFileRangeState.value = privateRange("src/a.ts");
-      harness.quoteRefs.value = [quoteRef("root-a")];
+    const sendingA = harness.runtime.submitDraft();
+    switchCommandHarness(harness, "root-b", { clearSubmitting: true });
+    harness.draft.value = "message B";
+    harness.setPrivateContext("private-b");
+    harness.quoteRefs.value = [quoteRef("root-b")];
+    const sendingB = harness.runtime.submitDraft();
 
-      const sendingA = harness.runtime.submitDraft();
+    first.resolve(false);
+    await sendingA;
+    expect(harness.submitting.value).toBeFalse();
+    expect(harness.draft.value).toBe("message B");
+    expect(harness.quoteRefs.value[0]?.root_session_id).toBe("root-b");
 
-      switchCommandHarness(harness, "root-b", {
-        clearSubmitting: true,
-      });
-      harness.draft.value = "message B";
-      harness.privateFileRangeState.value = privateRange("src/b.ts");
-      harness.quoteRefs.value = [quoteRef("root-b")];
-      const sendingB = harness.runtime.submitDraft();
-      const settledA = sendingA.then(
-        () => undefined,
-        (error) => error,
-      );
-
-      first.reject(new Error("message A failed"));
-      expect(await settledA).toBeUndefined();
-      expect(harness.submitting.value).toBeTrue();
-      expect(harness.draft.value).toBe("message B");
-      expect(harness.quoteRefs.value[0]?.root_session_id).toBe("root-b");
-      expect(harness.composerError.value).toBe("");
-
-      second.resolve({ message_id: "message-b", accepted: true });
-      await sendingB;
-      expect(harness.submitting.value).toBeFalse();
-      expect(harness.draft.value).toBe("");
-      expect(harness.quoteRefs.value).toEqual([]);
-      expect(harness.privateFileRangeState.value).toBeNull();
-    } finally {
-      conversationHomeApi.message = originalMessage;
-    }
+    second.resolve(true);
+    await sendingB;
+    expect(harness.draft.value).toBe("");
+    expect(harness.quoteRefs.value).toEqual([]);
+    expect(harness.privateContextPresent.value).toBeFalse();
   });
 
   test("new-conversation sends ignore stale success and never force-select the created root", async () => {
@@ -436,7 +461,7 @@ describe("conversation Home command races", () => {
     try {
       const harness = commandHarness("root-a", false);
       harness.draft.value = "Create A";
-      harness.privateFileRangeState.value = privateRange("src/create.ts");
+      harness.setPrivateContext("private-create");
 
       const creating = harness.runtime.submitDraft();
       switchCommandHarness(harness, "root-b", { clearSubmitting: true });
@@ -450,7 +475,46 @@ describe("conversation Home command races", () => {
       expect(harness.selectSessionCalls).toEqual([]);
       expect(harness.refreshSessionsCalls).toEqual([]);
       expect(harness.draft.value).toBe("Create A");
-      expect(harness.privateFileRangeState.value?.repo_relative_path).toBe("src/create.ts");
+      expect(harness.privateContextKeys.get("draft")).toBe("private-create");
+    } finally {
+      conversationHomeApi.create = originalCreate;
+    }
+  });
+
+  test("new-conversation transport loss replays one exact create command", async () => {
+    const originalCreate = conversationHomeApi.create;
+    const requests: Parameters<typeof conversationHomeApi.create>[0][] = [];
+    conversationHomeApi.create = (async (request) => {
+      requests.push(structuredClone(request));
+      if (requests.length === 1) throw new TypeError("response lost");
+      return {
+        conversation_id: "created-conversation",
+        stream_token: "stream-token",
+        stream_token_expires_at: "2026-08-25T00:05:00.000Z",
+      };
+    }) as typeof conversationHomeApi.create;
+
+    try {
+      const harness = commandHarness("root-a", false);
+      harness.sessions.value = [
+        {
+          root_session_id: "root-created",
+          root: revision("created"),
+        },
+      ];
+      harness.draft.value = "Create exactly once";
+
+      await harness.runtime.submitDraft();
+
+      expect(requests).toHaveLength(2);
+      expect(requests[0]).toEqual(requests[1]);
+      expect(requests[0]).toEqual({
+        schema_version: "1.0",
+        idempotency_key: expect.stringMatching(/^home-create\.[A-Za-z0-9._~-]+$/),
+        topic: "Create exactly once",
+        private_context_present: false,
+      });
+      expect(harness.selectSessionCalls).toEqual(["root-created"]);
     } finally {
       conversationHomeApi.create = originalCreate;
     }
@@ -480,100 +544,68 @@ describe("conversation Home command races", () => {
     }
   });
 
-  test("successful sends settle each composer field only when its consumed snapshot is still current", async () => {
-    const originalMessage = conversationHomeApi.message;
-    const reply = deferred<{ message_id: string; accepted: true }>();
-    conversationHomeApi.message = (() => reply.promise) as typeof conversationHomeApi.message;
+  test("successful queue admission settles each composer field only when its snapshot is current", async () => {
+    const reply = deferred<boolean>();
+    const harness = commandHarness("root-a");
+    harness.queueAdmissionHandler.value = async (admission) => {
+      await reply.promise;
+      admission.clearIfCurrent();
+      return true;
+    };
+    harness.draft.value = "Keep the new selection.";
+    harness.setPrivateContext("private-a");
+    harness.quoteRefs.value = [quoteRef("root-a")];
 
-    try {
-      const harness = commandHarness("root-a");
-      harness.draft.value = "Keep the new selection.";
-      harness.privateFileRangeState.value = privateRange("src/a.ts");
-      harness.quoteRefs.value = [quoteRef("root-a")];
+    const sending = harness.runtime.submitDraft();
+    harness.setPrivateContext("private-b");
+    harness.quoteRefs.value = [
+      {
+        ...quoteRef("root-a"),
+        source_key: "root-a-source-b",
+        source_event_ids: ["root-a-source-event-b"],
+        target_event_id: "root-a-event-final-b",
+        content_digest: "sha256:root-a-b",
+      },
+    ];
 
-      const sending = harness.runtime.submitDraft();
-      harness.privateFileRangeState.value = {
-        ...privateRange("src/b.ts"),
-        handoff_id:
-          "vf-file-range-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        handoff_record_digest:
-          "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-      };
-      harness.quoteRefs.value = [
-        {
-          ...quoteRef("root-a"),
-          source_key: "root-a-source-b",
-          source_event_ids: ["root-a-source-event-b"],
-          target_event_id: "root-a-event-final-b",
-          content_digest: "sha256:root-a-b",
-        },
-      ];
-
-      reply.resolve({ message_id: "message-a", accepted: true });
-      await sending;
-      expect(harness.draft.value).toBe("");
-      expect(harness.quoteRefs.value[0]?.source_key).toBe("root-a-source-b");
-      expect(harness.privateFileRangeState.value?.repo_relative_path).toBe("src/b.ts");
-    } finally {
-      conversationHomeApi.message = originalMessage;
-    }
+    reply.resolve(true);
+    await sending;
+    expect(harness.draft.value).toBe("");
+    expect(harness.quoteRefs.value[0]?.source_key).toBe("root-a-source-b");
+    expect(harness.privateContextKeys.get("root-a")).toBe("private-b");
   });
 
-  test("successful sends keep a newer draft while retiring unchanged consumed quote and private range", async () => {
-    const originalMessage = conversationHomeApi.message;
-    const reply = deferred<{ message_id: string; accepted: true }>();
-    conversationHomeApi.message = (() => reply.promise) as typeof conversationHomeApi.message;
+  test("successful queue admission keeps a newer draft while retiring consumed context", async () => {
+    const reply = deferred<boolean>();
+    const harness = commandHarness("root-a");
+    harness.queueAdmissionHandler.value = async (admission) => {
+      await reply.promise;
+      admission.clearIfCurrent();
+      return true;
+    };
+    harness.draft.value = "Draft A";
+    harness.setPrivateContext("private-a");
+    harness.quoteRefs.value = [quoteRef("root-a")];
 
-    try {
-      const harness = commandHarness("root-a");
-      harness.draft.value = "Draft A";
-      harness.privateFileRangeState.value = privateRange("src/a.ts");
-      harness.quoteRefs.value = [quoteRef("root-a")];
+    const sending = harness.runtime.submitDraft();
+    harness.draft.value = "Draft B";
 
-      const sending = harness.runtime.submitDraft();
-      harness.draft.value = "Draft B";
-
-      reply.resolve({ message_id: "message-a", accepted: true });
-      await sending;
-      expect(harness.draft.value).toBe("Draft B");
-      expect(harness.quoteRefs.value).toEqual([]);
-      expect(harness.privateFileRangeState.value).toBeNull();
-    } finally {
-      conversationHomeApi.message = originalMessage;
-    }
+    reply.resolve(true);
+    await sending;
+    expect(harness.draft.value).toBe("Draft B");
+    expect(harness.quoteRefs.value).toEqual([]);
+    expect(harness.privateContextPresent.value).toBeFalse();
   });
 
-  test("revision-producing sends adopt only the exact child returned by the message authority", async () => {
-    const originalMessage = conversationHomeApi.message;
-    conversationHomeApi.message = (async () => ({
-      message_id: "message-child",
-      accepted: true,
-      child_conversation_id: "child-exact",
-    })) as typeof conversationHomeApi.message;
-
-    try {
-      const accepted = commandHarness("root-a");
-      accepted.draft.value = "Continue in a revision";
-      await accepted.runtime.submitDraft();
-      expect(accepted.refreshAuthoritativeHeadCalls).toEqual([
-        { rootSessionId: "root-a", expectedConversationId: "child-exact" },
-      ]);
-      expect(accepted.refreshSessionsCalls).toEqual([]);
-      expect(accepted.refreshActiveSelectionCalls).toEqual([]);
-      expect(accepted.submitting.value).toBeFalse();
-
-      const mismatched = commandHarness("root-a");
-      mismatched.authoritativeHeadResult.value = false;
-      mismatched.draft.value = "Do not adopt a different child";
-      await mismatched.runtime.submitDraft();
-      expect(mismatched.refreshAuthoritativeHeadCalls[0]?.expectedConversationId).toBe(
-        "child-exact",
-      );
-      expect(mismatched.activationError.value).toContain("authoritative session head");
-      expect(mismatched.submitting.value).toBeFalse();
-    } finally {
-      conversationHomeApi.message = originalMessage;
-    }
+  test("queue admission never guesses or directly adopts a child revision", async () => {
+    const harness = commandHarness("root-a");
+    harness.draft.value = "Continue in a revision";
+    await harness.runtime.submitDraft();
+    expect(harness.queueAdmissions).toHaveLength(1);
+    expect(harness.refreshAuthoritativeHeadCalls).toEqual([]);
+    expect(harness.refreshSessionsCalls).toEqual([]);
+    expect(harness.refreshActiveSelectionCalls).toEqual([]);
+    expect(harness.submitting.value).toBeFalse();
   });
 
   test("requestChallenge keeps the second activation busy slot intact when proposal ids are reused", async () => {
@@ -896,6 +928,7 @@ describe("conversation Home command races", () => {
       };
       await harness.runtime.toggleReaction(ancestor, "👍");
       expect(calls).toHaveLength(1);
+      expect(calls[0]?.idempotency_key).toMatch(/^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/);
       expect(calls[0]?.message_ref).toMatchObject({
         root_session_id: "root-a",
         conversation_id: "root-a-parent-conversation",
@@ -908,7 +941,6 @@ describe("conversation Home command races", () => {
   test("every Home write path fails closed while offline without touching transport", async () => {
     const originals = {
       create: conversationHomeApi.create,
-      message: conversationHomeApi.message,
       reaction: conversationHomeApi.reaction,
       propose: conversationHomeApi.propose,
       challenge: conversationHomeApi.challenge,
@@ -922,7 +954,6 @@ describe("conversation Home command races", () => {
       throw new Error("offline transport must not run");
     };
     conversationHomeApi.create = blocked as typeof conversationHomeApi.create;
-    conversationHomeApi.message = blocked as typeof conversationHomeApi.message;
     conversationHomeApi.reaction = blocked as typeof conversationHomeApi.reaction;
     conversationHomeApi.propose = blocked as typeof conversationHomeApi.propose;
     conversationHomeApi.challenge = blocked as typeof conversationHomeApi.challenge;
@@ -964,7 +995,6 @@ describe("conversation Home command races", () => {
       expect(calls).toBe(0);
     } finally {
       conversationHomeApi.create = originals.create;
-      conversationHomeApi.message = originals.message;
       conversationHomeApi.reaction = originals.reaction;
       conversationHomeApi.propose = originals.propose;
       conversationHomeApi.challenge = originals.challenge;

@@ -116,6 +116,11 @@ export async function executeRevisionRetry(input: {
     prior_receipts: ReadonlyMap<string, readonly ParticipantStartReceiptV1[]>;
     now(): string;
   }): Promise<RevisionLaneRetryResultV1[]>;
+  publishAccepted?(input: {
+    operation: RevisionOperationV1;
+    plan: RevisionPreparationPlanV1;
+    lanes: ReadonlyMap<string, ParticipantStartReceiptV1>;
+  }): boolean;
 }): Promise<RevisionOperationEventV1[]> {
   let events = input.events;
   const prior = latestReceipts(events);
@@ -231,6 +236,8 @@ export async function executeRevisionRetry(input: {
   const destination = accepted ? "started" : failed ? "start_failed" : "needs_recovery";
   const outcome = accepted ? "succeeded" : failed ? "failed" : "needs_recovery";
   const reason = accepted ? null : failed ? "retry_start_failed" : "retry_start_uncertain";
+  if (accepted && !input.publishAccepted?.({ operation: input.operation, plan: input.plan, lanes }))
+    throw new Error("accepted revision retry lanes were not authoritatively published");
   const terminal = materializeRevisionEvent(
     input.operation,
     events,

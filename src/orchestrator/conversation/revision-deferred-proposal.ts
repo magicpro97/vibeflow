@@ -63,17 +63,17 @@ export async function prepareDeferredRevisionProposal(input: {
   assertExpected(input.request, base);
   if (base.reservation?.status === "active")
     throw new ConversationRevisionConflictError("conversation has an active revision reservation");
+  const target = applyConversationRevisionMutation({
+    parent: base.parent.source.manifest,
+    action,
+    idempotencyKey: input.request.idempotency_key,
+  });
   const claim = input.options.home.revisions.claimRequest({
     root_session_id: base.lineage.root_session_id,
     parent_conversation_id: base.parent.node.conversation_id,
     parent_revision_id: base.parent.node.revision_id,
     message_key: input.request.idempotency_key,
     created_at: input.options.now(),
-  });
-  const target = applyConversationRevisionMutation({
-    parent: base.parent.source.manifest,
-    action,
-    idempotencyKey: input.request.idempotency_key,
   });
   const materialized = await materializeFreshRevisionBindings({
     manifest: target,

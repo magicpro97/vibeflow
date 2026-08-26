@@ -44,6 +44,15 @@ export interface DurableAuthorityTransitionResolverV1 {
   verify(input: DurableAuthorityTransitionVerificationInputV1): void;
 }
 
+type OrdinaryAuthorityChangeV1 = Exclude<AuthorityEpochEventV1["change"], "authority-repaired">;
+export type OrdinaryAuthorityTransitionVerificationInputV1 = Omit<
+  DurableAuthorityTransitionVerificationInputV1,
+  "event" | "evidence"
+> & {
+  event: AuthorityEpochEventV1 & { change: OrdinaryAuthorityChangeV1 };
+  evidence: Exclude<AuthorityTransitionEvidenceV1, { change: "authority-repaired" }>;
+};
+
 interface ActionPlanBindingV1 {
   schema_version: "1.0";
   domain: "conversation" | "capability";
@@ -87,7 +96,7 @@ function fail(message: string, path = "authority.transition"): never {
   throw new CapabilityValidationError(message, path, "integrity_failure");
 }
 
-function readCanonical<T>(path: string, label: string): T {
+export function readCanonicalAuthorityRecord<T>(path: string, label: string): T {
   const bytes = privateFileBytes(path, JSON_LIMIT);
   if (!bytes) return fail(`${label} is missing`, label);
   let value: unknown;
@@ -102,7 +111,7 @@ function readCanonical<T>(path: string, label: string): T {
 }
 
 function actionObject<T>(root: string, objectDigest: string, label: string): T {
-  return readCanonical<T>(
+  return readCanonicalAuthorityRecord<T>(
     join(root, "actions", "v1", "objects", `${digestHex(objectDigest)}.json`),
     label,
   );
@@ -112,7 +121,9 @@ function exact(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-function stagedRecord(input: DurableAuthorityTransitionVerificationInputV1) {
+export function stagedAuthorityTransitionRecord(
+  input: OrdinaryAuthorityTransitionVerificationInputV1,
+) {
   switch (input.evidence.change) {
     case "grant-changed":
       return input.evidence.grant_frames.at(-1) ?? fail("grant transition has no staged frame");
@@ -122,13 +133,13 @@ function stagedRecord(input: DurableAuthorityTransitionVerificationInputV1) {
       return input.evidence.secret_frames.at(-1) ?? fail("secret transition has no staged frame");
     case "registry-trust-changed":
       return input.evidence.trust_frames.at(-1) ?? fail("trust transition has no staged frame");
-    case "authority-repaired":
-      return null;
   }
 }
 
-function actionKind(input: DurableAuthorityTransitionVerificationInputV1): string {
-  const staged = stagedRecord(input);
+export function authorityTransitionActionKind(
+  input: OrdinaryAuthorityTransitionVerificationInputV1,
+): string {
+  const staged = stagedAuthorityTransitionRecord(input);
   if (input.event.change === "grant-changed") {
     const transition = (staged as { transition: string }).transition;
     return transition === "issued"
@@ -139,15 +150,16 @@ function actionKind(input: DurableAuthorityTransitionVerificationInputV1): strin
   }
   if (input.event.change === "policy-changed") return "policy.update_authority";
   if (input.event.change === "secret-revoked") return "secret.revoke";
-  if (input.event.change === "registry-trust-changed") return "registry.trust_key";
-  return "authority.repair";
+  return "registry.trust_key";
 }
 
-function subjectAndDomainHead(input: DurableAuthorityTransitionVerificationInputV1): {
+export function authorityTransitionSubjectAndDomainHead(
+  input: OrdinaryAuthorityTransitionVerificationInputV1,
+): {
   subject: string;
   head: string | null;
 } {
-  const staged = stagedRecord(input) as Record<string, unknown> | null;
+  const staged = stagedAuthorityTransitionRecord(input) as unknown as Record<string, unknown>;
   switch (input.event.change) {
     case "grant-changed":
       return { subject: staged?.grant_id as string, head: input.prior.grant_head_digest };
@@ -160,8 +172,6 @@ function subjectAndDomainHead(input: DurableAuthorityTransitionVerificationInput
       };
     case "registry-trust-changed":
       return { subject: staged?.key_id as string, head: input.prior.trust_head_digest };
-    case "authority-repaired":
-      return { subject: input.event.scope_identity_digest, head: input.prior.content_digest };
   }
 }
 
@@ -211,7 +221,7 @@ function validateOuterPlan(
 
 function validateActionRecords(
   host: DurableActionAuthorityHostV1,
-  input: DurableAuthorityTransitionVerificationInputV1,
+  input: OrdinaryAuthorityTransitionVerificationInputV1,
 ) {
   const authority = host.resolve(structuredClone(input.event.action_root_locator));
   assertDurableActionAuthorityReaderV1(authority);
@@ -255,11 +265,10 @@ function validateActionRecords(
     snapshot.domain_terminal_digest !== input.event.event_digest ||
     snapshot.proposal.proposal_id !== input.event.proposal_id ||
     snapshot.approval.approval_id !== input.event.approval_id ||
-    dispatch.action_type !== actionKind(input) ||
+    dispatch.action_type !== authorityTransitionActionKind(input) ||
     dispatch.domain !== "capability" ||
     !exact(dispatch.action_root_locator, input.event.action_root_locator) ||
-    snapshot.proposal.base.authority_binding_mode !==
-      (input.event.change === "authority-repaired" ? "recovery-checkpoint" : "current") ||
+    snapshot.proposal.base.authority_binding_mode !== "current" ||
     snapshot.proposal.base.authority_epoch !== input.prior.authority_epoch ||
     snapshot.proposal.base.authority_head_digest !== input.prior.content_digest ||
     snapshot.proposal.base.capability_scope !== input.event.scope
@@ -270,7 +279,7 @@ function validateActionRecords(
 
 function validateChange(
   records: ReturnType<typeof validateActionRecords>,
-  input: DurableAuthorityTransitionVerificationInputV1,
+  input: OrdinaryAuthorityTransitionVerificationInputV1,
 ): void {
   const proposal = records.snapshot.proposal;
   const nativeDigest = validateOuterPlan(records.root, proposal, "authority-change");
@@ -280,7 +289,7 @@ function validateChange(
     "authority change plan",
   );
   const { plan_digest: observedPlan, ...planPreimage } = plan;
-  const binding = subjectAndDomainHead(input);
+  const binding = authorityTransitionSubjectAndDomainHead(input);
   const expectedEffect = digestV1("VF-AUTHORITY-DOMAIN-EFFECT\0v1\0", {
     schema_version: "1.0",
     scope: input.event.scope,
@@ -311,7 +320,7 @@ function validateChange(
   )
     fail("authority plan does not project the exact staged transition", "authority_plan");
 
-  const header = readCanonical<Record<string, unknown>>(
+  const header = readCanonicalAuthorityRecord<Record<string, unknown>>(
     join(
       records.privateRoot,
       "authority",
@@ -360,10 +369,11 @@ function verify(
   host: DurableActionAuthorityHostV1,
   input: DurableAuthorityTransitionVerificationInputV1,
 ) {
-  const records = validateActionRecords(host, input);
-  if (input.event.change === "authority-repaired")
+  if (input.event.change === "authority-repaired" || input.evidence.change === "authority-repaired")
     fail("authority-repair replay requires the dedicated durable bootstrap resolver");
-  validateChange(records, input);
+  const ordinary = input as OrdinaryAuthorityTransitionVerificationInputV1;
+  const records = validateActionRecords(host, ordinary);
+  validateChange(records, ordinary);
 }
 
 export function createDurableAuthorityTransitionResolver(

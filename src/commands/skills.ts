@@ -56,7 +56,7 @@ import {
 } from "./_shared.js";
 import { guardLegacyWriter } from "./capability/legacy-fence.js";
 import { handleDraftSkill } from "./skills-draft.js";
-export function skills(sub: string | undefined, rest: string[] = []): number {
+export async function skills(sub: string | undefined, rest: string[] = []): Promise<number> {
   const repo = cwd();
   const found = discoverSkills(repo);
   if (sub === undefined || sub === "list") {
@@ -342,7 +342,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "impact-evidence") return handleImpactEvidenceSubcommand(repo, rest);
   if (sub === "impact") return handleImpactSubcommand(repo, rest);
   if (sub === "policy-checks") return handlePolicyChecksSubcommand(repo, rest);
-  if (sub === "eval") return skillsEvalCmd(repo, rest);
+  if (sub === "eval") return await skillsEvalCmd(repo, rest);
   if (sub === "update-dependent") return skillsUpdateDependentCmd(repo, rest);
   if (sub === "verify-lock") {
     const allErrors: string[] = [];
@@ -388,7 +388,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "ci-domain-integrity") return handleCiDomainIntegrity(repo, rest);
   if (sub === "verify-freshness") return verifyFreshnessCommand(found, repo);
   if (sub === "curator") return handleCuratorSubcommand(repo, rest);
-  if (sub === "semantic-filter") return handleSemanticFilterSubcommand(repo, rest);
+  if (sub === "semantic-filter") return await handleSemanticFilterSubcommand(repo, rest);
   if (sub === "propose-merge") return handleProposeMergeSubcommand(repo, rest);
   if (sub === "propose-split") return handleProposeSplitSubcommand(repo, rest);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));

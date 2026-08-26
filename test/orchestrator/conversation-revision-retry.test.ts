@@ -246,10 +246,11 @@ describe("revision retry authority", () => {
     ).toThrow("invalid revision preparation participant");
   });
 
-  test("retries the complete lane set at generation plus one and closes the WAL", async () => {
+  test("publishes the complete accepted retry lane set before closing the WAL", async () => {
     const target = operation();
     const events = failedPrefix(target);
     const appended: RevisionOperationEventV1[] = [];
+    const publications: Array<ReadonlyMap<string, ParticipantStartReceiptV1>> = [];
     const result = await executeRevisionRetry({
       home: {
         revisions: {
@@ -277,6 +278,17 @@ describe("revision retry authority", () => {
           },
         ];
       },
+      publishAccepted: ({ operation: publishedOperation, plan: publishedPlan, lanes }) => {
+        expect(publishedOperation.operation_id).toBe(target.operation_id);
+        expect(publishedPlan.plan_digest).toBe(plan().plan_digest);
+        expect(lanes.get("participant-1")?.state).toBe("accepted");
+        expect(appended.at(-1)?.payload).toMatchObject({
+          kind: "participant-start",
+          receipt: { state: "accepted" },
+        });
+        publications.push(new Map(lanes));
+        return true;
+      },
     });
     expect(appended).toEqual(result.slice(events.length));
     expect(foldRevisionOperation(target, result).state).toBe("started");
@@ -284,6 +296,9 @@ describe("revision retry authority", () => {
     const lastLane = lanes.at(-1);
     if (lastLane?.payload.kind !== "participant-start") throw new Error("missing retry lane");
     expect(lastLane.payload.receipt.start_generation).toBe(1);
+    expect(publications.at(0)?.get("participant-1")?.attempt_key).toBe(
+      lastLane.payload.receipt.attempt_key,
+    );
   });
 
   test("requires a captured, matching, genuinely fresh native session", () => {

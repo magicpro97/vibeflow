@@ -36,13 +36,13 @@ function scaffold(name: string, frontmatter: Record<string, unknown>, body?: str
   writeFileSync(join(dir, "SKILL.md"), md);
 }
 
-function run(rest: string[]): number {
+async function run(rest: string[]): Promise<number> {
   const orig = process.cwd();
   const origHome = process.env.VF_SKILLS_HOME;
   process.env.VF_SKILLS_HOME = base;
   process.chdir(base);
   try {
-    return skills("propose-merge", rest);
+    return await skills("propose-merge", rest);
   } finally {
     process.chdir(orig);
     if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -109,10 +109,10 @@ describe("proposeMerge", () => {
     expect(r.proposal?.skillMd).toContain("Deploy to prod");
   });
 
-  test("exit code 0 on success via CLI", () => {
+  test("exit code 0 on success via CLI", async () => {
     scaffold("skill-a", { triggers: ["react"] });
     scaffold("skill-b", { triggers: ["hooks"] });
-    expect(run(["skill-a", "skill-b"])).toBe(0);
+    expect(await run(["skill-a", "skill-b"])).toBe(0);
   });
 });
 
@@ -160,15 +160,15 @@ describe("proposeMerge errors", () => {
     expect(r.exitCode).toBe(2);
   });
 
-  test("missing CLI args", () => {
+  test("missing CLI args", async () => {
     scaffold("a", {});
-    expect(run([])).toBe(2);
-    expect(run(["a"])).toBe(2);
+    expect(await run([])).toBe(2);
+    expect(await run(["a"])).toBe(2);
   });
 
-  test("CLI returns nonzero on unknown skill", () => {
+  test("CLI returns nonzero on unknown skill", async () => {
     scaffold("a", { triggers: ["x"] });
-    expect(run(["a", "nonexistent"])).toBe(2);
+    expect(await run(["a", "nonexistent"])).toBe(2);
   });
 });
 
@@ -198,9 +198,9 @@ describe("proposeMerge output", () => {
     expect(r.proposal?.evalPlan).toContain("Deprecation gate");
   });
 
-  test("single skill returns zero findings (no comparison)", () => {
+  test("single skill returns zero findings (no comparison)", async () => {
     scaffold("a", { triggers: ["x"] });
-    expect(run(["a", "nonexistent"])).toBe(2);
+    expect(await run(["a", "nonexistent"])).toBe(2);
   });
 });
 

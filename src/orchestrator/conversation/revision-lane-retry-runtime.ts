@@ -247,16 +247,8 @@ export class RevisionLaneRetryRuntime {
     try {
       const settled = await Promise.all(starts);
       const allAccepted = settled.every(({ outcome }) => outcome === "accepted");
-      if (allAccepted) {
-        const bindings = settled.map((result) => {
-          if (!result.resume) throw new Error("accepted retry lane lost its resume binding");
-          return { participant_id: result.participant_id, ...result.resume };
-        });
-        this.options.artifactStore.recordResumeBindings(
-          input.operation.child.conversation_id,
-          bindings,
-        );
-      }
+      if (allAccepted && settled.some((result) => !result.resume))
+        throw new Error("accepted retry lane lost its resume binding");
       return settled.map(({ resume: _resume, ...result }) => ({
         ...result,
         outcome: !allAccepted && result.outcome === "accepted" ? "uncertain" : result.outcome,

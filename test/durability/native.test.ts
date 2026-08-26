@@ -57,12 +57,12 @@ test("the native durability bundle acquires the same lock API under Node and Bun
     sourcePath,
     `import { createRequire } from "node:module";
 import { statSync } from "node:fs";
-import { acquireProcessLock, ensurePrivateDirectory } from ${JSON.stringify(modulePath)};
+import { acquireProcessLock, ensurePrivateDirectory, processStartIdentity } from ${JSON.stringify(modulePath)};
 const root = process.argv[2]; process.umask(0o777); ensurePrivateDirectory(root);
 const lock = acquireProcessLock(root + "/writer.lock", { operation: "runtime-probe" });
 lock.assertHeld(); lock.release();
 const runtimeRequire = createRequire(import.meta.url);
-console.log(JSON.stringify({ ok: true, bun: Boolean(process.versions.bun), mode: statSync(root).mode & 0o7777, koffiLoaded: Object.keys(runtimeRequire.cache).some((path) => path.includes("/koffi/")) }));`,
+console.log(JSON.stringify({ ok: true, bun: Boolean(process.versions.bun), mode: statSync(root).mode & 0o7777, identity: processStartIdentity(), koffiLoaded: Object.keys(runtimeRequire.cache).some((path) => path.includes("/koffi/")) }));`,
   );
   try {
     execFileSync(process.execPath, [
@@ -80,12 +80,17 @@ console.log(JSON.stringify({ ok: true, bun: Boolean(process.versions.bun), mode:
       const probe = execFileSync(runtime, [outputPath, `${lockRoot}-${isBun ? "bun" : "node"}`], {
         encoding: "utf8",
       });
-      expect(JSON.parse(probe)).toEqual({
+      const observed = JSON.parse(probe);
+      expect(observed).toEqual({
         ok: true,
         bun: isBun,
         mode: 0o700,
+        identity: expect.any(String),
         koffiLoaded: !isBun,
       });
+      if (process.platform === "darwin") {
+        expect(observed.identity).toMatch(/^darwin:[1-9][0-9]*:(?:0|[1-9][0-9]{0,5})$/);
+      }
     }
   } finally {
     rmSync(sandbox, { recursive: true, force: true });

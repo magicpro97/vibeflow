@@ -106,8 +106,17 @@ export class DirectConversationPolicy implements ConversationPolicy {
         pending = delivery.applicable_user_message_count > 0;
       }
       if (failed || !pending) {
+        const responseIdempotencyKey = `${eventPrefix}:complete`;
+        const stagedCandidate =
+          complete && result.ok && parsed.action_candidate?.present
+            ? context.stageActionCandidate({
+                participant_id: participantId,
+                response_idempotency_key: responseIdempotencyKey,
+                candidate: parsed.action_candidate.value,
+              })
+            : null;
         const response = await attempt.emit({
-          idempotency_key: `${eventPrefix}:complete`,
+          idempotency_key: responseIdempotencyKey,
           event: {
             type: "agent_response_delta",
             payload: {
@@ -126,6 +135,19 @@ export class DirectConversationPolicy implements ConversationPolicy {
             response_event_id: response.event_id,
             request: parsed.social_intent,
           });
+        if (stagedCandidate && !stagedCandidate.accepted) {
+          await attempt.emit({
+            idempotency_key: `${eventPrefix}:action-candidate:${stagedCandidate.diagnostic_code ?? "rejected"}`,
+            event: {
+              type: "error",
+              payload: {
+                agent_id: participantId,
+                code: stagedCandidate.diagnostic_code ?? "action_candidate_rejected",
+                message: "agent host-action candidate was rejected",
+              },
+            },
+          });
+        }
       }
       if (failed) {
         return {

@@ -18,13 +18,20 @@ export class ConversationRequestMaterializer {
     private readonly now: () => string,
   ) {}
 
-  manifest(request: RuntimeCreateRequest | RuntimePreviewRequest): ConversationManifest {
+  manifest(
+    request: RuntimeCreateRequest | RuntimePreviewRequest,
+    identity?: Pick<
+      ConversationManifest,
+      "conversation_id" | "workflow_id" | "revision_id" | "run_id"
+    >,
+    createdAt = this.now(),
+  ): ConversationManifest {
     return {
       version: "1.0",
-      conversation_id: this.runtime.ids("conversation"),
-      workflow_id: this.runtime.ids("workflow"),
-      revision_id: this.runtime.ids("revision"),
-      run_id: this.runtime.ids("run"),
+      conversation_id: identity?.conversation_id ?? this.runtime.ids("conversation"),
+      workflow_id: identity?.workflow_id ?? this.runtime.ids("workflow"),
+      revision_id: identity?.revision_id ?? this.runtime.ids("revision"),
+      run_id: identity?.run_id ?? this.runtime.ids("run"),
       parent_conversation_id: "parent" in request ? (request.parent?.conversationId ?? null) : null,
       parent_revision_id: "parent" in request ? (request.parent?.revisionId ?? null) : null,
       topic: request.topic,
@@ -38,8 +45,9 @@ export class ConversationRequestMaterializer {
       bindings: request.bindings.map((binding) => ({
         participant_id: binding.participantId,
         input: binding.input,
+        ...(binding.hostTools ? { host_tools: [...binding.hostTools] } : {}),
       })),
-      created_at: this.now(),
+      created_at: createdAt,
     };
   }
 

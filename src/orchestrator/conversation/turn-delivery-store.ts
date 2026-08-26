@@ -7,19 +7,16 @@ import {
   safeEntry,
   writePrivateAtomic,
 } from "../trace/path-safety.js";
+import { fail as rejectConversationState } from "./fold-validation.js";
 import type { PersistedTurnDeliveryV1 } from "./turn-delivery-types.js";
 
 const MAX_BYTES = 256 * 1024;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 
-function fail(message: string): never {
-  throw new Error(message);
-}
-
 function assertRow(value: unknown): asserts value is PersistedTurnDeliveryV1 {
   if (!value || typeof value !== "object" || Array.isArray(value))
-    fail("invalid turn delivery authority");
+    throw new Error("invalid turn delivery authority");
   const row = value as Record<string, unknown>;
   const keys = Object.keys(row).sort();
   const hasInteraction =
@@ -47,25 +44,29 @@ function assertRow(value: unknown): asserts value is PersistedTurnDeliveryV1 {
         typeof row.interaction_head_digest !== "string" ||
         !DIGEST.test(row.interaction_head_digest)))
   )
-    fail("invalid turn delivery authority");
+    throw new Error("invalid turn delivery authority");
 }
 
 function assertRows(value: unknown): asserts value is PersistedTurnDeliveryV1[] {
-  if (!Array.isArray(value) || value.length > 512) fail("invalid turn delivery authority");
+  if (!Array.isArray(value) || value.length > 512)
+    throw new Error("invalid turn delivery authority");
   for (const row of value) assertRow(row);
   if (new Set(value.map(({ participant_id }) => participant_id)).size !== value.length)
-    fail("duplicate turn delivery participant");
+    throw new Error("duplicate turn delivery participant");
 }
 
 export class ConversationTurnDeliveryStore {
   private readonly root: string;
 
   constructor(artifactRoot: string) {
-    this.root = ensurePrivateDirectory(join(artifactRoot, "turn-deliveries"), fail);
+    this.root = ensurePrivateDirectory(
+      join(artifactRoot, "turn-deliveries"),
+      rejectConversationState,
+    );
   }
 
   private path(conversationId: string): string {
-    if (!REF.test(conversationId)) fail("invalid turn delivery conversation");
+    if (!REF.test(conversationId)) throw new Error("invalid turn delivery conversation");
     const key = digestHex(
       digestV1("VF-CONVERSATION-TURN-DELIVERY-FILE\0v1\0", {
         schema_version: "1.0",
@@ -77,22 +78,27 @@ export class ConversationTurnDeliveryStore {
 
   read(conversationId: string): PersistedTurnDeliveryV1[] {
     const path = this.path(conversationId);
-    if (!safeEntry(path, fail, "unsafe turn delivery authority")) return [];
-    const fd = openPrivateFile(path, MAX_BYTES, fail, "unsafe turn delivery authority");
+    if (!safeEntry(path, rejectConversationState, "unsafe turn delivery authority")) return [];
+    const fd = openPrivateFile(
+      path,
+      MAX_BYTES,
+      rejectConversationState,
+      "unsafe turn delivery authority",
+    );
     try {
       const stat = fs.fstatSync(fd);
       const bytes = Buffer.alloc(stat.size);
       let offset = 0;
       while (offset < bytes.length) {
         const count = fs.readSync(fd, bytes, offset, bytes.length - offset, offset);
-        if (count <= 0) fail("unsafe turn delivery authority");
+        if (count <= 0) throw new Error("unsafe turn delivery authority");
         offset += count;
       }
       let decoded: unknown;
       try {
         decoded = JSON.parse(bytes.toString("utf8"));
       } catch {
-        return fail("invalid turn delivery authority");
+        throw new Error("invalid turn delivery authority");
       }
       assertRows(decoded);
       return structuredClone(decoded);
@@ -109,7 +115,7 @@ export class ConversationTurnDeliveryStore {
       this.path(conversationId),
       canonicalJsonBytes(captured, { maxBytes: MAX_BYTES }),
       MAX_BYTES,
-      fail,
+      rejectConversationState,
     );
   }
 }

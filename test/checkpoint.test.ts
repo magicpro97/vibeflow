@@ -158,6 +158,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     // Ignores everything (so backed-up secrets never stage) but re-includes curated knowledge.
     expect(guard?.content).toContain("*");
     expect(guard?.content).toContain("!knowledge/");
+    expect(guard?.content).toContain("!PROJECT_ID.json");
     expect(guard?.content).toContain("backup/");
   });
 

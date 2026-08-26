@@ -1,4 +1,5 @@
 import type { Engine } from "../core.js";
+import type { OwnedAiRouteRunner } from "../dispatch/owned-ai-route.js";
 
 /**
  * Engine readiness levels (most-actionable first):
@@ -49,4 +50,6 @@ export interface PreflightOpts {
   cacheKey?: string;
   /** Override the per-probe timeout (test seam, line 380). Production: undefined. */
   probeTimeoutMs?: number;
+  /** Canonical owned-process AI route seam for live round-trip probes. */
+  ownedRoute?: OwnedAiRouteRunner;
 }

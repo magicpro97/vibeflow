@@ -1,4 +1,7 @@
-export type ConversationEngine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
+import type { CapabilityScope } from "../../capabilities/manifest/types.js";
+import { ENGINES, type Engine } from "../../core/types.js";
+
+export type ConversationEngine = Engine;
 
 export type ComposerIntent =
   | { kind: "empty" }
@@ -11,20 +14,14 @@ export type ComposerIntent =
       model: string | null;
     }
   | { kind: "remove-participant"; participantId: string }
-  | { kind: "install-capability"; packageId: string; scope: "project" | "user" }
-  | { kind: "remove-capability"; packageId: string; scope: "project" | "user" };
+  | { kind: "install-capability"; packageId: string; scope: CapabilityScope }
+  | { kind: "remove-capability"; packageId: string; scope: CapabilityScope };
 
 const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const SAFE_PARTICIPANT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 
 function isConversationEngine(value: string): value is ConversationEngine {
-  return (
-    value === "claude" ||
-    value === "codex" ||
-    value === "copilot" ||
-    value === "opencode" ||
-    value === "antigravity"
-  );
+  return (ENGINES as readonly string[]).includes(value);
 }
 
 export function parseComposerIntent(source: string): ComposerIntent {
@@ -58,7 +55,7 @@ export function parseComposerIntent(source: string): ComposerIntent {
     const packageId = capability[2] ?? "";
     if (!SAFE_REFERENCE.test(packageId))
       return { kind: "invalid", message: "The capability package reference is invalid." };
-    const common: { packageId: string; scope: "project" | "user" } = {
+    const common: { packageId: string; scope: CapabilityScope } = {
       packageId,
       scope: capability[3] === "--user" ? "user" : "project",
     };
@@ -75,7 +72,7 @@ export function parseComposerIntent(source: string): ComposerIntent {
     return { kind: "message", content: targeted[2]?.trim() ?? "", targets: [participantId] };
   }
 
-  if (text.startsWith("/") || text.startsWith("+"))
+  if (text.startsWith("/") || text.startsWith("+") || text.startsWith("-@"))
     return { kind: "invalid", message: "That command is incomplete. Choose a suggestion below." };
   return { kind: "message", content: text, targets: "all" };
 }

@@ -28,6 +28,8 @@ export interface BuildContextHandoffInputV1 {
   user_messages: PublicHandoffMessageV1[];
   final_responses: PublicHandoffResponseV1[];
   artifacts: Array<PromptArtifactSelectionV1 | PublicArtifactReferenceV1>;
+  /** Internal selections that remain mandatory across an approved public compaction. */
+  mandatory_artifacts?: Array<PromptArtifactSelectionV1 | PublicArtifactReferenceV1>;
   consensus: { score: number | null; synthesis: string | null };
   prompt_budget_bytes: number;
   active_compaction?: PublicCompactionArtifactV1 | null;
@@ -192,6 +194,9 @@ export function buildContextHandoff(raw: BuildContextHandoffInputV1): BuiltConte
   input.final_responses = uniqueSorted(
     input.final_responses.map((event) => ({ ...event, text: event.text.normalize("NFC") })),
   );
+  const mandatoryArtifactSelections = (input.mandatory_artifacts ?? [])
+    .map(asSelection)
+    .sort((left, right) => compareText(left.artifact.artifact_id, right.artifact.artifact_id));
   let artifactSelections = input.artifacts
     .map(asSelection)
     .sort((left, right) => compareText(left.artifact.artifact_id, right.artifact.artifact_id));
@@ -267,6 +272,7 @@ export function buildContextHandoff(raw: BuildContextHandoffInputV1): BuiltConte
     );
     const byArtifactId = new Map<string, PromptArtifactSelectionV1>();
     for (const selection of [
+      ...mandatoryArtifactSelections,
       ...artifactSelections,
       ...(compaction?.omitted_public_ranges ?? []).map(({ artifact }) => ({
         artifact: structuredClone(artifact),

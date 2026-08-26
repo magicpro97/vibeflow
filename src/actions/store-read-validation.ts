@@ -4,7 +4,11 @@ import { actionIdempotencyKeyDigest, actionIdempotencyScopeDigest } from "./idem
 import type { ActionFilePersistence, ActionIdempotencyBindingV1 } from "./persistence.js";
 import { materializeDispatchRecord } from "./records.js";
 import { foldActionAuthority } from "./state.js";
-import { assertDispatchHeaderRule, equalCanonical } from "./store-rules.js";
+import {
+  assertDispatchHeaderRule,
+  equalCanonical,
+  isBoundHumanBrowserController,
+} from "./store-rules.js";
 import type { ActionAuthoritySnapshotV1, ApprovalChallengeFrameV1 } from "./types.js";
 
 export function readVerifiedActionSnapshot(
@@ -98,12 +102,21 @@ export function assertConsumedChallengeMatchesVisible(
   frame: ApprovalChallengeFrameV1,
 ): void {
   const approval = snapshot.approval;
+  const reviewerOwnsChallenge =
+    frame.principal_digest === visible.principal_digest ||
+    (snapshot.proposal.requested_by.kind === "agent" &&
+      approval?.decided_by.kind === "human-browser" &&
+      isBoundHumanBrowserController({
+        principal_digest: frame.principal_digest,
+        control_session_digest: frame.control_session_digest,
+        actor: approval.decided_by,
+      }));
   if (
     !approval ||
     frame.proposal_id !== snapshot.proposal.proposal_id ||
     frame.proposal_digest !== snapshot.proposal.proposal_digest ||
     frame.challenge_class !== approval.challenge_class ||
-    frame.principal_digest !== visible.principal_digest ||
+    !reviewerOwnsChallenge ||
     frame.consumed_at !== approval.decided_at ||
     frame.approval_expires_at !== approval.expires_at ||
     !equalCanonical(frame.approval_decided_by, approval.decided_by)

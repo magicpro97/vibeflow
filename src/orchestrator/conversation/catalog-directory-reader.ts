@@ -8,11 +8,23 @@ const IS_BUN = typeof (process.versions as Record<string, string | undefined>).b
 const NAME_OFFSET = process.platform === "darwin" ? 21 : 19;
 const RECLEN_OFFSET = 16;
 
-interface DirectoryApi {
+export interface DirectoryApiV1 {
   duplicate(fd: number): number;
   open(fd: number): unknown;
   next(directory: unknown): Uint8Array | null;
   close(directory: unknown): number;
+}
+
+export interface BunDirectoryRuntimeV1 {
+  platform: NodeJS.Platform;
+  architecture: string;
+  readMaps(): string;
+  ffi: Pick<typeof import("bun:ffi"), "FFIType" | "dlopen" | "toBuffer">;
+}
+
+export interface NodeDirectoryRuntimeV1 {
+  platform: NodeJS.Platform;
+  koffi: Pick<typeof import("koffi"), "load" | "view">;
 }
 
 function readName(bytes: Uint8Array): string {
@@ -24,8 +36,16 @@ function readName(bytes: Uint8Array): string {
   return name;
 }
 
-function bunApi(): DirectoryApi {
-  const ffi = require("bun:ffi") as typeof import("bun:ffi");
+/** Loads Bun's libc directory reader through an injectable platform authority. */
+export function loadBunDirectoryApi(
+  runtime: BunDirectoryRuntimeV1 = {
+    platform: process.platform,
+    architecture: arch(),
+    readMaps: () => readFileSync("/proc/self/maps", "utf8"),
+    ffi: require("bun:ffi") as typeof import("bun:ffi"),
+  },
+): DirectoryApiV1 {
+  const { ffi } = runtime;
   const { FFIType } = ffi;
   const definitions = {
     dup: { args: [FFIType.i32], returns: FFIType.i32 },
@@ -34,17 +54,17 @@ function bunApi(): DirectoryApi {
     closedir: { args: [FFIType.ptr], returns: FFIType.i32 },
   } as const;
   let maps = "";
-  if (process.platform === "linux") {
+  if (runtime.platform === "linux") {
     try {
-      maps = readFileSync("/proc/self/maps", "utf8");
+      maps = runtime.readMaps();
     } catch {
       // Missing procfs is supported; the ordered libc fallback list remains authoritative.
     }
   }
   const candidates =
-    process.platform === "darwin"
+    runtime.platform === "darwin"
       ? ["/usr/lib/libSystem.B.dylib"]
-      : linuxLibcCandidatesFromMaps(maps, arch());
+      : linuxLibcCandidatesFromMaps(maps, runtime.architecture);
   let library: ReturnType<typeof ffi.dlopen> | null = null;
   let failure: unknown;
   for (const candidate of candidates) {
@@ -77,9 +97,15 @@ function bunApi(): DirectoryApi {
   };
 }
 
-function nodeApi(): DirectoryApi {
-  const koffi = require("koffi") as typeof import("koffi");
-  const library = koffi.load(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : null);
+/** Loads Node's koffi directory reader through an injectable platform authority. */
+export function loadNodeDirectoryApi(
+  runtime: NodeDirectoryRuntimeV1 = {
+    platform: process.platform,
+    koffi: require("koffi") as typeof import("koffi"),
+  },
+): DirectoryApiV1 {
+  const { koffi } = runtime;
+  const library = koffi.load(runtime.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : null);
   const duplicate = library.func("int dup(int)");
   const open = library.func("void *fdopendir(int)");
   const next = library.func("void *readdir(void *)");
@@ -99,11 +125,10 @@ function nodeApi(): DirectoryApi {
   };
 }
 
-let cached: DirectoryApi | null = null;
+let cached: DirectoryApiV1 | null = null;
 
-export function readDirectoryNamesAt(fd: number): string[] {
-  if (!cached) cached = IS_BUN ? bunApi() : nodeApi();
-  const api = cached;
+/** Reads one pinned descriptor using a supplied native API, including all cleanup semantics. */
+export function readDirectoryNamesUsingApi(fd: number, api: DirectoryApiV1): string[] {
   const duplicate = api.duplicate(fd);
   if (duplicate < 0) throw new Error("cannot duplicate directory descriptor");
   const directory = api.open(duplicate);
@@ -129,4 +154,9 @@ export function readDirectoryNamesAt(fd: number): string[] {
   if (failed) throw primary;
   if (closeFailed) throw new Error("cannot close directory descriptor");
   return names.sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+}
+
+export function readDirectoryNamesAt(fd: number): string[] {
+  if (!cached) cached = IS_BUN ? loadBunDirectoryApi() : loadNodeDirectoryApi();
+  return readDirectoryNamesUsingApi(fd, cached);
 }

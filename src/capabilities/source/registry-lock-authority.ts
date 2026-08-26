@@ -32,6 +32,8 @@ import type {
   LegacyInspectionEvidenceV1,
   PackageAuthenticityBindingV1,
   RegistrySignatureEnvelopeV1,
+  RegistryTrustSnapshotV1,
+  VerifiedRegistryEnvelopeV1,
 } from "./types.js";
 
 function readCanonicalJson<T>(path: string, maxBytes: number, label: string): T {
@@ -47,6 +49,52 @@ function readCanonicalJson<T>(path: string, maxBytes: number, label: string): T 
   if (!Buffer.from(bytes).equals(canonicalJsonBytes(parsed, { maxBytes })))
     throw new CapabilityValidationError(`${label} is not canonical`, label, "integrity_failure");
   return parsed as T;
+}
+
+export function validateRetainedRegistryEnvelope(
+  entry: CapabilityLockEntryV1 & {
+    pin: CapabilityLockEntryV1["pin"] & {
+      source: Extract<CapabilityLockEntryV1["pin"]["source"], { kind: "registry" }>;
+    };
+  },
+  record: CapabilityPackageCacheRecordV1,
+  input: {
+    private_root: string;
+    at: string;
+    trust_snapshot: RegistryTrustSnapshotV1;
+  },
+): VerifiedRegistryEnvelopeV1 {
+  const envelopeDigest = record.registry_envelope_digest as string;
+  const envelope = readCanonicalJson<RegistrySignatureEnvelopeV1>(
+    packageRegistryEnvelopeCachePath(input.private_root, envelopeDigest),
+    512 * 1024,
+    "registry cached envelope",
+  );
+  if (registryEnvelopeDigest(envelope) !== envelopeDigest)
+    throw new CapabilityValidationError(
+      "registry cached envelope fixed-path digest mismatch",
+      "registry_cache.envelope",
+      "integrity_failure",
+    );
+  const verified = verifyRegistryEnvelope(envelope, {
+    trust_snapshot: input.trust_snapshot,
+    at: input.at,
+    mode: "locked",
+    expected: {
+      registry_origin: entry.pin.source.registry_origin,
+      package_id: entry.pin.id,
+      version: entry.pin.version,
+      content_sha256: entry.pin.content_sha256,
+    },
+  });
+  if (verified.status === "blocked")
+    throw new CapabilityValidationError(
+      "registry package signature is revoked",
+      "registry_cache.envelope",
+      "integrity_failure",
+    );
+  revalidateCachedRegistryPackagePin(record.package_pin, verified);
+  return verified;
 }
 
 function validateEntryCache(
@@ -119,42 +167,15 @@ function validateEntryCache(
   validateLockInputsAgainstManifest(entry, manifest.manifest);
   let verified = null;
   if (entry.pin.source.kind === "registry") {
-    if (!input.trust_snapshot)
-      throw new CapabilityValidationError(
-        "registry trust snapshot is unavailable",
-        "registry_cache",
-        "integrity_failure",
-      );
-    const envelopeDigest = record.registry_envelope_digest as string;
-    const envelope = readCanonicalJson<RegistrySignatureEnvelopeV1>(
-      packageRegistryEnvelopeCachePath(input.private_root, envelopeDigest),
-      512 * 1024,
-      "registry cached envelope",
-    );
-    if (registryEnvelopeDigest(envelope) !== envelopeDigest)
-      throw new CapabilityValidationError(
-        "registry cached envelope fixed-path digest mismatch",
-        "registry_cache.envelope",
-        "integrity_failure",
-      );
-    verified = verifyRegistryEnvelope(envelope, {
-      trust_snapshot: input.trust_snapshot,
-      at: input.at,
-      mode: "locked",
-      expected: {
-        registry_origin: entry.pin.source.registry_origin,
-        package_id: entry.pin.id,
-        version: entry.pin.version,
-        content_sha256: entry.pin.content_sha256,
+    verified = validateRetainedRegistryEnvelope(
+      entry as Parameters<typeof validateRetainedRegistryEnvelope>[0],
+      record,
+      {
+        private_root: input.private_root,
+        at: input.at,
+        trust_snapshot: input.trust_snapshot as RegistryTrustSnapshotV1,
       },
-    });
-    if (verified.status === "blocked")
-      throw new CapabilityValidationError(
-        "registry package signature is revoked",
-        "registry_cache.envelope",
-        "integrity_failure",
-      );
-    revalidateCachedRegistryPackagePin(record.package_pin, verified);
+    );
   } else if (entry.pin.source.kind === "legacy-adopt") {
     const evidence = readCanonicalJson<LegacyInspectionEvidenceV1>(
       legacyInspectionEvidenceCachePath(

@@ -64,7 +64,7 @@ function linuxLibcCandidates(): string[] {
   return linuxLibcCandidatesFromMaps(maps, arch());
 }
 
-function loadBunBindings(): NativeBindings {
+export function loadBunBindings(): NativeBindings {
   const ffi = RUNTIME_REQUIRE("bun:ffi") as typeof import("bun:ffi");
   const { FFIType } = ffi;
   const errnoSymbol = process.platform === "darwin" ? "__error" : "__errno_location";
@@ -123,7 +123,7 @@ function loadBunBindings(): NativeBindings {
   };
 }
 
-function loadNodeBindings(): NativeBindings {
+export function loadNodeBindings(): NativeBindings {
   const koffi = RUNTIME_REQUIRE("koffi") as typeof import("koffi").default;
   const library = koffi.load(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : null);
   nativeLibrary = library;
@@ -152,15 +152,43 @@ function loadNodeBindings(): NativeBindings {
   };
 }
 
-try {
-  if (process.env.VF_TEST_DISABLE_NATIVE_DURABILITY === "1")
-    unavailableReason = "native durability was disabled by the runtime";
-  else if (process.platform !== "darwin" && process.platform !== "linux")
-    unavailableReason = `native durability is unsupported on ${process.platform}`;
-  else bindings = IS_BUN ? loadBunBindings() : loadNodeBindings();
-} catch (error) {
-  unavailableReason = `native durability load failed: ${String(error)}`;
+export interface NativeRuntimeInitializationV1 {
+  bindings: NativeBindings | null;
+  unavailableReason: string;
 }
+
+export function initializeNativeRuntime(input: {
+  disabled: boolean;
+  platform: string;
+  isBun: boolean;
+}): NativeRuntimeInitializationV1 {
+  try {
+    if (input.disabled)
+      return { bindings: null, unavailableReason: "native durability was disabled by the runtime" };
+    if (input.platform !== "darwin" && input.platform !== "linux")
+      return {
+        bindings: null,
+        unavailableReason: `native durability is unsupported on ${input.platform}`,
+      };
+    return {
+      bindings: input.isBun ? loadBunBindings() : loadNodeBindings(),
+      unavailableReason: "native durability is not initialized",
+    };
+  } catch (error) {
+    return {
+      bindings: null,
+      unavailableReason: `native durability load failed: ${String(error)}`,
+    };
+  }
+}
+
+const initialized = initializeNativeRuntime({
+  disabled: process.env.VF_TEST_DISABLE_NATIVE_DURABILITY === "1",
+  platform: process.platform,
+  isBun: IS_BUN,
+});
+bindings = initialized.bindings;
+unavailableReason = initialized.unavailableReason;
 
 export function native(): NativeBindings {
   if (!bindings || nativeLibrary === null) durabilityError("unsupported", unavailableReason);

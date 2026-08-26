@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { ActionAuthorityStoreOptions } from "../../actions/index.js";
 import { materializeAgentBinding, previewAgentBinding } from "../../agents/binding.js";
 import type { EngineSessionAdapterOptions } from "../../dispatch/session-types.js";
 import { createEngineSessionAdapter } from "../../dispatch/session.js";
@@ -21,13 +22,21 @@ import {
   createConversationRequestResolvers,
 } from "./bootstrap-request-resolution.js";
 import { createConversationSocialAuthority } from "./bootstrap-social-authority.js";
+import { deriveConversationBrowserKey } from "./browser-authority-key.js";
 import { registerCapabilityConversationProposalBase } from "./capability-proposal-base.js";
+import { CatalogCursorCodec } from "./catalog-cursor.js";
 import type { ConversationActionDomainPlannerExecutorV1 } from "./conversation-action-domain.js";
 import type { ConversationActionService } from "./conversation-action-service.js";
+import { ConversationAgentActionCandidateAuthorityV1 } from "./conversation-agent-action-candidate-authority.js";
 import { createConversationBrowserAuthorities } from "./conversation-browser-authorities.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import type { ConversationMessageQueueRuntimeV1 } from "./conversation-message-queue-runtime.js";
+import { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
+import { ConversationUserMessageAuthorityV1 } from "./conversation-user-message-authority.js";
 import { DebateConversationPolicy } from "./debate-policy.js";
 import { DirectConversationPolicy } from "./direct-policy.js";
+import { fail as rejectConversationState } from "./fold-validation.js";
+import { ConversationLineageService } from "./lineage-service.js";
 import { OrchestrateConversationPolicy } from "./orchestrate-policy.js";
 import { PlanConversationPolicy } from "./plan-policy.js";
 import { ConversationPolicyRegistry } from "./policy-registry.js";
@@ -72,9 +81,16 @@ export interface ConversationBootstrapOptions extends ConversationRequestResolut
   actionDomainFactories?: readonly ((
     actions: ConversationActionService,
   ) => ConversationActionDomainPlannerExecutorV1)[];
+  /** Fault-injection seam for durable ActionAuthorityStore recovery tests. */
+  actionAuthorityFault?: ActionAuthorityStoreOptions["fault"];
+  /** Async materialization barrier used only by crash/concurrency authority tests. */
+  agentActionCandidateBarrier?: (input: {
+    point: "after-proposal-materialized";
+    conversation_id: string;
+  }) => Promise<void>;
 }
 export interface ConversationBootstrap {
-  service: ConversationService;
+  service: ConversationOrchestrator;
   services: Readonly<{
     plan: InjectedPlanService;
     review: InjectedReviewService;
@@ -87,13 +103,12 @@ export interface ConversationBootstrap {
     artifactStore: ConversationArtifactStore;
     homeAuthorities: ConversationHomeAuthorities;
     policies: ConversationPolicyRegistry;
+    agentActionCandidates: ConversationAgentActionCandidateAuthorityV1;
+    messageQueue: ConversationMessageQueueRuntimeV1;
+    privateContextBroker: ConversationPrivateContextBrokerV1;
     browser: ReturnType<typeof createConversationBrowserAuthorities>;
   }>;
 }
-const fail = (message: string): never => {
-  throw new Error(`conversation bootstrap: ${message}`);
-};
-
 export { defaultConversationReadiness } from "./bootstrap-request-resolution.js";
 
 /** Compose the one production conversation authority used by CLI and HTTP adapters. */
@@ -102,11 +117,18 @@ export function createConversationBootstrap(
 ): ConversationBootstrap {
   const repoRoot = realpathSync(resolve(options.repoRoot));
   const phase = options.phase ?? 3;
-  if (!Number.isSafeInteger(phase) || phase < 1) fail("invalid phase");
-  const root = ensurePrivateDirectory(
-    resolve(options.stateDir ?? join(repoRoot, ".vibeflow", "conversation")),
-    fail,
-  );
+  if (!Number.isSafeInteger(phase) || phase < 1)
+    throw new Error("conversation bootstrap: invalid phase");
+  let root: string;
+  try {
+    root = ensurePrivateDirectory(
+      resolve(options.stateDir ?? join(repoRoot, ".vibeflow", "conversation")),
+      rejectConversationState,
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unsafe state directory";
+    throw new Error(`conversation bootstrap: ${detail}`, { cause: error });
+  }
   const {
     artifactRegistry,
     traceStore,
@@ -119,12 +141,50 @@ export function createConversationBootstrap(
     root,
     ...(options.mirror ? { mirror: options.mirror } : {}),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.actionAuthorityFault ? { actionFault: options.actionAuthorityFault } : {}),
   });
   const socialAuthority = createConversationSocialAuthority({
     artifactRoot,
     traceRoot,
     artifactRegistry,
     home: homeAuthorities,
+  });
+  const now = options.now ?? (() => new Date().toISOString());
+  const privateContextBroker = new ConversationPrivateContextBrokerV1({
+    artifactRoot,
+    repoRoot,
+    now,
+  });
+  const queueLineage = new ConversationLineageService({
+    artifactRoot,
+    traceRoot,
+    scopeId: "vf-local-conversations",
+    cursorCodec: new CatalogCursorCodec(
+      deriveConversationBrowserKey(browserAuthorityKey, "message-queue-lineage"),
+    ),
+    publishedRevisionTransitions: () => homeAuthorities.publishedRevisionTransitions(),
+    revisionRecoveryAuthority: (operationId) => {
+      const operation = homeAuthorities.revisions.readOperation(operationId);
+      const revision_plan = homeAuthorities.revisions.readPlan(operationId);
+      return operation && revision_plan ? { operation, revision_plan } : null;
+    },
+    reservationHistory: ({ root_session_id }) =>
+      homeAuthorities.lineage.readReservationHistory(root_session_id),
+    headTransitions: () => homeAuthorities.headTransitions.readAll(),
+    actionAuthority: homeAuthorities.reviewedActionAuthority(),
+  });
+  const messageQueueUserAuthority = new ConversationUserMessageAuthorityV1({
+    lineage: queueLineage,
+    artifactRegistry,
+    artifactStore,
+  });
+  const agentActionCandidates = new ConversationAgentActionCandidateAuthorityV1({
+    artifactRoot,
+    traceRoot,
+    home: homeAuthorities,
+    ...(options.agentActionCandidateBarrier
+      ? { barrier: options.agentActionCandidateBarrier }
+      : {}),
   });
   const isolationAuthority = options.isolationAuthority ?? defaultConversationIsolationAuthority;
   const bindingIsolation =
@@ -133,6 +193,7 @@ export function createConversationBootstrap(
     createEngineSessionAdapter({
       ...options.session,
       evidenceRoot: options.session?.evidenceRoot ?? join(root, "attempts"),
+      privatePromptFileRoot: join(root, "session-prompts"),
     }),
     isolationAuthority,
     repoRoot,
@@ -148,11 +209,8 @@ export function createConversationBootstrap(
   const orchestrate = new InjectedOrchestrateService(
     {
       ...options.libraries.orchestrate,
-      cancel: (command) => {
-        const authority = serviceHolder.current;
-        if (!authority) fail("cancellation authority is not ready");
-        return (authority as ConversationOrchestrator).cancelOperation(command);
-      },
+      cancel: (command) =>
+        (serviceHolder.current as ConversationOrchestrator).cancelOperation(command),
     },
     options.actor,
   );
@@ -193,6 +251,9 @@ export function createConversationBootstrap(
     traceRoot,
     homeAuthorities,
     socialAuthority,
+    agentActionCandidates,
+    privateContextBroker,
+    messageQueueUserAuthority,
     sessionAdapter,
     policies,
     onConversationSourceCommitted: (event) =>
@@ -212,12 +273,18 @@ export function createConversationBootstrap(
     ...(options.schedule ? { schedule: options.schedule } : {}),
   });
   serviceHolder.current = service;
+  if (!service.messageQueue)
+    throw new Error("conversation bootstrap: message queue authority is unavailable");
   registerCapabilityConversationProposalBase({
     actions: homeAuthorities.actions,
     artifactRoot,
     traceRoot,
     home: homeAuthorities,
   });
+  homeAuthorities.actions.registerAgentProposalReviewValidator(
+    ({ proposal, now, phase, approval_id }) =>
+      agentActionCandidates.assertReviewSource(proposal, now, phase, approval_id),
+  );
   const additionalActionDomains = [
     ...(options.actionDomains ?? []),
     ...(options.actionDomainFactories ?? []).map((factory) => factory(homeAuthorities.actions)),
@@ -233,6 +300,7 @@ export function createConversationBootstrap(
     service,
     ...(additionalActionDomains.length > 0 ? { additionalActionDomains } : {}),
   });
+  agentActionCandidates.bind(browser.actions);
   recordConversationSource = (conversationId, recordedAt) =>
     browser.catalog.recordConversationSourceCommitted(conversationId, recordedAt);
   return Object.freeze({
@@ -244,6 +312,9 @@ export function createConversationBootstrap(
       artifactStore,
       homeAuthorities,
       policies,
+      agentActionCandidates,
+      messageQueue: service.messageQueue,
+      privateContextBroker,
       browser,
     }),
   });

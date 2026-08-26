@@ -6,13 +6,11 @@ import {
 import type { MaterializedAgentBinding } from "../../agents/binding.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
-import {
-  materializeContinueMessageAction,
-  materializeConversationRevisionActionPlan,
-} from "./conversation-action-planner.js";
+import { materializeContinueMessageAction } from "./conversation-action-planner.js";
 import { rethrowTerminalMessageOverflow } from "./conversation-handoff-overflow.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
-import { contextHandoffSharedPromptBytes } from "./handoff-selection.js";
+import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-runtime.js";
+import { resumeActiveConversationRevision } from "./revision-active-resume.js";
 import type { RevisionCrashPointV1 } from "./revision-crash-fault.js";
 import { ConversationRevisionOperationExecutor } from "./revision-operation-executor.js";
 import {
@@ -26,6 +24,7 @@ import {
   findPublishedContinuation,
   revisionActionIdempotencyKey,
 } from "./revision-publication-replay.js";
+import { ConversationRevisionRequestSingleFlightV1 } from "./revision-request-singleflight.js";
 import {
   type ResolvedRevisionBaseV1,
   buildRevisionHandoff,
@@ -61,6 +60,7 @@ export interface ConversationRevisionAuthorityOptions {
     manifest: ConversationManifest,
     operationId: string,
   ): Promise<ConversationCreateResult>;
+  revisionSettled(conversationId: string): void;
   revisionFault?(point: RevisionCrashPointV1): void;
 }
 
@@ -74,10 +74,11 @@ function same(left: unknown, right: unknown): boolean {
 
 /** Owns the revision reservation, WAL, head CAS, publication, and child activation closure. */
 export class ConversationRevisionAuthority {
-  private readonly inFlight = new Map<
-    string,
-    Promise<{ childId: string; proposalId: string; created: boolean }>
-  >();
+  private readonly requests = new ConversationRevisionRequestSingleFlightV1<{
+    childId: string;
+    proposalId: string;
+    created: boolean;
+  }>();
   private readonly executor: ConversationRevisionOperationExecutor;
 
   constructor(private readonly options: ConversationRevisionAuthorityOptions) {
@@ -90,6 +91,7 @@ export class ConversationRevisionAuthority {
     request: MessageRequest & { target_participants: "all" | string[] },
     messageKey: string,
     authority?: ActionRequestAuthorityV1,
+    queueDelivery?: ConversationQueuedMessageDeliveryAuthorityV1,
   ): Promise<string> {
     return this.continueMessageAction(
       conversationId,
@@ -97,6 +99,8 @@ export class ConversationRevisionAuthority {
       request,
       messageKey,
       authority,
+      undefined,
+      queueDelivery,
     ).then((result) => result.childId);
   }
 
@@ -107,24 +111,20 @@ export class ConversationRevisionAuthority {
     messageKey: string,
     authority?: ActionRequestAuthorityV1,
     expected?: ActionProposalRequestV1["expected"],
+    queueDelivery?: ConversationQueuedMessageDeliveryAuthorityV1,
   ): Promise<{ childId: string; proposalId: string; created: boolean }> {
     const key = `${conversationId}\0${messageKey}`;
-    const existing = this.inFlight.get(key);
-    if (existing) return existing;
-    const running = this.createRevision(
-      conversationId,
-      snapshot,
-      request,
-      messageKey,
-      authority,
-      expected,
+    return this.requests.run(key, () =>
+      this.createRevision(
+        conversationId,
+        snapshot,
+        request,
+        messageKey,
+        authority,
+        expected,
+        queueDelivery,
+      ),
     );
-    this.inFlight.set(key, running);
-    const clear = () => {
-      if (this.inFlight.get(key) === running) this.inFlight.delete(key);
-    };
-    void running.then(clear, clear);
-    return running;
   }
 
   private async createRevision(
@@ -134,14 +134,19 @@ export class ConversationRevisionAuthority {
     messageKey: string,
     suppliedAuthority?: ActionRequestAuthorityV1,
     expected?: ActionProposalRequestV1["expected"],
+    queueDelivery?: ConversationQueuedMessageDeliveryAuthorityV1,
   ): Promise<{ childId: string; proposalId: string; created: boolean }> {
+    queueDelivery?.assertRequest(request, messageKey);
     const replay = findPublishedContinuation(
       this.options.home.publishedRevisionTransitions(),
       conversationId,
       request,
       messageKey,
     );
-    if (replay) return replay;
+    if (replay) {
+      queueDelivery?.bindChild(replay.childId);
+      return replay;
+    }
     if (this.options.runtime.operationId(conversationId) !== null)
       throw new Error("conversation still has live operation authority");
     const base = resolveRevisionBase({
@@ -159,7 +164,15 @@ export class ConversationRevisionAuthority {
         expected.conversation_lock_digest !== base.lock.lock_digest)
     )
       throw new Error("conversation proposal expected source is stale");
-    if (base.reservation?.status === "active") return this.resumeActive(base, request, messageKey);
+    if (base.reservation?.status === "active")
+      return resumeActiveConversationRevision({
+        base,
+        request,
+        messageKey,
+        ...(queueDelivery ? { queueDelivery } : {}),
+        options: this.options,
+        executor: this.executor,
+      });
     const claim = this.options.home.revisions.claimRequest({
       root_session_id: base.lineage.root_session_id,
       parent_conversation_id: base.parent.node.conversation_id,
@@ -300,6 +313,8 @@ export class ConversationRevisionAuthority {
       sharedPrompt: handoff.shared_prompt_bytes.toString("utf8"),
       request,
       messageKey,
+      runtimeOperationId: queueDelivery?.operationId ?? operation.operation_id,
+      queueDelivery: queueDelivery ?? null,
       priorPublished: base.published,
     };
     try {
@@ -335,66 +350,9 @@ export class ConversationRevisionAuthority {
           current,
           materializeReleasedRevisionReservation(current, operation.created_at),
         );
+        this.options.revisionSettled(base.lineage.root_session_id);
       }
       throw error;
     }
-  }
-
-  private async resumeActive(
-    base: ResolvedRevisionBaseV1,
-    request: MessageRequest & { target_participants: "all" | string[] },
-    messageKey: string,
-  ): Promise<{ childId: string; proposalId: string; created: boolean }> {
-    const reservation = base.reservation;
-    if (!reservation || reservation.status !== "active")
-      throw new Error("active revision reservation is absent");
-    const operation = this.options.home.revisions.readOperation(reservation.operation_id);
-    const revisionPlan = this.options.home.revisions.readPlan(reservation.operation_id);
-    const action = this.options.home.actions.get(reservation.proposal_id);
-    const manifest = this.options.artifactStore.readPreparedRevision(
-      reservation.child.conversation_id,
-    )?.manifest;
-    if (!operation || !revisionPlan || !action?.approval || !manifest)
-      throw new Error("active revision preparation is incomplete");
-    if (
-      action.proposal.action.type !== "conversation.continue_message" ||
-      action.proposal.idempotency_key !==
-        revisionActionIdempotencyKey(messageKey, reservation.revision_claim_epoch) ||
-      action.proposal.action.content !== request.content ||
-      !same(action.proposal.action.target_participants, request.target_participants) ||
-      !same(action.proposal.action.quote_refs ?? [], request.quote_refs ?? [])
-    )
-      throw new Error("active revision belongs to another request");
-    const handoff = this.options.home.handoffs.read(operation.handoff_digest);
-    if (!handoff) throw new Error("active revision handoff is absent");
-    const materialized = await materializeFreshRevisionBindings({
-      manifest,
-      rehydrate: this.options.rehydrateBinding,
-    });
-    const record = revisionManifestRecord(manifest, materialized.authorities);
-    const result = await this.executor.execute(
-      {
-        operation,
-        revisionPlan,
-        reservation,
-        actionPlan: materializeConversationRevisionActionPlan(
-          base.lineage.root_session_id,
-          revisionPlan,
-        ),
-        proposal: action.proposal,
-        approval: action.approval,
-        manifest,
-        bindings: materialized.bindings,
-        bindingAuthorities: materialized.authorities,
-        manifestRecordDigest: record.digest,
-        handoff,
-        sharedPrompt: contextHandoffSharedPromptBytes(handoff.prompt_projection).toString("utf8"),
-        request,
-        messageKey,
-        priorPublished: base.published,
-      },
-      base.head,
-    );
-    return { childId: result.childId, proposalId: operation.proposal_id, created: false };
   }
 }

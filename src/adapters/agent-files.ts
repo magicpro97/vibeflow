@@ -1,11 +1,18 @@
-import { spawnSync } from "node:child_process";
 import { type AgentEngine, agentFilePath, renderForEngine } from "../agents/render.js";
 import { type RoleName, getRoleSpec, roleContextFromProfile } from "../agents/role-templates.js";
 import type { RoleSpec } from "../agents/role.js";
 import { ENGINES } from "../core.js";
+import type { Engine } from "../core.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import type { ProjectProfile } from "../scanner.js";
 
-function aiEnrichRole(spec: RoleSpec, profile: ProjectProfile): RoleSpec {
+async function aiEnrichRole(
+  spec: RoleSpec,
+  profile: ProjectProfile,
+  engine: Engine,
+  cwd: string,
+  ownedRoute: OwnedAiRouteRunner,
+): Promise<RoleSpec> {
   const cmd = process.env.VIBEFLOW_AI;
   if (!cmd) return spec;
   const prompt = [
@@ -18,24 +25,42 @@ function aiEnrichRole(spec: RoleSpec, profile: ProjectProfile): RoleSpec {
     "Original body:",
     spec.body,
   ].join("\n");
-  const r = spawnSync(cmd, { input: prompt, shell: true, encoding: "utf8", timeout: 30_000 });
-  if (r.status !== 0 || !r.stdout?.trim()) return spec;
-  const enrichedBody = r.stdout.trim().slice(0, 4000);
+  const result = await ownedRoute({
+    engine,
+    command: cmd,
+    input: prompt,
+    cwd,
+    shell: true,
+    timeoutMs: 30_000,
+  });
+  if (result.status !== 0 || !result.stdout.trim()) return spec;
+  const enrichedBody = result.stdout.trim().slice(0, 4000);
   return { ...spec, body: enrichedBody };
 }
 
-export function agentFiles(
+export async function agentFiles(
   profile: ProjectProfile,
   roles: RoleName[],
   useAi = true,
   engines: readonly AgentEngine[] = ENGINES as readonly AgentEngine[],
-): Record<string, string> {
+  inject: { cwd?: string; ownedRoute?: OwnedAiRouteRunner } = {},
+): Promise<Record<string, string>> {
   const ctx = roleContextFromProfile(profile);
   const out: Record<string, string> = {};
+  if (engines.length === 0) return out;
+  const enrichmentEngine = engines[0] as Engine;
   for (const roleName of roles) {
     const baseSpec = getRoleSpec(roleName, ctx);
     if (!baseSpec) continue;
-    const spec = useAi ? aiEnrichRole(baseSpec, profile) : baseSpec;
+    const spec = useAi
+      ? await aiEnrichRole(
+          baseSpec,
+          profile,
+          enrichmentEngine,
+          inject.cwd ?? process.cwd(),
+          inject.ownedRoute ?? runOwnedAiRoute,
+        )
+      : baseSpec;
     for (const engine of engines) {
       out[agentFilePath(engine, roleName)] = renderForEngine(engine, spec);
     }

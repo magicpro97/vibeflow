@@ -27,8 +27,31 @@
         <span>{{ store.capabilityError }}</span>
         <button type="button" @click="store.searchCapabilities()">Try again</button>
       </div>
-      <div v-else-if="store.capabilityLoading" class="home-capability-skeleton" aria-label="Loading capabilities">
-        <span v-for="index in 4" :key="index" />
+      <div
+        v-else-if="store.capabilityLoading"
+        class="home-loading-panel home-loading-panel--drawer"
+        aria-label="Loading capabilities"
+        role="status"
+        aria-live="polite"
+      >
+        <header class="home-loading-panel__header">
+          <span>{{ capabilityLoading.eyebrow }}</span>
+          <strong>{{ capabilityLoading.title }}</strong>
+        </header>
+        <p class="home-loading-panel__copy">{{ capabilityLoading.detail }}</p>
+        <ul class="home-loading-panel__checkpoints" aria-label="Capability search progress">
+          <li v-for="checkpoint in capabilityLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
+        </ul>
+        <div class="home-loading-capabilities" aria-hidden="true">
+          <article v-for="index in 3" :key="index">
+            <span class="home-loading-capabilities__icon" />
+            <div class="home-loading-capabilities__copy">
+              <strong />
+              <small />
+            </div>
+            <i />
+          </article>
+        </div>
       </div>
       <div v-else-if="!store.capabilities.length" class="home-drawer-state">
         <span class="home-drawer-state__glyph" aria-hidden="true">⌁</span>
@@ -71,7 +94,8 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
+import { describeHomeCapabilityLoading } from "../conversation-home-loading.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import type { CapabilityStatus, HomeCapabilityItem } from "../conversation-home-types.js";
 
@@ -80,6 +104,12 @@ const emit = defineEmits<{ close: [] }>();
 const store = useConversationHomeStore();
 const searchInput = ref<HTMLInputElement | null>(null);
 const closeButton = ref<HTMLButtonElement | null>(null);
+const capabilityLoading = computed(() =>
+  describeHomeCapabilityLoading({
+    query: store.capabilityQuery,
+    scope: store.capabilityScope,
+  }),
+);
 
 const statusLabel = (status: CapabilityStatus) => status.replaceAll("-", " ");
 const stateHelp = (status: CapabilityStatus) =>

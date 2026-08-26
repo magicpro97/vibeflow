@@ -18,6 +18,14 @@ export type CapabilityStepExecutionOutcomeV1 =
   | { kind: "rollback"; reason: string }
   | { kind: "result"; result: CapabilityOperationResultV1 };
 
+type CapabilityStepFrontierOutcomeV1 =
+  | {
+      kind: "preimage-stale";
+      descriptor: ReturnType<CapabilityOperationJournalV1["descriptorFor"]>;
+      observed: string | null;
+    }
+  | { kind: "applied" | "failed" | "uncertain" };
+
 function preimageDigest(ownershipKey: string, contentSha256: string | null): string {
   return digestV1("VF-CAPABILITY-PRE-EFFECT-OWNED-RESOURCE\0v1\0", {
     schema_version: "1.0",
@@ -44,7 +52,7 @@ export function executeCapabilitySteps(input: {
         step.step_id,
       );
       if (selected && ["applied", "failed", "reversed"].includes(selected.state)) continue;
-      const frontier = capabilityAuthorityFrontier({
+      const frontier = capabilityAuthorityFrontier<CapabilityStepFrontierOutcomeV1>({
         graph,
         options,
         operation: `capability-effect:${header.operation_id}:${step.step_id}`,
@@ -167,11 +175,6 @@ export function executeCapabilitySteps(input: {
       const outcome = frontier.value;
       if (outcome.kind === "preimage-stale") {
         const descriptor = outcome.descriptor;
-        if (!descriptor)
-          throw new CapabilityRuntimeError(
-            "preimage refusal lost its exact descriptor",
-            "integrity-failure",
-          );
         journal.appendRefusal({
           operationId: header.operation_id,
           plan,

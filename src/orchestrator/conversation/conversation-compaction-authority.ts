@@ -5,16 +5,23 @@ import {
   type JsonValue,
   deriveOperationId,
 } from "../../actions/index.js";
-import { canonicalJsonBytes } from "../../durability/index.js";
 import type { TraceStore } from "../trace/store.js";
-import type { StoredTraceEvent, TraceCorrelation } from "../trace/types.js";
-import type { ArtifactPreparation, ConversationArtifactStore } from "./artifact-store.js";
+import type { TraceCorrelation } from "../trace/types.js";
+import type { ConversationArtifactStore } from "./artifact-store.js";
 import { conversationLockDigest } from "./catalog-lock.js";
 import {
-  type ConversationActionAuthorityBindingV1,
   materializeConversationActionBinding,
   materializeConversationActionReceipt,
 } from "./conversation-action-receipt-store.js";
+import {
+  prepareConversationCompactionArtifacts,
+  verifyConversationCompactionArtifacts,
+} from "./conversation-compaction-artifacts.js";
+import {
+  findConversationCompactionEvent,
+  sameCompactionValue,
+  sortedCompactionFacts,
+} from "./conversation-compaction-helpers.js";
 import {
   type ContextCompactionPlanV1,
   constructContextCompaction,
@@ -32,19 +39,6 @@ type CompactionCandidate = Extract<BrowserHostActionRequestV1, { type: "context.
 
 function isCompaction(candidate: BrowserHostActionRequestV1): candidate is CompactionCandidate {
   return candidate.type === "context.compact";
-}
-
-function sortedFacts(facts: ConversationActionAuthorityBindingV1["facts"]) {
-  return facts.sort((left, right) =>
-    Buffer.compare(
-      Buffer.from(`${left.kind}\0${left.identity}`),
-      Buffer.from(`${right.kind}\0${right.identity}`),
-    ),
-  );
-}
-
-function same(left: unknown, right: unknown): boolean {
-  return canonicalJsonBytes(left).equals(canonicalJsonBytes(right));
 }
 
 export class ConversationCompactionAuthority {
@@ -156,79 +150,6 @@ export class ConversationCompactionAuthority {
     };
   }
 
-  private async event(
-    conversationId: string,
-    proposalId: string,
-  ): Promise<StoredTraceEvent | null> {
-    return (
-      (await this.options.traceStore.readConversation(conversationId)).find(
-        ({ stored_event: event }) =>
-          event.idempotency_key === `action-context-compaction:${proposalId}`,
-      )?.stored_event ?? null
-    );
-  }
-
-  private prepareArtifacts(
-    conversationId: string,
-    proposalId: string,
-    construction: ReturnType<typeof constructContextCompaction>,
-  ): {
-    preparations: ArtifactPreparation<never>[];
-    omittedRefs: string[];
-    ref: string;
-  } {
-    const preparations: ArtifactPreparation<never>[] = [];
-    const omittedRefs: string[] = [];
-    try {
-      construction.omitted.forEach((omitted, index) => {
-        const preparation = this.options.artifactStore.prepareCreateArtifact(
-          conversationId,
-          omitted.range.artifact.artifact_id,
-          {
-            artifact_type: "transcript",
-            content: omitted.bytes,
-            idempotency_key: `compaction-omitted-${proposalId.slice(-32)}-${index}`,
-          },
-        );
-        preparations.push(preparation as ArtifactPreparation<never>);
-        omittedRefs.push(preparation.result.ref);
-      });
-      const artifact = this.options.artifactStore.prepareCreateArtifact(
-        conversationId,
-        construction.artifact_id,
-        {
-          artifact_type: "compaction",
-          content: construction.artifact_bytes,
-          idempotency_key: `compaction-artifact-${proposalId.slice(-32)}`,
-        },
-      );
-      preparations.push(artifact as ArtifactPreparation<never>);
-      return { preparations, omittedRefs, ref: artifact.result.ref };
-    } catch (error) {
-      for (const prepared of preparations.reverse()) prepared.rollback();
-      throw error;
-    }
-  }
-
-  private verifyArtifacts(
-    conversationId: string,
-    construction: ReturnType<typeof constructContextCompaction>,
-    omittedRefs: readonly string[],
-    compactionRef: string,
-  ): void {
-    construction.omitted.forEach((omitted, index) => {
-      const bytes = this.options.artifactStore.readArtifactRef(
-        conversationId,
-        omittedRefs[index] ?? "",
-      );
-      if (!bytes || !Buffer.from(bytes).equals(omitted.bytes))
-        throw new Error("context compaction omitted artifact changed");
-    });
-    const bytes = this.options.artifactStore.readArtifactRef(conversationId, compactionRef);
-    if (!bytes || !Buffer.from(bytes).equals(construction.artifact_bytes))
-      throw new Error("context compaction artifact changed");
-  }
-
   async commit(proposalId: string): Promise<void> {
     const snapshot = this.options.home.actions.get(proposalId);
     const stored = this.options.home.actionReceipts.readPlan(proposalId);
@@ -244,13 +165,21 @@ export class ConversationCompactionAuthority {
         digest: terminal.receipt_digest,
         recorded_at: terminal.recorded_at,
       });
+      this.options.home.lineageMutations.release({
+        kind: "context-compaction",
+        proposal: snapshot.proposal,
+        approval: snapshot.approval,
+        outcome: terminal.outcome === "succeeded" ? "succeeded" : "aborted",
+        terminal_digest: terminal.receipt_digest,
+        now: terminal.recorded_at,
+      });
       return;
     }
     const candidate = this.options.home.oversizedHandoffs.readCandidate(
       action.oversized_candidate.candidate_id,
       action.oversized_candidate.candidate_digest,
     );
-    if (!candidate || !same(candidate, action.oversized_candidate))
+    if (!candidate || !sameCompactionValue(candidate, action.oversized_candidate))
       throw new Error("context compaction candidate changed");
     const rejected = this.options.home.oversizedHandoffs.readRejected(candidate);
     const plan = stored.native_plan.effect_binding as unknown as ContextCompactionPlanV1;
@@ -268,14 +197,19 @@ export class ConversationCompactionAuthority {
           this.options.home.handoffs.readOmission(reference.content_sha256),
       }),
     });
-    if (!same(plan, construction.plan)) throw new Error("context compaction plan changed");
+    if (!sameCompactionValue(plan, construction.plan))
+      throw new Error("context compaction plan changed");
     const resolved = this.options.lineages.resolve(candidate.source.conversation_id);
     const publicTranscript = revisionPublicTranscript(resolved.lineage, resolved.requested);
     const publicHead = handoffSourcePublicHeadDigest(candidate.source, [
       ...publicTranscript.messages,
       ...publicTranscript.responses,
     ]);
-    const existing = await this.event(candidate.source.conversation_id, proposalId);
+    const existing = await findConversationCompactionEvent(
+      this.options.traceStore,
+      candidate.source.conversation_id,
+      proposalId,
+    );
     if (
       !existing &&
       (!compactionSourceAuthorityMatches({
@@ -288,27 +222,87 @@ export class ConversationCompactionAuthority {
         resolved.requested.node.revision_id !== candidate.source.revision_id)
     )
       throw new Error("context compaction source head changed");
-    const dispatch = this.options.home.actions.dispatch(proposalId, snapshot.approval.approval_id, {
-      digest: stored.record_digest,
-      recorded_at: snapshot.approval.decided_at,
-    });
-    const prepared = this.prepareArtifacts(
-      candidate.source.conversation_id,
-      proposalId,
+    const prepared = prepareConversationCompactionArtifacts({
+      artifacts: this.options.artifactStore,
+      conversation_id: candidate.source.conversation_id,
+      proposal_id: proposalId,
       construction,
+    });
+    const currentMutation = this.options.home.lineageMutations.current(
+      resolved.lineage.root_session_id,
     );
+    try {
+      if (!existing || currentMutation?.proposal_id === proposalId)
+        this.options.home.lineageMutations.claim({
+          kind: "context-compaction",
+          proposal: snapshot.proposal,
+          approval: snapshot.approval,
+          now: snapshot.approval.decided_at,
+          resolveSource: () => {
+            const current = this.options.lineages.resolve(candidate.source.conversation_id);
+            const transcript = revisionPublicTranscript(current.lineage, current.requested);
+            const currentPublicHead = handoffSourcePublicHeadDigest(candidate.source, [
+              ...transcript.messages,
+              ...transcript.responses,
+            ]);
+            if (
+              !compactionSourceAuthorityMatches({
+                proposalId,
+                candidate,
+                construction,
+                resolved: current,
+              }) ||
+              currentPublicHead !== candidate.source_public_head_digest ||
+              current.requested.node.revision_id !== candidate.source.revision_id
+            )
+              throw new Error("context compaction source head changed");
+            return {
+              root_session_id: current.lineage.root_session_id,
+              conversation_id: current.requested.node.conversation_id,
+              revision_id: current.requested.node.revision_id,
+              last_seq: candidate.source.last_seq,
+              conversation_lock_digest: candidate.source.lock_digest,
+              lineage_head_digest: current.head.content_digest,
+              lineage_head_epoch: current.head.head_epoch,
+            };
+          },
+        });
+    } catch (error) {
+      for (const artifact of prepared.preparations.reverse()) artifact.rollback();
+      throw error;
+    }
+    const dispatch = (() => {
+      try {
+        return this.options.home.actions.dispatch(proposalId, snapshot.approval.approval_id, {
+          digest: stored.record_digest,
+          recorded_at: snapshot.approval.decided_at,
+        });
+      } catch (error) {
+        for (const artifact of prepared.preparations.reverse()) artifact.rollback();
+        this.options.home.lineageMutations.release({
+          kind: "context-compaction",
+          proposal: snapshot.proposal,
+          approval: snapshot.approval,
+          outcome: "aborted",
+          terminal_digest: snapshot.proposal.proposal_digest,
+          now: this.options.home.now(),
+        });
+        throw error;
+      }
+    })();
     try {
       for (const artifact of prepared.preparations) artifact.commit();
     } catch (error) {
       for (const artifact of prepared.preparations.reverse()) artifact.rollback();
       throw error;
     }
-    this.verifyArtifacts(
-      candidate.source.conversation_id,
+    verifyConversationCompactionArtifacts({
+      artifacts: this.options.artifactStore,
+      conversation_id: candidate.source.conversation_id,
       construction,
-      prepared.omittedRefs,
-      prepared.ref,
-    );
+      omitted_refs: prepared.omitted_refs,
+      compaction_ref: prepared.compaction_ref,
+    });
     this.options.fault?.("after-artifacts-durable");
     let event = existing;
     if (!event) {
@@ -321,7 +315,7 @@ export class ConversationCompactionAuthority {
             payload: {
               artifact_id: construction.artifact_id,
               artifact_type: "compaction",
-              ref: prepared.ref,
+              ref: prepared.compaction_ref,
             },
           },
         },
@@ -332,7 +326,7 @@ export class ConversationCompactionAuthority {
       event.event.type !== "artifact_created" ||
       event.event.payload.artifact_type !== "compaction" ||
       event.event.payload.artifact_id !== construction.artifact_id ||
-      event.event.payload.ref !== prepared.ref
+      event.event.payload.ref !== prepared.compaction_ref
     ) {
       throw new Error("context compaction replay event changed");
     }
@@ -343,7 +337,7 @@ export class ConversationCompactionAuthority {
       action_type: "context.compact",
       plan_digest: snapshot.proposal.plan_digest,
       phase: "expected",
-      facts: sortedFacts([
+      facts: sortedCompactionFacts([
         {
           kind: "public-trace-head",
           identity: `trace:${candidate.source.revision_id}`,
@@ -360,7 +354,7 @@ export class ConversationCompactionAuthority {
       action_type: "context.compact",
       plan_digest: snapshot.proposal.plan_digest,
       phase: "observed",
-      facts: sortedFacts([
+      facts: sortedCompactionFacts([
         {
           kind: "public-trace-head",
           identity: `trace:${candidate.source.revision_id}`,
@@ -392,6 +386,14 @@ export class ConversationCompactionAuthority {
       outcome: "succeeded",
       digest: receipt.receipt_digest,
       recorded_at: receipt.recorded_at,
+    });
+    this.options.home.lineageMutations.release({
+      kind: "context-compaction",
+      proposal: snapshot.proposal,
+      approval: snapshot.approval,
+      outcome: "succeeded",
+      terminal_digest: receipt.receipt_digest,
+      now: receipt.recorded_at,
     });
   }
 }

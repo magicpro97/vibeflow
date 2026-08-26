@@ -174,7 +174,7 @@ describe("canonical conversation turn delivery", () => {
     );
   });
 
-  test("falls back to full visible history when exact resume proof is absent", () => {
+  test("keeps fallback context peer-only when the native resume remains trusted", () => {
     const quote = {
       ...messageLocator("event-1"),
       author_public_id: "human",
@@ -187,6 +187,7 @@ describe("canonical conversation turn delivery", () => {
       request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
       events,
       resume: {
+        participant_id: "p1",
         attemptId: "attempt-prior",
         engine: "codex",
         nativeSessionId: "00000000-0000-4000-8000-000000000001",
@@ -209,11 +210,31 @@ describe("canonical conversation turn delivery", () => {
     ]);
     expect(
       prepared.envelope.public_responses.map(({ author_public_id }) => author_public_id),
-    ).toEqual(["p1", "p2"]);
+    ).toEqual(["p2"]);
+    expect(JSON.stringify(prepared.envelope)).not.toContain("answer p1");
     const { preview_text: _preview, created_at: _createdAt, ...reference } = quote;
     expect(prepared.envelope.quoted_messages).toEqual([
       { quoting_message_id: "event-8", quote_order: 1, target: reference },
     ]);
+  });
+
+  test("includes recipient history only when native resume proof is unavailable", () => {
+    const prepared = prepareConversationTurn({
+      conversation_id: "conversation",
+      revision_id: "revision",
+      request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
+      events,
+      resume: null,
+      prior_delivery: undefined,
+      observed_after_public_seq: 0,
+      shared_handoff: null,
+      interaction_projection: emptyInteractionProjection(),
+    });
+
+    expect(prepared.envelope.delivery_mode).toBe("full-history");
+    expect(
+      prepared.envelope.public_responses.map(({ author_public_id }) => author_public_id),
+    ).toEqual(["p1", "p2"]);
   });
 
   test("degraded interaction authority cannot claim an exact native delivery delta", () => {

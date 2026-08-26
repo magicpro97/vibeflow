@@ -1,5 +1,6 @@
 import type { Engine } from "../core.js";
 import type { EnvPolicy } from "./env-filter.js";
+import type { OwnedProcessPlatform } from "./owned-process-platform.js";
 
 // Re-export of `Bun.spawn` under a stable name so the test seam (`AsyncSpawnerOpts.spawn`)
 // can be typed as `typeof bunSpawn` and tests can pass any function with the same
@@ -122,7 +123,14 @@ export type AsyncSpawner = (
   cmd: string,
   args: string[],
   input: string,
+  owned?: AsyncSpawnOwnership,
 ) => Promise<{ status: number; stdout: string; stderr?: string; timedOut?: boolean }>;
+
+export interface AsyncSpawnOwnership {
+  attemptId: string;
+  engine: Engine;
+  evidenceRoot?: string;
+}
 
 export interface AsyncSpawnerOpts {
   timeoutMs?: number;
@@ -147,6 +155,15 @@ export interface AsyncSpawnerOpts {
    *  children) run rooted here instead of process.cwd() — the per-unit worktree
    *  isolation seam (W1). Omitted → inherits the parent cwd (unchanged default). */
   cwd?: string;
+
+  /** Root that persists owned CLI lifecycle records for real engine launches. */
+  evidenceRoot?: string;
+
+  /** Optional source env for spawn filtering without mutating process.env. */
+  sourceEnv?: NodeJS.ProcessEnv;
+
+  /** Test seam / platform override for owned CLI lifecycle inspection and termination. */
+  ownedProcessPlatform?: OwnedProcessPlatform;
 
   /** #556: env-scrub policy. The child env is `filterEnv(process.env, envPolicy)` — secret-shaped
    *  host vars are dropped before they reach the third-party agent CLI. Omitted → conservative

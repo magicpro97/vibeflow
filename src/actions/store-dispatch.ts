@@ -1,5 +1,6 @@
 import {
   type ActionAuthorityResolverV1,
+  ActionAuthorityStaleError,
   type DispatchPreparationProofV1,
   type DomainPreparedProofV1,
   assertDispatchPreparationProof,
@@ -29,6 +30,36 @@ export interface ActionDispatchRuntimeV1 {
 function iso(epoch: number): string {
   if (!Number.isSafeInteger(epoch)) throw new Error("invalid action clock");
   return new Date(epoch).toISOString();
+}
+
+export function prevalidateActionDispatch(
+  runtime: ActionDispatchRuntimeV1,
+  proposalId: string,
+  approvalId: string,
+): void {
+  runtime.files.withLock(`action-dispatch-prevalidate:${proposalId}`, (lock) => {
+    const snapshot = runtime.get(proposalId);
+    if (!snapshot || snapshot.state !== "approved" || snapshot.approval?.approval_id !== approvalId)
+      throw new ActionConflictError(
+        "stale_proposal",
+        "Proposal is not approved for dispatch.",
+        proposalId,
+      );
+    const now = iso(runtime.now());
+    assertDispatchLease(runtime.files, lock, snapshot, now);
+    const resolver = requireResolver(runtime.resolver);
+    if (!resolver.prevalidateDispatch)
+      throw new Error("action dispatch prevalidation authority is unavailable");
+    try {
+      resolver.prevalidateDispatch({
+        proposal: snapshot.proposal,
+        approval: snapshot.approval,
+        now,
+      });
+    } catch (error) {
+      handleStaleResolver(runtime.files, lock, snapshot, error);
+    }
+  });
 }
 
 export function prepareActionDispatch(
@@ -86,6 +117,96 @@ export function prepareActionDispatch(
   });
 }
 
+/**
+ * Acquires an exact external-source reservation after the dispatch record is durable.
+ * The resolver call intentionally runs outside the Action writer lock so a resolver may
+ * take its own lineage lock without introducing an Action->lineage lock inversion.
+ */
+export function reserveActionDispatch(
+  runtime: ActionDispatchRuntimeV1,
+  proposalId: string,
+  approvalId: string,
+): ActionDispatchRecordV1 {
+  const closure = runtime.files.withLock(`action-dispatch-reserve-read:${proposalId}`, (lock) => {
+    const snapshot = runtime.get(proposalId);
+    if (
+      !snapshot ||
+      !["approved", "committing", "succeeded", "failed", "needs_recovery"].includes(
+        snapshot.state,
+      ) ||
+      snapshot.approval?.approval_id !== approvalId
+    )
+      throw new ActionConflictError(
+        "stale_proposal",
+        "Proposal is not approved for dispatch reservation.",
+        proposalId,
+      );
+    const now = iso(runtime.now());
+    if (snapshot.state === "approved") assertDispatchLease(runtime.files, lock, snapshot, now);
+    const dispatch = runtime.files.readDispatch(
+      deriveOperationId(snapshot.proposal, snapshot.approval.approval_id),
+    );
+    if (!dispatch) throw new Error("durable dispatch record is required before reservation");
+    const expected = materializeDispatchRecord(
+      snapshot.proposal,
+      snapshot.approval,
+      dispatch.domain_header_digest,
+    );
+    if (!equalCanonical(dispatch, expected))
+      throw new Error("durable dispatch reservation closure mismatch");
+    return {
+      proposal: structuredClone(snapshot.proposal),
+      approval: structuredClone(snapshot.approval),
+      dispatch: structuredClone(dispatch),
+      now,
+      requires_reservation: snapshot.state === "approved",
+    };
+  });
+  const resolver = requireResolver(runtime.resolver);
+  if (!resolver.reserveDispatch)
+    throw new Error("action dispatch source reservation authority is unavailable");
+  if (closure.requires_reservation) {
+    try {
+      resolver.reserveDispatch(closure);
+    } catch (error) {
+      if (!(error instanceof ActionAuthorityStaleError)) throw error;
+      runtime.files.withLock(`action-dispatch-reserve-stale:${proposalId}`, (lock) => {
+        const current = runtime.get(proposalId);
+        if (
+          current?.state === "approved" &&
+          current.approval?.approval_id === approvalId &&
+          current.proposal.proposal_digest === closure.proposal.proposal_digest
+        )
+          handleStaleResolver(runtime.files, lock, current, error);
+      });
+      throw error;
+    }
+  }
+  return runtime.files.withLock(`action-dispatch-reserve-confirm:${proposalId}`, () => {
+    const current = runtime.get(proposalId);
+    if (
+      !current ||
+      !["approved", "committing", "succeeded", "failed", "needs_recovery"].includes(
+        current.state,
+      ) ||
+      current.approval?.approval_id !== approvalId ||
+      current.proposal.proposal_digest !== closure.proposal.proposal_digest
+    )
+      throw new ActionConflictError(
+        "stale_proposal",
+        "Proposal changed while its dispatch source was reserved.",
+        proposalId,
+      );
+    if (["approved", "committing", "needs_recovery"].includes(current.state))
+      resolver.assertDispatchReserved?.({
+        proposal: current.proposal,
+        approval: current.approval,
+        dispatch: closure.dispatch,
+      });
+    return structuredClone(closure.dispatch);
+  });
+}
+
 export function beginActionDispatch(
   runtime: ActionDispatchRuntimeV1,
   proposalId: string,
@@ -123,6 +244,11 @@ export function beginActionDispatch(
     );
     if (!equalCanonical(dispatch, expected)) throw new Error("durable dispatch closure mismatch");
     assertDispatchHeaderRule(snapshot.proposal, dispatch.domain_header_digest);
+    requireResolver(runtime.resolver).assertDispatchReserved?.({
+      proposal: snapshot.proposal,
+      approval: snapshot.approval,
+      dispatch,
+    });
     let committing = snapshot;
     if (snapshot.state === "approved") {
       const event = materializeAuthorityEvent(

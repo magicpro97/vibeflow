@@ -1,14 +1,6 @@
-import type {
-  ActionApprovalV1,
-  ActionDispatchRecordV1,
-  ActionProposalV1,
-} from "../../actions/index.js";
-import type { MaterializedAgentBinding } from "../../agents/binding.js";
+import type { ActionDispatchRecordV1 } from "../../actions/index.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
-import type { BindingAuthoritySnapshot } from "./artifact-validation.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
-import type { ContextHandoffV1 } from "./handoff-types.js";
-import type { LineageActionPlanBindingV1 } from "./lineage-action-authority.js";
 import { publishedRevisionAuthorityMap } from "./lineage-published-transition.js";
 import type { PublishedRevisionTransitionInputV1 } from "./lineage-published-transition.js";
 import { deriveConversationLineages } from "./lineage-reader.js";
@@ -23,6 +15,7 @@ import {
   ConversationRevisionCorruptError,
 } from "./revision-errors.js";
 import { foldRevisionOperation } from "./revision-fold.js";
+import type { PreparedConversationRevisionV1 } from "./revision-operation-types.js";
 import { runOwnedRevisionStart } from "./revision-owned-start-runtime.js";
 import {
   type RevisionOperationEventV1,
@@ -38,25 +31,8 @@ import {
 import { materializeRevisionStateTransition } from "./revision-state-transition.js";
 import type { ConversationRuntime } from "./runtime.js";
 import { readConversationSourceInventory } from "./source-inventory.js";
-import type { ConversationCreateResult, ConversationManifest, MessageRequest } from "./types.js";
-
-export interface PreparedConversationRevisionV1 {
-  operation: RevisionOperationV1;
-  revisionPlan: RevisionPreparationPlanV1;
-  reservation: RevisionReservationRecordV1;
-  actionPlan: LineageActionPlanBindingV1;
-  proposal: ActionProposalV1;
-  approval: ActionApprovalV1;
-  manifest: ConversationManifest;
-  bindings: MaterializedAgentBinding[];
-  bindingAuthorities: BindingAuthoritySnapshot[];
-  manifestRecordDigest: string;
-  handoff: ContextHandoffV1;
-  sharedPrompt: string;
-  request: (MessageRequest & { target_participants: "all" | string[] }) | null;
-  messageKey: string;
-  priorPublished: readonly PublishedRevisionTransitionInputV1[];
-}
+import type { ConversationCreateResult, ConversationManifest } from "./types.js";
+export type { PreparedConversationRevisionV1 } from "./revision-operation-types.js";
 
 export interface ConversationRevisionExecutorOptions {
   runtime: ConversationRuntime;
@@ -69,6 +45,7 @@ export interface ConversationRevisionExecutorOptions {
     manifest: ConversationManifest,
     operationId: string,
   ): Promise<ConversationCreateResult>;
+  revisionSettled(conversationId: string): void;
   revisionFault?(point: RevisionCrashPointV1): void;
 }
 
@@ -166,6 +143,7 @@ export class ConversationRevisionOperationExecutor {
       manifest_record_digest: prepared.manifestRecordDigest,
       updated_at: prepared.operation.created_at,
     });
+    prepared.queueDelivery?.bindChild(prepared.manifest.conversation_id);
     if (!this.options.runtime.operationId(prepared.manifest.conversation_id)) {
       this.options.runtime.begin(
         prepared.manifest,
@@ -173,7 +151,7 @@ export class ConversationRevisionOperationExecutor {
         [],
         false,
         0,
-        prepared.operation.operation_id,
+        prepared.runtimeOperationId,
         false,
         prepared.sharedPrompt,
       );
@@ -184,7 +162,8 @@ export class ConversationRevisionOperationExecutor {
         await this.options.runtime.userMessage(
           prepared.manifest.conversation_id,
           prepared.request,
-          `revision-message:${prepared.messageKey}`,
+          prepared.queueDelivery ? prepared.messageKey : `revision-message:${prepared.messageKey}`,
+          prepared.queueDelivery ?? undefined,
         );
     } catch (error) {
       this.options.runtime.finish(prepared.manifest.conversation_id);
@@ -380,6 +359,7 @@ export class ConversationRevisionOperationExecutor {
             await runOwnedRevisionStart({ prepared, options: this.options, owner });
           } finally {
             releaseIfTerminal();
+            this.options.revisionSettled(prepared.operation.root_session_id);
           }
         })();
       });
@@ -392,6 +372,7 @@ export class ConversationRevisionOperationExecutor {
         });
       } finally {
         releaseIfTerminal();
+        this.options.revisionSettled(prepared.operation.root_session_id);
       }
     }
   }

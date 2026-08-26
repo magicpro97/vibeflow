@@ -125,7 +125,7 @@ export function homeReactionLabel(emoji: HomeReactionEmoji): string {
 
 export function homeReactionSummaryTitle(summary: HomeReactionSummary): string {
   if (!summary.actor_public_ids.length) return `${summary.label} · ${summary.count}`;
-  return `${summary.label} · ${summary.count} — ${summary.actor_public_ids.join(", ")}`;
+  return `${summary.label} · ${summary.count} · ${summary.actor_public_ids.join(", ")}`;
 }
 
 export function toHomeCanonicalMessageReference(

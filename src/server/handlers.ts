@@ -11,7 +11,13 @@ import { basename, join } from "node:path";
 import { skillForFile } from "../commands.js";
 import { type Attachment, CTX_DIR, ENGINES, type Engine, readState, writeState } from "../core.js";
 import type { LogEvent } from "../logbus.js";
-import { type EngineReadiness, type PreflightOpts, anyReady, preflightAll } from "../preflight.js";
+import {
+  type EngineReadiness,
+  type PreflightOpts,
+  anyReady,
+  preflightAll,
+  preflightAllAsync,
+} from "../preflight.js";
 import { type ProjectProfile, scanRepo } from "../scanner.js";
 import { type VibeSettings, readSettings, writeSettings } from "../settings.js";
 import { TOOLS, TOOL_ORDER } from "../tools/index.js";
@@ -99,13 +105,15 @@ export function requestedEngines(payload: Record<string, unknown>): Engine[] {
   return picked.length ? picked : [...ENGINES];
 }
 
-export function runPreflight(payload: Record<string, unknown>): {
+export async function runPreflight(payload: Record<string, unknown>): Promise<{
   ok: boolean;
   readiness: EngineReadiness[];
   anyReady: boolean;
-} {
+}> {
   const opts: PreflightOpts = { probe: payload.probe !== false };
-  const readiness = preflightAll(requestedEngines(payload), opts);
+  const readiness = opts.probe
+    ? await preflightAllAsync(requestedEngines(payload), opts)
+    : preflightAll(requestedEngines(payload), opts);
   return { ok: true, readiness, anyReady: anyReady(readiness) };
 }
 

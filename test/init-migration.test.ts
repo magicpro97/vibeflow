@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 describe("init fat→slim migration (#326)", () => {
-  test("replaces fat block with slim block inside markers, preserves human content outside", () => {
+  test("replaces fat block with slim block inside markers, preserves human content outside", async () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-init-migrate-"));
     dirs.push(repo);
 
@@ -44,7 +44,7 @@ describe("init fat→slim migration (#326)", () => {
 
     // Run the same path vf init takes: applyIntake generates the slim body
     // and mergeManagedBlock swaps only the fenced region.
-    applyIntake({ goal: "test project", engines: ["codex"] }, { useAi: false, base: repo });
+    await applyIntake({ goal: "test project", engines: ["codex"] }, { useAi: false, base: repo });
 
     // Read the merged result
     const result = readFileSync(join(repo, "AGENTS.md"), "utf8");
@@ -86,7 +86,7 @@ describe("init fat→slim migration (#326)", () => {
     expect(beforePos).toBeLessThan(startIdx);
   });
 
-  test("slim block replaces fat block on codex engine (AGENTS.md rooted)", () => {
+  test("slim block replaces fat block on codex engine (AGENTS.md rooted)", async () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-init-migrate-codex-"));
     dirs.push(repo);
 
@@ -106,7 +106,7 @@ describe("init fat→slim migration (#326)", () => {
     const existing = `${beforeMarker}${VF_BLOCK_START}\n${fatBlock}\n${VF_BLOCK_END}\n${afterMarker}`;
     writeFileSync(join(repo, "AGENTS.md"), existing);
 
-    applyIntake({ goal: "codex test", engines: ["codex"] }, { useAi: false, base: repo });
+    await applyIntake({ goal: "codex test", engines: ["codex"] }, { useAi: false, base: repo });
 
     const result = readFileSync(join(repo, "AGENTS.md"), "utf8");
 

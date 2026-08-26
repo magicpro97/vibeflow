@@ -1,5 +1,5 @@
 import { type Engine, hasCommand, resolveCommand, resolveEngineBinary } from "../core.js";
-import { filterEnv } from "../dispatch/env-filter.js";
+import { runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import {
   GH_AUTH_TIMEOUT_MS,
   type ProbeInvocation,
@@ -69,6 +69,9 @@ export async function checkEngineAsync(
   }
   const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
   const spawner = opts.spawner;
+  if (opts.probe === false) {
+    return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
+  }
   if (engine === "copilot" && !hasGh(has, usesDefaultHasAsync)) {
     return Promise.resolve(stamp("no-binary", ghInstallHint()));
   }
@@ -90,9 +93,6 @@ export async function checkEngineAsync(
     const failed = failedAuth("copilot", ghResult);
     return Promise.resolve(stamp(failed.level, failed.detail));
   }
-  if (opts.probe === false) {
-    return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
-  }
   if (spawner !== undefined) {
     const probe = runProbe(engine, spawner);
     return Promise.resolve(stamp(probe.level, probe.detail));
@@ -100,50 +100,21 @@ export async function checkEngineAsync(
   const runAttempt = (
     attempt: ProbeInvocation,
     timeoutMs = probeTimeoutMs(engine, opts.probeTimeoutMs),
-  ): Promise<ProbeResult> =>
-    new Promise((resolve) => {
-      const spawnCmd = attempt.cmd === cmd ? resolvedCmd : attempt.cmd;
-      const child = Bun.spawn([spawnCmd, ...attempt.args], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        env: filterEnv(process.env, {}).env,
-      });
-      child.stdin?.write(attempt.input);
-      child.stdin?.end();
-      const timeout = setTimeout(() => {
-        child.kill();
-        resolve({ status: 124, stdout: "", stderr: `${attempt.cmd}: probe timed out` });
-      }, timeoutMs);
-      let stdout = "";
-      let stderr = "";
-      (async () => {
-        const reader = child.stdout.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          stdout += new TextDecoder().decode(value);
-        }
-      })();
-      (async () => {
-        const reader = child.stderr.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          stderr += new TextDecoder().decode(value);
-        }
-      })();
-      child.exited
-        .then((code) => {
-          clearTimeout(timeout);
-          resolve({ status: code ?? 1, stdout, stderr });
-        })
-        .catch((err: unknown) => {
-          clearTimeout(timeout);
-          const msg = err instanceof Error ? err.message : String(err);
-          resolve({ status: 1, stdout, stderr: msg });
-        });
-    });
+  ): Promise<ProbeResult> => {
+    const spawnCmd = attempt.cmd === cmd ? resolvedCmd : attempt.cmd;
+    return (opts.ownedRoute ?? runOwnedAiRoute)({
+      engine,
+      command: spawnCmd,
+      args: attempt.args,
+      input: attempt.input,
+      cwd: opts.cacheKey ?? process.cwd(),
+      timeoutMs,
+    }).then((result) => ({
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.timedOut ? `${attempt.cmd}: probe timed out` : result.stderr,
+    }));
+  };
   return new Promise((resolve) => {
     runAttempts(engine, has, probeSucceeded, failedProbe, resolve, runAttempt, stamp).catch(
       (err: unknown) => {

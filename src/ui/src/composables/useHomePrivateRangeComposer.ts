@@ -1,13 +1,14 @@
 import { type Ref, nextTick, onScopeDispose, reactive, ref, toRef, watch } from "vue";
-import { api } from "../api.js";
+import type { HomePrivateRangeSelectionRequest } from "../conversation-home-private-context-types.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import type { HomePrivateFileRangeBinding } from "../conversation-home-types.js";
 
 interface HomePrivateRangeComposerOptions {
   activeRootId?: Ref<string | null>;
   composerEpoch?: Ref<number>;
-  privateFileRange: Ref<HomePrivateFileRangeBinding | null>;
-  setPrivateFileRange(binding: HomePrivateFileRangeBinding): void;
+  stagePrivateContext(
+    request: HomePrivateRangeSelectionRequest,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
 }
 
 interface FocusableInput {
@@ -42,16 +43,6 @@ export function useHomePrivateRangeComposer(options: HomePrivateRangeComposerOpt
   };
 
   watch(
-    options.privateFileRange,
-    (binding) => {
-      if (!binding) return;
-      privateRangeDraft.path = binding.repo_relative_path;
-      privateRangeDraft.startLine = String(binding.start_line);
-      privateRangeDraft.endLine = String(binding.end_line);
-    },
-    { immediate: true },
-  );
-  watch(
     [activeRootId, composerEpoch],
     () => {
       const wasOpen = privateRangeOpen.value;
@@ -83,16 +74,9 @@ export function useHomePrivateRangeComposer(options: HomePrivateRangeComposerOpt
   });
 
   const resetPrivateRangeForm = () => {
-    const binding = options.privateFileRange.value;
-    if (binding) {
-      privateRangeDraft.path = binding.repo_relative_path;
-      privateRangeDraft.startLine = String(binding.start_line);
-      privateRangeDraft.endLine = String(binding.end_line);
-    } else {
-      privateRangeDraft.path = "";
-      privateRangeDraft.startLine = "";
-      privateRangeDraft.endLine = "";
-    }
+    privateRangeDraft.path = "";
+    privateRangeDraft.startLine = "";
+    privateRangeDraft.endLine = "";
     privateRangeError.value = "";
   };
 
@@ -175,6 +159,10 @@ export function useHomePrivateRangeComposer(options: HomePrivateRangeComposerOpt
       privateRangeError.value = "End line must be greater than or equal to the start line.";
       return;
     }
+    if (endLine - startLine + 1 > 200) {
+      privateRangeError.value = "Select at most 200 lines.";
+      return;
+    }
     const requestGeneration = ++stageGeneration;
     const rootSessionId = activeRootId.value;
     const requestEpoch = composerEpoch.value;
@@ -182,14 +170,22 @@ export function useHomePrivateRangeComposer(options: HomePrivateRangeComposerOpt
     stageAbortController = controller;
     privateRangeBusy.value = true;
     try {
-      const binding = await api.stagePrivateFileRange(path, startLine, endLine, controller.signal);
+      const selected = await options.stagePrivateContext(
+        {
+          repo_relative_path: path,
+          start_line: startLine,
+          end_line: endLine,
+        },
+        controller.signal,
+      );
       if (
         requestGeneration !== stageGeneration ||
         activeRootId.value !== rootSessionId ||
         composerEpoch.value !== requestEpoch
       )
         return;
-      options.setPrivateFileRange(binding);
+      if (!selected) return;
+      resetPrivateRangeForm();
       closePrivateRangePanel();
     } catch (error) {
       if (

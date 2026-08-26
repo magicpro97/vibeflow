@@ -1,4 +1,4 @@
-import { type ComputedRef, type Ref, toRaw } from "vue";
+import { toRaw } from "vue";
 import { type BrowserActionCandidate, conversationHomeApi } from "./conversation-home-api.js";
 import {
   moveHomeQuoteReference,
@@ -7,54 +7,24 @@ import {
   toHomeCanonicalQuoteReference,
   toggleHomeQuoteReference,
 } from "./conversation-home-authoring.js";
+import { createHomeCapabilityTargetRuntime } from "./conversation-home-capability-target-runtime.js";
+import type { HomeCommandRuntimeInput } from "./conversation-home-command-input.js";
+import type { HomePrivateContextCapture } from "./conversation-home-private-context-types.js";
+import { createHomeProposalRuntime } from "./conversation-home-proposal-runtime.js";
 import { capabilityRepairCandidate } from "./conversation-home-recovery.js";
 import {
   captureHomeCommandToken,
   createHomeActionKey,
   matchesHomeCommandToken,
   readableHomeError,
-  sameHomePrivateFileRangeBinding,
 } from "./conversation-home-runtime.js";
 import { parseComposerIntent } from "./conversation-home-state.js";
 import { applyHomeReactionFold } from "./conversation-home-stream.js";
 import type {
-  HomeActionView,
   HomeCapabilityItem,
-  HomePrivateFileRangeBinding,
   HomeQuoteReference,
   HomeReactionEmoji,
-  HomeRevisionSummary,
-  HomeTimelineResponse,
 } from "./conversation-home-types.js";
-
-interface HomeCommandRuntimeInput {
-  activation: {
-    captureGeneration(): number;
-    isGenerationCurrent(generation: number): boolean;
-  };
-  activeRevision: ComputedRef<HomeRevisionSummary | null>;
-  activeRootId: Ref<string | null>;
-  selectedConversationId: ComputedRef<string | null>;
-  draft: Ref<string>;
-  online: Ref<boolean>;
-  submitting: Ref<boolean>;
-  submittingToken: Ref<string | null>;
-  privateFileRange: Ref<HomePrivateFileRangeBinding | null>;
-  composerError: Ref<string>;
-  activationError: Ref<string>;
-  quoteRefs: Ref<HomeQuoteReference[]>;
-  reactionBusy: Ref<Record<string, boolean>>;
-  reactionBusyTokens: Ref<Record<string, string>>;
-  pendingActions: Ref<HomeActionView[]>;
-  timeline: Ref<HomeTimelineResponse | null>;
-  refreshSessions(query?: string): Promise<void>;
-  refreshActiveSelection(): Promise<boolean>;
-  refreshAuthoritativeActiveHead(expectedConversationId: string): Promise<boolean>;
-  selectSession(rootSessionId: string): Promise<void>;
-  sessions: Ref<Array<{ root_session_id: string; root: { conversation_id: string } }>>;
-  sessionQuery: Ref<string>;
-}
-
 export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
   const isCurrent = (command: ReturnType<typeof captureHomeCommandToken>) =>
     matchesHomeCommandToken(
@@ -63,13 +33,11 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
       input.activeRootId.value,
       input.selectedConversationId.value,
     );
-
   const finishSubmitting = (command: ReturnType<typeof captureHomeCommandToken>) => {
     if (input.submittingToken.value !== command.command_id) return;
     input.submittingToken.value = null;
     input.submitting.value = false;
   };
-
   const finishReactionBusy = (
     busyKey: string,
     command: ReturnType<typeof captureHomeCommandToken>,
@@ -82,7 +50,6 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     input.reactionBusy.value = nextBusy;
     input.reactionBusyTokens.value = nextTokens;
   };
-
   const sameQuoteSelection = (
     left: readonly HomeQuoteReference[],
     right: readonly HomeQuoteReference[],
@@ -96,62 +63,66 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
   const clearSubmittedComposer = (
     draft: string,
     quoteRefs: readonly HomeQuoteReference[],
-    privateFileRange: HomePrivateFileRangeBinding | null,
+    privateContext: HomePrivateContextCapture | null,
   ) => {
     if (input.draft.value === draft) input.draft.value = "";
     if (sameQuoteSelection(input.quoteRefs.value, quoteRefs)) input.quoteRefs.value = [];
-    if (sameHomePrivateFileRangeBinding(input.privateFileRange.value, privateFileRange))
-      input.privateFileRange.value = null;
+    privateContext?.clearIfCurrent();
+  };
+
+  const restoreSubmittedComposer = (
+    draft: string,
+    quoteRefs: readonly HomeQuoteReference[],
+    privateContext: HomePrivateContextCapture | null,
+  ): boolean => {
+    if (
+      input.draft.value !== "" ||
+      input.quoteRefs.value.length > 0 ||
+      input.privateContext.present()
+    )
+      return false;
+    if (privateContext && !privateContext.restoreIfVacant()) return false;
+    input.draft.value = draft;
+    input.quoteRefs.value = quoteRefs.map((reference) => structuredClone(reference));
+    return true;
   };
 
   const clearSubmittedDraft = (draft: string) => {
     if (input.draft.value === draft) input.draft.value = "";
   };
 
-  async function proposeCandidate(
-    candidate: BrowserActionCandidate,
-    options: { refreshSelection?: boolean } = {},
-  ): Promise<boolean> {
-    const rootSessionId = input.activeRootId.value;
-    const conversationId = input.selectedConversationId.value;
-    const revision = input.activeRevision.value;
-    if (!input.online.value) throw new Error("Reconnect before changing this conversation.");
-    if (!rootSessionId || !conversationId || !revision)
-      throw new Error("Open a conversation first.");
-    const command = captureHomeCommandToken(input.activation, rootSessionId, conversationId);
-    try {
-      const view = await conversationHomeApi.propose(
-        revision.conversation_id,
-        {
-          mode: "writable-revision",
-          conversation_id: revision.conversation_id,
-          revision_id: revision.revision_id,
-          last_seq: revision.last_seq,
-          conversation_lock_digest: revision.lock_digest,
-        },
-        candidate,
-        createHomeActionKey(),
-      );
-      if (!isCurrent(command)) return false;
-      input.pendingActions.value = [
-        view,
-        ...input.pendingActions.value.filter(
-          (item) => item.proposal.proposal_id !== view.proposal.proposal_id,
-        ),
-      ];
-      if (options.refreshSelection !== false) {
-        return await input.refreshActiveSelection();
-      }
-      return true;
-    } catch (error) {
-      if (!isCurrent(command)) return false;
-      throw error;
-    }
-  }
+  const { publishCandidate, transportCandidate, proposeCandidate } = createHomeProposalRuntime({
+    activation: input.activation,
+    activeRevision: input.activeRevision,
+    activeRootId: input.activeRootId,
+    selectedConversationId: input.selectedConversationId,
+    online: input.online,
+    pendingActions: input.pendingActions,
+    refreshActiveSelection: input.refreshActiveSelection,
+  });
+  const capabilityTargets = createHomeCapabilityTargetRuntime({
+    activation: input.activation,
+    activeRevision: input.activeRevision,
+    activeRootId: input.activeRootId,
+    selectedConversationId: input.selectedConversationId,
+    draft: input.draft,
+    online: input.online,
+    submitting: input.submitting,
+    submittingToken: input.submittingToken,
+    composerError: input.composerError,
+    transportCandidate,
+    publishCandidate,
+    refreshActiveSelection: input.refreshActiveSelection,
+  });
 
   async function submitDraft(): Promise<void> {
-    if (input.submitting.value || !input.online.value) return;
+    if (!input.online.value) return;
+    if (input.messageQueue.currentEdit()) {
+      await input.messageQueue.saveEdit();
+      return;
+    }
     const intent = parseComposerIntent(input.draft.value);
+    capabilityTargets.reconcileCapabilityTargetDraft();
     if (intent.kind === "empty") return;
     if (intent.kind === "invalid") {
       input.composerError.value = intent.message;
@@ -162,9 +133,64 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
         "Quoted sources only attach to natural-language replies. Remove them before sending a typed action.";
       return;
     }
-    if (input.privateFileRange.value && intent.kind !== "message") {
+    if (input.privateContext.present() && intent.kind !== "message") {
       input.composerError.value =
         "Private file ranges only attach to natural-language goals or replies. Remove the selected range before sending a typed action.";
+      return;
+    }
+    const submittedDraft = input.draft.value;
+    const activeRevision = input.activeRevision.value;
+    const submittedQuotes = structuredClone(toRaw(input.quoteRefs.value));
+    if (intent.kind === "message" && input.activeRootId.value) {
+      try {
+        if (!activeRevision)
+          throw new Error("Refresh this conversation before sending so its head can be verified.");
+        const rootSessionId = input.activeRootId.value;
+        const privateContext = input.privateContext.captureForMessage(rootSessionId);
+        if (input.privateContext.present() && !privateContext)
+          throw new Error("Refresh this private context selection before sending.");
+        const readyQuotes = input.quoteRefs.value.map((reference) => {
+          if (reference.root_session_id !== rootSessionId)
+            throw new Error(
+              "One quoted source belongs to another conversation. Remove it or return to that session.",
+            );
+          const canonical = toHomeCanonicalQuoteReference(reference);
+          if (!canonical)
+            throw new Error(
+              "One quoted source still lacks an immutable public locator. Refresh the conversation or remove it.",
+            );
+          return canonical;
+        });
+        await input.messageQueue.enqueue({
+          ...(privateContext ? { idempotency_key: privateContext.idempotency_key } : {}),
+          content: intent.content,
+          target_participants: intent.targets,
+          quote_refs: readyQuotes,
+          private_context_present: privateContext !== null,
+          clearIfCurrent: () =>
+            clearSubmittedComposer(submittedDraft, submittedQuotes, privateContext),
+          restoreIfVacant: () =>
+            restoreSubmittedComposer(submittedDraft, submittedQuotes, privateContext),
+        });
+      } catch (error) {
+        input.composerError.value = readableHomeError(error);
+      }
+      return;
+    }
+    if (input.submitting.value) return;
+    if (intent.kind === "install-capability") {
+      try {
+        if (!input.activeRootId.value || !activeRevision)
+          throw new Error("Open a conversation before installing a capability.");
+        const automatic = capabilityTargets.prepareCapabilityInstall(
+          intent,
+          activeRevision,
+          submittedDraft,
+        );
+        if (automatic) await capabilityTargets.confirmCapabilityTargets();
+      } catch (error) {
+        input.composerError.value = readableHomeError(error);
+      }
       return;
     }
     const command = captureHomeCommandToken(
@@ -176,21 +202,31 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     input.submitting.value = true;
     input.composerError.value = "";
     try {
-      const submittedDraft = input.draft.value;
-      const submittedQuotes = structuredClone(toRaw(input.quoteRefs.value));
-      const privateFileRange = input.privateFileRange.value
-        ? structuredClone(toRaw(input.privateFileRange.value))
-        : null;
-      const activeRevision = input.activeRevision.value;
       if (!input.activeRootId.value) {
         if (intent.kind !== "message" || intent.targets !== "all")
           throw new Error("Start with a natural-language goal, then add agents or capabilities.");
-        const created = await conversationHomeApi.create(
-          intent.content,
-          privateFileRange ?? undefined,
-        );
+        const privateContext = input.privateContext.captureForCreate();
+        if (input.privateContext.present() && !privateContext)
+          throw new Error(
+            "Refresh this private context selection before creating the conversation.",
+          );
+        const createRequest = {
+          schema_version: "1.0" as const,
+          idempotency_key:
+            privateContext?.idempotency_key ?? `home-create.${createHomeActionKey()}`.slice(0, 128),
+          topic: intent.content,
+          private_context_present: privateContext !== null,
+        };
+        let created: Awaited<ReturnType<typeof conversationHomeApi.create>>;
+        try {
+          created = await conversationHomeApi.create(createRequest);
+        } catch (error) {
+          if (!(error instanceof TypeError) || !isCurrent(command) || !input.online.value)
+            throw error;
+          created = await conversationHomeApi.create(createRequest);
+        }
         if (!isCurrent(command)) return;
-        clearSubmittedComposer(submittedDraft, [], privateFileRange);
+        clearSubmittedComposer(submittedDraft, [], privateContext);
         input.sessionQuery.value = "";
         await input.refreshSessions("");
         if (!isCurrent(command)) return;
@@ -204,42 +240,9 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
       }
       if (!activeRevision)
         throw new Error("Refresh this conversation before sending so its head can be verified.");
-      if (intent.kind === "message") {
-        const rootSessionId = input.activeRootId.value;
-        const readyQuotes = input.quoteRefs.value.map((reference) => {
-          if (rootSessionId && reference.root_session_id !== rootSessionId)
-            throw new Error(
-              "One quoted source belongs to another conversation. Remove it or return to that session.",
-            );
-          const canonical = toHomeCanonicalQuoteReference(reference);
-          if (!canonical)
-            throw new Error(
-              "One quoted source still lacks an immutable public locator. Refresh the conversation or remove it.",
-            );
-          return canonical;
-        });
-        const response = await conversationHomeApi.message(activeRevision.conversation_id, {
-          content: intent.content,
-          target_participants: intent.targets,
-          ...(readyQuotes.length ? { quote_refs: readyQuotes } : {}),
-          ...(privateFileRange ? { private_file_range: privateFileRange } : {}),
-        });
-        if (!isCurrent(command)) return;
-        clearSubmittedComposer(submittedDraft, submittedQuotes, privateFileRange);
-        if (response.child_conversation_id && rootSessionId) {
-          try {
-            const adopted = await input.refreshAuthoritativeActiveHead(
-              response.child_conversation_id,
-            );
-            if (!adopted)
-              throw new Error("The new revision did not become the authoritative session head.");
-          } catch (error) {
-            if (isCurrent(command)) input.activationError.value = readableHomeError(error);
-          }
-        }
-        return;
-      }
-      const proposed = await proposeCandidate(
+      if (intent.kind === "message")
+        throw new Error("Open the current root session before sending this message.");
+      const candidate: BrowserActionCandidate =
         intent.kind === "add-participant"
           ? {
               type: "conversation.add_participant",
@@ -252,22 +255,15 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
             }
           : intent.kind === "remove-participant"
             ? { type: "conversation.remove_participant", participant_id: intent.participantId }
-            : intent.kind === "install-capability"
-              ? {
-                  type: "capability.install",
-                  package: { id: intent.packageId },
-                  scope: intent.scope,
-                  requested_targets: [],
-                  inputs: [],
-                }
-              : {
-                  type: "capability.remove",
-                  package_id: intent.packageId,
-                  scope: intent.scope,
-                  cascade: false,
-                },
-        { refreshSelection: false },
-      );
+            : {
+                type: "capability.remove" as const,
+                package_id: intent.packageId,
+                scope: intent.scope,
+                cascade: false,
+              };
+      const proposed = await proposeCandidate(candidate, {
+        refreshSelection: false,
+      });
       if (!isCurrent(command) || !proposed) return;
       clearSubmittedDraft(submittedDraft);
       if (input.activeRootId.value) await input.refreshActiveSelection();
@@ -277,7 +273,6 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
       finishSubmitting(command);
     }
   }
-
   async function proposeSettings(changes: {
     policy?: string;
     max_rounds?: number;
@@ -329,7 +324,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     try {
       const response = await conversationHomeApi.reaction({
         schema_version: "1.0",
-        idempotency_key: `home-reaction:${busyKey}:${emoji}:${createHomeActionKey()}`.slice(0, 200),
+        idempotency_key: `home-reaction.${createHomeActionKey()}`.slice(0, 128),
         mode: "toggle-self",
         emoji,
         message_ref: messageRef,
@@ -378,6 +373,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
   }
 
   return {
+    ...capabilityTargets,
     proposeCandidate,
     submitDraft,
     proposeSettings,

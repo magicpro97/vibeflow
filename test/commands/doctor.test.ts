@@ -14,6 +14,10 @@ function r(
   return { engine, level, detail: detail ?? level, checkedAt: "" };
 }
 
+const cleanOwned = {
+  inspectOwnedProcesses: () => ({ active: [], recovered: [], uncertain: [] }),
+};
+
 describe("doctor", () => {
   // ── readinessMark: L47-48 (probe-failed / unknown level → c.yellow(\"!\")) ──
   test("readinessMark returns yellow ! for probe-failed (L47)", async () => {
@@ -24,7 +28,7 @@ describe("doctor", () => {
     ];
     // --probe with inject hits the probe-failed branch which exercises
     // readinessMark(level) where level === "probe-failed" → c.yellow("!")
-    const code = await doctor({ probe: true }, { readiness });
+    const code = await doctor({ probe: true }, { readiness, ...cleanOwned });
     expect(code).toBe(1);
   });
 
@@ -34,7 +38,7 @@ describe("doctor", () => {
       r("codex", "no-binary", "not installed"),
       r("copilot", "ready"),
     ];
-    const code = await doctor({}, { readiness });
+    const code = await doctor({}, { readiness, ...cleanOwned });
     expect(code).toBe(0);
   });
 
@@ -46,7 +50,7 @@ describe("doctor", () => {
       r("copilot", "probe-failed", "timeout"),
     ];
     // Multiple probe-failed → L126-128 exercised with plural message
-    const code = await doctor({ probe: true }, { readiness });
+    const code = await doctor({ probe: true }, { readiness, ...cleanOwned });
     expect(code).toBe(1);
   });
 
@@ -57,7 +61,7 @@ describe("doctor", () => {
       r("codex", "ready"),
       r("copilot", "probe-failed", "auth error"),
     ];
-    const code = await doctor({ probe: true }, { readiness });
+    const code = await doctor({ probe: true }, { readiness, ...cleanOwned });
     expect(code).toBe(1);
   });
 
@@ -68,7 +72,7 @@ describe("doctor", () => {
       r("codex", "ready"),
       r("copilot", "ready"),
     ];
-    const code = await doctor({ probe: true }, { readiness });
+    const code = await doctor({ probe: true }, { readiness, ...cleanOwned });
     expect(code).toBe(0);
   });
 
@@ -78,14 +82,14 @@ describe("doctor", () => {
       r("codex", "ready"),
       r("copilot", "ready"),
     ];
-    const code = await doctor({}, { readiness });
+    const code = await doctor({}, { readiness, ...cleanOwned });
     expect(code).toBe(0);
   });
 
   // ── no-inject, no-probe branch: L115-116 → printReadiness(L118) → return 0 (L134-135) ──
   test("no-inject no-probe path reaches Ready when tools are present (L134-135)", async () => {
     // Default call without inject — exercises preflightAll(ENGINES, {probe:false})
-    const code = await doctor({});
+    const code = await doctor({}, cleanOwned);
     expect([0, 1]).toContain(code);
   }, 30_000);
 
@@ -106,7 +110,7 @@ describe("doctor", () => {
     (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = mockSpawn;
     (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = mockSpawnSync;
     try {
-      const code = await doctor({ probe: true });
+      const code = await doctor({ probe: true }, cleanOwned);
       expect([0, 1]).toContain(code);
     } finally {
       (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
@@ -117,14 +121,14 @@ describe("doctor", () => {
   // ── missing required tools: L120-123 (already covered, keep for completeness) ──
   test("missing required tools returns 1", async () => {
     const { doctor: d } = require("../../src/commands.js");
-    const code = await d({}, { hasCommand: () => false, readiness: [] });
+    const code = await d({}, { hasCommand: () => false, readiness: [], ...cleanOwned });
     expect(code).toBe(1);
   });
 
   // ── refresh flag clears probe cache: L102-106 ──
   test("refresh flag clears probe cache and uses inject readiness", async () => {
     const readiness: EngineReadiness[] = [r("claude", "ready")];
-    const code = await doctor({ refresh: true }, { readiness });
+    const code = await doctor({ refresh: true }, { readiness, ...cleanOwned });
     expect(code).toBe(0);
   });
 
@@ -144,7 +148,7 @@ describe("doctor", () => {
     console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
     try {
       process.chdir(tmp);
-      const code = await doctor({});
+      const code = await doctor({}, cleanOwned);
       expect(code).toBe(0);
       expect(logs.some((l) => l.includes("logbus lock is stale"))).toBe(true);
     } finally {
@@ -153,6 +157,60 @@ describe("doctor", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   }, 10_000);
+
+  test("uncertain owned CLI records return 1", async () => {
+    const code = await doctor(
+      {},
+      {
+        ...cleanOwned,
+        inspectOwnedProcesses: () => ({
+          active: [],
+          recovered: [],
+          uncertain: [{ attempt_id: "owned-uncertain", reason: "identity mismatch" }],
+        }),
+      },
+    );
+    expect(code).toBe(1);
+  });
+
+  test("recovered owned CLI records under --fix keep doctor ready", async () => {
+    const code = await doctor(
+      { fix: true },
+      {
+        ...cleanOwned,
+        inspectOwnedProcesses: () => ({
+          active: [],
+          recovered: [
+            {
+              schema_version: "1.0",
+              attempt_id: "owned-recovered",
+              engine: "codex",
+              host: "host",
+              platform: process.platform,
+              strategy: process.platform === "win32" ? "windows-tree" : "posix-session",
+              owner_pid: 1,
+              owner_identity: "owner",
+              supervisor_pid: 2,
+              supervisor_identity: "supervisor",
+              cli_pid: 3,
+              cli_identity: "cli",
+              terminal_kind: null,
+              state: "released",
+              release_reason: "startup orphan recovery",
+              exit_code: 0,
+              process_quiescent: true,
+              recorded_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              record_digest:
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            } as never,
+          ],
+          uncertain: [],
+        }),
+      },
+    );
+    expect(code).toBe(0);
+  });
 });
 
 describe("resolveRepo", () => {

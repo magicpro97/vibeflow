@@ -254,14 +254,14 @@ describe("runSkillEval", () => {
     expect(result.previousSummary).toBeUndefined();
   });
 
-  test("objective task runs baseline then skill context", () => {
+  test("objective task runs baseline then skill context", async () => {
     const evals = validateEvalFile({
       schemaVersion: 1,
       skill: "test-skill",
       cases: [{ id: "task", type: "positive", prompt: "answer", expected: "correct" }],
     });
     const calls: Array<string | undefined> = [];
-    const result = runTaskEval(evals, "skill body", (_prompt, context) => {
+    const result = await runTaskEval(evals, "skill body", (_prompt, context) => {
       calls.push(context);
       return context ? "correct" : "wrong";
     });
@@ -272,7 +272,7 @@ describe("runSkillEval", () => {
       delta: 1,
       taskPassRate: 1,
     });
-    expect(runTaskEval(evals, "skill body", () => "wrong", 1)?.regression).toBe(true);
+    expect((await runTaskEval(evals, "skill body", () => "wrong", 1))?.regression).toBe(true);
   });
 
   test("includes ISO timestamp", () => {

@@ -157,23 +157,23 @@ describe("setSkillStatus", () => {
 
 // ── vf skills verify (command arm) ────────────────────────────────────────
 describe("skills verify command", () => {
-  function run(rest: string[]): number {
+  async function run(rest: string[]): Promise<number> {
     const orig = process.cwd();
     process.chdir(base);
     try {
-      return skills("verify", rest);
+      return await skills("verify", rest);
     } finally {
       process.chdir(orig);
     }
   }
 
-  test("promotes an unverified skill → file gets status: verified", () => {
+  test("promotes an unverified skill → file gets status: verified", async () => {
     const md = scaffold("good", ["---", "name: good", "description: d", "---", ...VALID_BODY]);
-    expect(run(["good"])).toBe(0);
+    expect(await run(["good"])).toBe(0);
     expect(readFileSync(md, "utf8")).toContain("status: verified");
   });
 
-  test("--undo demotes back to unverified", () => {
+  test("--undo demotes back to unverified", async () => {
     const md = scaffold("good", [
       "---",
       "name: good",
@@ -182,11 +182,11 @@ describe("skills verify command", () => {
       "---",
       ...VALID_BODY,
     ]);
-    expect(run(["good", "--undo"])).toBe(0);
+    expect(await run(["good", "--undo"])).toBe(0);
     expect(readFileSync(md, "utf8")).toContain("status: unverified");
   });
 
-  test("already verified → exit 0, no change", () => {
+  test("already verified → exit 0, no change", async () => {
     scaffold("good", [
       "---",
       "name: good",
@@ -195,27 +195,27 @@ describe("skills verify command", () => {
       "---",
       ...VALID_BODY,
     ]);
-    expect(run(["good"])).toBe(0);
+    expect(await run(["good"])).toBe(0);
   });
 
-  test("invalid name → exit 2", () => {
-    expect(run(["Bad Name"])).toBe(2);
+  test("invalid name → exit 2", async () => {
+    expect(await run(["Bad Name"])).toBe(2);
   });
 
-  test("missing name → exit 2", () => {
-    expect(run([])).toBe(2);
+  test("missing name → exit 2", async () => {
+    expect(await run([])).toBe(2);
   });
 
-  test("not found in canonical store → exit 1", () => {
-    expect(run(["ghost"])).toBe(1);
+  test("not found in canonical store → exit 1", async () => {
+    expect(await run(["ghost"])).toBe(1);
   });
 
-  test("malformed SKILL.md (no frontmatter) → exit 1", () => {
+  test("malformed SKILL.md (no frontmatter) → exit 1", async () => {
     scaffold("bad", ["no frontmatter at all"]);
-    expect(run(["bad"])).toBe(1);
+    expect(await run(["bad"])).toBe(1);
   });
 
-  test("quality errors block promotion", () => {
+  test("quality errors block promotion", async () => {
     scaffold("huge", [
       "---",
       "name: huge",
@@ -231,10 +231,10 @@ describe("skills verify command", () => {
       "Verify.",
       ...Array.from({ length: 510 }, (_, i) => `line ${i}`),
     ]);
-    expect(run(["huge"])).toBe(1);
+    expect(await run(["huge"])).toBe(1);
   });
 
-  test("quality warnings allow promotion", () => {
+  test("quality warnings allow promotion", async () => {
     scaffold("warn", [
       "---",
       "name: warn",
@@ -249,7 +249,7 @@ describe("skills verify command", () => {
       "## Verification",
       "Verify.",
     ]);
-    expect(run(["warn"])).toBe(0);
+    expect(await run(["warn"])).toBe(0);
   });
 
   test("set status failure after quality checks → exit 1", () => {
@@ -262,13 +262,13 @@ describe("skills verify command", () => {
 // ── vf skills verify-lock (CLI handler) ─────────────────────────────────
 
 describe("skills verify-lock command", () => {
-  function run(rest: string[]): number {
+  async function run(rest: string[]): Promise<number> {
     const orig = process.cwd();
     const origHome = process.env.VF_SKILLS_HOME;
     process.env.VF_SKILLS_HOME = base;
     process.chdir(base);
     try {
-      return skills("verify-lock", rest);
+      return await skills("verify-lock", rest);
     } finally {
       process.chdir(orig);
       if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -281,28 +281,28 @@ describe("skills verify-lock command", () => {
     writeFileSync(join(base, ".vibeflow", "SKILL_REGISTRY.lock.json"), JSON.stringify(data));
   }
 
-  test("passes when no lock file exists", () => {
-    expect(run([])).toBe(0);
+  test("passes when no lock file exists", async () => {
+    expect(await run([])).toBe(0);
   });
 
-  test("passes on valid lock with empty registries", () => {
+  test("passes on valid lock with empty registries", async () => {
     mkLock({ schemaVersion: 1, registries: [] });
-    expect(run([])).toBe(0);
+    expect(await run([])).toBe(0);
   });
 
-  test("fails on malformed lock file", () => {
+  test("fails on malformed lock file", async () => {
     mkdirSync(join(base, ".vibeflow"), { recursive: true });
     writeFileSync(join(base, ".vibeflow", "SKILL_REGISTRY.lock.json"), "bad json");
-    expect(run([])).toBe(1);
+    expect(await run([])).toBe(1);
   });
 
-  test("fails on root not an object", () => {
+  test("fails on root not an object", async () => {
     mkdirSync(join(base, ".vibeflow"), { recursive: true });
     writeFileSync(join(base, ".vibeflow", "SKILL_REGISTRY.lock.json"), '"string"');
-    expect(run([])).toBe(1);
+    expect(await run([])).toBe(1);
   });
 
-  test("fails on missing registry from catalog", () => {
+  test("fails on missing registry from catalog", async () => {
     mkLock({
       schemaVersion: 1,
       registries: [
@@ -315,6 +315,6 @@ describe("skills verify-lock command", () => {
         },
       ],
     });
-    expect(run([])).toBe(1);
+    expect(await run([])).toBe(1);
   });
 });

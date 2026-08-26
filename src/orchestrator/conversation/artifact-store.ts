@@ -173,6 +173,34 @@ export class ConversationArtifactStore {
       }).manifest;
     });
   }
+  createOrVerifyInitial(
+    manifest: ConversationManifest,
+    bindingAuthorities: BindingAuthoritySnapshot[],
+    operationId: string,
+  ): ConversationManifest {
+    assertConversationManifest(manifest);
+    return this.withLock(() => {
+      if (this.operationAuthorities.owner(operationId) !== manifest.conversation_id)
+        throw new Error("prepared conversation operation authority changed");
+      const existing = this.readUnlocked(manifest.conversation_id);
+      if (existing) {
+        if (
+          JSON.stringify(existing.manifest) !== JSON.stringify(manifest) ||
+          JSON.stringify(existing.binding_authorities) !== JSON.stringify(bindingAuthorities)
+        )
+          throw new Error("prepared conversation manifest identity conflict");
+        return existing.manifest;
+      }
+      return this.writeRecordUnlocked({
+        manifest: clone(manifest),
+        binding_authorities: clone(bindingAuthorities),
+        resume_bindings: [],
+        child_revisions: {},
+        artifacts: [],
+        artifact_reservations: {},
+      }).manifest;
+    });
+  }
   prepareRevision(
     manifest: ConversationManifest,
     bindingAuthorities: BindingAuthoritySnapshot[],

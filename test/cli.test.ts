@@ -146,10 +146,10 @@ describe("adapters", () => {
     expect(files[`${CTX_DIR}/WORKFLOW_POLICY.md`]).toContain("Tool Error & Execution Policy");
   });
 
-  test("engine instruction files point to the vf skill for the full workflow (slim block, #322)", () => {
+  test("engine instruction files point to the vf skill for the full workflow (slim block, #322)", async () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
-      const files = engineFiles(engine, ctx, false);
+      const files = await engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
       // #322: the always-loaded engine block is SLIM and points to the `vf` skill for the
       // full workflow guide instead of inlining it.
@@ -160,10 +160,10 @@ describe("adapters", () => {
     }
   });
 
-  test("engine instruction files document VibeFlow's 5 core commands", () => {
+  test("engine instruction files document VibeFlow's 5 core commands", async () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
-      const files = engineFiles(engine, ctx, false);
+      const files = await engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
       expect(body).toContain("VibeFlow commands");
       // #322: only the 5 CORE commands stay inline (headless mitigation).
@@ -178,10 +178,10 @@ describe("adapters", () => {
     }
   });
 
-  test("engine instruction files keep the confidence gate inline and point to the vf skill", () => {
+  test("engine instruction files keep the confidence gate inline and point to the vf skill", async () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
-      const files = engineFiles(engine, ctx, false);
+      const files = await engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
       // Headless mitigation (#322): the confidence gate + "drive via vf" rule stay INLINE
       // (engines auto-load this block headless; the skill may not load headless).
@@ -213,10 +213,10 @@ describe("adapters", () => {
     expect(policy).toContain("append-only");
   });
 
-  test("engine instruction files delegate knowledge write-back to the vf skill (slim block, #322)", () => {
+  test("engine instruction files delegate knowledge write-back to the vf skill (slim block, #322)", async () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
-      const files = engineFiles(engine, ctx, false);
+      const files = await engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
       // #322: the knowledge write-back loop (log.md / index.md / append-only) is detail that
       // moved out of the always-loaded engine block into .vibeflow/WORKFLOW_POLICY.md + the skill,
@@ -232,18 +232,18 @@ describe("adapters", () => {
     expect(policy).toContain("index.md");
   });
 
-  test("each engine produces its canonical instruction file (and not the unused .agents/instructions.md)", () => {
+  test("each engine produces its canonical instruction file (and not the unused .agents/instructions.md)", async () => {
     const ctx = defaultContext();
-    expect(Object.keys(engineFiles("claude", ctx))).toContain("CLAUDE.md");
-    expect(Object.keys(engineFiles("codex", ctx))).toContain("AGENTS.md");
-    const copilot = engineFiles("copilot", ctx);
+    expect(Object.keys(await engineFiles("claude", ctx))).toContain("CLAUDE.md");
+    expect(Object.keys(await engineFiles("codex", ctx))).toContain("AGENTS.md");
+    const copilot = await engineFiles("copilot", ctx);
     expect(Object.keys(copilot)).toContain(".github/copilot-instructions.md");
     // No supported engine reads `.agents/instructions.md` (Claude Code reads CLAUDE.md,
     // Codex reads AGENTS.md, Copilot reads .github/copilot-instructions.md). Asserting
     // its absence here prevents regressions of the v0.6.x bug where a single-engine
     // `vf init` would still create the .agents/ directory.
     for (const engine of ["claude", "codex", "copilot"] as const) {
-      expect(Object.keys(engineFiles(engine, ctx))).not.toContain(".agents/instructions.md");
+      expect(Object.keys(await engineFiles(engine, ctx))).not.toContain(".agents/instructions.md");
     }
   });
 
@@ -268,9 +268,9 @@ describe("adapters", () => {
     expect(between).not.toContain("ship the thing\n\n");
   });
 
-  test("engine body trims trailing whitespace from goal so 'Powered by VibeFlow' footer has no double-newlines (issue #91)", () => {
+  test("engine body trims trailing whitespace from goal so 'Powered by VibeFlow' footer has no double-newlines (issue #91)", async () => {
     const ctx = { ...defaultContext(), goal: "ship the thing\n\n" };
-    const body = engineFiles("codex", ctx, false)["AGENTS.md"] ?? "";
+    const body = (await engineFiles("codex", ctx, false))["AGENTS.md"] ?? "";
     expect(body).not.toBe("");
     // The "Powered by VibeFlow" footer is the last line of the slim managed block. Find the LAST occurrence.
     const goalIdx = body.indexOf("Goal: ship the thing");
@@ -290,10 +290,10 @@ describe("adapters", () => {
     expect(beforeFooter.endsWith("\n\n\n")).toBe(false);
   });
 
-  test("Bash-only native warning is inlined for codex but NOT claude (full native) — #634", () => {
+  test("Bash-only native warning is inlined for codex but NOT claude (full native) — #634", async () => {
     const ctx = defaultContext();
-    const codex = engineFiles("codex", ctx, false)["AGENTS.md"] ?? "";
-    const claude = engineFiles("claude", ctx, false)["CLAUDE.md"] ?? "";
+    const codex = (await engineFiles("codex", ctx, false))["AGENTS.md"] ?? "";
+    const claude = (await engineFiles("claude", ctx, false))["CLAUDE.md"] ?? "";
     expect(codex).toContain("Bash/shell only");
     expect(claude).not.toContain("Bash/shell only");
   });
@@ -561,17 +561,17 @@ describe("commands.init preserves human-curated TASK_CONTEXT.md (data-loss P1)",
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("first init writes TASK_CONTEXT.md with the template", () => {
-    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+  test("first init writes TASK_CONTEXT.md with the template", async () => {
+    await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     const body = readFileSync(taskPath(), "utf8");
     expect(body).toContain("# Task Context");
     expect(body).toContain("- Goal:");
   });
 
-  test("re-init with NO explicit goal preserves a hand-edited TASK_CONTEXT.md", () => {
-    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+  test("re-init with NO explicit goal preserves a hand-edited TASK_CONTEXT.md", async () => {
+    await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     writeFileSync(taskPath(), "# Task Context\n\n- Goal: MY CUSTOM GOAL\n");
-    const result = applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const result = await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     const body = readFileSync(taskPath(), "utf8");
     expect(body).toContain("MY CUSTOM GOAL");
     expect(body).not.toContain("Describe the task in");
@@ -579,19 +579,19 @@ describe("commands.init preserves human-curated TASK_CONTEXT.md (data-loss P1)",
     expect(result.files).not.toContain(`${CTX_DIR}/TASK_CONTEXT.md`);
   });
 
-  test("PROJECT_CONTEXT.md preserved on re-init (human-curated, not regenerated)", () => {
-    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+  test("PROJECT_CONTEXT.md preserved on re-init (human-curated, not regenerated)", async () => {
+    await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     writeFileSync(projectPath(), "STALE PROJECT CONTEXT\n");
-    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     const body = readFileSync(projectPath(), "utf8");
     expect(body).toContain("STALE PROJECT CONTEXT");
     expect(body).not.toContain("# Project Context");
   });
 
-  test("re-init WITH an explicit goal does overwrite TASK_CONTEXT.md", () => {
-    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+  test("re-init WITH an explicit goal does overwrite TASK_CONTEXT.md", async () => {
+    await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     writeFileSync(taskPath(), "# Task Context\n\n- Goal: OLD GOAL\n");
-    const result = applyIntake(
+    const result = await applyIntake(
       { goal: "BRAND NEW EXPLICIT GOAL", engines: ["claude"] },
       { useAi: false, base: dir },
     );
@@ -613,14 +613,14 @@ describe("commands.init preserves human-curated ROOT engine files (data-loss P1)
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("a hand-edited CLAUDE.md is preserved AND backed up on re-init (no data loss)", () => {
+  test("a hand-edited CLAUDE.md is preserved AND backed up on re-init (no data loss)", async () => {
     // First init produces a managed (fenced) CLAUDE.md.
-    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     // User replaces it with their own hand-written file (no markers, no generation marker).
     const precious = "# My own CLAUDE.md\n\nPRECIOUS HUMAN INSTRUCTIONS that must never be lost.\n";
     writeFileSync(claudePath(), precious);
 
-    const result = applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const result = await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     const body = readFileSync(claudePath(), "utf8");
     // Human content survives, and the managed block is appended (not a clobber).
     expect(body).toContain("PRECIOUS HUMAN INSTRUCTIONS that must never be lost.");
@@ -634,13 +634,13 @@ describe("commands.init preserves human-curated ROOT engine files (data-loss P1)
     expect(archived).toBe(precious);
   });
 
-  test("re-init over a managed CLAUDE.md only swaps the block; no backup, idempotent", () => {
-    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+  test("re-init over a managed CLAUDE.md only swaps the block; no backup, idempotent", async () => {
+    await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     // User edits OUTSIDE the markers — that edit must survive and must NOT trigger a backup.
     const managed = readFileSync(claudePath(), "utf8");
     writeFileSync(claudePath(), `${managed}\n## My notes outside the fence\n`);
 
-    const result = applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const result = await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     const body = readFileSync(claudePath(), "utf8");
     expect(body).toContain("## My notes outside the fence");
     expect(result.backedUp ?? []).not.toContain("CLAUDE.md");
@@ -787,12 +787,12 @@ describe("commands.repo", () => {
     expect(resolveRepo("/no/such/dir/anywhere")).toBe(process.cwd());
   });
 
-  test("detectRepo reports engine markers present in a repo", () => {
+  test("detectRepo reports engine markers present in a repo", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-det-"));
     try {
       const prev = process.cwd();
       process.chdir(dir);
-      applyIntake({ engines: ["claude", "copilot"] }, { useAi: false, base: dir });
+      await applyIntake({ engines: ["claude", "copilot"] }, { useAi: false, base: dir });
       process.chdir(prev);
       const det = detectRepo(dir);
       expect(det.engines.claude).toBe(true); // CLAUDE.md written
@@ -804,10 +804,10 @@ describe("commands.repo", () => {
 });
 
 describe("commands.units CRUD", () => {
-  test("add, update, then delete a work unit and recompute totals", () => {
+  test("add, update, then delete a work unit and recompute totals", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-crud-"));
     try {
-      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
 
       let s = mutateUnits(dir, "add", {
         name: "auth",
@@ -834,12 +834,12 @@ describe("commands.units CRUD", () => {
     }
   });
 
-  test("`vf units add/update/delete` subcommands mutate the ledger", () => {
+  test("`vf units add/update/delete` subcommands mutate the ledger", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-unitscmd-"));
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
 
       expect(units("add", ["auth"])).toBe(0);
       expect(readState(dir)?.work_units.map((u) => u.name)).toEqual(["auth"]);
@@ -875,12 +875,12 @@ describe("commands.units CRUD", () => {
     }
   });
 
-  test("`vf units evidence <name> --add` appends evidence and satisfies the policy gate", () => {
+  test("`vf units evidence <name> --add` appends evidence and satisfies the policy gate", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-unitsev-"));
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
       expect(units("add", ["nav"])).toBe(0);
 
       // (1) --add appends an evidence string and persists it
@@ -910,12 +910,12 @@ describe("commands.units CRUD", () => {
   });
 
   // #517: manual evidence add stamps a UTC capture time, stamp-once on re-add.
-  test("evidence --add stamps evidence_at (UTC), stamp-once on re-add", () => {
+  test("evidence --add stamps evidence_at (UTC), stamp-once on re-add", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-evat-"));
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
       expect(units("add", ["nav"])).toBe(0);
       const key = "compiled green: BUILD SUCCESSFUL";
       expect(units("evidence", ["nav"], { add: key })).toBe(0);
@@ -933,12 +933,12 @@ describe("commands.units CRUD", () => {
     }
   });
 
-  test("evidence-add resolves the no-evidence policy gate dead-end", () => {
+  test("evidence-add resolves the no-evidence policy gate dead-end", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-unitsgate-"));
     const orig = process.cwd();
     process.chdir(dir);
     try {
-      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
       expect(units("add", ["nav"])).toBe(0);
       expect(units("update", ["nav"], { status: "done", confidence: "1" })).toBe(0);
       // Green gates so the computed-confidence gate clears — this test isolates
@@ -1486,12 +1486,12 @@ describe("adapters settings integration", () => {
     expect(files[`${CTX_DIR}/SETTINGS.json`]).toBeUndefined();
   });
 
-  test("engineBody omits the navigation block when no tool is enabled", () => {
-    const body = Object.values(engineFiles("claude", defaultContext(), false)).join("\n");
+  test("engineBody omits the navigation block when no tool is enabled", async () => {
+    const body = Object.values(await engineFiles("claude", defaultContext(), false)).join("\n");
     expect(body).not.toContain("For code navigation");
   });
 
-  test("engineBody adds the navigation block and reflects priority order when tools enabled", () => {
+  test("engineBody adds the navigation block and reflects priority order when tools enabled", async () => {
     const ctx = {
       ...defaultContext(),
       settings: {
@@ -1503,7 +1503,7 @@ describe("adapters settings integration", () => {
         notifications: true,
       } satisfies VibeSettings,
     };
-    const body = Object.values(engineFiles("claude", { ...ctx }, false)).join("\n");
+    const body = Object.values(await engineFiles("claude", { ...ctx }, false)).join("\n");
     expect(body).toContain("For code navigation");
     // priority puts lsp first, so its label must precede codegraph's in the sentence.
     const lspAt = body.indexOf("language-server (LSP)");
@@ -1539,8 +1539,8 @@ describe("commands.applyIntake hard creation gate", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  test("refuses creation when no engine is present at all (binary + probe both fail)", () => {
-    const result = applyIntake(
+  test("refuses creation when no engine is present at all (binary + probe both fail)", async () => {
+    const result = await applyIntake(
       { goal: "g", engines: ["claude", "codex"] },
       { base: dir, preflight: noneReady },
     );
@@ -1551,7 +1551,7 @@ describe("commands.applyIntake hard creation gate", () => {
     expect(existsSync(join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`))).toBe(false);
   });
 
-  test("generates only for ready engines when at least one is ready", () => {
+  test("generates only for ready engines when at least one is ready", async () => {
     // claude ready, codex not — only CLAUDE.md should be written.
     const mixed = (engines: Engine[]) =>
       engines.map((engine) => ({
@@ -1560,7 +1560,7 @@ describe("commands.applyIntake hard creation gate", () => {
         detail: "x",
         checkedAt: "",
       }));
-    const result = applyIntake(
+    const result = await applyIntake(
       { goal: "g", engines: ["claude", "codex"] },
       { base: dir, preflight: mixed },
     );
@@ -1569,9 +1569,9 @@ describe("commands.applyIntake hard creation gate", () => {
     expect(existsSync(join(dir, "AGENTS.md"))).toBe(false);
   });
 
-  test("dry run skips the gate so the offline preview works with no engine", () => {
+  test("dry run skips the gate so the offline preview works with no engine", async () => {
     let probed = false;
-    const result = applyIntake(
+    const result = await applyIntake(
       { goal: "g", engines: ["claude"] },
       {
         base: dir,
@@ -1589,9 +1589,9 @@ describe("commands.applyIntake hard creation gate", () => {
     expect(existsSync(join(dir, "CLAUDE.md"))).toBe(false);
   });
 
-  test("skipPreflight (web /api/init path) bypasses the gate entirely", () => {
+  test("skipPreflight (web /api/init path) bypasses the gate entirely", async () => {
     let probed = false;
-    const result = applyIntake(
+    const result = await applyIntake(
       { goal: "g", engines: ["claude"] },
       {
         base: dir,
@@ -1608,12 +1608,12 @@ describe("commands.applyIntake hard creation gate", () => {
     expect(existsSync(join(dir, "CLAUDE.md"))).toBe(true);
   });
 
-  test("VIBEFLOW_AI (bridge) skips the named-engine preflight so init isn't blocked offline", () => {
+  test("VIBEFLOW_AI (bridge) skips the named-engine preflight so init isn't blocked offline", async () => {
     const prev = process.env.VIBEFLOW_AI;
     process.env.VIBEFLOW_AI = "node scripts/fake-engine.mjs";
     let probed = false;
     try {
-      const result = applyIntake(
+      const result = await applyIntake(
         { goal: "g", engines: ["claude"] },
         {
           base: dir,
@@ -1641,9 +1641,9 @@ describe("commands.applyIntake preserves SETTINGS.json", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  test("first init on a fresh dir seeds SETTINGS.json with the off-by-default baseline", () => {
+  test("first init on a fresh dir seeds SETTINGS.json with the off-by-default baseline", async () => {
     expect(existsSync(join(dir, CTX_DIR, "SETTINGS.json"))).toBe(false);
-    applyIntake(
+    await applyIntake(
       { goal: "g", engines: ["claude"] },
       { base: dir, skipPreflight: true, useAi: false },
     );
@@ -1653,12 +1653,12 @@ describe("commands.applyIntake preserves SETTINGS.json", () => {
     expect(existsSync(join(dir, CTX_DIR, "SETTINGS.json"))).toBe(true);
   });
 
-  test("re-init does NOT reset enabled tools back to defaults", () => {
+  test("re-init does NOT reset enabled tools back to defaults", async () => {
     writeSettings(dir, { tools: { codegraph: true, lsp: true } });
     expect(readSettings(dir).tools.codegraph).toBe(true);
     expect(readSettings(dir).tools.lsp).toBe(true);
 
-    applyIntake(
+    await applyIntake(
       { goal: "g", engines: ["claude"] },
       { base: dir, skipPreflight: true, useAi: false },
     );
@@ -1668,9 +1668,9 @@ describe("commands.applyIntake preserves SETTINGS.json", () => {
     expect(s.tools.lsp).toBe(true);
   });
 
-  test("with tools enabled, generated CLAUDE.md/AGENTS.md carry the nav block and it survives re-init", () => {
+  test("with tools enabled, generated CLAUDE.md/AGENTS.md carry the nav block and it survives re-init", async () => {
     writeSettings(dir, { tools: { codegraph: true, lsp: true } });
-    applyIntake(
+    await applyIntake(
       { goal: "g", engines: ["claude", "codex"] },
       {
         base: dir,
@@ -1690,9 +1690,9 @@ describe("commands.applyIntake preserves SETTINGS.json", () => {
     expect(readSettings(dir).tools.codegraph).toBe(true);
   });
 
-  test("init writes tool MCP config only for the selected engine", () => {
+  test("init writes tool MCP config only for the selected engine", async () => {
     writeSettings(dir, { tools: { codegraph: true, lsp: true } });
-    applyIntake(
+    await applyIntake(
       { goal: "g", engines: ["claude"] },
       {
         base: dir,
@@ -2071,7 +2071,7 @@ describe("commands.skills init", () => {
 
   test("scaffolds a parseable SKILL.md that discoverSkills + matchSkillsForTask can use", async () => {
     const { discoverSkills, matchSkillsForTask } = await import("../src/skills/registry.js");
-    expect(skills("init", ["compose-screen-ux"])).toBe(0);
+    expect(await skills("init", ["compose-screen-ux"])).toBe(0);
     const path = join(dir, ".vibeflow", "skills", "compose-screen-ux", "SKILL.md");
     expect(existsSync(path)).toBe(true);
 
@@ -2087,10 +2087,10 @@ describe("commands.skills init", () => {
     expect(matches.some((m) => m.skill.name === "compose-screen-ux")).toBe(true);
   });
 
-  test("rejects a non-kebab name and refuses to overwrite an existing skill", () => {
-    expect(skills("init", ["Bad_Name"])).toBe(2);
-    expect(skills("init", ["good-skill"])).toBe(0);
-    expect(skills("init", ["good-skill"])).toBe(1); // already exists
+  test("rejects a non-kebab name and refuses to overwrite an existing skill", async () => {
+    expect(await skills("init", ["Bad_Name"])).toBe(2);
+    expect(await skills("init", ["good-skill"])).toBe(0);
+    expect(await skills("init", ["good-skill"])).toBe(1); // already exists
   });
 });
 

@@ -3,7 +3,7 @@ import type {
   CapabilityDurablePlanningGraphV1,
   CapabilityFabricPlanV1,
 } from "../planning/types.js";
-import { readCapabilityWal } from "../storage/operation-store.js";
+import { foldCapabilityWal, readCapabilityWal } from "../storage/operation-store.js";
 import { capabilityOperationPaths } from "../storage/paths.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
@@ -109,6 +109,13 @@ export function beginCapabilityOperationRecovery(input: {
       input.held,
     );
   }
+  const events = readCapabilityWal(input.options.storage.paths, input.operationId);
+  const structuralState = foldCapabilityWal(events).state;
+  if (
+    structuralState === "committing" &&
+    events.some((event) => event.payload.kind === "health-inventory-prepared")
+  )
+    return null;
   const current = foldCapabilityOperation(
     input.options.storage,
     input.operationId,

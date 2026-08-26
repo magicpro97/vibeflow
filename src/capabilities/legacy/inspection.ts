@@ -16,6 +16,10 @@ import { createAuthenticityBinding, createLegacyAdoptPackagePin } from "../sourc
 import { computePackageTree } from "../source/tree.js";
 import type { PublicLegacyAdoptInspectionResponseV1 } from "../wire/cli.js";
 import { CapabilityValidationError, bytewise } from "../wire/primitives.js";
+import {
+  type FilesystemLegacyOwnedMarkerV1,
+  assertFilesystemLegacyOwnedMarkerV1,
+} from "./filesystem-reader.js";
 import { projectLegacyAdoptInspection } from "./inspection-projection.js";
 import type { LegacyAdoptMaterializedInspectionRequestV1, LegacyOwnedMarkerV1 } from "./types.js";
 
@@ -52,40 +56,22 @@ function managedIdentifier(raw: string): string {
   return `${slug}-${hash}`;
 }
 
-function packageId(marker: LegacyOwnedMarkerV1): string {
+function packageId(marker: FilesystemLegacyOwnedMarkerV1): string {
   const prefix =
     marker.source === "skill-lock"
       ? "legacy.skill."
-      : marker.source === "tool-managed-evidence"
-        ? "legacy.tool."
-        : marker.source === "mcp-managed-sidecar"
-          ? `legacy.mcp.${marker.engine}.`
-          : marker.source === "hook-sentinel"
-            ? `legacy.hook.${marker.engine}.`
-            : `legacy.role.${marker.engine}.`;
+      : marker.source === "mcp-managed-sidecar"
+        ? `legacy.mcp.${marker.engine}.`
+        : `legacy.hook.${marker.engine}.`;
   return `${prefix}${managedIdentifier(marker.raw_identifier)}`;
 }
 
-function component(marker: LegacyOwnedMarkerV1): LegacySyntheticComponentV1 {
+function component(marker: FilesystemLegacyOwnedMarkerV1): LegacySyntheticComponentV1 {
   const base = { component_id: "legacy", targets: [marker.engine], required: true };
   const payloadSha = rawSha(marker.payload);
   switch (marker.source) {
     case "skill-lock":
       return { ...base, type: "skill", bundle_path: "payload/SKILL.md", bundle_sha256: payloadSha };
-    case "tool-managed-evidence":
-      return {
-        ...base,
-        type: "tool",
-        installer: {
-          kind: "download",
-          coordinate: `legacy-managed:${managedIdentifier(marker.raw_identifier)}`,
-          version: "0.0.0",
-          artifact_sha256: payloadSha,
-          lifecycle_scripts: "disabled",
-        },
-        expected_binary: "legacy-tool",
-        version_constraint: "*",
-      };
     case "mcp-managed-sidecar":
       return {
         ...base,
@@ -97,82 +83,62 @@ function component(marker: LegacyOwnedMarkerV1): LegacySyntheticComponentV1 {
       };
     case "hook-sentinel":
       return { ...base, type: "hook", event: "pre-tool", vf_handler_id: "legacy-handler" };
-    case "role-marker":
-      return {
-        ...base,
-        type: "role",
-        role_spec_path: "payload/role.md",
-        role_spec_sha256: payloadSha,
-      };
   }
 }
 
-function permissions(marker: LegacyOwnedMarkerV1, id: string): LegacyManifestPermissionV1[] {
-  return marker.owned_resources
-    .map((resource, index): LegacyManifestPermissionV1 => {
-      const permission_id = `${id}/owned-${index}`;
-      if (marker.source === "hook-sentinel")
-        return {
-          permission_id,
-          required_enforcement: "engine-enforced",
-          kind: "hook",
-          scope: { engine: marker.engine, hook_point: "pre-tool", participant_id: null },
-        };
-      if (marker.source === "skill-lock" || marker.source === "role-marker")
-        return {
-          permission_id,
-          required_enforcement: "sandboxed",
-          kind: "filesystem",
-          scope: { root: "project", access: "write", path_prefix: ".vibeflow" },
-        };
-      if (marker.source === "tool-managed-evidence")
-        return {
-          permission_id,
-          required_enforcement: "brokered",
-          kind: "process",
-          scope: { executable_class: "legacy-tool", argv_prefix: [], allow_additional_args: false },
-        };
-      return {
+function permissions(
+  marker: FilesystemLegacyOwnedMarkerV1,
+  id: string,
+): LegacyManifestPermissionV1[] {
+  const permission_id = `${id}/owned-0`;
+  if (marker.source === "hook-sentinel")
+    return [
+      {
         permission_id,
         required_enforcement: "engine-enforced",
-        kind: "config",
-        scope: {
-          engine: marker.engine,
-          namespace: "legacy",
-          access: "write",
-          key_prefix: `managed.item${index}`,
-        },
-      };
-    })
-    .sort((left, right) => bytewise(left.permission_id, right.permission_id));
+        kind: "hook",
+        scope: { engine: marker.engine, hook_point: "pre-tool", participant_id: null },
+      },
+    ];
+  if (marker.source === "skill-lock")
+    return [
+      {
+        permission_id,
+        required_enforcement: "sandboxed",
+        kind: "filesystem",
+        scope: { root: "project", access: "write", path_prefix: ".vibeflow" },
+      },
+    ];
+  return [
+    {
+      permission_id,
+      required_enforcement: "engine-enforced",
+      kind: "config",
+      scope: {
+        engine: marker.engine,
+        namespace: "legacy",
+        access: "write",
+        key_prefix: "managed.item0",
+      },
+    },
+  ];
 }
 
 function candidate(
   request: LegacyAdoptMaterializedInspectionRequestV1,
-  marker: LegacyOwnedMarkerV1,
+  markerValue: LegacyOwnedMarkerV1,
   inspectedAt: string,
 ): LegacyAdoptCandidateMaterializationV1 {
+  const marker = assertFilesystemLegacyOwnedMarkerV1(markerValue);
   const id = packageId(marker);
-  const owned_resources = marker.owned_resources
-    .map(({ ownership_key, public_target, expected_preimage_sha256 }) => ({
-      ownership_key,
-      public_target,
-      expected_preimage_sha256,
-    }))
-    .sort((left, right) =>
-      bytewise(
-        `${left.ownership_key}\0${left.public_target}\0${left.expected_preimage_sha256}`,
-        `${right.ownership_key}\0${right.public_target}\0${right.expected_preimage_sha256}`,
-      ),
-    );
+  const { ownership_key, public_target, expected_preimage_sha256 } = marker.owned_resources[0];
+  const owned_resources = [{ ownership_key, public_target, expected_preimage_sha256 }];
   const proof = marker.ownership_proof as NonNullable<LegacyOwnedMarkerV1["ownership_proof"]>;
   const recordKind = {
     "skill-lock": "lock",
-    "tool-managed-evidence": "descriptor",
     "mcp-managed-sidecar": "managed-sidecar",
     "hook-sentinel": "sentinel",
-    "role-marker": "renderer-marker",
-  }[marker.source] as "lock" | "descriptor" | "managed-sidecar" | "sentinel" | "renderer-marker";
+  }[marker.source] as "lock" | "managed-sidecar" | "sentinel";
   const recordDraft = {
     record_kind: recordKind,
     logical_id: proof.logical_id,
@@ -220,13 +186,9 @@ function candidate(
         kind:
           marker.source === "skill-lock"
             ? ("file-hash" as const)
-            : marker.source === "tool-managed-evidence"
-              ? ("binary-version" as const)
-              : marker.source === "mcp-managed-sidecar"
-                ? ("mcp-handshake" as const)
-                : marker.source === "hook-sentinel"
-                  ? ("hook-selftest" as const)
-                  : ("role-parse" as const),
+            : marker.source === "mcp-managed-sidecar"
+              ? ("mcp-handshake" as const)
+              : ("hook-selftest" as const),
         required: true,
         timeout_ms: 5_000,
         retries: 0 as const,
@@ -255,8 +217,6 @@ function candidate(
     entries.push({ path: "payload/SKILL.md", bytes: marker.payload });
   if (marker.source === "mcp-managed-sidecar")
     entries.push({ path: "payload/server", bytes: marker.payload });
-  if (marker.source === "role-marker")
-    entries.push({ path: "payload/role.md", bytes: marker.payload });
   const tree = computePackageTree(entries);
   const parsedManifest = parseCapabilityManifest(
     tree.files.get("capability.json") as Uint8Array,

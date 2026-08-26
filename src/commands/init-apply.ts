@@ -105,7 +105,7 @@ function contextFrom(answers: IntakeAnswers): ProjectContext {
 }
 
 /** Injectable readiness check so the creation gate is testable without spawning engines. */
-export type PreflightFn = (engines: Engine[]) => EngineReadiness[];
+export type PreflightFn = (engines: Engine[]) => EngineReadiness[] | Promise<EngineReadiness[]>;
 
 export interface ApplyIntakeOpts {
   dry?: boolean;
@@ -142,17 +142,17 @@ export interface ApplyIntakeResult {
  * The default skip ties the offline/browser path (useAi:false) to "no gate" so a browser
  * request never blocks on a live probe — Wave C may also pass skipPreflight explicitly.
  */
-function gateEngines(
+async function gateEngines(
   answers: IntakeAnswers,
   opts: ApplyIntakeOpts,
-): { engines: Engine[]; readiness?: EngineReadiness[]; refused: boolean } {
+): Promise<{ engines: Engine[]; readiness?: EngineReadiness[]; refused: boolean }> {
   const chosen = chosenEngines(answers.engines);
   const skip = opts.skipPreflight ?? opts.useAi === false;
   // Bridge mode (VIBEFLOW_AI set) never spawns the named engine CLI — dispatch goes through
   // the bridge command — so a missing/unauthed named-engine binary must not block init.
   if (skip || opts.dry || process.env.VIBEFLOW_AI) return { engines: chosen, refused: false };
   const probe = opts.preflight ?? ((e: Engine[]) => preflightAll(e, { probe: false }));
-  const readiness = probe(chosen);
+  const readiness = await probe(chosen);
   if (!anyReady(readiness)) return { engines: [], readiness, refused: true };
   return { engines: readyEngines(readiness), readiness, refused: false };
 }
@@ -167,7 +167,10 @@ function gateEngines(
  * engines and refuse creation when none is ready, generating only for ready engines
  * otherwise. The gate is parameterized via {@link ApplyIntakeOpts} so callers opt out.
  */
-export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}): ApplyIntakeResult {
+export async function applyIntake(
+  answers: IntakeAnswers,
+  opts: ApplyIntakeOpts = {},
+): Promise<ApplyIntakeResult> {
   const base = opts.base ?? resolveRepo(answers.repoPath);
   const ctx = contextFrom(answers);
   ctx.settings = readSettings(base);
@@ -179,7 +182,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   } catch {
     /* scanning is best-effort; never block init */
   }
-  const gate = gateEngines(answers, opts);
+  const gate = await gateEngines(answers, opts);
   const prev = readState(base);
   const state = recomputeTotals({
     task_id: prev?.task_id ?? "TASK-1",
@@ -205,7 +208,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   const useAi = opts.useAi !== false;
   const files: Record<string, string> = { ...canonicalFiles(ctx) };
   for (const engine of gate.engines) {
-    Object.assign(files, engineFiles(engine, ctx, useAi));
+    Object.assign(files, await engineFiles(engine, ctx, useAi, { cwd: base }));
   }
   // Per-role agent files: same body, engine-specific wrappers.
   // Honour `gate.engines` so `vf init --engine codex` writes only codex
@@ -214,7 +217,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   const roles = detectRolesForRepo(base, profile);
   const targetEngines: readonly AgentEngine[] =
     gate.engines.length > 0 ? (gate.engines as readonly AgentEngine[]) : [DEFAULT_ENGINE];
-  Object.assign(files, agentFiles(profile, roles, useAi, targetEngines));
+  Object.assign(files, await agentFiles(profile, roles, useAi, targetEngines, { cwd: base }));
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
   // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`
   // must NOT clobber hand-edited specs. Preserve existing copies like SETTINGS.json and

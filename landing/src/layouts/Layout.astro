@@ -1,5 +1,5 @@
 ---
-import SEO from '../components/SEO.astro';
+import SEO from "../components/SEO.astro";
 
 export interface Props {
   title: string;
@@ -7,7 +7,7 @@ export interface Props {
   canonicalPath?: string;
 }
 
-const { title, description, canonicalPath = '/' } = Astro.props;
+const { title, description, canonicalPath = "/" } = Astro.props;
 ---
 
 <!doctype html>
@@ -35,24 +35,27 @@ const { title, description, canonicalPath = '/' } = Astro.props;
 
 <style is:global>
   :root {
-    --bg: #0b0f17;
-    --bg-elev: #121826;
-    --bg-card: #131a28;
-    --border: #1f2937;
-    --border-soft: #1a2333;
-    --text: #e6edf6;
-    --text-dim: #9aa7bd;
-    --text-faint: #6b7890;
-    --accent: #5eead4;
-    --accent-2: #7c93ff;
-    --accent-grad: linear-gradient(135deg, #5eead4 0%, #7c93ff 100%);
-    --code-bg: #0a0e16;
+    --bg: #081018;
+    --bg-elev: #0d1621;
+    --bg-panel: #111d2a;
+    --bg-panel-strong: #122232;
+    --border: rgba(124, 166, 187, 0.18);
+    --border-strong: rgba(124, 166, 187, 0.3);
+    --text: #edf6ff;
+    --text-dim: #a2b4c9;
+    --text-faint: #708297;
+    --accent: #59e1cb;
+    --accent-strong: #96fff0;
+    --accent-grad: linear-gradient(135deg, #59e1cb 0%, #78f3e0 100%);
+    --accent-surface: rgba(89, 225, 203, 0.12);
+    --code-bg: #09121b;
     --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo,
       Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
-      Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-    --maxw: 1080px;
-    --radius: 14px;
+    --sans: "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    --maxw: 1180px;
+    --radius: 18px;
+    --shadow: 0 30px 90px rgba(0, 0, 0, 0.28);
   }
 
   * {
@@ -72,24 +75,48 @@ const { title, description, canonicalPath = '/' } = Astro.props;
     font-size: 17px;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-    background-image: radial-gradient(
-        60% 50% at 50% -10%,
-        rgba(124, 147, 255, 0.12) 0%,
-        transparent 70%
-      ),
-      radial-gradient(
-        40% 30% at 90% 0%,
-        rgba(94, 234, 212, 0.08) 0%,
-        transparent 60%
-      );
+    background-image:
+      radial-gradient(52% 42% at 86% 0%, rgba(89, 225, 203, 0.16) 0%, transparent 70%),
+      radial-gradient(38% 32% at 8% 12%, rgba(89, 225, 203, 0.08) 0%, transparent 72%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 22%);
+    background-attachment: fixed;
     background-repeat: no-repeat;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0.02) 0%,
+      transparent 38%,
+      rgba(89, 225, 203, 0.03) 68%,
+      transparent 100%
+    );
+    mask-image: radial-gradient(circle at center, black, transparent 82%);
+  }
+
+  main {
+    position: relative;
+  }
+
+  img,
+  video {
+    max-width: 100%;
+  }
+
+  ::selection {
+    background: rgba(89, 225, 203, 0.22);
+    color: var(--text);
   }
 
   h1,
   h2,
   h3 {
-    line-height: 1.15;
-    letter-spacing: -0.02em;
+    line-height: 1.05;
+    letter-spacing: -0.035em;
     margin: 0;
   }
 
@@ -116,7 +143,7 @@ const { title, description, canonicalPath = '/' } = Astro.props;
     left: -999px;
     top: 0;
     background: var(--accent);
-    color: #04201b;
+    color: #062420;
     padding: 0.6rem 1rem;
     border-radius: 0 0 8px 0;
     z-index: 100;
@@ -130,20 +157,68 @@ const { title, description, canonicalPath = '/' } = Astro.props;
   :focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 3px;
-    border-radius: 4px;
+    border-radius: 6px;
   }
 
   .container {
     width: 100%;
     max-width: var(--maxw);
     margin-inline: auto;
-    padding-inline: 1.25rem;
+    padding-inline: 1.35rem;
+  }
+
+  .nav-bar {
+    border-bottom: 1px solid var(--border);
+    background: rgba(8, 16, 24, 0.78);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(14px);
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-block: 0.95rem;
+    gap: 1rem;
+  }
+
+  .nav-logo {
+    font-weight: 700;
+    font-size: 1.02rem;
+    color: var(--text);
+    letter-spacing: -0.03em;
+  }
+
+  .nav-logo:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 1.35rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .nav-links a {
+    color: var(--text-dim);
+    font-size: 0.93rem;
+    font-weight: 500;
+  }
+
+  .nav-links a:hover {
+    color: var(--accent);
+    text-decoration: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
     html {
       scroll-behavior: auto;
     }
+
     *,
     *::before,
     *::after {
@@ -151,45 +226,27 @@ const { title, description, canonicalPath = '/' } = Astro.props;
       animation-iteration-count: 1 !important;
       transition-duration: 0.001ms !important;
     }
+
+    body {
+      background-attachment: scroll;
+    }
+
+    body::before {
+      display: none;
+    }
   }
 
-  /* --- Nav bar --- */
-  .nav-bar {
-    border-bottom: 1px solid var(--border-soft);
-    background: var(--bg-elev);
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    backdrop-filter: blur(10px);
-  }
-  .nav-inner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-block: 0.8rem;
-  }
-  .nav-logo {
-    font-weight: 700;
-    font-size: 1.1rem;
-    color: var(--text);
-    letter-spacing: -0.02em;
-  }
-  .nav-logo:hover {
-    color: var(--accent);
-    text-decoration: none;
-  }
-  .nav-links {
-    display: flex;
-    gap: 1.5rem;
-    align-items: center;
-  }
-  .nav-links a {
-    color: var(--text-dim);
-    font-size: 0.93rem;
-    font-weight: 500;
-  }
-  .nav-links a:hover {
-    color: var(--accent);
-    text-decoration: none;
+  @media (max-width: 640px) {
+    .container {
+      padding-inline: 1rem;
+    }
+
+    .nav-inner {
+      padding-block: 0.85rem;
+    }
+
+    .nav-links {
+      gap: 1rem;
+    }
   }
 </style>

@@ -18,7 +18,7 @@ import {
   writeState,
 } from "../core.js";
 import { DEFAULT_CONCURRENCY, orchestrateUnits } from "../orchestrator/run.js";
-import { preflightAll } from "../preflight.js";
+import { preflightAllAsync } from "../preflight.js";
 import type { ProjectProfile } from "../scanner.js";
 import { scanRepo } from "../scanner.js";
 import { curateSkillsFromEvidence } from "../skills/curator.js";
@@ -60,14 +60,14 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   writeContextFilesDep()(base, profile, intake.engines, ctx7Auth);
   mkdirSync(join(base, CTX_DIR, "skills"), { recursive: true });
 
-  const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
+  const probe = preflight ?? ((engines, pg) => preflightAllAsync(engines, pg));
   let engine: Engine | null = null;
   if (forceEngine) {
-    const readiness = probe([forceEngine], { probe: true });
+    const readiness = await probe([forceEngine], { probe: true });
     const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
     engine = match ? forceEngine : null;
   } else {
-    const readiness = probe(ENGINES, { probe: true });
+    const readiness = await probe(ENGINES, { probe: true });
     engine = selectBestEngine(readiness);
   }
   if (!engine) {

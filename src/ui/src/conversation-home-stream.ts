@@ -3,6 +3,8 @@ import {
   conversationEventsUrl,
   parseConversationSseRecord,
 } from "./conversation-api.js";
+import { assertHomeQueueInvalidation } from "./conversation-home-message-queue-authority.js";
+import type { HomeMessageQueueInvalidation } from "./conversation-home-message-queue-types.js";
 import { homeTimelineItemKey } from "./conversation-home-pagination.js";
 import type {
   HomeCanonicalMessageReference,
@@ -30,8 +32,11 @@ export function degradedHomeTimelineInteraction(): HomeTimelineInteraction {
   };
 }
 
-export function shouldStreamHomeRevision(revision: HomeRevisionSummary | null): boolean {
-  return Boolean(revision && !isTerminalLifecycle(revision.lifecycle));
+export function shouldStreamHomeRevision(
+  revision: HomeRevisionSummary | null,
+  hasLiveQueueItems = false,
+): boolean {
+  return Boolean(revision && (hasLiveQueueItems || !isTerminalLifecycle(revision.lifecycle)));
 }
 
 export function homeTimelineCursorForRevision(
@@ -107,6 +112,7 @@ export function applyHomeReactionFold(
 
 interface HomeConversationStreamInput {
   conversationId: string;
+  rootSessionId?: string;
   cursor(): number;
   signal: AbortSignal;
   isCurrent(): boolean;
@@ -114,7 +120,11 @@ interface HomeConversationStreamInput {
   onSnapshot(snapshot: ConversationSnapshot): void;
   onTrace(record: ConversationTraceRecord): void;
   onRefreshNeeded(): void;
+  onQueueInvalidation?(invalidation: HomeMessageQueueInvalidation): void;
+  onQueueRefreshNeeded?(): void;
 }
+
+export const HOME_MESSAGE_QUEUE_INVALIDATION_EVENT = "message-queue-invalidated";
 
 export function watchHomeConversationStream(input: HomeConversationStreamInput): { close(): void } {
   const EventSourceCtor = globalThis.EventSource as { new (url: string): EventSource } | undefined;
@@ -220,14 +230,31 @@ export function watchHomeConversationStream(input: HomeConversationStreamInput):
       conversationEventsUrl(input.conversationId, streamToken, input.cursor()),
     );
     source = current;
+    input.onQueueRefreshNeeded?.();
 
     current.addEventListener("snapshot", (event) => {
       if (closed || attemptId !== generation || !input.isCurrent()) return;
       try {
         input.onSnapshot(JSON.parse((event as MessageEvent<string>).data) as ConversationSnapshot);
+        input.onQueueRefreshNeeded?.();
         input.setStatus("live", null);
       } catch {
         input.setStatus("error", "conversation snapshot was invalid");
+      }
+    });
+
+    current.addEventListener(HOME_MESSAGE_QUEUE_INVALIDATION_EVENT, (event) => {
+      if (closed || attemptId !== generation || !input.isCurrent()) return;
+      try {
+        if (!input.rootSessionId || !input.onQueueInvalidation)
+          throw new Error("message queue stream binding is unavailable");
+        const invalidation: unknown = JSON.parse((event as MessageEvent<string>).data);
+        assertHomeQueueInvalidation(invalidation, input.rootSessionId);
+        input.onQueueInvalidation(invalidation);
+        input.setStatus("live", null);
+      } catch {
+        input.setStatus("error", "message queue update was invalid");
+        input.onQueueRefreshNeeded?.();
       }
     });
 

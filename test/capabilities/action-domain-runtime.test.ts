@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   ActionAuthorityStore,
+  type ActionAuthorityStoreOptions,
   actionIdempotencyScopeDigest,
   createDurableActionAuthorityReaderV1,
 } from "../../src/actions/index.js";
 import {
+  CapabilityRuntimeError,
   CapabilityRuntimeFactoryV1,
   activateProjectCapabilityAuthorityForVfInit,
   productionCapabilityRuntimeV1,
@@ -17,6 +19,10 @@ import { digestHex, digestV1 } from "../../src/durability/index.js";
 import { ConversationActionReceiptStore } from "../../src/orchestrator/conversation/conversation-action-receipt-store.js";
 import { ConversationActionDomainRegistryV1 } from "../../src/orchestrator/conversation/conversation-action-registry.js";
 import { ConversationActionService } from "../../src/orchestrator/conversation/conversation-action-service.js";
+import { readCapabilityDispatchBlock } from "../../src/orchestrator/conversation/conversation-capability-dispatch-block.js";
+import { capabilityDispatchReservationPath } from "../../src/orchestrator/conversation/conversation-capability-dispatch-reservation-records.js";
+import { revisionReservationDigest } from "../../src/orchestrator/conversation/lineage-reservation.js";
+import { LineageAuthorityStore } from "../../src/orchestrator/conversation/lineage-store.js";
 import { ConversationRevisionStore } from "../../src/orchestrator/conversation/revision-store.js";
 import { startServer } from "../../src/server.js";
 import { resolvedRolePackage, retainRuntimePackageCache } from "./runtime-fixtures.js";
@@ -27,6 +33,7 @@ afterEach(() => {
 });
 
 const now = () => "2026-08-25T12:00:00.000Z";
+const participantId = "participant-capability-action";
 const conversation = {
   root_session_id: "root-capability-action",
   conversation_id: "conversation-capability-action",
@@ -35,6 +42,10 @@ const conversation = {
   conversation_lock_digest: digestV1("VF-TEST-CONVERSATION-LOCK\0v1\0", 1),
   lineage_head_digest: digestV1("VF-TEST-LINEAGE-HEAD\0v1\0", 1),
   lineage_head_epoch: 2,
+  participant_binding_set_digest: digestV1("VF-TEST-PARTICIPANT-BINDING-SET\0v1\0", [
+    { participant_id: participantId, engine: "codex" },
+  ]),
+  participants: [{ participant_id: participantId, engine: "codex" as const }],
 };
 
 function fixture() {
@@ -64,12 +75,15 @@ function fixture() {
   const service = runtime.service("project");
   const pkg = resolvedRolePackage();
   retainRuntimePackageCache(service.options.storage, pkg);
-  const makeActions = () => {
+  const makeActions = (fault?: ActionAuthorityStoreOptions["fault"]) => {
     const actions = new ConversationActionService(
       artifactRoot,
       now,
       new ConversationRevisionStore({ artifactRoot }),
       new ConversationActionReceiptStore(artifactRoot),
+      undefined,
+      undefined,
+      fault,
     );
     actions.registerCapabilityActionRootResolver((conversationId) => {
       if (conversationId !== conversation.conversation_id) throw new Error("unknown conversation");
@@ -122,10 +136,17 @@ function fixture() {
         package_pin_digest: pkg.pin.pin_digest,
       },
       scope: "project" as const,
-      requested_targets: [{ engine: "codex" as const, participant_id: null }],
+      requested_targets: [{ engine: "codex" as const, participant_id: participantId }],
       inputs: [],
     },
   };
+  const projectedRolePath = join(
+    projectRoot,
+    ".codex/agents",
+    `acme.reviewer--reviewer--p-${digestHex(
+      digestV1("VF-CAPABILITY-PARTICIPANT-TARGET\0v1\0", participantId),
+    ).slice(0, 16)}.toml`,
+  );
   return {
     root,
     projectRoot,
@@ -136,8 +157,124 @@ function fixture() {
     makeActions,
     authority,
     request,
+    projectedRolePath,
   };
 }
+
+function testActiveRevisionReservation(label: string) {
+  const identity = digestHex(digestV1("VF-TEST-CAPABILITY-BLOCKED-REVISION\0v1\0", label));
+  const body = {
+    schema_version: "1.0" as const,
+    root_session_id: conversation.root_session_id,
+    reservation_epoch: 1,
+    previous_reservation_digest: null,
+    status: "active" as const,
+    parent: {
+      conversation_id: conversation.conversation_id,
+      revision_id: conversation.revision_id,
+      revision_ordinal: 0,
+    },
+    revision_claim_epoch: 1,
+    operation_id: `vf-operation-${identity}`,
+    proposal_id: `vf-proposal-${identity}`,
+    plan_digest: digestV1("VF-TEST-CAPABILITY-BLOCKED-REVISION-PLAN\0v1\0", label),
+    child: {
+      conversation_id: `child-${identity.slice(0, 16)}`,
+      revision_id: `revision-${identity.slice(0, 16)}`,
+      revision_ordinal: 1,
+    },
+    created_at: now(),
+    updated_at: now(),
+  };
+  return { ...body, content_digest: revisionReservationDigest(body) };
+}
+
+async function approvedInstall(
+  fx: ReturnType<typeof fixture>,
+  actions: ConversationActionService,
+  domainOptions: Parameters<CapabilityRuntimeFactoryV1["conversationActionDomain"]>[1] = {},
+) {
+  const domain = fx.runtime.conversationActionDomain(actions, domainOptions);
+  const proposed = await domain.propose({
+    conversation_id: conversation.conversation_id,
+    request: fx.request,
+    authority: fx.authority,
+  });
+  const proposal = proposed.response.proposal;
+  const approved = await domain.approve({
+    conversation_id: conversation.conversation_id,
+    proposal_id: proposal.proposal_id,
+    request: {
+      schema_version: "1.0",
+      proposal_digest: proposal.proposal_digest,
+      decision: "approved",
+      challenge_id: null,
+      challenge_response: null,
+    },
+    authority: fx.authority,
+  });
+  return { domain, proposal, approval: approved.approval };
+}
+
+type CrashCase = {
+  barrier:
+    | "after-dispatch-prepared"
+    | "after-dispatch-reserved"
+    | "after-domain-terminal"
+    | "after-action-terminal"
+    | null;
+  actionFault: boolean;
+  expectedActionState: "approved" | "committing" | "succeeded";
+  expectedClaim: "active" | null;
+};
+
+const crashCases: Array<[string, CrashCase]> = [
+  [
+    "prepared dispatch without claim",
+    {
+      barrier: "after-dispatch-prepared" as const,
+      actionFault: false,
+      expectedActionState: "approved",
+      expectedClaim: null,
+    },
+  ],
+  [
+    "active claim while Action remains approved",
+    {
+      barrier: "after-dispatch-reserved" as const,
+      actionFault: false,
+      expectedActionState: "approved",
+      expectedClaim: "active",
+    },
+  ],
+  [
+    "active claim after Action becomes committing",
+    {
+      barrier: null,
+      actionFault: true,
+      expectedActionState: "committing",
+      expectedClaim: "active",
+    },
+  ],
+  [
+    "domain terminal before Action mirror",
+    {
+      barrier: "after-domain-terminal" as const,
+      actionFault: false,
+      expectedActionState: "committing",
+      expectedClaim: "active",
+    },
+  ],
+  [
+    "terminal Action mirror before claim release",
+    {
+      barrier: "after-action-terminal" as const,
+      actionFault: false,
+      expectedActionState: "succeeded",
+      expectedClaim: "active",
+    },
+  ],
+];
 
 describe("conversation Capability action domain", () => {
   test("collapses only byte-identical packages in the desired/effect closure union", () => {
@@ -358,9 +495,9 @@ describe("conversation Capability action domain", () => {
     expect(await restarted.pending(conversation.conversation_id)).toEqual([]);
     expect(committed.operation.targets).toHaveLength(1);
     expect(committed.operation.targets[0]?.outcome).toBe("applied");
-    expect(
-      readFileSync(join(fx.projectRoot, ".codex/agents/acme.reviewer--reviewer.toml"), "utf8"),
-    ).toContain("Capability role acme.reviewer--reviewer");
+    expect(readFileSync(fx.projectedRolePath, "utf8")).toContain(
+      "Capability role acme.reviewer--reviewer",
+    );
     const events = await restarted.events(conversation.conversation_id, proposalId);
     expect(events?.map((event) => event.progress?.phase)).toEqual([
       "operation-started",
@@ -422,10 +559,390 @@ describe("conversation Capability action domain", () => {
         authority: fx.authority,
       }),
     ).rejects.toThrow(/adapter plan|object binding/i);
-    expect(
-      existsSync(join(fx.projectRoot, ".codex/agents/acme.reviewer--reviewer.toml")),
-    ).toBeFalse();
+    expect(existsSync(fx.projectedRolePath)).toBeFalse();
   });
+
+  test.each(crashCases)(
+    "recovers %s without stranding the conversation lineage",
+    async (_label, crash) => {
+      const fx = fixture();
+      let interrupted = false;
+      const actions = fx.makeActions(
+        crash.actionFault
+          ? (point) => {
+              if (interrupted || point !== "after-action-committing") return;
+              interrupted = true;
+              throw new Error("simulated capability action crash");
+            }
+          : undefined,
+      );
+      const approved = await approvedInstall(fx, actions, {
+        barrier: async ({ point }) => {
+          if (interrupted || point !== crash.barrier) return;
+          interrupted = true;
+          throw new Error("simulated capability dispatch crash");
+        },
+      });
+      await expect(
+        approved.domain.commit({
+          conversation_id: conversation.conversation_id,
+          proposal_id: approved.proposal.proposal_id,
+          request: {
+            schema_version: "1.0",
+            proposal_digest: approved.proposal.proposal_digest,
+            approval_id: approved.approval.approval_id,
+          },
+          authority: fx.authority,
+        }),
+      ).rejects.toThrow(/simulated capability (action|dispatch) crash/);
+      expect(actions.authority.get(approved.proposal.proposal_id)?.state).toBe(
+        crash.expectedActionState,
+      );
+      expect(
+        actions.capabilityDispatches.current(conversation.root_session_id)?.status ?? null,
+      ).toBe(crash.expectedClaim);
+
+      const restartedActions = fx.makeActions();
+      const restartedRuntime = new CapabilityRuntimeFactoryV1(fx.runtimeOptions);
+      const restartedDomain = restartedRuntime.conversationActionDomain(restartedActions);
+      const registry = new ConversationActionDomainRegistryV1([restartedDomain]);
+      await registry.awaitRecovery();
+
+      expect(restartedActions.authority.get(approved.proposal.proposal_id)?.state).toBe(
+        "succeeded",
+      );
+      expect(
+        restartedActions.capabilityDispatches.current(conversation.root_session_id),
+      ).toMatchObject({
+        status: "released",
+        proposal_id: approved.proposal.proposal_id,
+        release_outcome: "succeeded",
+      });
+      expect(existsSync(fx.projectedRolePath)).toBeTrue();
+    },
+    20_000,
+  );
+
+  test("converges concurrent bootstrap owners on one claimed capability operation", async () => {
+    const fx = fixture();
+    const actions = fx.makeActions();
+    let interrupted = false;
+    const approved = await approvedInstall(fx, actions, {
+      barrier: async ({ point }) => {
+        if (interrupted || point !== "after-dispatch-reserved") return;
+        interrupted = true;
+        throw new Error("simulated process loss after capability claim");
+      },
+    });
+    await expect(
+      approved.domain.commit({
+        conversation_id: conversation.conversation_id,
+        proposal_id: approved.proposal.proposal_id,
+        request: {
+          schema_version: "1.0",
+          proposal_digest: approved.proposal.proposal_digest,
+          approval_id: approved.approval.approval_id,
+        },
+        authority: fx.authority,
+      }),
+    ).rejects.toThrow(/process loss after capability claim/);
+    expect(actions.authority.get(approved.proposal.proposal_id)?.state).toBe("approved");
+    expect(actions.capabilityDispatches.current(conversation.root_session_id)?.status).toBe(
+      "active",
+    );
+
+    const recover = () => {
+      const restartedActions = fx.makeActions();
+      const restarted = new CapabilityRuntimeFactoryV1(fx.runtimeOptions);
+      const registry = new ConversationActionDomainRegistryV1([
+        restarted.conversationActionDomain(restartedActions),
+      ]);
+      return { actions: restartedActions, done: registry.awaitRecovery() };
+    };
+    const first = recover();
+    const second = recover();
+    await Promise.all([first.done, second.done]);
+
+    expect(first.actions.authority.get(approved.proposal.proposal_id)?.state).toBe("succeeded");
+    expect(second.actions.authority.get(approved.proposal.proposal_id)?.state).toBe("succeeded");
+    expect(first.actions.capabilityDispatches.current(conversation.root_session_id)).toMatchObject({
+      status: "released",
+      release_outcome: "succeeded",
+      proposal_id: approved.proposal.proposal_id,
+    });
+    expect(existsSync(fx.projectedRolePath)).toBeTrue();
+  }, 20_000);
+
+  test("keeps a needs-recovery capability claim active and blocks later lineage writers", async () => {
+    const fx = fixture();
+    const actions = fx.makeActions();
+    const approved = await approvedInstall(fx, actions);
+    let interrupted = false;
+    fx.service.fault = (point) => {
+      if (interrupted || point !== "after-effect-in-progress") return;
+      interrupted = true;
+      throw new CapabilityRuntimeError("simulated unknown capability effect", "fault");
+    };
+    await expect(
+      approved.domain.commit({
+        conversation_id: conversation.conversation_id,
+        proposal_id: approved.proposal.proposal_id,
+        request: {
+          schema_version: "1.0",
+          proposal_digest: approved.proposal.proposal_digest,
+          approval_id: approved.approval.approval_id,
+        },
+        authority: fx.authority,
+      }),
+    ).rejects.toThrow(/simulated unknown capability effect/);
+    expect(actions.authority.get(approved.proposal.proposal_id)?.state).toBe("committing");
+    expect(actions.capabilityDispatches.current(conversation.root_session_id)?.status).toBe(
+      "active",
+    );
+
+    mkdirSync(dirname(fx.projectedRolePath), { recursive: true });
+    writeFileSync(fx.projectedRolePath, "third-state-after-unknown-effect\n");
+    const restartedActions = fx.makeActions();
+    const restartedRuntime = new CapabilityRuntimeFactoryV1(fx.runtimeOptions);
+    const registry = new ConversationActionDomainRegistryV1([
+      restartedRuntime.conversationActionDomain(restartedActions),
+    ]);
+    await registry.awaitRecovery();
+
+    expect(restartedActions.authority.get(approved.proposal.proposal_id)?.state).toBe(
+      "needs_recovery",
+    );
+    expect(
+      restartedActions.capabilityDispatches.current(conversation.root_session_id),
+    ).toMatchObject({
+      status: "active",
+      proposal_id: approved.proposal.proposal_id,
+      release_outcome: null,
+    });
+    const lineage = new LineageAuthorityStore({ artifactRoot: fx.artifactRoot });
+    expect(() =>
+      lineage.commitReservation(null, testActiveRevisionReservation("needs-recovery")),
+    ).toThrow(/active capability dispatch/i);
+  }, 20_000);
+
+  test.each([
+    ["missing", "claim-missing"],
+    ["released", "claim-released"],
+  ] as const)(
+    "fails closed when a committing Action has a %s lineage claim",
+    async (variant, expectedReason) => {
+      const fx = fixture();
+      let interrupted = false;
+      const actions = fx.makeActions((point) => {
+        if (interrupted || point !== "after-action-committing") return;
+        interrupted = true;
+        throw new Error("simulated process loss after Action became committing");
+      });
+      const approved = await approvedInstall(fx, actions);
+      await expect(
+        approved.domain.commit({
+          conversation_id: conversation.conversation_id,
+          proposal_id: approved.proposal.proposal_id,
+          request: {
+            schema_version: "1.0",
+            proposal_digest: approved.proposal.proposal_digest,
+            approval_id: approved.approval.approval_id,
+          },
+          authority: fx.authority,
+        }),
+      ).rejects.toThrow(/process loss after Action became committing/);
+      const committing = actions.authority.get(approved.proposal.proposal_id);
+      if (!committing?.operation_id || !committing.approval)
+        throw new Error("committing corruption fixture is incomplete");
+      const dispatch = actions.authority.getDispatch(committing.operation_id);
+      if (!dispatch) throw new Error("committing corruption dispatch is absent");
+      if (variant === "missing") {
+        rmSync(capabilityDispatchReservationPath(fx.artifactRoot, conversation.root_session_id));
+      } else {
+        actions.capabilityDispatches.release({
+          proposal: committing.proposal,
+          approval: committing.approval,
+          dispatch,
+          release_outcome: "aborted",
+          domain_terminal_digest:
+            committing.events.at(-1)?.event_digest ?? committing.proposal.proposal_digest,
+          now: now(),
+        });
+      }
+
+      const restartedActions = fx.makeActions();
+      const restartedRuntime = new CapabilityRuntimeFactoryV1(fx.runtimeOptions);
+      const registry = new ConversationActionDomainRegistryV1([
+        restartedRuntime.conversationActionDomain(restartedActions),
+      ]);
+      await expect(registry.awaitRecovery()).rejects.toThrow(/claim authority/i);
+      expect(
+        readCapabilityDispatchBlock(fx.artifactRoot, conversation.root_session_id),
+      ).toMatchObject({
+        proposal_id: approved.proposal.proposal_id,
+        reason: expectedReason,
+      });
+      expect(existsSync(fx.projectedRolePath)).toBeFalse();
+      const lineage = new LineageAuthorityStore({ artifactRoot: fx.artifactRoot });
+      expect(() =>
+        lineage.commitReservation(null, testActiveRevisionReservation(`corrupt-${variant}`)),
+      ).toThrow(/corrupt capability dispatch/i);
+    },
+    20_000,
+  );
+
+  test("releases an approved capability claim when a restarted controller cancels it", async () => {
+    const fx = fixture();
+    const actions = fx.makeActions();
+    let interrupted = false;
+    const approved = await approvedInstall(fx, actions, {
+      barrier: async ({ point }) => {
+        if (interrupted || point !== "after-dispatch-reserved") return;
+        interrupted = true;
+        throw new Error("simulated owner loss after capability claim");
+      },
+    });
+    await expect(
+      approved.domain.commit({
+        conversation_id: conversation.conversation_id,
+        proposal_id: approved.proposal.proposal_id,
+        request: {
+          schema_version: "1.0",
+          proposal_digest: approved.proposal.proposal_digest,
+          approval_id: approved.approval.approval_id,
+        },
+        authority: fx.authority,
+      }),
+    ).rejects.toThrow(/owner loss after capability claim/);
+    expect(actions.authority.get(approved.proposal.proposal_id)?.state).toBe("approved");
+
+    const restartedActions = fx.makeActions();
+    const restartedRuntime = new CapabilityRuntimeFactoryV1(fx.runtimeOptions);
+    const restarted = restartedRuntime.conversationActionDomain(restartedActions, {
+      recover_on_bootstrap: false,
+    });
+    const canceled = await restarted.cancel({
+      conversation_id: conversation.conversation_id,
+      proposal_id: approved.proposal.proposal_id,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: approved.proposal.proposal_digest,
+        reason: "controller canceled after process restart",
+      },
+      authority: fx.authority,
+    });
+    expect(canceled.operation.state).toBe("canceled");
+    expect(
+      restartedActions.capabilityDispatches.current(conversation.root_session_id),
+    ).toMatchObject({
+      status: "released",
+      proposal_id: approved.proposal.proposal_id,
+      release_outcome: "aborted",
+    });
+    expect(existsSync(fx.projectedRolePath)).toBeFalse();
+    const postCancelRegistry = new ConversationActionDomainRegistryV1([
+      new CapabilityRuntimeFactoryV1(fx.runtimeOptions).conversationActionDomain(fx.makeActions()),
+    ]);
+    await postCancelRegistry.awaitRecovery();
+    expect(existsSync(fx.projectedRolePath)).toBeFalse();
+  }, 20_000);
+
+  test("terminal replay for proposal A leaves proposal B's active claim byte-exact", async () => {
+    const fx = fixture();
+    const actions = fx.makeActions();
+    let interruptNext = false;
+    const approvedA = await approvedInstall(fx, actions, {
+      barrier: async ({ point }) => {
+        if (!interruptNext || point !== "after-dispatch-reserved") return;
+        interruptNext = false;
+        throw new Error("hold proposal B after its claim");
+      },
+    });
+    const committedA = await approvedA.domain.commit({
+      conversation_id: conversation.conversation_id,
+      proposal_id: approvedA.proposal.proposal_id,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: approvedA.proposal.proposal_digest,
+        approval_id: approvedA.approval.approval_id,
+      },
+      authority: fx.authority,
+    });
+    expect(committedA.operation.state).toBe("succeeded");
+
+    const packageB = resolvedRolePackage((manifest) => {
+      manifest.id = "acme.second-reviewer";
+      manifest.version = "1.0.0";
+      manifest.metadata.display_name = "Second reviewer";
+      const permission = manifest.permissions[0];
+      if (permission) permission.permission_id = "acme.second-reviewer/project-read";
+    });
+    retainRuntimePackageCache(fx.service.options.storage, packageB);
+    const proposedB = await approvedA.domain.propose({
+      conversation_id: conversation.conversation_id,
+      request: {
+        ...fx.request,
+        idempotency_key: "install-second-reviewer",
+        candidate: {
+          type: "capability.install",
+          package: {
+            id: packageB.pin.id,
+            version: packageB.pin.version,
+            source_kind: packageB.pin.source.kind,
+            content_sha256: packageB.pin.content_sha256,
+            package_pin_digest: packageB.pin.pin_digest,
+          },
+          scope: "project",
+          requested_targets: [{ engine: "codex", participant_id: participantId }],
+          inputs: [],
+        },
+      },
+      authority: fx.authority,
+    });
+    const proposalB = proposedB.response.proposal;
+    const approvedB = await approvedA.domain.approve({
+      conversation_id: conversation.conversation_id,
+      proposal_id: proposalB.proposal_id,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposalB.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+      authority: fx.authority,
+    });
+    interruptNext = true;
+    await expect(
+      approvedA.domain.commit({
+        conversation_id: conversation.conversation_id,
+        proposal_id: proposalB.proposal_id,
+        request: {
+          schema_version: "1.0",
+          proposal_digest: proposalB.proposal_digest,
+          approval_id: approvedB.approval.approval_id,
+        },
+        authority: fx.authority,
+      }),
+    ).rejects.toThrow(/hold proposal B/);
+    const beforeReplay = actions.capabilityDispatches.current(conversation.root_session_id);
+    expect(beforeReplay).toMatchObject({ status: "active", proposal_id: proposalB.proposal_id });
+
+    const replayedA = await approvedA.domain.commit({
+      conversation_id: conversation.conversation_id,
+      proposal_id: approvedA.proposal.proposal_id,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: approvedA.proposal.proposal_digest,
+        approval_id: approvedA.approval.approval_id,
+      },
+      authority: fx.authority,
+    });
+    expect(replayedA.operation.state).toBe("succeeded");
+    expect(actions.capabilityDispatches.current(conversation.root_session_id)).toEqual(
+      beforeReplay,
+    );
+  }, 20_000);
 
   test("uses the real conversation HTTP proposal, approval, commit, and SSE routes across restart", async () => {
     const fx = fixture();

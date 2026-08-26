@@ -455,9 +455,10 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("POST /api/ask returns 400 on path escaping the repo (#562 Stage B, no engine spawned)", async () => {
-    // Route glue in routes.ts calls askResponse with real deps. A path-traversal
-    // body is rejected by the pure guard BEFORE any engine spawn — hermetic 400.
+  test("POST /api/ask returns queue-style 400 on path escaping the repo (#562 Stage B, no engine spawned)", async () => {
+    // Compatibility Ask now routes through the durable queue/home admission path,
+    // so invalid requests surface the shared queue error envelope instead of the
+    // legacy {error} body.
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
@@ -475,7 +476,13 @@ describe("server HTTP API handlers", () => {
         }),
       });
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { error: string }).error).toMatch(/escapes repo/);
+      expect(await res.json()).toMatchObject({
+        schema_version: "1.0",
+        error: {
+          code: "invalid_request",
+          message: expect.stringMatching(/message queue request is invalid/i),
+        },
+      });
     } finally {
       server.stop();
     }

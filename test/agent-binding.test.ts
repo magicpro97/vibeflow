@@ -27,8 +27,25 @@ import * as canonicalPreflight from "../src/preflight.js";
 import { discoverSkills } from "../src/skills/discovery.js";
 
 const realPreflightAll = canonicalPreflight.preflightAll;
+const realPreflightAllAsync = canonicalPreflight.preflightAllAsync;
 let bindingProbeReady = true;
 const bindingProbeOptions: Array<Parameters<typeof realPreflightAll>[1]> = [];
+const bindingPreflight = (
+  engines: Parameters<typeof realPreflightAll>[0],
+  options: Parameters<typeof realPreflightAll>[1],
+) => {
+  bindingProbeOptions.push(options);
+  return engines.map((engine) => ({
+    engine,
+    level:
+      bindingProbeReady &&
+      (options?.probe === false || (options?.probe === true && options.skipCache === true))
+        ? ("ready" as const)
+        : ("probe-failed" as const),
+    detail: "hermetic binding preflight",
+    checkedAt: "2026-08-22T00:00:00.000Z",
+  }));
+};
 mock.module("../src/preflight.js", () => ({
   ...canonicalPreflight,
   preflightAll: (
@@ -36,17 +53,14 @@ mock.module("../src/preflight.js", () => ({
     options: Parameters<typeof realPreflightAll>[1],
   ) => {
     if (!options?.cacheKey?.includes("vf-binding-")) return realPreflightAll(engines, options);
-    bindingProbeOptions.push(options);
-    return engines.map((engine) => ({
-      engine,
-      level:
-        bindingProbeReady &&
-        (options.probe === false || (options.probe === true && options.skipCache === true))
-          ? ("ready" as const)
-          : ("probe-failed" as const),
-      detail: "hermetic binding preflight",
-      checkedAt: "2026-08-22T00:00:00.000Z",
-    }));
+    return bindingPreflight(engines, options);
+  },
+  preflightAllAsync: async (
+    engines: Parameters<typeof realPreflightAllAsync>[0],
+    options: Parameters<typeof realPreflightAllAsync>[1],
+  ) => {
+    if (!options?.cacheKey?.includes("vf-binding-")) return realPreflightAllAsync(engines, options);
+    return bindingPreflight(engines, options);
   },
 }));
 
@@ -151,7 +165,7 @@ describe("AgentBinding materialization", () => {
     expect(bindingProbeOptions).toEqual([]);
   });
 
-  test("workflow admits a default repo skill without opt-in isolation while conversation stays strict", () => {
+  test("workflow admits a default repo skill without opt-in isolation while conversation stays strict", async () => {
     const root = repo();
     const dir = join(root, ".agents", "skills", "repo-law");
     mkdirSync(dir, { recursive: true });
@@ -179,14 +193,14 @@ describe("AgentBinding materialization", () => {
     );
     expect(workflow.resolved.skills.map((skill) => skill.ref)).toEqual(["repo-law"]);
     expect(workflow.spawn.rendered_prompt).toBe("ordinary workflow task");
-    expect(() =>
+    await expect(
       materializeAgentBinding(binding, options(root, { phase: 2, taskText: "ordinary task" })),
-    ).toThrow(/live canonical isolation/i);
+    ).rejects.toThrow(/live canonical isolation/i);
   });
 
   test.each(["opencode", "antigravity"] as const)(
     "workflow keeps %s compatibility without weakening conversation admission",
-    (engine) => {
+    async (engine) => {
       const root = repo();
       const binding: AgentBinding = {
         roleRef: "dispatch-runner",
@@ -200,17 +214,17 @@ describe("AgentBinding materialization", () => {
       expect(workflow.spawn.rendered_prompt).toBe(`workflow-${engine}`);
       expect(workflow.spawn.rendered_tools).toEqual([]);
       expect(workflow.spawn.sandbox).toBeNull();
-      expect(() =>
+      await expect(
         materializeAgentBinding(
           { ...binding, roleRef: "direct" },
           options(root, { phase: 2, taskText: "conversation" }),
         ),
-      ).toThrow(/cannot enforce/i);
+      ).rejects.toThrow(/cannot enforce/i);
     },
   );
 
-  test("preserves session mode, applies model override, and projects renderer authority", () => {
-    const out = materializeAgentBinding(
+  test("preserves session mode, applies model override, and projects renderer authority", async () => {
+    const out = await materializeAgentBinding(
       direct({ modelOverride: "claude-sonnet-4-5" }),
       options(repo()),
     );
@@ -234,9 +248,9 @@ describe("AgentBinding materialization", () => {
     expect(Object.isFrozen(out.spawn.trace_metadata.skill_resolved_hashes)).toBe(true);
   });
 
-  test("materialization snapshots caller-owned binding selections before launch authority exists", () => {
+  test("materialization snapshots caller-owned binding selections before launch authority exists", async () => {
     const binding = direct({ modelOverride: "claude-sonnet-4-5" });
-    const out = materializeAgentBinding(binding, options(repo()));
+    const out = await materializeAgentBinding(binding, options(repo()));
 
     binding.roleRef = "reviewer";
     binding.engine = "codex";
@@ -255,8 +269,8 @@ describe("AgentBinding materialization", () => {
     });
   });
 
-  test("Codex uses canonical model mapping and sandbox rather than unenforceable tool flags", () => {
-    const out = materializeAgentBinding(
+  test("Codex uses canonical model mapping and sandbox rather than unenforceable tool flags", async () => {
+    const out = await materializeAgentBinding(
       direct({ engine: "codex", sessionMode: "fresh" }),
       options(repo()),
     );
@@ -265,8 +279,8 @@ describe("AgentBinding materialization", () => {
     expect(out.spawn.sandbox).toBe("read-only");
   });
 
-  test("an engine renderer that has no canonical RoleModel surface omits it", () => {
-    const out = materializeAgentBinding(
+  test("an engine renderer that has no canonical RoleModel surface omits it", async () => {
+    const out = await materializeAgentBinding(
       direct({ engine: "copilot", sessionMode: "fresh" }),
       options(repo(), { phase: 2 }),
     );
@@ -275,23 +289,23 @@ describe("AgentBinding materialization", () => {
     expect(out.spawn.rendered_tools).toEqual(["Read", "Grep", "Glob", "WebFetch"]);
   });
 
-  test("Phase 1 admits only live-probed built-in read-only Claude/Codex bindings", () => {
+  test("Phase 1 admits only live-probed built-in read-only Claude/Codex bindings", async () => {
     const root = repo();
-    expect(() =>
+    await expect(
       materializeAgentBinding(direct({ engine: "copilot" }), {
         ...options(root),
         taskText: "x",
       } as MaterializeAgentBindingOptions),
-    ).toThrow(/phase 1/i);
-    expect(() =>
+    ).rejects.toThrow(/phase 1/i);
+    await expect(
       materializeAgentBinding(direct({ roleRef: "cli-engine" }), {
         ...options(root),
         taskText: "x",
       } as MaterializeAgentBindingOptions),
-    ).toThrow(/read-only/i);
-    materializeAgentBinding(direct(), options(root));
+    ).rejects.toThrow(/read-only/i);
+    await materializeAgentBinding(direct(), options(root));
     bindingProbeReady = false;
-    expect(() =>
+    await expect(
       materializeAgentBinding(direct(), {
         ...options(root),
         trustedReadinessResolver: () => [
@@ -303,10 +317,10 @@ describe("AgentBinding materialization", () => {
           },
         ],
       } as unknown as MaterializeAgentBindingOptions),
-    ).toThrow(/verified engine/i);
+    ).rejects.toThrow(/verified engine/i);
   });
 
-  test("read-only preview resolves unavailable engine authority without minting spawn authority", () => {
+  test("read-only preview resolves unavailable engine authority without minting spawn authority", async () => {
     const root = repo();
     bindingProbeReady = false;
     const preview = previewAgentBinding(direct(), options(root));
@@ -316,7 +330,9 @@ describe("AgentBinding materialization", () => {
     expect(preview.resolved.role.spec.name).toBe("direct");
     expect("spawn" in preview).toBe(false);
     expect(Object.isFrozen(preview)).toBe(true);
-    expect(() => materializeAgentBinding(direct(), options(root))).toThrow(/verified engine/i);
+    await expect(materializeAgentBinding(direct(), options(root))).rejects.toThrow(
+      /verified engine/i,
+    );
   });
 
   test("preview readiness never performs a live provider probe", () => {
@@ -435,18 +451,18 @@ describe("AgentBinding materialization", () => {
     );
     const binding = direct({ roleRef: "repo-direct" });
     const base = options(root, { phase: 2, taskText: "x" });
-    expect(() => materializeAgentBinding(binding, { ...base, isolation: undefined })).toThrow(
-      /live canonical isolation/i,
-    );
-    expect(() =>
+    await expect(
+      materializeAgentBinding(binding, { ...base, isolation: undefined }),
+    ).rejects.toThrow(/live canonical isolation/i);
+    await expect(
       materializeAgentBinding(binding, {
         ...base,
         isolation: { kind: "container", cwd: root, evidence_ref: "forged" },
       }),
-    ).toThrow(/live canonical isolation/i);
+    ).rejects.toThrow(/live canonical isolation/i);
 
     const isolation = containerLease(root);
-    const admitted = materializeAgentBinding(binding, {
+    const admitted = await materializeAgentBinding(binding, {
       ...base,
       isolation,
     });
@@ -466,7 +482,7 @@ describe("AgentBinding materialization", () => {
     expect(filtered.env.OPENAI_API_KEY).toBeUndefined();
     expect(filtered.env.GITHUB_TOKEN).toBeUndefined();
     await releaseIsolationLease(isolation);
-    expect(() => materializeAgentBinding(binding, { ...base, isolation })).toThrow(
+    await expect(materializeAgentBinding(binding, { ...base, isolation })).rejects.toThrow(
       /live canonical isolation/i,
     );
   });
@@ -488,25 +504,25 @@ describe("AgentBinding materialization", () => {
     );
     const isolation = containerLease(root, unrelated);
     try {
-      expect(() =>
+      await expect(
         materializeAgentBinding(
           direct({ roleRef: "repo-direct" }),
           options(root, { phase: 2, isolation }),
         ),
-      ).toThrow(/associated canonical repository/i);
+      ).rejects.toThrow(/associated canonical repository/i);
     } finally {
       await releaseIsolationLease(isolation);
     }
   });
 
-  test("rejects metadata-only isolation even for a built-in Phase 2 role", () => {
+  test("rejects metadata-only isolation even for a built-in Phase 2 role", async () => {
     const root = repo();
-    expect(() =>
+    await expect(
       materializeAgentBinding(direct(), {
         ...options(root, { phase: 2 }),
         isolation: { kind: "container", cwd: root, evidence_ref: "forged" },
       }),
-    ).toThrow(/live canonical isolation/i);
+    ).rejects.toThrow(/live canonical isolation/i);
   });
 
   test("binds every supplied Phase 2 lease to the exact requested repository", async () => {
@@ -514,37 +530,37 @@ describe("AgentBinding materialization", () => {
     const unrelated = repo();
     const isolation = containerLease(unrelated);
     try {
-      expect(() =>
+      await expect(
         materializeAgentBinding(direct(), options(root, { phase: 2, isolation })),
-      ).toThrow(/associated canonical repository/i);
+      ).rejects.toThrow(/associated canonical repository/i);
     } finally {
       await releaseIsolationLease(isolation);
     }
   });
 
-  test("fails closed for runtime-invalid engine and session values", () => {
+  test("fails closed for runtime-invalid engine and session values", async () => {
     const root = repo();
-    expect(() =>
+    await expect(
       materializeAgentBinding({ ...direct(), engine: "unknown" } as unknown as AgentBinding, {
         ...options(root, { phase: 2 }),
       }),
-    ).toThrow(/engine/i);
-    expect(() =>
+    ).rejects.toThrow(/engine/i);
+    await expect(
       materializeAgentBinding({ ...direct(), sessionMode: "reuse" } as unknown as AgentBinding, {
         ...options(root, { phase: 2 }),
       }),
-    ).toThrow(/session mode/i);
+    ).rejects.toThrow(/session mode/i);
   });
 
-  test("canonical spawn factory rejects credential-shaped and local-path model overrides", () => {
+  test("canonical spawn factory rejects credential-shaped and local-path model overrides", async () => {
     const root = repo();
     for (const modelOverride of [
       "provider/sk-abcdefghijklmnopqrstuvwxyz1234567890",
       "/tmp/private-model",
     ]) {
-      expect(() => materializeAgentBinding(direct({ modelOverride }), options(root))).toThrow(
-        /safe engine identifier/i,
-      );
+      await expect(
+        materializeAgentBinding(direct({ modelOverride }), options(root)),
+      ).rejects.toThrow(/safe engine identifier/i);
     }
   });
 
@@ -557,7 +573,7 @@ describe("AgentBinding materialization", () => {
     const forged = { ...canonical, path, resolvedBody: "CALLER FORGED BODY" } satisfies Skill;
     const isolation = containerLease(root);
     try {
-      const out = materializeAgentBinding(direct({ additionalSkillRefs: ["fabricated"] }), {
+      const out = await materializeAgentBinding(direct({ additionalSkillRefs: ["fabricated"] }), {
         ...options(root, { phase: 2, isolation }),
         skills: [forged],
       } as unknown as MaterializeAgentBindingOptions);
@@ -569,14 +585,14 @@ describe("AgentBinding materialization", () => {
     }
   });
 
-  test("Phase 1 rejects project-controlled engine-mirror skills", () => {
+  test("Phase 1 rejects project-controlled engine-mirror skills", async () => {
     const root = repo();
     skillFile(root, join(".agents", "skills"), "fabricated", "project mirror body");
-    expect(() =>
+    await expect(
       materializeAgentBinding(direct({ additionalSkillRefs: ["fabricated"] }), {
         ...options(root),
         skills: discoverSkills(root),
       } as unknown as MaterializeAgentBindingOptions),
-    ).toThrow(/phase 1/i);
+    ).rejects.toThrow(/phase 1/i);
   });
 });

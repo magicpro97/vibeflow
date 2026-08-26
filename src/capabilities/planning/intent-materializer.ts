@@ -329,20 +329,21 @@ export class DefaultCapabilityIntentMaterializerV1
     selector: PackageSelectorV1,
     engines: import("../../actions/types.js").EngineName[],
   ): ResolvedCapabilityPackageV1[] {
-    const rows = this.options.packages
-      .candidates([...new Set(engines)].sort(bytewise))
-      .filter((row) => capabilitySelectorMatches(selector, row));
-    if (rows.length === 0) invalid("no validated cached package matches the exact selector");
+    const candidateRows = this.options.packages.candidates([...new Set(engines)].sort(bytewise));
+    const rootRows = candidateRows.filter((row) => capabilitySelectorMatches(selector, row));
+    if (rootRows.length === 0) invalid("no validated cached package matches the exact selector");
     const resolution = resolveDependencies({
       requests: [
         {
           package_id: selector.id,
           version_range: selector.version ?? "*",
           ...(selector.content_sha256 ? { content_sha256: selector.content_sha256 } : {}),
-          ...(rows.length === 1 ? { source_identity: rows[0]?.candidate.source_identity } : {}),
+          ...(rootRows.length === 1
+            ? { source_identity: rootRows[0]?.candidate.source_identity }
+            : {}),
         },
       ],
-      candidates: rows.map((row) => row.candidate),
+      candidates: candidateRows.map((row) => row.candidate),
       allowed_trust:
         selector.source_kind === "local-dev"
           ? ["verified", "source-pinned", "legacy-verified", "dev-unverified"]
@@ -358,7 +359,7 @@ export class DefaultCapabilityIntentMaterializerV1
         "action-required",
       );
     return resolution.packages.map((candidate) => {
-      const resolved = rows.find(
+      const resolved = candidateRows.find(
         (row) => row.candidate.candidate_digest === candidate.candidate_digest,
       )?.resolved;
       if (!resolved) invalid("resolved package escaped the fixed cache candidate set");

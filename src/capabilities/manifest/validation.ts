@@ -364,7 +364,7 @@ export function parseCapabilityManifest(
     throw new CapabilityValidationError("manifest byte size is out of bounds", "$", "bounds");
   let source: string;
   try {
-    source = new TextDecoder("utf-8", { fatal: true }).decode(sourceBytes);
+    source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(sourceBytes);
   } catch {
     throw new CapabilityValidationError("manifest is not strict UTF-8", "$", "invalid_capability");
   }

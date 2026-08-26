@@ -158,6 +158,11 @@ export type CapabilityWalPayloadV1 =
       lock_digest: string;
       health_inventory_digest: string;
       expected_health_pointer_digest: string | null;
+      /** Present on newly prepared publications. Optional only so retained v1
+       * WAL rows written before exact post-pointer binding remain readable. */
+      expected_health_pointer_epoch?: number | null;
+      next_health_pointer_epoch?: number;
+      next_health_pointer_digest?: string;
     }
   | {
       kind: "lock-commit";
@@ -165,6 +170,10 @@ export type CapabilityWalPayloadV1 =
       lock_digest: string;
       health_inventory_digest: string;
       expected_health_pointer_digest: string | null;
+      /** Mirrors the exact post-pointer identity from the prepared row. */
+      expected_health_pointer_epoch?: number | null;
+      next_health_pointer_epoch?: number;
+      next_health_pointer_digest?: string;
       directory_fsync_completed: true;
     }
   | {

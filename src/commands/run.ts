@@ -174,7 +174,7 @@ async function launchEngine(
 ): Promise<number> {
   // Stronger gate: confirm a live-ready engine. An injected spawner IS the round-trip, so trust it.
   const preflight = inject.preflight ?? (inject.spawner ? () => [readyStub(engine)] : undefined);
-  if (!engineReady(engine, "cli", preflight)) return 1;
+  if (!(await engineReady(engine, "cli", preflight))) return 1;
 
   // Source-protection — identical to orchestrate(): refuse a dirty/non-git tree unless opted in.
   const fp = resolveProtection(flags, readSettings(base).failureProtection);

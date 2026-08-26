@@ -25,7 +25,15 @@
           placeholder="Search conversations"
           @keydown.esc="store.sessionQuery = ''"
         />
-        <span v-if="store.catalogLoading" class="home-search__busy" aria-label="Searching" />
+        <span
+          v-if="store.catalogLoading"
+          class="home-search__busy"
+          :aria-label="catalogLoading.searchLabel"
+          role="status"
+        >
+          <span class="home-busy-signal" aria-hidden="true"><i /><i /><i /></span>
+          <small>{{ catalogLoading.searchLabel }}</small>
+        </span>
       </label>
     </div>
 
@@ -34,8 +42,30 @@
       <span>{{ store.catalogError }}</span>
       <button type="button" @click="store.refreshSessions()">Try again</button>
     </div>
-    <div v-else-if="store.catalogLoading && !store.sessions.length" class="home-session-skeleton" aria-label="Loading conversations">
-      <span v-for="index in 5" :key="index" />
+    <div
+      v-else-if="store.catalogLoading && !store.sessions.length"
+      class="home-loading-panel home-loading-panel--rail"
+      aria-label="Loading conversations"
+      role="status"
+      aria-live="polite"
+    >
+      <header class="home-loading-panel__header">
+        <span>{{ catalogLoading.eyebrow }}</span>
+        <strong>{{ catalogLoading.title }}</strong>
+      </header>
+      <p class="home-loading-panel__copy">{{ catalogLoading.detail }}</p>
+      <ul class="home-loading-panel__checkpoints" aria-label="Loading progress">
+        <li v-for="checkpoint in catalogLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
+      </ul>
+      <div class="home-loading-rail" aria-hidden="true">
+        <article v-for="index in 4" :key="index">
+          <span class="home-loading-rail__dot" />
+          <div class="home-loading-rail__copy">
+            <strong />
+            <small />
+          </div>
+        </article>
+      </div>
     </div>
     <div v-else-if="!store.sessions.length" class="home-rail-state">
       <strong>{{ store.sessionQuery ? "No matches" : "No conversations yet" }}</strong>
@@ -81,7 +111,8 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { describeHomeCatalogLoading } from "../conversation-home-loading.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import type { ConversationLifecycle } from "../conversation-home-types.js";
 
@@ -89,6 +120,12 @@ const store = useConversationHomeStore();
 const railRoot = ref<HTMLElement | null>(null);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let mobileQuery: MediaQueryList | null = null;
+const catalogLoading = computed(() =>
+  describeHomeCatalogLoading({
+    query: store.sessionQuery,
+    health: store.catalogHealth,
+  }),
+);
 
 const lifecycleLabel = (value: ConversationLifecycle) =>
   ({

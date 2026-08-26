@@ -69,6 +69,9 @@ describe("production capability runtime factory", () => {
     expect(
       first.query({ view: "status", scope: "user", package_id: "acme.none" }).items[0]?.status,
     ).toBe("absent");
+    expect(() => first.detail({ scope: "project", package_id: "acme.none" })).toThrow(
+      /detail was not found/,
+    );
     expect(files(fx.root)).toEqual(before);
     expect(() =>
       productionCapabilityRuntimeV1({

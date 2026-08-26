@@ -3,6 +3,7 @@ import {
   type ActionRequestAuthorityV1,
   deriveOperationId,
 } from "../../actions/index.js";
+import { isAgentProposalBrowserController } from "../../actions/store-rules.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import {
   conversationActionAuthorityHead,
@@ -99,7 +100,9 @@ export function validateDeferredRevisionCommit(input: {
     deferred.revision_plan.parent.conversation_id !== input.commit.conversationId ||
     actionState.proposal.handoff_selection_digest !==
       deferred.revision_plan.handoff_selection_plan_digest ||
-    !same(actionState.proposal.requested_by, input.commit.authority.actor)
+    !same(approval.decided_by, input.commit.authority.actor) ||
+    (!same(actionState.proposal.requested_by, input.commit.authority.actor) &&
+      !isAgentProposalBrowserController(actionState.proposal, input.commit.authority))
   )
     throw new Error("deferred revision approval authority mismatch");
   const rootSessionId = actionState.proposal.base.root_session_id;
@@ -110,15 +113,17 @@ export function validateDeferredRevisionCommit(input: {
   );
   if (digestV1("VF-ACTION-PLAN\0v1\0", actionPlan) !== actionState.proposal.plan_digest)
     throw new Error("deferred revision action plan changed");
-  const authorityHead = conversationActionAuthorityHead({
-    root_session_id: rootSessionId,
-    authority: input.commit.authority,
-  });
-  if (
-    authorityHead.authority_epoch !== actionState.proposal.base.authority_epoch ||
-    authorityHead.authority_head_digest !== actionState.proposal.base.authority_head_digest
-  )
-    throw new Error("deferred revision request authority changed");
+  if (actionState.proposal.requested_by.kind !== "agent") {
+    const authorityHead = conversationActionAuthorityHead({
+      root_session_id: rootSessionId,
+      authority: input.commit.authority,
+    });
+    if (
+      authorityHead.authority_epoch !== actionState.proposal.base.authority_epoch ||
+      authorityHead.authority_head_digest !== actionState.proposal.base.authority_head_digest
+    )
+      throw new Error("deferred revision request authority changed");
+  }
   if (
     !["approved", "committing", "succeeded", "failed", "needs_recovery"].includes(actionState.state)
   )

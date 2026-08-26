@@ -12,7 +12,9 @@ export async function startInitialRevisionLaneBarrier(input: {
   live: AttemptConversationAuthority;
   operation: RegisteredOperation;
   plan: RevisionPreparationPlanV1;
+  authorityOperationId?: string;
 }): Promise<boolean> {
+  const authorityOperationId = input.authorityOperationId ?? input.operation.operationId;
   const shared = input.live.sharedHandoff;
   if (shared === null) throw new Error("revision start handoff authority is absent");
   const active = new Map<string, ReturnType<typeof startAndAdmitAttempt>>();
@@ -40,7 +42,7 @@ export async function startInitialRevisionLaneBarrier(input: {
     )
       throw new Error("revision participant start binding changed");
     const token = input.authority.prepare({
-      operation_id: input.operation.operationId,
+      operation_id: authorityOperationId,
       conversation_id: input.live.manifest.conversation_id,
       participant_id: participant.participant_id,
       binding,
@@ -73,7 +75,7 @@ export async function startInitialRevisionLaneBarrier(input: {
         startAuthority: input.options.sessionAdapter.startAuthority,
       });
       settled = true;
-      const accepted = input.authority.allAccepted(input.operation.operationId, {
+      const accepted = input.authority.allAccepted(authorityOperationId, {
         ...input.plan,
         participant_starts: [participant],
       });
@@ -92,7 +94,7 @@ export async function startInitialRevisionLaneBarrier(input: {
   const results = await Promise.all(starts);
   return (
     results.every(Boolean) &&
-    input.authority.allAccepted(input.operation.operationId, input.plan) &&
-    input.authority.isQuiescent(input.operation.operationId)
+    input.authority.allAccepted(authorityOperationId, input.plan) &&
+    input.authority.isQuiescent(authorityOperationId)
   );
 }

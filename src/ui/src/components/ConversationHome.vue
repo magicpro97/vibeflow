@@ -48,7 +48,10 @@
       </header>
 
       <HomeTimeline />
-      <HomeComposer @open-capabilities="$emit('open-capabilities')" />
+      <HomeComposer
+        :transient-ui-open="transientUiOpen || detailsOpen"
+        @open-capabilities="$emit('open-capabilities')"
+      />
     </section>
 
     <Transition name="home-inspector">
@@ -68,7 +71,20 @@
             <li v-for="participant in store.activeRevision.participants" :key="participant.participant_id">
               <span>{{ initials(participant.role_ref) }}</span>
               <p><strong>{{ participant.role_ref }}</strong><small>{{ participant.engine }}{{ participant.model ? ` · ${participant.model}` : '' }}</small></p>
-              <button type="button" title="Mention in composer" @click="mention(participant.participant_id)">@</button>
+              <div class="home-participant-actions">
+                <button
+                  type="button"
+                  :aria-label="`Mention ${participant.role_ref}`"
+                  title="Mention in composer"
+                  @click="mention(participant.participant_id)"
+                >@</button>
+                <button
+                  type="button"
+                  :aria-label="`Remove ${participant.role_ref} from conversation`"
+                  title="Prepare removal in composer"
+                  @click="removeAgent(participant.participant_id)"
+                >−</button>
+              </div>
             </li>
           </ul>
           <button class="home-inspector-add" type="button" @click="addAgent">+ Add an AI participant</button>
@@ -100,6 +116,7 @@ import HomeSessionRail from "./HomeSessionRail.vue";
 import HomeTimeline from "./HomeTimeline.vue";
 
 const emit = defineEmits<{ "open-capabilities": []; "open-trace": [] }>();
+defineProps<{ transientUiOpen: boolean }>();
 const store = useConversationHomeStore();
 const detailsOpen = ref(false);
 const detailsTrigger = ref<HTMLButtonElement | null>(null);
@@ -137,6 +154,12 @@ function mention(participantId: string) {
 
 function addAgent() {
   store.draft = "+";
+  closeDetails(false);
+  nextTick(() => document.querySelector<HTMLTextAreaElement>("#home-composer")?.focus());
+}
+
+function removeAgent(participantId: string) {
+  store.draft = `-@${participantId}`;
   closeDetails(false);
   nextTick(() => document.querySelector<HTMLTextAreaElement>("#home-composer")?.focus());
 }

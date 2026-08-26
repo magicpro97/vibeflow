@@ -15,7 +15,7 @@ import {
 
 const MAX_RECORD = 256 * 1024;
 const MAX_CONTENT = 64 * 1024;
-const MAX_FRAMES = 8;
+export const PRIVATE_FILE_RANGE_MAX_FRAMES = 8;
 const STAGING = /^vf-file-range-[0-9a-f]{64}$/;
 const PATH_LIMIT = 4 * 1024;
 
@@ -171,9 +171,9 @@ export class PrivateFileRangeStagingStoreV1 {
   private codec(id: string) {
     return {
       domain: "private-file-range-staging" as const,
-      maxFrames: MAX_FRAMES,
+      maxFrames: PRIVATE_FILE_RANGE_MAX_FRAMES,
       maxPayloadBytes: MAX_RECORD,
-      maxAggregateBytes: MAX_RECORD * MAX_FRAMES,
+      maxAggregateBytes: MAX_RECORD * PRIVATE_FILE_RANGE_MAX_FRAMES,
       validatePayload: (payload: Record<string, unknown>) => {
         const value = payload as unknown as PrivateFileRangeStagingFrameV1;
         const { frame_digest: _digest, ...preimage } = value;
@@ -274,7 +274,7 @@ export class PrivateFileRangeStagingStoreV1 {
   readFrames(id: string): PrivateFileRangeStagingFrameV1[] {
     this.assertId(id);
     const path = join(this.frames, `${id}.frames`);
-    if (privateFileBytes(path, MAX_RECORD * MAX_FRAMES) === null) return [];
+    if (privateFileBytes(path, MAX_RECORD * PRIVATE_FILE_RANGE_MAX_FRAMES) === null) return [];
     return readVffrFile(path, this.codec(id)).map((item) =>
       structuredClone(item.payload as unknown as PrivateFileRangeStagingFrameV1),
     );

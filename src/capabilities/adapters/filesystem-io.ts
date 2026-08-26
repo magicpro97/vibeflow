@@ -21,6 +21,11 @@ const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefi
 
 export type ProjectionMutationFaultV1 = (point: "before-commit", absolutePath: string) => void;
 
+export interface ProjectionStagingFaultV1 {
+  entropy?: (attempt: number) => Uint8Array;
+  afterCreate?: (temporaryName: string) => void;
+}
+
 export type CapabilityInternalCasFaultV1 = (point: {
   phase: "after-cas";
   absolute_path: string;
@@ -134,14 +139,17 @@ function writeTemporary(
   name: string,
   bytes: Uint8Array,
   mode: number,
+  staging?: ProjectionStagingFaultV1,
 ): string {
   if (bytes.byteLength > MAX_PROJECTION_BYTES)
     throw new CapabilityValidationError("projection replacement exceeds byte limit", name);
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const temporary = `.vf-capability-${randomBytes(16).toString("hex")}.tmp`;
+    const entropy = staging?.entropy?.(attempt) ?? randomBytes(16);
+    const temporary = `.vf-capability-${Buffer.from(entropy).toString("hex")}.tmp`;
     const fd = createAt(directory, temporary, fs.constants.O_WRONLY, mode);
     if (fd === null) continue;
     try {
+      staging?.afterCreate?.(temporary);
       fs.fchmodSync(fd, mode);
       for (let offset = 0; offset < bytes.byteLength; ) {
         const written = fs.writeSync(fd, bytes, offset, bytes.byteLength - offset, offset);
@@ -167,12 +175,13 @@ export function compareAndSwapProjectionFile(
   replacement: Uint8Array | null,
   mode = 0o600,
   fault?: ProjectionMutationFaultV1,
+  staging?: ProjectionStagingFaultV1,
 ): void {
   const result = withPinnedParent(path, true, (directory, name) => {
     if (!bytesEqual(readAt(directory, name), expected))
       throw new CapabilityValidationError("projection CAS preimage mismatch", path);
     let temporary: string | null =
-      replacement === null ? null : writeTemporary(directory, name, replacement, mode);
+      replacement === null ? null : writeTemporary(directory, name, replacement, mode, staging);
     try {
       fault?.("before-commit", path);
       assertPinnedDirectory(directory);
@@ -313,14 +322,15 @@ export function readJsonSlice(
   object: Record<string, CapabilityPrivateJsonV1>,
   keyPath: readonly string[],
 ): { present: boolean; value: CapabilityPrivateJsonV1 | null } {
+  if (keyPath.length === 0)
+    throw new CapabilityValidationError("projection key path must not be empty", "key_path");
   let cursor: CapabilityPrivateJsonV1 = object;
-  for (const [index, key] of keyPath.entries()) {
+  for (const key of keyPath) {
     if (!cursor || typeof cursor !== "object" || Array.isArray(cursor) || !(key in cursor))
       return { present: false, value: null };
     cursor = cursor[key] as CapabilityPrivateJsonV1;
-    if (index === keyPath.length - 1) return { present: true, value: structuredClone(cursor) };
   }
-  return { present: false, value: null };
+  return { present: true, value: structuredClone(cursor) };
 }
 
 export function writeJsonSlice(
@@ -329,6 +339,8 @@ export function writeJsonSlice(
   present: boolean,
   value: CapabilityPrivateJsonV1 | null,
 ): Record<string, CapabilityPrivateJsonV1> {
+  if (keyPath.length === 0)
+    throw new CapabilityValidationError("projection key path must not be empty", "key_path");
   const output = structuredClone(object);
   let cursor: Record<string, CapabilityPrivateJsonV1> = output;
   for (const key of keyPath.slice(0, -1)) {

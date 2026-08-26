@@ -62,8 +62,8 @@ export interface ReadConversationSourceInventoryOptions {
   includeHiddenRevisions?: boolean;
   includeHiddenRevisionOperationIds?: ReadonlySet<string>;
   actionAuthority?: ConversationReviewedActionAuthorityV1;
+  fault?: (point: "after-artifact-scan") => void;
 }
-
 const compareBytes = (left: string, right: string): number =>
   Buffer.compare(Buffer.from(left), Buffer.from(right));
 
@@ -356,6 +356,7 @@ export function readConversationSourceInventory(
           options.actionAuthority,
         );
       }
+      options.fault?.("after-artifact-scan");
       assertPrivateDirectorySnapshot(artifactRoot);
       if (traceRoot.state === "valid") assertPrivateDirectorySnapshot(traceRoot);
     }

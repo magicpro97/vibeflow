@@ -8,27 +8,26 @@ import {
   reserveAttemptEvidence,
   snapshotSessionAdapterOptions,
 } from "./attempt-handle.js";
-import { filterEnv, providerCredentialValues } from "./env-filter.js";
-import {
-  claimIsolationLease,
-  materializeIsolationInvocation,
-  releaseIsolationLease,
-} from "./isolation.js";
+import { type claimIsolationLease, releaseIsolationLease } from "./isolation.js";
+import type { OwnedProcessTerminalKind } from "./owned-process-contract.js";
+import { supportsOwnedRuntime } from "./owned-process-launch.js";
+import { createOwnedProcessPlatform } from "./owned-process-platform.js";
+import { type OwnedProcessController, OwnedProcessRecordStore } from "./owned-process-runtime.js";
 import { parseEngineSummary } from "./prompt.js";
 import {
   publicEngineSummary,
   sanitizePublicEngineText,
   sanitizePublicValue,
 } from "./public-redaction.js";
-// biome-ignore format: keep the canonical adapter under the 400-line production cap
-import { assertSpawnProjection, reconcileSessionHistory, sessionInvocation } from "./session-argv.js";
+import { reconcileSessionHistory } from "./session-argv.js";
+import { type SessionLaunchPreparation, prepareSessionLaunch } from "./session-launch-prep.js";
 import { SessionStdoutState } from "./session-output.js";
-import { bridgeSessionInvocation } from "./session-protocol.js";
+import { noteOwnedOutputDrainFailure, reapOwnedSessionRootExit } from "./session-owned-runtime.js";
 import {
   persistSynchronousStartFailure,
   recordCompletedStartOutcome,
 } from "./session-start-recording.js";
-import { isCanonicalSpawnOptionsProjection } from "./session-types.js";
+import { createSessionStreamObserver } from "./session-stream-observer.js";
 import type {
   AttemptHandle,
   EngineProcess,
@@ -54,7 +53,13 @@ export function createEngineSessionAdapter(
   const evidenceRoot = config.evidenceRoot ?? join(process.cwd(), ".vibeflow", "attempts");
   const startAuthorityStore = new AttemptStartAuthorityStore(evidenceRoot);
   const startAuthority = createDurableAttemptStartAuthorityReaderV1(startAuthorityStore);
-
+  const ownedRuntimeSupported = supportsOwnedRuntime(spawnProcess);
+  const ownedRuntimeStore = ownedRuntimeSupported
+    ? new OwnedProcessRecordStore(evidenceRoot)
+    : undefined;
+  const ownedRuntimePlatform = ownedRuntimeSupported
+    ? (config.ownedProcessPlatform ?? createOwnedProcessPlatform())
+    : undefined;
   return {
     startAuthority,
     start(request): AttemptHandle {
@@ -91,7 +96,7 @@ export function createEngineSessionAdapter(
           recordOnFailure,
         );
       let engine: Engine | "unknown" = "unknown";
-      let claimedProjection: typeof spawn.isolation = null;
+      let claimedProjection: typeof spawn.isolation = spawn.isolation;
       let claimedLease: ReturnType<typeof claimIsolationLease> | undefined;
       let initialPrivate: string[] = [];
       const persistStartFailure = (failure: Error, outcome: "proved-absent" | "unknown") => {
@@ -111,55 +116,38 @@ export function createEngineSessionAdapter(
           }) ?? evidenceBinding;
       };
 
-      let invocation: ReturnType<typeof sessionInvocation>;
+      let invocation: SessionLaunchPreparation["invocation"];
       let env: NodeJS.ProcessEnv;
       let argv: string[];
       let cwd: string | undefined;
       let inheritedPrivateValues: string[] = [];
+      let ownedRuntime: OwnedProcessController | undefined;
       try {
-        if (!isCanonicalSpawnOptionsProjection(spawn)) {
-          throw new Error("spawn projection lacks canonical spawn authority");
-        }
-        engine = spawn.engine;
-        claimedProjection = spawn.isolation;
-        initialPrivate = [spawn.rendered_prompt, spawn.isolation?.evidence_ref ?? ""];
-        assertSpawnProjection(spawn, nativeSessionId);
-        transition("requested");
-        const projectRole = spawn.provenance.roleSource === "repo";
-        if (projectRole && !claimedProjection) {
-          throw new Error("project role requires a live isolation lease");
-        }
-        if (claimedProjection) {
-          try {
-            claimedLease = claimIsolationLease(claimedProjection);
-          } catch {
-            if (projectRole) throw new Error("project role requires a live isolation lease");
-            throw new Error("spawn isolation lease is not live");
-          }
-        }
-        // biome-ignore format: keep the canonical adapter under the 400-line production cap
-        invocation = config.protocol === "bridge" ? bridgeSessionInvocation(spawn) : sessionInvocation(spawn, nativeSessionId);
-        env = filterEnv(sourceEnv, spawn.env_policy).env;
-        inheritedPrivateValues = providerCredentialValues(env, spawn.engine);
-        env.PWD = claimedLease?.cwd ?? process.cwd();
-        Object.assign(env, {
-          VF_ATTEMPT_ID: attemptId,
-          VF_SESSION_MODE: spawn.sessionMode,
-          VF_RENDERED_TOOLS: spawn.rendered_tools.join(","),
-          VF_ROLE_SANDBOX: spawn.sandbox ?? "none",
-          VF_ROLE_SOURCE: spawn.provenance.roleSource,
-          VF_ROLE_HASH: spawn.provenance.roleHash,
-          VF_SKILL_HASHES: spawn.provenance.skillHashes.join(","),
-          VF_ROLE_RESOLVED_HASH: spawn.trace_metadata.role_resolved_hash,
-          VF_SKILL_RESOLVED_HASHES: spawn.trace_metadata.skill_resolved_hashes.join(","),
-        });
-        const materialized = materializeIsolationInvocation(
+        ({
+          argv,
           claimedLease,
-          [invocation.cmd, ...invocation.args],
+          claimedProjection,
+          cwd,
+          engine,
           env,
-        );
-        argv = materialized.argv;
-        cwd = materialized.cwd;
+          inheritedPrivateValues,
+          initialPrivate,
+          invocation,
+          ownedRuntime,
+        } = prepareSessionLaunch({
+          attemptId,
+          config,
+          nativeSessionId,
+          ownedRuntimePlatform: ownedRuntimeSupported
+            ? (ownedRuntimePlatform as NonNullable<typeof ownedRuntimePlatform>)
+            : undefined,
+          ownedRuntimeStore: ownedRuntimeSupported
+            ? (ownedRuntimeStore as OwnedProcessRecordStore)
+            : undefined,
+          sourceEnv,
+          spawn,
+          transition,
+        }));
       } catch (error) {
         const failure = normalizedAttemptError(error);
         try {
@@ -179,10 +167,13 @@ export function createEngineSessionAdapter(
           detached:
             (config.spawn === undefined || config.ownsProcessGroup === true) &&
             process.platform !== "win32",
+          ...(ownedRuntime ? { ownedRuntime } : {}),
         });
       } catch (error) {
         const failure = normalizedAttemptError(error);
         try {
+          ownedRuntime?.finalize(null, "spawn failure");
+          invocation.cleanupOnFailure?.();
           persistStartFailure(failure, "unknown");
         } finally {
           if (claimedProjection) void releaseIsolationLease(claimedProjection).catch(() => {});
@@ -200,10 +191,11 @@ export function createEngineSessionAdapter(
       let acknowledged = false;
       let terminationReason: string | undefined;
       let terminationRequested = false;
+      let authenticatedTerminal: OwnedProcessTerminalKind | null = null;
       let terminalError: Error | undefined;
       let hardTimer: ReturnType<typeof setTimeout> | undefined;
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
-      const { terminate: terminateProcess } = createProcessTerminator({
+      const { terminate: fallbackTerminate } = createProcessTerminator({
         process: processHandle,
         killProcessGroup:
           (config.spawn === undefined || config.ownsProcessGroup === true) &&
@@ -214,6 +206,15 @@ export function createEngineSessionAdapter(
           terminationReason = reason;
         },
       });
+      const terminateProcess = (reason?: string) => {
+        if (reason) {
+          terminationRequested = true;
+          terminationReason = reason;
+        }
+        return ownedRuntime
+          ? ownedRuntime.terminate(config.graceMs ?? 3000)
+          : fallbackTerminate(reason);
+      };
       const callbackReason = () =>
         callbackError ? `callback failed: ${callbackError.message}` : undefined;
       transition("dispatched", true);
@@ -223,33 +224,6 @@ export function createEngineSessionAdapter(
         acknowledgementSeen = true;
         acknowledged = transition("acknowledged", true);
         if (!acknowledged) void terminateProcess(callbackReason());
-      };
-      const emitChunk = (stream: "stdout" | "stderr", content: string) => {
-        try {
-          onChunk?.({ stream, content });
-        } catch (error) {
-          callbackError ??= normalizedAttemptError(error);
-          void terminateProcess(callbackReason());
-        }
-      };
-      const consumeOutput = (stream: "stdout" | "stderr", content: string, flush: boolean) => {
-        const projected = stdout.consume(
-          stream,
-          content,
-          flush,
-          resumeBinding?.nativeSessionId,
-          privateValues,
-        );
-        const observed = projected.observation;
-        if (observed?.nativeSessionId && !resumeBinding) {
-          resumeBinding = {
-            attemptId,
-            engine: spawn.engine,
-            nativeSessionId: observed.nativeSessionId,
-          };
-        }
-        if (observed?.acknowledged) acknowledge();
-        for (const frame of projected.frames) emitChunk(frame.stream, frame.content);
       };
       const resetIdle = () => {
         if (idleTimer) clearTimeout(idleTimer);
@@ -264,27 +238,29 @@ export function createEngineSessionAdapter(
       if (processHandle.startupError) {
         void terminateProcess(`startup I/O failed: ${processHandle.startupError.message}`);
       }
-
-      const readStream = async (
-        stream: ReadableStream<Uint8Array> | null | undefined,
-        kind: "stdout" | "stderr",
-      ) => {
-        if (!stream) return;
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            const tail = decoder.decode();
-            consumeOutput(kind, tail, true);
-            break;
-          }
-          const content = decoder.decode(value, { stream: true });
-          if (!content) continue;
-          resetIdle();
-          consumeOutput(kind, content, false);
-        }
-      };
+      const { readStream } = createSessionStreamObserver({
+        attemptId,
+        engine: spawn.engine,
+        onAcknowledged: acknowledge,
+        onActivity: resetIdle,
+        onChunk,
+        onError: (error) => {
+          callbackError ??= error;
+          void terminateProcess(callbackReason());
+        },
+        onTerminal: (kind) => {
+          if (authenticatedTerminal) return;
+          authenticatedTerminal = kind;
+          ownedRuntime?.noteTerminal(kind);
+          if (ownedRuntime) void terminateProcess("authenticated terminal record");
+        },
+        privateValues,
+        readResumeBinding: () => resumeBinding,
+        stdout,
+        writeResumeBinding: (binding) => {
+          resumeBinding = binding;
+        },
+      });
 
       const safeExit = processHandle.exited.catch(async (error) => {
         terminalError = normalizedAttemptError(error);
@@ -292,6 +268,11 @@ export function createEngineSessionAdapter(
         await terminateProcess(terminationReason);
         return null;
       });
+      const reapOnRootExit = reapOwnedSessionRootExit(
+        processHandle,
+        ownedRuntime,
+        config.graceMs ?? 3000,
+      );
       const drains = Promise.all([
         readStream(processHandle.stdout, "stdout"),
         readStream(processHandle.stderr, "stderr"),
@@ -301,10 +282,28 @@ export function createEngineSessionAdapter(
       });
       const completion = (async (): Promise<EngineSessionResult> => {
         try {
-          const [exitCode] = await Promise.all([safeExit, drains]);
+          const [processExitCode, _drains, rootOutcome] = await Promise.all([
+            safeExit,
+            drains,
+            reapOnRootExit,
+          ]);
+          invocation.cleanup?.();
+          const exitCode = rootOutcome?.exitCode ?? processExitCode;
+          terminationReason ??= noteOwnedOutputDrainFailure(rootOutcome, ownedRuntime);
           if (config.protocol === "bridge" && exitCode === 0 && !acknowledgementSeen) acknowledge();
+          const processRelease = ownedRuntime?.finalize(
+            exitCode,
+            authenticatedTerminal
+              ? "authenticated terminal release"
+              : (terminationReason ?? "engine exit"),
+          );
           let state: EngineSessionResult["state"] =
-            acknowledged && !callbackError && !terminalError && !terminationRequested
+            acknowledged &&
+            !callbackError &&
+            !terminalError &&
+            (!terminationRequested || terminationReason === "authenticated terminal record") &&
+            (!ownedRuntime || Boolean(processRelease)) &&
+            (authenticatedTerminal !== null || exitCode === 0)
               ? "completed"
               : "ambiguous";
           const terminalObserved = transition(state, true, state === "ambiguous");
@@ -313,19 +312,23 @@ export function createEngineSessionAdapter(
             transition("ambiguous", true);
           }
           const rawReason =
-            terminationReason ??
-            callbackReason() ??
-            (terminalError
-              ? terminalError.message
-              : exitCode === 0
-                ? undefined
-                : `engine exited ${exitCode}`);
+            state === "completed"
+              ? undefined
+              : (terminationReason ??
+                callbackReason() ??
+                (terminalError
+                  ? terminalError.message
+                  : exitCode === 0
+                    ? undefined
+                    : `engine exited ${exitCode}`));
           const nativeIds = resumeBinding?.nativeSessionId ? [resumeBinding.nativeSessionId] : [];
           const output = stdout.publicOutput(nativeIds, privateValues);
           const reason = rawReason
             ? sanitizePublicEngineText(rawReason, nativeIds, privateValues)
             : undefined;
-          const ok = state === "completed" && exitCode === 0 && !rawReason;
+          const ok =
+            state === "completed" &&
+            (authenticatedTerminal !== null || (exitCode === 0 && !rawReason));
           const evidence = sanitizePublicValue(
             {
               attempt_id: attemptId,
@@ -335,6 +338,7 @@ export function createEngineSessionAdapter(
               ok,
               reason: reason ?? null,
               native_session_status: resumeBinding ? "captured" : "unavailable",
+              process_release: processRelease ?? null,
               isolation_evidence_ref: spawn.isolation?.evidence_ref ?? null,
               provenance: spawn.provenance,
               trace_metadata: spawn.trace_metadata,
@@ -363,15 +367,18 @@ export function createEngineSessionAdapter(
             evidenceStatus: "persisted",
             nativeSessionStatus: resumeBinding ? "captured" : "unavailable",
           };
-          recordCompletedStartOutcome({
-            store: startAuthorityStore,
-            result,
-            lifecycle,
-            resume: resumeBinding,
-            evidence: evidenceBinding,
-          });
+          if (!ownedRuntime || processRelease) {
+            recordCompletedStartOutcome({
+              store: startAuthorityStore,
+              result,
+              lifecycle,
+              resume: resumeBinding,
+              evidence: evidenceBinding,
+            });
+          }
           return result;
         } finally {
+          invocation.cleanup?.();
           if (hardTimer) clearTimeout(hardTimer);
           if (idleTimer) clearTimeout(idleTimer);
           if (claimedProjection) {

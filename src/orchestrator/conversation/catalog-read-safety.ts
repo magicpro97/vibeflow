@@ -18,6 +18,22 @@ export interface PrivateDirectorySnapshotV1 {
   directory: PinnedDirectory | null;
 }
 
+export interface PrivateDirectoryInspectionAuthorityV1 {
+  lstat(path: string): void;
+  open(path: string): PinnedDirectory;
+  assert(directory: PinnedDirectory): void;
+  close(directory: PinnedDirectory): void;
+}
+
+const defaultDirectoryInspectionAuthority: PrivateDirectoryInspectionAuthorityV1 = {
+  lstat: (path) => {
+    fs.lstatSync(path);
+  },
+  open: (path) => openPrivateDirectory(path, false),
+  assert: assertPinnedDirectory,
+  close: closePinnedDirectory,
+};
+
 const unsafe = (): never => {
   throw new Error("unsafe read-only source path");
 };
@@ -38,24 +54,27 @@ const invalid = (path: string): PrivateDirectorySnapshotV1 => ({
   directory: null,
 });
 
-export function inspectPrivateDirectoryReadOnly(input: string): PrivateDirectorySnapshotV1 {
+export function inspectPrivateDirectoryReadOnly(
+  input: string,
+  authority: PrivateDirectoryInspectionAuthorityV1 = defaultDirectoryInspectionAuthority,
+): PrivateDirectorySnapshotV1 {
   const path = resolve(input);
   try {
-    fs.lstatSync(path);
+    authority.lstat(path);
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? missing(path) : invalid(path);
   }
   let directory: PinnedDirectory;
   try {
-    directory = openPrivateDirectory(path, false);
+    directory = authority.open(path);
   } catch {
     return invalid(path);
   }
   try {
-    assertPinnedDirectory(directory);
+    authority.assert(directory);
     return { state: "valid", path, dev: directory.dev, ino: directory.ino, directory };
   } catch {
-    closePinnedDirectory(directory);
+    authority.close(directory);
     return invalid(path);
   }
 }

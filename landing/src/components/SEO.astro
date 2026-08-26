@@ -7,37 +7,32 @@ export interface Props {
   ogImage?: string;
 }
 
-const {
-  title,
-  description,
-  canonicalPath = '/',
-  ogImage = '/og.png',
-} = Astro.props;
+const { title, description, canonicalPath = "/", ogImage = "/og.png" } = Astro.props;
 
-const site = Astro.site ?? new URL('https://vibeflow-landing.web.app');
+const site = Astro.site ?? new URL("https://vibeflow-landing.web.app");
 const canonical = new URL(canonicalPath, site).href;
 const ogImageUrl = new URL(ogImage, site).href;
 
 const jsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'SoftwareApplication',
-  name: 'VibeFlow',
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "VibeFlow",
   description,
-  applicationCategory: 'DeveloperApplication',
-  operatingSystem: 'Linux, macOS, Windows',
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Linux, macOS, Windows",
   url: site.href,
-  downloadUrl: 'https://www.npmjs.com/package/@magicpro97/vibeflow',
-  softwareVersion: '0.8.0',
-  license: 'https://opensource.org/licenses/MIT',
+  downloadUrl: "https://www.npmjs.com/package/@magicpro97/vibeflow",
+  softwareVersion: "0.15.0",
+  license: "https://opensource.org/licenses/MIT",
   offers: {
-    '@type': 'Offer',
-    price: '0',
-    priceCurrency: 'USD',
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "USD",
   },
   author: {
-    '@type': 'Person',
-    name: 'Linh Ngo',
-    url: 'https://linhngo.dev',
+    "@type": "Person",
+    name: "Linh Ngo",
+    url: "https://linhngo.dev",
   },
 };
 ---
@@ -57,7 +52,7 @@ const jsonLd = {
 <meta property="og:image" content={ogImageUrl} />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="VibeFlow — orchestrate AI coding engines with guardrails" />
+<meta property="og:image:alt" content="VibeFlow local-first harness for AI CLIs" />
 <meta property="og:site_name" content="VibeFlow" />
 <meta property="og:locale" content="en_US" />
 

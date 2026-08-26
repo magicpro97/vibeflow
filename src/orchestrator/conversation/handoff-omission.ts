@@ -13,15 +13,11 @@ export interface OmittedPublicEventArtifactV1 {
   bytes: Buffer;
 }
 
-function compare(left: string, right: string): number {
-  return Buffer.compare(Buffer.from(left), Buffer.from(right));
-}
-
 function eventOrder(left: PublicHandoffEventV1, right: PublicHandoffEventV1): number {
   return (
     left.revision_ordinal - right.revision_ordinal ||
     left.public_seq - right.public_seq ||
-    compare(left.event_id, right.event_id)
+    Buffer.compare(Buffer.from(left.event_id), Buffer.from(right.event_id))
   );
 }
 

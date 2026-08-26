@@ -5,6 +5,9 @@ import {
 } from "./catalog-cursor.js";
 import { createConversationRevisionSummary } from "./catalog-row.js";
 import type { ConversationRevisionSummaryV1 } from "./catalog-types.js";
+export { activeRevisionOperationIdForHead } from "./lineage-active-revision.js";
+import { activeRevisionOperationIdForHead } from "./lineage-active-revision.js";
+import { validateLineageHeadAuthorityChain } from "./lineage-head-authority.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
 import {
   type PreparedRevisionRecoveryLinkInputV1,
@@ -62,6 +65,7 @@ export interface ResolvedConversationLineageV1 {
   lineage: ConversationLineageReadV1;
   requested: ValidatedLineageNodeV1;
   head: LineageHeadRecordV1;
+  active_revision_operation_id: string | null;
   revision_claim_epoch: number;
   selected_nodes: ValidatedLineageNodeV1[];
 }
@@ -233,12 +237,27 @@ export class ConversationLineageService {
       this.store.readHead(lineage.root_session_id) ?? this.store.initializeHead(lineage);
     const head = validateLineageHeadForRead(storedHead, lineage, transitions);
     const reservation = this.store.readReservation(lineage.root_session_id) ?? undefined;
+    const publishedAuthority =
+      head.head_epoch === 0
+        ? { revision_claim_epoch: 0, reservation_digest: null }
+        : validateLineageHeadAuthorityChain(head, lineage, transitions);
     const revisionClaimEpoch = deriveRevisionClaimEpoch(
       reservation,
       lineage,
       head,
       this.options.reservationHistory?.(lineage) ?? new Map(),
-      null,
+      publishedAuthority.reservation_digest,
+    );
+    if (
+      (publishedAuthority.revision_claim_epoch > 0 && reservation === undefined) ||
+      revisionClaimEpoch < publishedAuthority.revision_claim_epoch
+    )
+      throw new LineageAuthorityCorruptError("lineage claim authority is incomplete");
+    const activeHeadAuthority = transitions.get(head.content_digest);
+    const activeRevisionOperationId = activeRevisionOperationIdForHead(
+      head,
+      activeHeadAuthority,
+      published,
     );
     return {
       inventory,
@@ -246,6 +265,7 @@ export class ConversationLineageService {
       lineage,
       requested,
       head,
+      active_revision_operation_id: activeRevisionOperationId,
       revision_claim_epoch: revisionClaimEpoch,
       selected_nodes: selectedAncestry(lineage, head),
     };

@@ -88,6 +88,9 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
   readonly #executor: CapabilityOperationExecutorV1;
   readonly #query: CapabilityQueryServiceV1;
   readonly #observers = new Map<string, Set<CapabilityOperationObserverV1>>();
+  readonly #emit: CapabilityOperationObserverV1 = (event) => {
+    for (const observer of this.#observers.get(event.operation_id) ?? []) observer(event);
+  };
   readonly #now: () => string;
 
   constructor(readonly options: CapabilityFabricServiceOptionsV1) {
@@ -99,9 +102,7 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
       actionAuthority: options.actionAuthority,
       broker: options.broker,
       now: this.#now,
-      emit: (event) => {
-        for (const observer of this.#observers.get(event.operation_id) ?? []) observer(event);
-      },
+      emit: this.#emit,
     });
     this.#query = new CapabilityQueryServiceV1(options);
   }

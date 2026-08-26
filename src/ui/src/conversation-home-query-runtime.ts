@@ -1,9 +1,9 @@
-import type { ComputedRef, Ref, ShallowRef } from "vue";
 import { createHomeActivePaginationRuntime } from "./conversation-home-active-pagination.js";
 import { conversationHomeApi } from "./conversation-home-api.js";
 import { createHomeCapabilityQueryRuntime } from "./conversation-home-capability-query.js";
 import { mergeHomePage, staleHomeCursor } from "./conversation-home-pagination.js";
 import { refreshHomeActiveSelection } from "./conversation-home-query-active.js";
+import type { HomeQueryRuntimeInput } from "./conversation-home-query-input.js";
 import { readableHomeError, retainSelectedHomeSession } from "./conversation-home-runtime.js";
 import { type ActivationEpoch, ActivationResourceRegistry } from "./conversation-home-state.js";
 import {
@@ -12,50 +12,14 @@ import {
   shouldStreamHomeRevision,
   watchHomeConversationStream,
 } from "./conversation-home-stream.js";
-import type {
-  HomeActionView,
-  HomeAuthoritativeHeadResponse,
-  HomeCapabilityItem,
-  HomePagingState,
-  HomeRevisionSummary,
-  HomeSessionSummary,
-  HomeTimelineResponse,
-} from "./conversation-home-types.js";
-
-interface HomeQueryRuntimeInput {
-  sessions: Ref<HomeSessionSummary[]>;
-  sessionQuery: Ref<string>;
-  catalogHealth: Ref<"ready" | "rebuilding" | "degraded">;
-  catalogLoading: Ref<boolean>;
-  catalogError: Ref<string>;
-  activeRootId: Ref<string | null>;
-  selectedSession: ShallowRef<HomeSessionSummary | null>;
-  authoritativeHead: ShallowRef<HomeAuthoritativeHeadResponse | null>;
-  timeline: ShallowRef<HomeTimelineResponse | null>;
-  pendingActions: Ref<HomeActionView[]>;
-  activationLoading: Ref<boolean>;
-  activationError: Ref<string>;
-  online: Ref<boolean>;
-  streamStatus: Ref<"idle" | "connecting" | "live" | "reconnecting" | "error">;
-  streamError: Ref<string>;
-  capabilities: Ref<HomeCapabilityItem[]>;
-  capabilityQuery: Ref<string>;
-  capabilityScope: Ref<"project" | "user">;
-  capabilityLoading: Ref<boolean>;
-  capabilityError: Ref<string>;
-  paging: HomePagingState;
-  activeRevision: ComputedRef<HomeRevisionSummary | null>;
-  selectedConversationId: ComputedRef<string | null>;
-  readEpoch: ActivationEpoch;
-  commandAuthority: ActivationEpoch;
-}
-
 export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
   let catalogController: AbortController | null = null;
   let catalogMoreController: AbortController | null = null;
   let catalogGeneration = 0;
   let activeToken: ReturnType<ActivationEpoch["begin"]> | null = null;
   let activeRefresh: (() => Promise<void>) | null = null;
+  let activeQueueRefresh: (() => Promise<boolean>) | null = null;
+  let activeStreamReconcile: (() => void) | null = null;
   let activeDataGeneration = 0;
   const capabilityRuntime = createHomeCapabilityQueryRuntime({
     capabilities: input.capabilities,
@@ -168,9 +132,106 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     const streams = new ActivationResourceRegistry<EventSource>();
     token.addCleanup(() => streams.close());
     token.addCleanup(activePagination.invalidate);
+    let liveBinding: {
+      conversationId: string;
+      revisionId: string;
+      stream: { close(): void };
+    } | null = null;
     let refreshing: Promise<void> | null = null;
     let refreshAgain = false;
-    const refresh = async () => {
+    let queueRefreshing: Promise<boolean> | null = null;
+    let queueRefreshAgain = false;
+
+    function rebindLiveConversation(): void {
+      if (!token.isCurrent()) return;
+      const revision = input.activeRevision.value;
+      if (!revision || !shouldStreamHomeRevision(revision, input.messageQueueHasLiveItems())) {
+        liveBinding?.stream.close();
+        liveBinding = null;
+        return;
+      }
+      if (
+        liveBinding?.conversationId === revision.conversation_id &&
+        liveBinding.revisionId === revision.revision_id
+      )
+        return;
+      liveBinding?.stream.close();
+      const stream = watchHomeConversationStream({
+        conversationId: revision.conversation_id,
+        rootSessionId,
+        cursor: () =>
+          homeTimelineCursorForRevision(
+            input.timeline.value,
+            revision.conversation_id,
+            revision.revision_id,
+          ),
+        signal: token.signal,
+        isCurrent: token.isCurrent,
+        setStatus(status, error) {
+          if (!token.isCurrent()) return;
+          input.streamStatus.value = status;
+          input.streamError.value = error ?? "";
+        },
+        onSnapshot(snapshot) {
+          if (!token.isCurrent()) return;
+          if (
+            snapshot.conversation_id === revision.conversation_id &&
+            snapshot.last_seq >
+              homeTimelineCursorForRevision(
+                input.timeline.value,
+                revision.conversation_id,
+                revision.revision_id,
+              )
+          )
+            void refresh().catch(() => undefined);
+        },
+        onTrace(record) {
+          if (!token.isCurrent()) return;
+          input.timeline.value = appendHomeTimelineTrace(input.timeline.value, revision, record);
+        },
+        onRefreshNeeded() {
+          void refresh().catch(() => undefined);
+        },
+        onQueueInvalidation() {
+          void refreshQueue().catch(() => undefined);
+        },
+        onQueueRefreshNeeded() {
+          void refreshQueue().catch(() => undefined);
+        },
+      });
+      liveBinding = {
+        conversationId: revision.conversation_id,
+        revisionId: revision.revision_id,
+        stream,
+      };
+    }
+
+    async function refreshQueue(): Promise<boolean> {
+      if (queueRefreshing) {
+        queueRefreshAgain = true;
+        return queueRefreshing;
+      }
+      if (!token.isCurrent()) return false;
+      const run = (async () => {
+        let adopted = false;
+        do {
+          queueRefreshAgain = false;
+          const response = await conversationHomeApi.messageQueue(rootSessionId, token.signal);
+          if (!token.isCurrent()) return false;
+          input.adoptMessageQueueSnapshot(response, rootSessionId);
+          adopted = true;
+          rebindLiveConversation();
+        } while (queueRefreshAgain);
+        return adopted;
+      })();
+      const tracked = run.finally(() => {
+        if (queueRefreshing === tracked) queueRefreshing = null;
+      });
+      queueRefreshing = tracked;
+      return tracked;
+    }
+
+    async function refresh(): Promise<void> {
       if (refreshing) {
         refreshAgain = true;
         return refreshing;
@@ -190,6 +251,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
             authoritativeHead: input.authoritativeHead,
             timeline: input.timeline,
             pendingActions: input.pendingActions,
+            adoptMessageQueueSnapshot: input.adoptMessageQueueSnapshot,
             paging: input.paging,
             isRefreshCurrent: () => generation === activeDataGeneration,
             reload: refresh,
@@ -199,6 +261,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
             },
           });
           requiredConversationId = undefined;
+          rebindLiveConversation();
         } while (refreshAgain);
       })();
       const tracked = run.finally(() => {
@@ -206,16 +269,25 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
       });
       refreshing = tracked;
       return tracked;
-    };
+    }
     activeRefresh = refresh;
+    activeQueueRefresh = refreshQueue;
+    activeStreamReconcile = rebindLiveConversation;
     token.addCleanup(() => {
       if (activeRefresh === refresh) activeRefresh = null;
+      if (activeQueueRefresh === refreshQueue) activeQueueRefresh = null;
+      if (activeStreamReconcile === rebindLiveConversation) activeStreamReconcile = null;
+    });
+    token.addCleanup(() => {
+      liveBinding?.stream.close();
+      liveBinding = null;
     });
     input.activeRootId.value = rootSessionId;
     if (rootChanged) {
       input.authoritativeHead.value = null;
       input.timeline.value = null;
       input.pendingActions.value = [];
+      input.clearMessageQueueProjection();
     }
     input.activationLoading.value = true;
     input.activationError.value = "";
@@ -224,52 +296,6 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     try {
       await refresh();
       if (!token.isCurrent()) return;
-      if (shouldStreamHomeRevision(input.activeRevision.value)) {
-        const revision = input.activeRevision.value;
-        if (revision) {
-          const live = watchHomeConversationStream({
-            conversationId: revision.conversation_id,
-            cursor: () =>
-              homeTimelineCursorForRevision(
-                input.timeline.value,
-                revision.conversation_id,
-                revision.revision_id,
-              ),
-            signal: token.signal,
-            isCurrent: token.isCurrent,
-            setStatus(status, error) {
-              if (!token.isCurrent()) return;
-              input.streamStatus.value = status;
-              input.streamError.value = error ?? "";
-            },
-            onSnapshot(snapshot) {
-              if (!token.isCurrent()) return;
-              if (
-                snapshot.conversation_id === revision.conversation_id &&
-                snapshot.last_seq >
-                  homeTimelineCursorForRevision(
-                    input.timeline.value,
-                    revision.conversation_id,
-                    revision.revision_id,
-                  )
-              )
-                void refresh().catch(() => undefined);
-            },
-            onTrace(record) {
-              if (!token.isCurrent()) return;
-              input.timeline.value = appendHomeTimelineTrace(
-                input.timeline.value,
-                revision,
-                record,
-              );
-            },
-            onRefreshNeeded() {
-              void refresh().catch(() => undefined);
-            },
-          });
-          token.addCleanup(() => live.close());
-        }
-      }
       const timer = setInterval(() => {
         if (token.isCurrent() && input.online.value) void refresh().catch(() => undefined);
       }, 8_000);
@@ -306,12 +332,22 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     return Boolean(activeToken?.isCurrent() && input.activeRootId.value === rootSessionId);
   }
 
+  async function refreshMessageQueue(): Promise<boolean> {
+    const refresh = activeQueueRefresh;
+    if (!refresh || !activeToken?.isCurrent()) return false;
+    return refresh();
+  }
+
   return {
     refreshSessions,
     loadMoreSessions,
     selectSession,
     adoptAuthoritativeActiveHead,
     refreshActiveSelection,
+    refreshMessageQueue,
+    reconcileActiveStream() {
+      activeStreamReconcile?.();
+    },
     loadMoreTimeline: activePagination.loadMoreTimeline,
     loadMorePendingActions: activePagination.loadMorePendingActions,
     searchCapabilities: capabilityRuntime.searchCapabilities,

@@ -15,6 +15,7 @@ export function explicitConversationParticipants(request: ConversationCreateRequ
       roleRef: participant.role_ref,
       engine: participant.engine as Engine,
       ...(participant.model === undefined ? {} : { model: participant.model }),
+      ...(participant.host_tools === undefined ? {} : { hostTools: [...participant.host_tools] }),
     };
   });
 }

@@ -2,7 +2,11 @@
   <div class="home-app">
     <a class="home-skip-link" href="#conversation-main">Skip to conversation</a>
     <TopBar @open-capabilities="openCapabilities" @open-settings="openSettings" />
-    <ConversationHome @open-capabilities="openCapabilities" @open-trace="openTrace" />
+    <ConversationHome
+      :transient-ui-open="capabilitiesOpen || settingsOpen || traceOpen"
+      @open-capabilities="openCapabilities"
+      @open-trace="openTrace"
+    />
     <HomeCapabilityDrawer :open="capabilitiesOpen" @close="closeCapabilities" />
     <HomePreferencesDrawer :open="settingsOpen" @close="closeSettings" />
     <HomeTraceDrawer :open="traceOpen" @close="closeTrace" />

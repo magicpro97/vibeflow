@@ -6,7 +6,11 @@ import {
   type ApprovalChallengeResponseV1,
 } from "./challenge.js";
 import { ActionConflictError } from "./errors.js";
-import type { CanonicalActionRequestV1 } from "./idempotency.js";
+import {
+  type CanonicalActionRequestV1,
+  actionIdempotencyFileKey,
+  actionIdempotencyKeyDigest,
+} from "./idempotency.js";
 import { ActionFilePersistence } from "./persistence.js";
 import { materializeApproval } from "./records.js";
 import { type CancelActionInputV1, cancelAction } from "./store-cancel.js";
@@ -14,7 +18,9 @@ import { createActionProposal } from "./store-creation.js";
 import {
   beginActionDispatch,
   prepareActionDispatch,
+  prevalidateActionDispatch,
   recordActionTerminal,
+  reserveActionDispatch,
 } from "./store-dispatch.js";
 import { readRecordedActionSnapshot, readVerifiedActionSnapshot } from "./store-read-validation.js";
 import {
@@ -22,6 +28,7 @@ import {
   equalCanonical,
   requireOwnedPending,
   requireOwnedSnapshot,
+  sameAuthority,
 } from "./store-rules.js";
 import { appendApproval, revalidateReview } from "./store-transitions.js";
 import type {
@@ -100,6 +107,41 @@ export class ActionAuthorityStore {
     return createActionProposal(this.files, this.now, input, this.authorityResolver, this.fault);
   }
 
+  preparedProposal(input: {
+    authority: ActionRequestAuthorityV1;
+    idempotency_key: string;
+  }): ActionProposalV1 | null {
+    assertRequestAuthority(input.authority);
+    const keyDigest = actionIdempotencyKeyDigest(input.idempotency_key);
+    const path = this.files.idempotencyPath(
+      actionIdempotencyFileKey(
+        input.authority.principal_digest,
+        input.authority.authority_scope_digest,
+        keyDigest,
+      ),
+    );
+    const chain = this.files.readIdempotency(path);
+    if (chain.length === 0) return null;
+    const prepared = chain[0];
+    if (
+      !prepared ||
+      !sameAuthority(prepared, input.authority) ||
+      prepared.idempotency_key_digest !== keyDigest
+    )
+      throw new Error("prepared action idempotency authority changed");
+    const proposal = this.files.readProposal(prepared.proposal_id);
+    const authority = this.files.readAuthority(prepared.proposal_id);
+    if (authority.length === 0) return null;
+    if (
+      !proposal ||
+      proposal.idempotency_key !== input.idempotency_key ||
+      proposal.proposal_digest !== prepared.proposal_digest ||
+      !equalCanonical(authority[0]?.payload, { kind: "proposal-created", proposal })
+    )
+      throw new Error("prepared action proposal closure is missing or mismatched");
+    return structuredClone(proposal);
+  }
+
   get(proposalId: string): ActionAuthoritySnapshotV1 | null {
     return readVerifiedActionSnapshot(this.files, this.authorityResolver, proposalId);
   }
@@ -132,8 +174,50 @@ export class ActionAuthorityStore {
       );
   }
 
+  /** Structural-only snapshots for domain bootstrap before a retained resolver is rebound. */
+  listRecorded(): ActionAuthoritySnapshotV1[] {
+    return this.files
+      .proposalIds()
+      .map((proposalId) => this.getRecorded(proposalId))
+      .filter((value): value is ActionAuthoritySnapshotV1 => value !== null)
+      .sort(
+        (left, right) =>
+          right.proposal.created_at.localeCompare(left.proposal.created_at) ||
+          right.proposal.proposal_id.localeCompare(left.proposal.proposal_id),
+      );
+  }
+
+  assertMutationController(input: {
+    proposal_id: string;
+    proposal_digest: string;
+    authority: ActionRequestAuthorityV1;
+  }): void {
+    assertRequestAuthority(input.authority);
+    const snapshot = requireOwnedSnapshot(
+      this.files,
+      (id) => this.get(id),
+      input.proposal_id,
+      input.proposal_digest,
+      input.authority,
+    );
+    const actor =
+      snapshot.proposal.requested_by.kind === "agent" && snapshot.approval
+        ? snapshot.approval.decided_by
+        : snapshot.proposal.requested_by;
+    if (!equalCanonical(actor, input.authority.actor))
+      throw new ActionConflictError(
+        "stale_proposal",
+        "Action mutation controller does not match the reviewed proposal.",
+        input.proposal_id,
+      );
+  }
+
   decide(input: DecideActionInputV1): ActionApprovalV1 {
     assertRequestAuthority(input.authority);
+    if (input.authority.actor.kind === "agent")
+      throw new Error("agent cannot approve or deny host actions");
+    if (input.authority.actor.kind === "system-recovery")
+      throw new Error("system recovery cannot approve or deny new intent");
     const observed = requireOwnedSnapshot(
       this.files,
       (id) => this.get(id),
@@ -230,6 +314,14 @@ export class ActionAuthorityStore {
     return prepareActionDispatch(this.dispatchRuntime(), proposalId, approvalId);
   }
 
+  prevalidateDispatch(proposalId: string, approvalId: string): void {
+    prevalidateActionDispatch(this.dispatchRuntime(), proposalId, approvalId);
+  }
+
+  reserveDispatch(proposalId: string, approvalId: string): ActionDispatchRecordV1 {
+    return reserveActionDispatch(this.dispatchRuntime(), proposalId, approvalId);
+  }
+
   getDispatch(operationId: string): ActionDispatchRecordV1 | null {
     return this.files.readDispatch(operationId);
   }
@@ -252,6 +344,10 @@ export class ActionAuthorityStore {
 
   issueChallenge(input: ApprovalChallengeRequestV1): ApprovalChallengeResponseV1 {
     assertRequestAuthority(input.authority);
+    if (input.authority.actor.kind === "agent")
+      throw new Error("agent cannot issue host-action approval challenges");
+    if (input.authority.actor.kind === "system-recovery")
+      throw new Error("system recovery cannot issue approval challenges");
     if (!this.hmacKey) throw new Error("approval challenge identity key is required");
     return this.challenges.issue(input, (lock, snapshot, sampledNow) => {
       const expected = requiredChallengeClass(snapshot.proposal, input.authority);

@@ -23,7 +23,157 @@ import {
   inspectProcessLock,
   inspectProcessLockStatus,
 } from "../../src/durability/index.js";
+import {
+  type ProcessLockOwnerRuntime,
+  type ProcessLockOwnerV1,
+  processLockOwnerIsAlive,
+  processStartIdentity,
+} from "../../src/durability/lock-owner.js";
 import { publishStableLockRecord, readStableLockRecord } from "../../src/durability/lock-record.js";
+
+function exactOwner(
+  platform: "darwin" | "win32",
+  processStartIdentity: string,
+): ProcessLockOwnerV1 {
+  return {
+    schema_version: "1.0",
+    pid: 41,
+    process_start_identity: processStartIdentity,
+    host: hostname(),
+    operation: `${platform}-owner`,
+    nonce: "a".repeat(64),
+  };
+}
+
+test("Windows lock identity uses an absolute native query and never POSIX ps", () => {
+  const identities = new Map<number, string | Error>([[41, "638918820000000000"]]);
+  const commands: string[] = [];
+  const runtime: Partial<ProcessLockOwnerRuntime> = {
+    platform: "win32",
+    host: hostname(),
+    windowsSystemRoot: "D:\\Windows",
+    kill: (() => true) as typeof process.kill,
+    execFileSync: ((command: string, args: string[]) => {
+      commands.push(command);
+      const pid = Number((args[2] ?? "").match(/ProcessId = (\d+)/)?.[1]);
+      const result = identities.get(pid);
+      if (result instanceof Error) throw result;
+      if (!result) throw Object.assign(new Error("absent"), { status: 3 });
+      return result;
+    }) as typeof execFileSync,
+  };
+  const identity = "win32:638918820000000000";
+  const owner = exactOwner("win32", identity);
+
+  expect(processStartIdentity(owner.pid, runtime)).toBe(identity);
+  expect(processLockOwnerIsAlive(owner, runtime)).toBeTrue();
+  expect(commands).toEqual([
+    "D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  ]);
+  expect(commands).not.toContain("/bin/ps");
+
+  identities.set(owner.pid, "638918820000000001");
+  expect(processLockOwnerIsAlive(owner, runtime)).toBeFalse();
+  identities.set(owner.pid, Object.assign(new Error("query denied"), { status: 1 }));
+  expect(processLockOwnerIsAlive(owner, runtime)).toBeNull();
+
+  const beforeAbsentProbe = commands.length;
+  expect(
+    processLockOwnerIsAlive(owner, {
+      ...runtime,
+      kill: (() => {
+        throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      }) as typeof process.kill,
+    }),
+  ).toBeFalse();
+  expect(commands).toHaveLength(beforeAbsentProbe);
+  expect(processStartIdentity(owner.pid, { ...runtime, windowsSystemRoot: "relative" })).toBeNull();
+});
+
+test("Darwin external owners use exact start identity for live, reused, and unknown proofs", () => {
+  const identity = "darwin:1700000000:123456";
+  const owner = exactOwner("darwin", identity);
+  let observed: string | null = identity;
+  const runtime: Partial<ProcessLockOwnerRuntime> = {
+    platform: "darwin",
+    host: hostname(),
+    kill: (() => true) as typeof process.kill,
+    observeStartIdentity: () => observed,
+  };
+
+  expect(processLockOwnerIsAlive(owner, runtime)).toBeTrue();
+  observed = "darwin:1700000001:654321";
+  expect(processLockOwnerIsAlive(owner, runtime)).toBeFalse();
+  observed = null;
+  expect(processLockOwnerIsAlive(owner, runtime)).toBeNull();
+  expect(processLockOwnerIsAlive({ ...owner, host: "remote.example" }, runtime)).toBeNull();
+  expect(
+    processLockOwnerIsAlive(owner, {
+      ...runtime,
+      kill: (() => {
+        throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+      }) as typeof process.kill,
+    }),
+  ).toBeNull();
+  expect(
+    processLockOwnerIsAlive(owner, {
+      ...runtime,
+      kill: (() => {
+        throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      }) as typeof process.kill,
+    }),
+  ).toBeFalse();
+});
+
+test("same-host lock takeover requires a proved identity mismatch on Windows and Darwin", () => {
+  const sandbox = mkdtempSync(join(tmpdir(), "vf-lock-cross-platform-owner-"));
+  const root = join(sandbox, "private");
+  ensurePrivateDirectory(root);
+  try {
+    for (const [platform, staleIdentity, reusedIdentity, currentIdentity] of [
+      ["win32", "win32:638918820000000000", "win32:638918820000000001", "win32:638918830000000000"],
+      [
+        "darwin",
+        "darwin:1700000000:123456",
+        "darwin:1700000001:654321",
+        "darwin:1700000002:111111",
+      ],
+    ] as const) {
+      const path = join(root, `${platform}.lock`);
+      const stale = {
+        ...exactOwner(platform, staleIdentity),
+        nonce: (platform === "win32" ? "b" : "c").repeat(64),
+      };
+      seedOwner(path, stale);
+      let observed: string | null = staleIdentity;
+      const processRuntime: Partial<ProcessLockOwnerRuntime> = {
+        platform,
+        host: hostname(),
+        kill: (() => true) as typeof process.kill,
+        observeStartIdentity: (pid) => (pid === process.pid ? currentIdentity : observed),
+      };
+
+      expect(() =>
+        acquireProcessLock(path, { operation: "must-not-steal-live", processRuntime }),
+      ).toThrow(/live owner/);
+      observed = null;
+      expect(() =>
+        acquireProcessLock(path, { operation: "must-not-steal-unknown", processRuntime }),
+      ).toThrow(/death is unprovable/);
+      observed = reusedIdentity;
+      const recovered = acquireProcessLock(path, {
+        operation: "proved-dead-takeover",
+        processRuntime,
+      });
+      expect(recovered.owner.process_start_identity).toBe(currentIdentity);
+      expect(recovered.owner.nonce).not.toBe(stale.nonce);
+      recovered.release();
+    }
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
+});
 
 test("process lock stores private owner identity and fences a live owner within a bound", () => {
   const sandbox = mkdtempSync(join(tmpdir(), "vf-lock-"));
@@ -397,28 +547,48 @@ test("generated owner identity is validated before a lock file can be published"
   const root = join(sandbox, "private");
   ensurePrivateDirectory(root);
   const modulePath = join(process.cwd(), "src", "durability", "index.ts");
-  const cases = [
-    `const os = await import("node:os"); mock.module("node:os", () => ({ ...os, hostname: () => "bad" + String.fromCharCode(10) + "host" }));`,
-    `if (process.platform === "linux") {
-       const fs = await import("node:fs");
-       mock.module("node:fs", () => ({ ...fs, readFileSync(path, ...args) {
-         if (String(path) === "/proc/" + process.pid + "/stat") return process.pid + " (bun) R " + Array(19).fill("1").join(" ") + " " + "9".repeat(600);
-         if (String(path) === "/proc/sys/kernel/random/boot_id") return "12345678-1234-1234-1234-123456789abc";
-         return fs.readFileSync(path, ...args);
-       }}));
-     } else {
-       const childProcess = await import("node:child_process");
-       mock.module("node:child_process", () => ({ ...childProcess, execFileSync: () => "x".repeat(600) }));
-     }`,
+  const sources = [
+    `import { mock } from "bun:test";
+const os = await import("node:os");
+mock.module("node:os", () => ({
+  ...os,
+  hostname: () => "bad" + String.fromCharCode(10) + "host",
+}));
+const { acquireProcessLock } = await import(${JSON.stringify(modulePath)});
+try {
+  acquireProcessLock(process.argv[1], { operation: "generated-owner-test" });
+  console.log(JSON.stringify({ ok: true }));
+} catch (error) {
+  console.log(JSON.stringify({ code: error?.code, message: error?.message }));
+}`,
+    `import { spyOn } from "bun:test";
+import * as fs from "node:fs";
+const durability = await import(${JSON.stringify(modulePath)});
+const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+const realReadFile = fs.readFileSync;
+const readSpy = spyOn(fs, "readFileSync").mockImplementation((path, ...args) => {
+  if (String(path) === "/proc/" + process.pid + "/stat") {
+    return process.pid + " (bun) R " + Array(18).fill("1").join(" ") + " " + "9".repeat(600);
+  }
+  if (String(path) === "/proc/sys/kernel/random/boot_id") {
+    return "12345678-1234-1234-1234-123456789abc";
+  }
+  return realReadFile(path, ...args);
+});
+Object.defineProperty(process, "platform", { configurable: true, value: "linux" });
+try {
+  durability.acquireProcessLock(process.argv[1], { operation: "generated-owner-test" });
+  console.log(JSON.stringify({ ok: true }));
+} catch (error) {
+  console.log(JSON.stringify({ code: error?.code, message: error?.message }));
+} finally {
+  readSpy.mockRestore();
+  if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
+}`,
   ];
   try {
-    for (const [index, setup] of cases.entries()) {
+    for (const [index, source] of sources.entries()) {
       const path = join(root, `invalid-${index}.lock`);
-      const source = `import { mock } from "bun:test";
-${setup}
-const { acquireProcessLock } = await import(${JSON.stringify(modulePath)});
-try { acquireProcessLock(process.argv[1], { operation: "generated-owner-test" }); console.log(JSON.stringify({ ok: true })); }
-catch (error) { console.log(JSON.stringify({ code: error?.code, message: error?.message })); }`;
       const observed = JSON.parse(
         execFileSync(process.execPath, ["-e", source, path], { encoding: "utf8" }),
       );

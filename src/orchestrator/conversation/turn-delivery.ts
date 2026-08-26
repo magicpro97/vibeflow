@@ -1,5 +1,9 @@
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import type { PublicStoredTraceEvent } from "../trace/types.js";
+import {
+  type PersistedResumeBinding,
+  assertPersistedResumeBinding,
+} from "./artifact-resume-validation.js";
 import type { ConversationInteractionProjectionV1 } from "./conversation-interaction-types.js";
 import { HANDOFF_PROMPT_PREFIX, MAX_CANONICAL_HANDOFF_BYTES } from "./handoff-limits.js";
 import { privateFileRangeTurnContextPrompt } from "./private-file-range-turn-context-prompt.js";
@@ -26,6 +30,15 @@ function hasDeliveryAuthority(value: unknown): value is ResumeWithDeliveryAuthor
     typeof candidate.delivery_digest === "string" &&
     DIGEST.test(candidate.delivery_digest)
   );
+}
+
+function trustedNativeResume(value: unknown, participantId: string): PersistedResumeBinding | null {
+  try {
+    assertPersistedResumeBinding(value);
+    return value.participant_id === participantId ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 function validInteractionCursor(input: {
@@ -59,9 +72,10 @@ export function prepareConversationTurn(input: {
   private_contexts?: readonly ConversationTurnPrivateFileRangeContextV1[];
   interaction_projection?: ConversationInteractionProjectionV1;
 }): PreparedConversationTurnV1 {
-  const resume = input.resume;
+  const resume = trustedNativeResume(input.resume, input.request.participant_id);
   const prior = input.prior_delivery;
   const exactBase =
+    resume !== null &&
     hasDeliveryAuthority(resume) &&
     prior?.participant_id === input.request.participant_id &&
     prior.attempt_id === resume.attemptId &&
@@ -82,7 +96,7 @@ export function prepareConversationTurn(input: {
     input.events,
     input.request.participant_id,
     after,
-    !exact,
+    resume === null,
   );
   const deliveredIds = new Set([
     ...userMessages.map((message) => message.message_id),

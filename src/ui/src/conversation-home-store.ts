@@ -1,7 +1,14 @@
 import { defineStore } from "pinia";
-import { computed, onScopeDispose, reactive, ref, shallowRef } from "vue";
+import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from "vue";
 import { createHomeActionMutationRuntime } from "./conversation-home-action-runtime.js";
 import { createHomeCommandRuntime } from "./conversation-home-command-runtime.js";
+import { createHomeMessageQueueRuntime } from "./conversation-home-message-queue-runtime.js";
+import type {
+  HomeMessageQueueSnapshot,
+  HomeOptimisticQueuedMessage,
+  HomeQueuedMessageEditBinding,
+} from "./conversation-home-message-queue-types.js";
+import { createHomePrivateContextRuntime } from "./conversation-home-private-context-runtime.js";
 import { createHomeQueryRuntime } from "./conversation-home-query-runtime.js";
 import { ActivationEpoch } from "./conversation-home-state.js";
 import type {
@@ -11,7 +18,6 @@ import type {
   HomeConversationStreamStatus,
   HomePagingState,
   HomePendingChallenge,
-  HomePrivateFileRangeBinding,
   HomeQuoteReference,
   HomeSessionSummary,
   HomeTimelineResponse,
@@ -44,7 +50,15 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   const composerError = ref("");
   const submitting = ref(false);
   const submittingToken = ref<string | null>(null);
-  const privateFileRange = ref<HomePrivateFileRangeBinding | null>(null);
+  const messageQueue = shallowRef<HomeMessageQueueSnapshot | null>(null);
+  const optimisticMessages = ref<HomeOptimisticQueuedMessage[]>([]);
+  const queuedMessageEdit = shallowRef<HomeQueuedMessageEditBinding | null>(null);
+  const queuedMessageEditSaving = ref(false);
+  const queueSendAsNew = ref(false);
+  const queueAnnouncement = ref("");
+  const queueComposerFocusEpoch = ref(0);
+  const privateContextPresent = ref(false);
+  const privateContextDiscarding = ref(false);
   const capabilities = ref<HomeCapabilityItem[]>([]);
   const capabilityQuery = ref("");
   const capabilityScope = ref<"project" | "user">("project");
@@ -67,6 +81,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   });
   const commandAuthority = new ActivationEpoch();
   const readEpoch = new ActivationEpoch();
+  let refreshMessageQueue = async (): Promise<boolean> => false;
 
   const activeSession = computed(
     () =>
@@ -96,8 +111,32 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   const clearComposerContext = () => {
     composerEpoch.value += 1;
     quoteRefs.value = [];
-    privateFileRange.value = null;
+    commandRuntime.clearCapabilityTargetSelection();
   };
+  const privateContextRuntime = createHomePrivateContextRuntime({
+    activeRootId,
+    online,
+    present: privateContextPresent,
+    discardBusy: privateContextDiscarding,
+    composerError,
+    announcement: queueAnnouncement,
+    composerFocusEpoch: queueComposerFocusEpoch,
+  });
+  const messageQueueRuntime = createHomeMessageQueueRuntime({
+    activation: commandAuthority,
+    activeRootId,
+    online,
+    draft,
+    composerError,
+    snapshot: messageQueue,
+    optimistic: optimisticMessages,
+    edit: queuedMessageEdit,
+    editSaving: queuedMessageEditSaving,
+    sendAsNew: queueSendAsNew,
+    announcement: queueAnnouncement,
+    composerFocusEpoch: queueComposerFocusEpoch,
+    refreshQueue: () => refreshMessageQueue(),
+  });
   const queryRuntime = createHomeQueryRuntime({
     sessions,
     sessionQuery,
@@ -109,6 +148,18 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     authoritativeHead,
     timeline,
     pendingActions,
+    adoptMessageQueueSnapshot: messageQueueRuntime.adoptSnapshot,
+    clearMessageQueueProjection() {
+      messageQueue.value = null;
+      optimisticMessages.value = [];
+    },
+    messageQueueHasLiveItems: () =>
+      optimisticMessages.value.length > 0 ||
+      Boolean(
+        messageQueue.value?.items.some(
+          (item) => item.state === "queued" || item.state === "claimed",
+        ),
+      ),
     activationLoading,
     activationError,
     online,
@@ -125,6 +176,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     readEpoch,
     commandAuthority,
   });
+  refreshMessageQueue = queryRuntime.refreshMessageQueue;
   const commandRuntime = createHomeCommandRuntime({
     activation: commandAuthority,
     activeRevision,
@@ -134,7 +186,11 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     online,
     submitting,
     submittingToken,
-    privateFileRange,
+    privateContext: {
+      present: () => privateContextPresent.value,
+      captureForMessage: privateContextRuntime.captureForMessage,
+      captureForCreate: privateContextRuntime.captureForCreate,
+    },
     composerError,
     activationError,
     quoteRefs,
@@ -148,7 +204,50 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     selectSession: queryRuntime.selectSession,
     sessions,
     sessionQuery,
+    messageQueue: {
+      enqueue: messageQueueRuntime.enqueue,
+      currentEdit: () => queuedMessageEdit.value,
+      saveEdit: messageQueueRuntime.saveEdit,
+    },
   });
+  const capabilityAuthoritySignature = computed(() => {
+    const revision = activeRevision.value;
+    if (!revision) return `${activeRootId.value ?? ""}\0unavailable`;
+    const participants = revision.participants
+      .map((participant) => `${participant.engine}\0${participant.participant_id}`)
+      .join("\0");
+    return [
+      activeRootId.value ?? "",
+      revision.conversation_id,
+      revision.revision_id,
+      revision.last_seq,
+      revision.lock_digest,
+      participants,
+    ].join("\0");
+  });
+  watch(capabilityAuthoritySignature, () => commandRuntime.reconcileCapabilityTargetSelection(), {
+    flush: "sync",
+  });
+  watch(draft, () => commandRuntime.reconcileCapabilityTargetDraft(), { flush: "sync" });
+  watch(
+    activeRootId,
+    (nextRootId, previousRootId) => {
+      messageQueueRuntime.switchRoot(previousRootId, nextRootId);
+      privateContextRuntime.switchRoot();
+    },
+    { flush: "sync" },
+  );
+  watch(
+    () =>
+      optimisticMessages.value.length > 0 ||
+      Boolean(
+        messageQueue.value?.items.some(
+          (item) => item.state === "queued" || item.state === "claimed",
+        ),
+      ),
+    () => queryRuntime.reconcileActiveStream(),
+    { flush: "sync" },
+  );
   const actionRuntime = createHomeActionMutationRuntime({
     activation: commandAuthority,
     activeRootId,
@@ -180,6 +279,8 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
 
   onScopeDispose(() => {
     commandAuthority.close();
+    messageQueueRuntime.dispose();
+    privateContextRuntime.dispose();
     queryRuntime.dispose();
   });
 
@@ -201,9 +302,18 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     online,
     railCollapsed,
     draft,
-    privateFileRange,
+    privateContextPresent,
+    privateContextDiscarding,
     composerError,
     submitting,
+    messageQueue,
+    queuedMessages: messageQueueRuntime.projections,
+    queuedMessageEdit,
+    queuedMessageEditSaving,
+    queueSendAsNew,
+    queueAnnouncement,
+    queueComposerFocusEpoch,
+    capabilityTargetRequest: commandRuntime.capabilityTargetRequest,
     capabilities,
     capabilityQuery,
     capabilityScope,
@@ -239,17 +349,22 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     removeQuoteReference: commandRuntime.removeQuoteReference,
     moveQuoteReference: commandRuntime.moveQuoteReference,
     toggleReaction: commandRuntime.toggleReaction,
-    setPrivateFileRange(binding: HomePrivateFileRangeBinding) {
-      privateFileRange.value = structuredClone(binding);
-      composerError.value = "";
-    },
-    clearPrivateFileRange() {
-      privateFileRange.value = null;
-    },
+    stagePrivateContext: privateContextRuntime.stage,
+    discardPrivateContext: privateContextRuntime.discardCurrent,
     reportUnavailableInteraction: commandRuntime.reportUnavailableInteraction,
+    toggleCapabilityTarget: commandRuntime.toggleCapabilityTarget,
+    toggleAllCapabilityTargets: commandRuntime.toggleAllCapabilityTargets,
+    cancelCapabilityTargetSelection: commandRuntime.cancelCapabilityTargetSelection,
+    confirmCapabilityTargets: commandRuntime.confirmCapabilityTargets,
+    beginQueuedMessageEdit(queueItemId?: string) {
+      if (quoteRefs.value.length || privateContextPresent.value) return false;
+      return messageQueueRuntime.beginEdit(queueItemId);
+    },
+    cancelQueuedMessageEdit: messageQueueRuntime.cancelEdit,
     setOnline(value: boolean) {
       online.value = value;
       if (!value) {
+        messageQueueRuntime.goOffline();
         clearCommandActivity();
         commandAuthority.close();
         readEpoch.close();

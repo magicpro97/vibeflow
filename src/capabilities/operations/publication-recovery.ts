@@ -1,5 +1,5 @@
 import { parseStrictJson } from "../../actions/strict-json.js";
-import { digestV1, privateFileBytes } from "../../durability/index.js";
+import { canonicalJsonBytes, privateFileBytes } from "../../durability/index.js";
 import type {
   CapabilityDurablePlanningGraphV1,
   CapabilityFabricPlanV1,
@@ -16,6 +16,10 @@ import { CapabilityRuntimeError } from "./errors.js";
 import { foldCapabilityOperation, readOperationBaseLock } from "./fold.js";
 import { readCapabilityHealthCurrent, readCapabilityHealthInventory } from "./health-inventory.js";
 import type { CapabilityOperationJournalV1 } from "./operation-journal.js";
+import {
+  assertCapabilityPublicationEvidence,
+  materializeCapabilityPublicationHealthPointer,
+} from "./publication-evidence.js";
 import type {
   CapabilityOperationActionAuthorityV1,
   CapabilityOperationResultV1,
@@ -38,28 +42,44 @@ function readPreparedObjects(
   proposed: NonNullable<ReturnType<CapabilityStorageV1["readStatus"]>["lock"]>;
   inventory: CapabilityHealthInventoryV1;
 } | null {
-  const historyBytes = privateFileBytes(
-    capabilityHistoryPath(storage.paths, generationId),
-    8 * 1024 * 1024,
-  );
-  if (!historyBytes) return null;
-  const proposed = validateCapabilityLock(
-    parseStrictJson(new TextDecoder("utf-8", { fatal: true }).decode(historyBytes)) as never,
-    { expected_scope: storage.paths.scope },
-  );
-  let inventory: CapabilityHealthInventoryV1;
   try {
-    inventory = readCapabilityHealthInventory(storage, inventoryDigest, proposed);
+    const historyBytes = privateFileBytes(
+      capabilityHistoryPath(storage.paths, generationId),
+      8 * 1024 * 1024,
+    );
+    if (!historyBytes) return null;
+    const proposed = validateCapabilityLock(
+      parseStrictJson(new TextDecoder("utf-8", { fatal: true }).decode(historyBytes)) as never,
+      { expected_scope: storage.paths.scope },
+    );
+    if (
+      !Buffer.from(historyBytes).equals(canonicalJsonBytes(proposed, { maxBytes: 8 * 1024 * 1024 }))
+    )
+      return null;
+    const inventory = readCapabilityHealthInventory(storage, inventoryDigest, proposed);
+    if (
+      proposed.generation_id !== generationId ||
+      proposed.content_digest !== lockDigest ||
+      inventory.inventory_digest !== inventoryDigest
+    )
+      return null;
+    return { proposed, inventory };
   } catch {
     return null;
   }
-  if (
-    proposed.generation_id !== generationId ||
-    proposed.content_digest !== lockDigest ||
-    inventory.inventory_digest !== inventoryDigest
-  )
-    return null;
-  return { proposed, inventory };
+}
+
+function failAfterDurableRecoveryTerminal(
+  input: {
+    operationId: string;
+    held: CapabilityScopeLockV1;
+    journal: CapabilityOperationJournalV1;
+  },
+  reason: string,
+  message: string,
+): never {
+  input.journal.terminal(input.operationId, "needs_recovery", reason, input.held);
+  throw new CapabilityRuntimeError(message, "integrity-failure");
 }
 
 export function recoverCapabilityPublication(input: {
@@ -75,17 +95,65 @@ export function recoverCapabilityPublication(input: {
   actionAuthority: CapabilityOperationActionAuthorityV1;
 }): CapabilityPublicationRecoveryOutcomeV1 {
   const events = readCapabilityWal(input.storage.paths, input.operationId);
-  const prepared = events
-    .filter((event) => event.payload.kind === "health-inventory-prepared")
-    .map((event) => (event.payload.kind === "health-inventory-prepared" ? event.payload : null))
-    .filter((value): value is NonNullable<typeof value> => value !== null)
-    .at(-1);
-  if (!prepared) return { kind: "none" };
+  const preparedEvent = events.find((event) => event.payload.kind === "health-inventory-prepared");
+  if (preparedEvent?.payload.kind !== "health-inventory-prepared") return { kind: "none" };
+  const prepared = preparedEvent.payload;
+  const retainedTransition = events
+    .filter((event) => event.payload.kind === "operation-transition")
+    .at(-1)?.payload;
+  if (
+    retainedTransition?.kind === "operation-transition" &&
+    retainedTransition.to === "needs_recovery"
+  )
+    return {
+      kind: "result",
+      result: foldCapabilityOperation(input.storage, input.operationId, input.actionAuthority),
+    };
+  const objects = readPreparedObjects(
+    input.storage,
+    prepared.generation_id,
+    prepared.lock_digest,
+    prepared.health_inventory_digest,
+  );
+  if (!objects)
+    return failAfterDurableRecoveryTerminal(
+      input,
+      "publication-objects-missing",
+      "prepared publication objects are missing or corrupt after durable recovery terminal",
+    );
+
+  try {
+    assertCapabilityPublicationEvidence({
+      storage: input.storage,
+      plan: input.plan,
+      events,
+    });
+  } catch {
+    return failAfterDurableRecoveryTerminal(
+      input,
+      "publication-evidence-invalid",
+      "prepared publication evidence is invalid after durable recovery terminal",
+    );
+  }
+  const expectedEpoch = prepared.expected_health_pointer_epoch;
+  const nextEpoch = prepared.next_health_pointer_epoch;
+  const nextDigest = prepared.next_health_pointer_digest;
+  if (expectedEpoch === undefined || nextEpoch === undefined || nextDigest === undefined)
+    return failAfterDurableRecoveryTerminal(
+      input,
+      "publication-pointer-evidence-missing",
+      "prepared publication lacks exact post-pointer evidence after durable recovery terminal",
+    );
+  const nextPointer = materializeCapabilityPublicationHealthPointer({
+    scope: objects.proposed.scope,
+    scopeIdentityDigest: input.storage.scopeIdentityDigest,
+    inventoryEpoch: nextEpoch,
+    inventoryDigest: objects.inventory.inventory_digest,
+  });
+  foldCapabilityOperation(input.storage, input.operationId, input.actionAuthority);
   const retainedRefusal = events.find(
     (event) =>
-      event.sequence >
-        (events.find((candidate) => candidate.payload.kind === "health-inventory-prepared")
-          ?.sequence ?? -1) &&
+      event.sequence > preparedEvent.sequence &&
       event.payload.kind === "pre-effect-refusal" &&
       event.payload.refusal.frontier_kind === "lock-publication",
   );
@@ -94,24 +162,6 @@ export function recoverCapabilityPublication(input: {
       kind: "rollback-required",
       reason: retainedRefusal.payload.refusal.reason_code,
     };
-  const objects = readPreparedObjects(
-    input.storage,
-    prepared.generation_id,
-    prepared.lock_digest,
-    prepared.health_inventory_digest,
-  );
-  if (!objects) {
-    input.journal.terminal(
-      input.operationId,
-      "needs_recovery",
-      "publication-objects-missing",
-      input.held,
-    );
-    return {
-      kind: "result",
-      result: foldCapabilityOperation(input.storage, input.operationId, input.actionAuthority),
-    };
-  }
   const committed = events.some(
     (event) =>
       event.payload.kind === "lock-commit" &&
@@ -148,6 +198,9 @@ export function recoverCapabilityPublication(input: {
               lock_digest: objects.proposed.content_digest,
               health_inventory_digest: objects.inventory.inventory_digest,
               expected_health_pointer_digest: prepared.expected_health_pointer_digest,
+              expected_health_pointer_epoch: expectedEpoch,
+              next_health_pointer_epoch: nextPointer.inventory_epoch,
+              next_health_pointer_digest: nextPointer.pointer_digest,
               directory_fsync_completed: true,
             },
             input.held,
@@ -183,6 +236,9 @@ export function recoverCapabilityPublication(input: {
               lock_digest: objects.proposed.content_digest,
               health_inventory_digest: objects.inventory.inventory_digest,
               expected_health_pointer_digest: prepared.expected_health_pointer_digest,
+              expected_health_pointer_epoch: expectedEpoch,
+              next_health_pointer_epoch: nextPointer.inventory_epoch,
+              next_health_pointer_digest: nextPointer.pointer_digest,
               directory_fsync_completed: true,
             },
             input.held,
@@ -200,20 +256,34 @@ export function recoverCapabilityPublication(input: {
       result: foldCapabilityOperation(input.storage, input.operationId, input.actionAuthority),
     };
   }
-  const pointer = readCapabilityHealthCurrent(input.storage);
-  const base = readOperationBaseLock(input.storage, input.plan);
-  if ((pointer?.pointer_digest ?? null) === prepared.expected_health_pointer_digest) {
-    if (pointer) readCapabilityHealthInventory(input.storage, pointer.inventory_digest, base);
-    else if (base)
-      throw new CapabilityRuntimeError(
-        "retained base health pointer is missing during publication recovery",
-        "integrity-failure",
-      );
+  let pointer: ReturnType<typeof readCapabilityHealthCurrent>;
+  try {
+    pointer = readCapabilityHealthCurrent(input.storage);
+  } catch {
+    return failAfterDurableRecoveryTerminal(
+      input,
+      "health-pointer-invalid",
+      "health pointer is corrupt after durable recovery terminal",
+    );
   }
-  if (
-    pointer?.inventory_digest !== objects.inventory.inventory_digest &&
-    (pointer?.pointer_digest ?? null) !== prepared.expected_health_pointer_digest
-  ) {
+  const pointerDigest = pointer?.pointer_digest ?? null;
+  const pointerEpoch = pointer?.inventory_epoch ?? null;
+  const matchesPriorPointer =
+    pointerDigest === prepared.expected_health_pointer_digest && pointerEpoch === expectedEpoch;
+  const matchesNextPointer =
+    pointerDigest === nextPointer.pointer_digest && pointerEpoch === nextPointer.inventory_epoch;
+  const base = readOperationBaseLock(input.storage, input.plan);
+  if (pointer && matchesPriorPointer)
+    try {
+      readCapabilityHealthInventory(input.storage, pointer.inventory_digest, base);
+    } catch {
+      return failAfterDurableRecoveryTerminal(
+        input,
+        "retained-health-pointer-invalid",
+        "retained base health pointer is invalid after durable recovery terminal",
+      );
+    }
+  if (!matchesPriorPointer && !matchesNextPointer) {
     input.journal.terminal(
       input.operationId,
       "needs_recovery",
@@ -230,25 +300,7 @@ export function recoverCapabilityPublication(input: {
     options: input,
     operation: `capability-pointer-recovery:${input.operationId}`,
     recover: () => {
-      if (pointer?.inventory_digest !== objects.inventory.inventory_digest) {
-        const pointerDraft = {
-          schema_version: "1.0" as const,
-          scope: objects.proposed.scope,
-          scope_identity_digest: input.plan.scope_identity_digest,
-          inventory_epoch: (pointer?.inventory_epoch ?? -1) + 1,
-          inventory_digest: objects.inventory.inventory_digest,
-          pointer_digest: "",
-        };
-        const { pointer_digest: _, ...preimage } = pointerDraft;
-        input.storage.publishHealthCurrent(
-          pointer,
-          {
-            ...pointerDraft,
-            pointer_digest: digestV1("VF-CAPABILITY-HEALTH-CURRENT\0v1\0", preimage),
-          },
-          input.held,
-        );
-      }
+      if (matchesPriorPointer) input.storage.publishHealthCurrent(pointer, nextPointer, input.held);
       input.journal.terminal(input.operationId, "succeeded", null, input.held);
     },
   });

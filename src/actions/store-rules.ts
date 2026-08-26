@@ -1,4 +1,4 @@
-import { type ProcessLock, canonicalJsonBytes, digestV1 } from "../durability/index.js";
+import { type ProcessLock, canonicalJsonBytes, digestHex, digestV1 } from "../durability/index.js";
 import { ActionConflictError } from "./errors.js";
 import {
   actionIdempotencyFileKey,
@@ -27,6 +27,35 @@ export function sameAuthority(
   return (
     binding.principal_digest === authority.principal_digest &&
     binding.authority_scope_digest === authority.authority_scope_digest
+  );
+}
+
+export function isBoundHumanBrowserController(input: {
+  principal_digest: string;
+  control_session_digest: string;
+  actor: ActionRequestAuthorityV1["actor"];
+}): boolean {
+  if (input.actor.kind !== "human-browser" || input.actor.credential_class !== "loopback-session")
+    return false;
+  const expectedPrincipal = digestV1("VF-BROWSER-ACTION-PRINCIPAL\0v1\0", {
+    schema_version: "1.0",
+    control_session_digest: input.control_session_digest,
+  });
+  return (
+    input.principal_digest === expectedPrincipal &&
+    input.actor.public_actor_id === `browser-${digestHex(expectedPrincipal)}`
+  );
+}
+
+export function isAgentProposalBrowserController(
+  proposal: ActionProposalV1,
+  authority: ActionRequestAuthorityV1,
+): boolean {
+  return (
+    proposal.requested_by.kind === "agent" &&
+    authority.authority_scope_digest ===
+      actionIdempotencyScopeDigest(proposal.action_root_locator) &&
+    isBoundHumanBrowserController(authority)
   );
 }
 
@@ -128,12 +157,25 @@ export function requireOwnedSnapshot(
     ),
   );
   const latest = files.readIdempotency(path).at(-1);
-  const owned =
+  const directlyOwned =
     latest?.state === "visible" &&
     latest.proposal_id === proposalId &&
     latest.proposal_digest === proposalDigest &&
     sameAuthority(latest, authority);
-  if (!owned)
+  if (directlyOwned) return snapshot;
+  const producerChain = files.idempotencyChainsForProposal(proposalId);
+  const producerVisible = producerChain[0]?.at(-1);
+  const controlled =
+    isAgentProposalBrowserController(snapshot.proposal, authority) &&
+    producerChain.length === 1 &&
+    producerChain[0]?.length === 2 &&
+    producerVisible?.state === "visible" &&
+    producerVisible.proposal_id === proposalId &&
+    producerVisible.proposal_digest === proposalDigest &&
+    producerVisible.authority_scope_digest === derivedScopeDigest &&
+    producerVisible.idempotency_key_digest ===
+      actionIdempotencyKeyDigest(snapshot.proposal.idempotency_key);
+  if (!controlled)
     throw new ActionConflictError(
       "stale_proposal",
       "Proposal authority binding changed.",

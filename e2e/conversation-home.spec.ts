@@ -209,6 +209,42 @@ function homeHead(session: ReturnType<typeof homeSession>) {
   };
 }
 
+function homeQueuedMessage(rootSessionId: string, sequence: number, content: string) {
+  const queueItemId = `vf-queued-message-${homeHex(`${rootSessionId}:${sequence}`)}`;
+  return {
+    schema_version: "1.0" as const,
+    queue_item_id: queueItemId,
+    queue_sequence: sequence,
+    root_session_id: rootSessionId,
+    author_public_id: "human" as const,
+    content,
+    content_digest: homeDigest(`queue-content:${rootSessionId}:${sequence}:${content}`),
+    target_participants: "all" as const,
+    quote_refs: [],
+    private_context_present: false,
+    predecessor_queue_item_id:
+      sequence === 1 ? null : `vf-queued-message-${homeHex(`${rootSessionId}:${sequence - 1}`)}`,
+    admitted_authority_digest: homeDigest(`${rootSessionId}-queue-authority`),
+    effective_authority_digest: homeDigest(`${rootSessionId}-queue-authority`),
+    state: "queued" as const,
+    stale_reason: null,
+    admitted_at: HOME_TS,
+    updated_at: HOME_TS,
+    item_digest: homeDigest(`queue-item:${rootSessionId}:${sequence}:${content}`),
+  };
+}
+
+const homeMessageQueue = (
+  rootSessionId: string,
+  items: ReturnType<typeof homeQueuedMessage>[] = [],
+) => ({
+  schema_version: "1.0" as const,
+  root_session_id: rootSessionId,
+  current_authority_digest: homeDigest(`${rootSessionId}-queue-authority`),
+  max_nonterminal_items: 32 as const,
+  items,
+});
+
 function homePendingAction(
   proposalSeed: string,
   title: string,
@@ -287,6 +323,14 @@ async function routeHomeHeads(page: Page, sessions: Array<ReturnType<typeof home
       return;
     }
     await route.fulfill({ status: 200, json: homeHead(session) });
+  });
+  await page.route("**/api/conversation-sessions/*/messages/queue", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    const rootSessionId = new URL(route.request().url()).pathname.split("/")[3] ?? "";
+    await route.fulfill({ status: 200, json: homeMessageQueue(rootSessionId) });
   });
 }
 
@@ -594,20 +638,22 @@ test.describe("AI-first conversation Home", () => {
     await expect(actionCard("Action B current")).toBeVisible();
   });
 
-  test("keeps the next session selected and busy when an older send settles late", async ({
+  test("queues rapid sends and quick-edits the latest FIFO slot without intercepting IME", async ({
     page,
   }) => {
-    const firstSend = deferred<void>();
-    const secondSend = deferred<{ message_id: string; accepted: true }>();
-    const sessionA = homeSession("root-a", "Session A");
-    const sessionB = homeSession("root-b", "Session B");
+    const session = homeSession("root-queue", "Queue session");
+    const gates = new Map(["A", "B", "C"].map((content) => [content, deferred<void>()]));
+    const items: ReturnType<typeof homeQueuedMessage>[] = [];
+    const postBodies: Array<Record<string, unknown>> = [];
+    const patchBodies: Array<Record<string, unknown>> = [];
+    let conflictEdit = false;
 
     await page.route("**/api/conversations?**", async (route) => {
       await route.fulfill({
         status: 200,
         json: {
           schema_version: "1.0",
-          items: [sessionA, sessionB],
+          items: [session],
           next_cursor: null,
           catalog_generation: "catalog",
           source_watermark: "watermark",
@@ -615,63 +661,161 @@ test.describe("AI-first conversation Home", () => {
         },
       });
     });
-    await routeHomeHeads(page, [sessionA, sessionB]);
-    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
-      const rootSessionId = new URL(route.request().url()).pathname.split("/")[3] ?? "";
-      await route.fulfill({
-        status: 200,
-        json: homeTimeline(rootSessionId, []),
-      });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/root-queue/timeline?**", async (route) => {
+      await route.fulfill({ status: 200, json: homeTimeline("root-queue", []) });
     });
-    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+    await page.route(
+      "**/api/conversations/root-queue-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+    await page.route("**/api/conversations/root-queue-conversation/stream-token", async (route) => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
-          items: [],
-          next_cursor: null,
-          authority_watermark: "watermark",
+          stream_token: "queue-stream-token",
+          stream_token_expires_at: HOME_FUTURE_TS,
         },
       });
     });
-    await page.route("**/api/conversations/root-a-conversation/messages", async (route) => {
-      await firstSend.promise;
+    await page.route("**/api/conversations/root-queue-conversation/events?**", async (route) => {
       await route.fulfill({
-        status: 202,
-        json: { message_id: "message-a", accepted: true },
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: "event: heartbeat\ndata: \nretry: 60000\n\n",
       });
     });
-    await page.route("**/api/conversations/root-b-conversation/messages", async (route) => {
-      const body = await secondSend.promise;
-      await route.fulfill({ status: 202, json: body });
+    await page.route("**/api/conversation-sessions/root-queue/messages/queue", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, json: homeMessageQueue("root-queue", items) });
+        return;
+      }
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      postBodies.push(body);
+      const content = String(body.content);
+      const queued = {
+        ...homeQueuedMessage("root-queue", postBodies.length, content),
+        target_participants: body.target_participants,
+        quote_refs: body.quote_refs,
+        private_context_present: body.private_context_present,
+      } as ReturnType<typeof homeQueuedMessage>;
+      await gates.get(content)?.promise;
+      items.push(queued);
+      items.sort((left, right) => left.queue_sequence - right.queue_sequence);
+      await route.fulfill({ status: 201, json: queued });
+    });
+    await page.route("**/api/conversation-sessions/root-queue/messages/queue/*", async (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      patchBodies.push(body);
+      const latest = items.at(-1);
+      if (!latest) throw new Error("queue fixture has no editable item");
+      if (conflictEdit) {
+        await route.fulfill({
+          status: 409,
+          json: {
+            error: {
+              code: "queued_message_not_editable",
+              message: "That queued message changed before the edit could commit.",
+              retryable: false,
+              recovery_action: "send-as-new",
+              details: {
+                root_session_id: "root-queue",
+                queue_item_id: latest.queue_item_id,
+                state: "claimed",
+                item_digest: homeDigest("claimed-item"),
+              },
+            },
+          },
+        });
+        return;
+      }
+      const updated = {
+        ...latest,
+        content: String(body.content),
+        content_digest: homeDigest(`edited:${String(body.content)}`),
+        updated_at: "2026-08-25T00:00:01.000Z",
+        item_digest: homeDigest(`edited-item:${String(body.content)}`),
+      };
+      items[items.length - 1] = updated;
+      await route.fulfill({ status: 200, json: updated });
     });
 
     await page.goto("/");
     await waitForPage(page);
-    const sendButton = page.getByRole("button", { name: "Send message" });
-    await page.getByRole("button", { name: /Session A/ }).click();
-    await expect(page.getByRole("heading", { name: "Session A" })).toBeVisible();
-    await page.locator("#home-composer").fill("Message for A");
-    await sendButton.click();
-    await expect(page.getByRole("button", { name: "Sending message" })).toBeVisible();
+    const queueActivated = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/conversation-sessions/root-queue/messages/queue",
+    );
+    await page.getByRole("button", { name: /Queue session/ }).click();
+    await queueActivated;
+    const composer = page.locator("#home-composer");
+    for (const content of ["A", "B", "C"]) {
+      await composer.fill(content);
+      await composer.press("Enter");
+      await expect(composer).toHaveValue("");
+      await expect(composer).toBeFocused();
+    }
+    await expect(page.locator(".home-message-queue li")).toHaveCount(3);
+    await expect(page.locator(".home-message-queue__content strong")).toHaveText(["A", "B", "C"]);
+    expect(new Set(postBodies.map((body) => body.idempotency_key)).size).toBe(3);
 
-    await page.getByRole("button", { name: /Session B/ }).click();
-    await expect(page.getByRole("heading", { name: "Session B" })).toBeVisible();
-    await page.locator("#home-composer").fill("Message for B");
-    await sendButton.click();
-    await expect(page.getByRole("button", { name: "Sending message" })).toBeVisible();
+    gates.get("C")?.resolve();
+    gates.get("A")?.resolve();
+    gates.get("B")?.resolve();
+    await expect(page.locator(".home-message-queue__sequence")).toHaveText(["1", "2", "3"]);
 
-    firstSend.resolve();
+    await composer.dispatchEvent("compositionstart");
+    await composer.press("ArrowUp");
+    await expect(composer).toHaveValue("");
+    await composer.dispatchEvent("compositionend");
+    await composer.press("ArrowUp");
+    await expect(composer).toHaveValue("C");
+    const cancelEdit = page.getByRole("button", { name: "Cancel edit" });
+    const cancelBox = await cancelEdit.boundingBox();
+    expect(cancelBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(cancelBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await composer.press("Escape");
+    await expect(composer).toHaveValue("");
+    await expect(composer).toBeFocused();
+
+    await composer.press("ArrowUp");
+    await composer.fill("C edited");
+    await composer.press("Enter");
+    await expect(page.locator(".home-message-queue__content strong")).toHaveText([
+      "A",
+      "B",
+      "C edited",
+    ]);
+    expect(patchBodies[0]).toMatchObject({
+      schema_version: "1.0",
+      expected_item_digest: homeQueuedMessage("root-queue", 3, "C").item_digest,
+      content: "C edited",
+    });
+    expect(JSON.stringify(patchBodies[0])).not.toMatch(/private|quote|target|sequence/i);
+
+    await composer.press("ArrowUp");
+    await composer.fill("preserved replacement");
+    conflictEdit = true;
+    await composer.press("Enter");
+    await expect(composer).toHaveValue("preserved replacement");
+    await expect(composer).toBeFocused();
+    await expect(page.getByText(/this is now an unsent draft/i)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Send preserved draft as a new queued message" }),
+    ).toBeVisible();
     await page.waitForTimeout(100);
-    await expect(page.getByRole("heading", { name: "Session B" })).toBeVisible();
-    await expect(page.locator("#home-composer")).toHaveValue("Message for B");
-    await expect(page.getByRole("button", { name: "Sending message" })).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveText("");
-
-    secondSend.resolve({ message_id: "message-b", accepted: true });
-    await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
-    await expect(page.locator("#home-composer")).toHaveValue("");
-    await expect(page.getByRole("heading", { name: "Session B" })).toBeVisible();
+    expect(postBodies).toHaveLength(3);
+    const failures = browserFailures.get(page) ?? [];
+    const expectedConflict =
+      "console: Failed to load resource: the server responded with a status of 409 (Conflict)";
+    expect(failures.filter((failure) => failure === expectedConflict)).toHaveLength(1);
+    browserFailures.set(
+      page,
+      failures.filter((failure) => failure !== expectedConflict),
+    );
   });
 
   test("never creates or sends when the selected session head is invalid or missing", async ({
@@ -684,7 +828,7 @@ test.describe("AI-first conversation Home", () => {
       const path = new URL(request.url()).pathname;
       if (
         request.method() === "POST" &&
-        (path === "/api/conversations" || path.endsWith("/messages"))
+        (path === "/api/conversations" || path.endsWith("/messages/queue"))
       )
         writeRequests += 1;
     });
@@ -773,11 +917,42 @@ test.describe("AI-first conversation Home", () => {
         await route.fulfill({ status: 200, json: homePending([]) });
       },
     );
-    await page.route("**/api/conversations/root-home-conversation/messages", async (route) => {
+    await page.route("**/api/conversation-sessions/root-home/messages/queue", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fallback();
+        return;
+      }
       messageBody = JSON.parse(route.request().postData() ?? "{}");
+      const request = messageBody as {
+        content: string;
+        target_participants: "all";
+        quote_refs: Array<Record<string, unknown>>;
+        private_context_present: boolean;
+      };
       await route.fulfill({
-        status: 202,
-        json: { message_id: "message-home", accepted: true },
+        status: 201,
+        json: {
+          ...homeQueuedMessage("root-home", 1, request.content),
+          target_participants: request.target_participants,
+          quote_refs: request.quote_refs,
+          private_context_present: request.private_context_present,
+        },
+      });
+    });
+    await page.route("**/api/conversations/root-home-conversation/stream-token", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          stream_token: "quote-stream-token",
+          stream_token_expires_at: HOME_FUTURE_TS,
+        },
+      });
+    });
+    await page.route("**/api/conversations/root-home-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: "event: heartbeat\ndata: \nretry: 60000\n\n",
       });
     });
     await page.route(
@@ -818,6 +993,9 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "Send message" }).click();
 
     expect(messageBody).toEqual({
+      schema_version: "1.0",
+      idempotency_key: expect.any(String),
+      expected_authority_digest: homeDigest("root-home-queue-authority"),
       content: "Use the reviewed source.",
       target_participants: "all",
       quote_refs: [
@@ -826,6 +1004,7 @@ test.describe("AI-first conversation Home", () => {
           author_public_id: "reviewer",
         },
       ],
+      private_context_present: false,
     });
     await expect(page.getByRole("region", { name: "Quoted sources" })).toHaveCount(0);
 
@@ -845,43 +1024,20 @@ test.describe("AI-first conversation Home", () => {
     await expectAxeClean(page, "reaction fold");
   });
 
-  test("stages inline private file ranges without browser persistence and clears them after one send", async ({
+  test("stages, replaces, discards, and sends root private context without browser leakage", async ({
     page,
   }) => {
     const stageRequests: Array<Record<string, unknown>> = [];
-    const bindings = [
-      {
-        schema_version: "1.0",
-        handoff_id:
-          "vf-file-range-1111111111111111111111111111111111111111111111111111111111111111",
-        handoff_record_digest:
-          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        repo_relative_path: "src/private.ts",
-        start_line: 12,
-        end_line: 16,
-        line_count: 5,
-        staged_at: "2026-08-25T00:00:00.000Z",
-        expires_at: HOME_FUTURE_TS,
-      },
-      {
-        schema_version: "1.0",
-        handoff_id:
-          "vf-file-range-2222222222222222222222222222222222222222222222222222222222222222",
-        handoff_record_digest:
-          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        repo_relative_path: "src/private.ts",
-        start_line: 12,
-        end_line: 16,
-        line_count: 5,
-        staged_at: "2026-08-25T00:00:01.000Z",
-        expires_at: HOME_FUTURE_TS,
-      },
-    ];
-    let stageAttempt = 0;
+    const discardRequests: Array<Record<string, unknown>> = [];
+    const draftStageRequests: Array<Record<string, unknown>> = [];
+    let legacyCalls = 0;
     let messageBody: unknown = null;
+    let createBody: unknown = null;
+    let createdPublished = false;
     const session = homeSession("root-private", "Private range session", [
       homeParticipant("operator", "direct"),
     ]);
+    const createdSession = homeSession("root-private-created", "Create with private context");
     const timeline = homeTimeline("root-private", []);
 
     await page.route("**/api/conversations?**", async (route) => {
@@ -889,7 +1045,7 @@ test.describe("AI-first conversation Home", () => {
         status: 200,
         json: {
           schema_version: "1.0",
-          items: [session],
+          items: createdPublished ? [session, createdSession] : [session],
           next_cursor: null,
           catalog_generation: "generation-private",
           source_watermark: "watermark-private",
@@ -897,10 +1053,19 @@ test.describe("AI-first conversation Home", () => {
         },
       });
     });
-    await routeHomeHeads(page, [session]);
+    await routeHomeHeads(page, [session, createdSession]);
     await page.route("**/api/conversation-sessions/root-private/timeline?**", async (route) => {
       await route.fulfill({ status: 200, json: timeline });
     });
+    await page.route(
+      "**/api/conversation-sessions/root-private-created/timeline?**",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: homeTimeline("root-private-created", []),
+        });
+      },
+    );
     await page.route(
       "**/api/conversations/root-private-conversation/action-proposals?**",
       async (route) => {
@@ -915,18 +1080,105 @@ test.describe("AI-first conversation Home", () => {
         });
       },
     );
-    await page.route("**/api/home/private-file-range-handoffs", async (route) => {
-      stageRequests.push(JSON.parse(route.request().postData() ?? "{}"));
-      await route.fulfill({ status: 200, json: bindings[stageAttempt] });
-      stageAttempt += 1;
+    await page.route(
+      "**/api/conversations/root-private-created-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: {
+            schema_version: "1.0",
+            items: [],
+            next_cursor: null,
+            authority_watermark: "watermark-private-created",
+          },
+        });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-private-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: {
+            stream_token: "private-stream-token",
+            stream_token_expires_at: HOME_FUTURE_TS,
+          },
+        });
+      },
+    );
+    await page.route("**/api/conversations/root-private-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: "event: heartbeat\ndata: \nretry: 60000\n\n",
+      });
     });
-    await page.route("**/api/conversations/root-private-conversation/messages", async (route) => {
-      messageBody = JSON.parse(route.request().postData() ?? "{}");
+    await page.route(
+      "**/api/conversation-sessions/root-private/messages/private-context",
+      async (route) => {
+        stageRequests.push(JSON.parse(route.request().postData() ?? "{}"));
+        await route.fulfill({
+          status: 201,
+          json: { schema_version: "1.0", private_context_present: true },
+        });
+      },
+    );
+    await page.route(
+      "**/api/conversation-sessions/root-private/messages/private-context/discard",
+      async (route) => {
+        discardRequests.push(JSON.parse(route.request().postData() ?? "{}"));
+        await route.fulfill({
+          status: 200,
+          json: { schema_version: "1.0", private_context_present: false },
+        });
+      },
+    );
+    await page.route("**/api/home/private-file-range-handoffs", async (route) => {
+      legacyCalls += 1;
+      await route.fulfill({ status: 410, json: { error: { message: "Legacy route forbidden." } } });
+    });
+    await page.route("**/api/conversation-drafts/private-context", async (route) => {
+      draftStageRequests.push(JSON.parse(route.request().postData() ?? "{}"));
+      await route.fulfill({
+        status: 201,
+        json: { schema_version: "1.0", private_context_present: true },
+      });
+    });
+    await page.route("**/api/conversations", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      createBody = JSON.parse(route.request().postData() ?? "{}");
+      createdPublished = true;
       await route.fulfill({
         status: 202,
         json: {
-          message_id: "message-private",
-          accepted: true,
+          conversation_id: "root-private-created-conversation",
+          stream_token: "private-created-token",
+          stream_token_expires_at: HOME_FUTURE_TS,
+        },
+      });
+    });
+    await page.route("**/api/conversation-sessions/root-private/messages/queue", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fallback();
+        return;
+      }
+      messageBody = JSON.parse(route.request().postData() ?? "{}");
+      const request = messageBody as {
+        content: string;
+        target_participants: "all";
+        quote_refs: [];
+        private_context_present: boolean;
+      };
+      await route.fulfill({
+        status: 201,
+        json: {
+          ...homeQueuedMessage("root-private", 1, request.content),
+          target_participants: request.target_participants,
+          quote_refs: request.quote_refs,
+          private_context_present: request.private_context_present,
         },
       });
     });
@@ -940,7 +1192,7 @@ test.describe("AI-first conversation Home", () => {
       '.home-composer__tools button[aria-controls="home-private-range-panel"]',
     );
     await privateRangeTrigger.click();
-    await expect(page.getByText(/Only the binding stays in browser memory/i)).toBeVisible();
+    await expect(page.getByText(/Home keeps only a generic presence indicator/i)).toBeVisible();
     await expect(page.getByLabel("Path")).toBeFocused();
     await expectAxeClean(page, "private range panel");
     await page.getByLabel("Path").fill("src/private.ts");
@@ -954,59 +1206,124 @@ test.describe("AI-first conversation Home", () => {
     await page.getByLabel("Start line").fill("12");
     await page.getByLabel("End line").fill("16");
     await page.getByRole("button", { name: "Select range" }).click();
-    await expect(page.getByText("Private file range selected", { exact: true })).toBeVisible();
+    await expect(page.getByText("Private file range ready", { exact: true })).toBeVisible();
     await expect(privateRangeTrigger).toBeFocused();
     expect(stageRequests[0]).toEqual({
-      path: "src/private.ts",
+      schema_version: "1.0",
+      enqueue_idempotency_key: expect.any(String),
+      source_kind: "private-file-range",
+      repo_relative_path: "src/private.ts",
       start_line: 12,
       end_line: 16,
     });
-    await expect(page.getByText(/src\/private\.ts · Lines 12–16/)).toBeVisible();
+    await expect(page.getByText(/src\/private\.ts/)).toHaveCount(0);
 
     const storageAfterStage = await page.evaluate(() =>
       [...Object.values(localStorage), ...Object.values(sessionStorage)].join("\n"),
     );
-    expect(storageAfterStage).not.toContain(bindings[0].handoff_id);
-    expect(storageAfterStage).not.toContain(bindings[0].repo_relative_path);
+    expect(storageAfterStage).not.toContain("src/private.ts");
+    expect(storageAfterStage).not.toContain(String(stageRequests[0]?.enqueue_idempotency_key));
 
-    const changePrivateRange = page.getByRole("button", { name: "Change", exact: true });
+    const privateRangeSummary = page.getByRole("region", { name: "Private file range" });
+    const changePrivateRange = privateRangeSummary.getByRole("button", {
+      name: "Change",
+      exact: true,
+    });
+    const removePrivateRange = privateRangeSummary.getByRole("button", {
+      name: "Remove",
+      exact: true,
+    });
+    for (const control of [changePrivateRange, removePrivateRange]) {
+      const box = await control.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
     await changePrivateRange.click();
+    await expect(page.getByLabel("Path")).toHaveValue("");
     await page.getByLabel("Path").fill("src/other.ts");
     await page.getByLabel("Start line").fill("90");
     await page.getByLabel("End line").fill("91");
-    await page.getByRole("button", { name: "Reset" }).click();
-    await expect(page.getByLabel("Path")).toHaveValue("src/private.ts");
-    await expect(page.getByLabel("Start line")).toHaveValue("12");
-    await expect(page.getByLabel("End line")).toHaveValue("16");
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("button", { name: "Select range" }).click();
+    await expect(page.getByText("Private file range ready", { exact: true })).toBeVisible();
     await expect(changePrivateRange).toBeFocused();
+    expect(stageRequests[1]).toEqual({
+      schema_version: "1.0",
+      enqueue_idempotency_key: expect.any(String),
+      source_kind: "private-file-range",
+      repo_relative_path: "src/other.ts",
+      start_line: 90,
+      end_line: 91,
+    });
+    expect(stageRequests[1]?.enqueue_idempotency_key).not.toBe(
+      stageRequests[0]?.enqueue_idempotency_key,
+    );
+    await expect.poll(() => discardRequests.length).toBe(1);
+    expect(discardRequests[0]).toEqual({
+      schema_version: "1.0",
+      idempotency_key: expect.any(String),
+      enqueue_idempotency_key: stageRequests[0]?.enqueue_idempotency_key,
+      expected_private_context_present: true,
+    });
 
-    await page.reload();
-    await waitForPage(page);
-    await page.getByRole("button", { name: /Private range session/ }).click();
-    await expect(page.getByText("Private file range selected", { exact: true })).toHaveCount(0);
+    await removePrivateRange.click();
+    await expect(page.getByText("Private file range ready", { exact: true })).toHaveCount(0);
+    expect(discardRequests[1]).toEqual({
+      schema_version: "1.0",
+      idempotency_key: expect.any(String),
+      enqueue_idempotency_key: stageRequests[1]?.enqueue_idempotency_key,
+      expected_private_context_present: true,
+    });
 
     await privateRangeTrigger.click();
-    await page.getByLabel("Path").fill("src/private.ts");
-    await page.getByLabel("Start line").fill("12");
-    await page.getByLabel("End line").fill("16");
+    await page.getByLabel("Path").fill("src/final.ts");
+    await page.getByLabel("Start line").fill("2");
+    await page.getByLabel("End line").fill("4");
     await page.getByRole("button", { name: "Select range" }).click();
-    await expect(page.getByText("Private file range selected", { exact: true })).toBeVisible();
-    await expect(privateRangeTrigger).toBeFocused();
-    expect(stageRequests[1]).toEqual({
-      path: "src/private.ts",
-      start_line: 12,
-      end_line: 16,
-    });
     await page.locator("#home-composer").fill("Use the private excerpt.");
     await page.getByRole("button", { name: "Send message" }).click();
 
     expect(messageBody).toEqual({
+      schema_version: "1.0",
+      idempotency_key: stageRequests[2]?.enqueue_idempotency_key,
+      expected_authority_digest: homeDigest("root-private-queue-authority"),
       content: "Use the private excerpt.",
       target_participants: "all",
-      private_file_range: bindings[1],
+      quote_refs: [],
+      private_context_present: true,
     });
-    await expect(page.getByText("Private file range selected", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Private file range ready", { exact: true })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "New conversation", exact: true }).first().click();
+    await privateRangeTrigger.click();
+    await page.getByLabel("Path").fill("src/draft-private.ts");
+    await page.getByLabel("Start line").fill("7");
+    await page.getByLabel("End line").fill("9");
+    await page.getByRole("button", { name: "Select range" }).click();
+    expect(draftStageRequests[0]).toEqual({
+      schema_version: "1.0",
+      create_idempotency_key: expect.any(String),
+      source_kind: "private-file-range",
+      repo_relative_path: "src/draft-private.ts",
+      start_line: 7,
+      end_line: 9,
+    });
+    await page
+      .getByPlaceholder("What do you want the AI team to build?")
+      .fill("Create with private context");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByRole("heading", { name: "Create with private context" })).toBeVisible();
+    expect(createBody).toEqual({
+      schema_version: "1.0",
+      idempotency_key: draftStageRequests[0]?.create_idempotency_key,
+      topic: "Create with private context",
+      private_context_present: true,
+    });
+    const finalStorage = await page.evaluate(() =>
+      [...Object.values(localStorage), ...Object.values(sessionStorage)].join("\n"),
+    );
+    expect(finalStorage).not.toContain("src/draft-private.ts");
+    expect(finalStorage).not.toContain(String(draftStageRequests[0]?.create_idempotency_key));
+    await expect(page.getByText(/src\/draft-private\.ts/)).toHaveCount(0);
+    expect(legacyCalls).toBe(0);
   });
 
   test("restores focus for Conversation Details and keeps a collapsed rail inert", async ({
@@ -1044,6 +1361,9 @@ test.describe("AI-first conversation Home", () => {
     await page.route("**/api/conversation-sessions/root-focus/timeline?**", async (route) => {
       await route.fulfill({ status: 200, json: homeTimeline("root-focus", []) });
     });
+    await page.route("**/api/conversation-sessions/root-focus/messages/queue", async (route) => {
+      await route.fulfill({ status: 200, json: homeMessageQueue("root-focus") });
+    });
     await page.route(
       "**/api/conversations/root-focus-conversation/action-proposals?**",
       async (route) => {
@@ -1080,6 +1400,13 @@ test.describe("AI-first conversation Home", () => {
       /home-inspector-enter-active/,
     );
     await expectAxeClean(page, "conversation details");
+    await page.getByRole("button", { name: "Remove builder from conversation" }).click();
+    await expect(page.getByRole("complementary", { name: "Conversation details" })).toHaveCount(0);
+    await expect(page.locator("#home-composer")).toBeFocused();
+    await expect(page.locator("#home-composer")).toHaveValue("-@builder");
+    await page.locator("#home-composer").fill("");
+
+    await details.click();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Conversation details" })).toHaveCount(0);
     await expect(details).toBeFocused();
@@ -1089,6 +1416,95 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByRole("complementary", { name: "Conversation details" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "What are we building?" })).toBeVisible();
     await expect(page.locator("#home-composer")).toBeFocused();
+  });
+
+  test("returns chooser completion focus to the composer and keeps every chooser target at 44px", async ({
+    page,
+  }) => {
+    const session = homeSession("root-targets", "Capability targets", [
+      homeParticipant("reviewer", "reviewer"),
+      homeParticipant("builder", "builder"),
+    ]);
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: "1.0",
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "generation",
+          source_watermark: "watermark",
+          catalog_health: "ready",
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/root-targets/timeline?**", async (route) => {
+      await route.fulfill({ status: 200, json: homeTimeline("root-targets", []) });
+    });
+    await page.route(
+      "**/api/conversations/root-targets-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-targets-conversation/action-proposals",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: homePendingAction("target-install", "Install accessible capability", {
+            proposal: {
+              action_type: "capability.install",
+              domain: "capability",
+              scope: "project",
+            },
+            operation: { domain: "capability" },
+          }),
+        });
+      },
+    );
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Capability targets/ }).click();
+    const composer = page.locator("#home-composer");
+    await composer.fill("/install acme/accessible");
+    await page.getByRole("button", { name: "Send message" }).click();
+
+    const chooser = page.locator(".home-capability-targets");
+    await expect(chooser).toBeVisible();
+    await expect(chooser.getByRole("checkbox").first()).toBeFocused();
+    await expectAxeClean(page, "capability target chooser");
+    for (const control of [
+      chooser.getByRole("button", { name: "Cancel capability target selection" }),
+      chooser.getByRole("button", { name: "Select all" }),
+      chooser.getByRole("button", { name: "Review install" }),
+    ]) {
+      const box = await control.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+
+    await page.keyboard.press("Escape");
+    await expect(chooser).toHaveCount(0);
+    await expect(composer).toBeFocused();
+    await expect(composer).toHaveValue("/install acme/accessible");
+
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(chooser).toBeVisible();
+    await chooser.getByRole("button", { name: "Cancel capability target selection" }).click();
+    await expect(chooser).toHaveCount(0);
+    await expect(composer).toBeFocused();
+    await expect(composer).toHaveValue("/install acme/accessible");
+
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(chooser).toBeVisible();
+    await chooser.getByRole("checkbox").first().check();
+    await chooser.getByRole("button", { name: "Review install" }).click();
+    await expect(chooser).toHaveCount(0);
+    await expect(composer).toBeFocused();
+    await expect(composer).toHaveValue("");
   });
 
   test("keeps action review state durable, focused, and exact across terminal states", async ({
@@ -1400,9 +1816,7 @@ test.describe("AI-first conversation Home", () => {
         },
       });
     });
-    await page.route("**/api/conversation-sessions/root-quotes/head", async (route) => {
-      await route.fulfill({ status: 200, json: homeHead(quoteSession) });
-    });
+    await routeHomeHeads(page, [quoteSession]);
     await page.route("**/api/conversation-sessions/root-quotes/timeline?**", async (route) => {
       await route.fulfill({
         status: 200,

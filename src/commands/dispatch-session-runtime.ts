@@ -9,6 +9,7 @@ import {
 } from "../agents/binding.js";
 import { runDispatchAsync, writeDispatchPrompt } from "../dispatch.js";
 import { createIsolationLease, releaseIsolationLease } from "../dispatch/isolation.js";
+import { markOwnedRuntimeSpawner } from "../dispatch/owned-process-launch.js";
 import {
   registerDispatchResumeBinding,
   registerPrivateDispatchValues,
@@ -79,7 +80,7 @@ function makeSessionProcessSpawner(
 ): EngineProcessSpawner {
   const base = options.processSpawner ?? makeEngineProcessSpawner();
   const repoRoot = realpathSync(options.base);
-  return (argv, spawnOptions) => {
+  const spawner = (argv: string[], spawnOptions: Parameters<EngineProcessSpawner>[1]) => {
     const cwd = spawnOptions.cwd ?? repoRoot;
     const ownedOptions = {
       ...spawnOptions,
@@ -103,6 +104,7 @@ function makeSessionProcessSpawner(
     });
     return base(pointed, { ...ownedOptions, stdinText: "" });
   };
+  return options.processSpawner === undefined ? markOwnedRuntimeSpawner(spawner) : spawner;
 }
 
 export async function runDispatchWithSessionRuntime(

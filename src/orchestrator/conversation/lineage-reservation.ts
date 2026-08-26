@@ -110,7 +110,11 @@ export function deriveRevisionClaimEpoch(
   history: ReadonlyMap<string, unknown> = new Map(),
   requiredPublishedReservationDigest: string | null = null,
 ): number {
-  if (input === undefined) return 0;
+  if (input === undefined) {
+    if (requiredPublishedReservationDigest !== null)
+      throw new Error("published revision reservation authority is absent");
+    return 0;
+  }
   assertRevisionReservationRecordV1(input);
   let current = input;
   const seen = new Set<string>();

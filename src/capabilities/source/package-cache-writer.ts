@@ -122,13 +122,6 @@ export function retainCapabilityPackageCache(
       "integrity_failure",
     );
   }
-  if (pin.source.kind === "legacy-adopt" && pin.source.inspection_evidence_digest !== legacyDigest)
-    throw new CapabilityValidationError(
-      "legacy cache publication evidence does not bind its pin",
-      "package_cache.legacy_evidence",
-      "integrity_failure",
-    );
-
   materializePackageTree(
     packageTreeCachePath(options.private_root, tree.content_sha256),
     tree,

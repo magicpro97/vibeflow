@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { ActionAuthorityStoreOptions } from "../../actions/index.js";
 import { DurableArtifactRegistry } from "../trace/artifacts.js";
 import { TraceStore, type TraceStoreOptions } from "../trace/store.js";
 import { ConversationArtifactStore } from "./artifact-store.js";
@@ -12,6 +13,7 @@ export function createConversationPersistence(input: {
   root: string;
   mirror?: TraceStoreOptions["mirror"];
   now?: () => string;
+  actionFault?: ActionAuthorityStoreOptions["fault"];
 }) {
   const artifactRegistry = new DurableArtifactRegistry({ dir: join(input.root, "opaque") });
   const traceRoot = join(input.root, "trace");
@@ -28,6 +30,7 @@ export function createConversationPersistence(input: {
     artifactRoot,
     now: input.now ?? (() => new Date().toISOString()),
     challengeKey: deriveConversationBrowserKey(browserAuthorityKey, "approval-challenge"),
+    ...(input.actionFault ? { actionFault: input.actionFault } : {}),
   });
   return {
     artifactRegistry,

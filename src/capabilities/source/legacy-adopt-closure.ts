@@ -59,11 +59,6 @@ export function validateLegacyInspectionEvidence(
     min: 1,
     max: 512,
   });
-  if (rawIdentifier !== rawIdentifier.normalize("NFC"))
-    throw new CapabilityValidationError(
-      "legacy inspection identifier is not NFC",
-      "legacy_evidence.raw_identifier_nfc",
-    );
   if (
     value.adapter_fingerprint !==
     digestV1("VF-LEGACY-ADAPTER-FINGERPRINT\0v1\0", value.legacy_source)

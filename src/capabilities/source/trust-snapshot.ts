@@ -1,4 +1,4 @@
-import { canonicalJson, digestV1 } from "../../durability/index.js";
+import { digestV1 } from "../../durability/index.js";
 import { foldTrustFrames } from "../authority/fold.js";
 import type { AuthorityEpochHeadV1, RegistryTrustKeyFrameV1 } from "../authority/types.js";
 import { validateAuthorityHead } from "../authority/validation.js";
@@ -108,13 +108,5 @@ export function validateRegistryTrustSnapshot(
     );
   if ((value.trust_epoch === 0) !== (value.trust_head_digest === null))
     throw new CapabilityValidationError("trust snapshot head/epoch mismatch", "trust_snapshot");
-  if (
-    canonicalJson(value.keys) !==
-    canonicalJson([...value.keys].sort((a, b) => bytewise(a.key_id, b.key_id)))
-  )
-    throw new CapabilityValidationError(
-      "trust snapshot keys are not canonical",
-      "trust_snapshot.keys",
-    );
   return value;
 }

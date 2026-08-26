@@ -135,13 +135,13 @@ describe("resolveDraftDomain — stable order", () => {
 
 // ── CLI integration ───────────────────────────────────────────────────
 
-function run(rest: string[]): number {
+async function run(rest: string[]): Promise<number> {
   const orig = process.cwd();
   const origHome = process.env.VF_SKILLS_HOME;
   process.env.VF_SKILLS_HOME = base;
   process.chdir(base);
   try {
-    return skills("draft", rest);
+    return await skills("draft", rest);
   } finally {
     process.chdir(orig);
     if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -150,7 +150,7 @@ function run(rest: string[]): number {
 }
 
 describe("vf skills draft CLI — domain resolution", () => {
-  test("blocks draft when domain exists", () => {
+  test("blocks draft when domain exists", async () => {
     skill("auth-skill", "domain:\n  id: auth-domain\n  role: canonical\n");
     facts(
       JSON.stringify({
@@ -158,13 +158,13 @@ describe("vf skills draft CLI — domain resolution", () => {
         facts: [{ key: "auth-domain", owner: "auth-skill", version: "1", statement: "auth" }],
       }),
     );
-    expect(run(["auth-domain"])).toBe(0);
+    expect(await run(["auth-domain"])).toBe(0);
     // Should not have created the file
     const target = join(base, ".vibeflow", "skills", "auth-domain", "SKILL.md");
     expect(fsExistsSync(target)).toBe(false);
   });
 
-  test("--new bypasses resolution", () => {
+  test("--new bypasses resolution", async () => {
     skill("auth-skill", "domain:\n  id: auth-domain\n  role: canonical\n");
     facts(
       JSON.stringify({
@@ -172,22 +172,22 @@ describe("vf skills draft CLI — domain resolution", () => {
         facts: [{ key: "auth-domain", owner: "auth-skill", version: "1", statement: "auth" }],
       }),
     );
-    expect(run(["--new", "auth-domain"])).toBe(0);
+    expect(await run(["--new", "auth-domain"])).toBe(0);
     const target = join(base, ".vibeflow", "skills", "auth-domain", "SKILL.md");
     expect(fsExistsSync(target)).toBe(true);
   });
 
-  test("creates draft when no domain match", () => {
-    expect(run(["brand-new"])).toBe(0);
+  test("creates draft when no domain match", async () => {
+    expect(await run(["brand-new"])).toBe(0);
     const target = join(base, ".vibeflow", "skills", "brand-new", "SKILL.md");
     expect(fsExistsSync(target)).toBe(true);
   });
 
-  test("missing name returns 2", () => {
-    expect(run([])).toBe(2);
+  test("missing name returns 2", async () => {
+    expect(await run([])).toBe(2);
   });
 
-  test("invalid name returns 2", () => {
-    expect(run(["BAD_NAME"])).toBe(2);
+  test("invalid name returns 2", async () => {
+    expect(await run(["BAD_NAME"])).toBe(2);
   });
 });

@@ -50,13 +50,13 @@ function scaffoldSkill(name: string) {
   writeFileSync(join(dir, "SKILL.md"), body.join("\n"));
 }
 
-function run(rest: string[]): number {
+async function run(rest: string[]): Promise<number> {
   const orig = process.cwd();
   const origHome = process.env.VF_SKILLS_HOME;
   process.env.VF_SKILLS_HOME = base;
   process.chdir(base);
   try {
-    return skills("facts", rest);
+    return await skills("facts", rest);
   } finally {
     process.chdir(orig);
     if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -254,33 +254,33 @@ describe("handleFactsSubcommand (unit)", () => {
 
 // ── vf skills facts (CLI integration) ─────────────────────────────────
 describe("vf skills facts CLI", () => {
-  test("no file list returns 0", () => {
-    expect(run(["list"])).toBe(0);
+  test("no file list returns 0", async () => {
+    expect(await run(["list"])).toBe(0);
   });
 
-  test("no file check returns 0", () => {
-    expect(run(["check"])).toBe(0);
+  test("no file check returns 0", async () => {
+    expect(await run(["check"])).toBe(0);
   });
 
-  test("list with facts", () => {
+  test("list with facts", async () => {
     scaffoldSkill("s1");
     writeFacts({
       schemaVersion: 1,
       facts: [{ key: "k1", owner: "s1", version: "1.0", statement: "f" }],
     });
-    expect(run(["list"])).toBe(0);
+    expect(await run(["list"])).toBe(0);
   });
 
-  test("check passes", () => {
+  test("check passes", async () => {
     scaffoldSkill("s1");
     writeFacts({
       schemaVersion: 1,
       facts: [{ key: "k1", owner: "s1", version: "1.0", statement: "f" }],
     });
-    expect(run(["check"])).toBe(0);
+    expect(await run(["check"])).toBe(0);
   });
 
-  test("check fails on dup key", () => {
+  test("check fails on dup key", async () => {
     scaffoldSkill("s1");
     writeFacts({
       schemaVersion: 1,
@@ -289,25 +289,25 @@ describe("vf skills facts CLI", () => {
         { key: "k1", owner: "s1", version: "1.0", statement: "f2" },
       ],
     });
-    expect(run(["check"])).toBe(1);
+    expect(await run(["check"])).toBe(1);
   });
 
-  test("check fails on missing owner", () => {
+  test("check fails on missing owner", async () => {
     writeFacts({
       schemaVersion: 1,
       facts: [{ key: "k1", owner: "no-such", version: "1.0", statement: "f" }],
     });
-    expect(run(["check"])).toBe(1);
+    expect(await run(["check"])).toBe(1);
   });
 
-  test("usage on unknown subsubcommand", () => {
-    expect(run(["badcmd"])).toBe(2);
+  test("usage on unknown subsubcommand", async () => {
+    expect(await run(["badcmd"])).toBe(2);
   });
 
-  test("malformed JSON in check returns 1 not crash", () => {
+  test("malformed JSON in check returns 1 not crash", async () => {
     const path = join(base, CTX_DIR, "DOMAIN_FACTS.json");
     writeFileSync(path, "not-json{");
-    expect(run(["check"])).toBe(1);
+    expect(await run(["check"])).toBe(1);
   });
 });
 

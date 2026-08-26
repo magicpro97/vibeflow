@@ -28,7 +28,7 @@ import {
   engineCommand,
   isUnavailable,
   out,
-  preflightAll,
+  preflightAllAsync,
 } from "./_shared.js";
 
 export function resolveMode(flags: Record<string, string | boolean>): "cli" | "bridge" | "dry" {
@@ -103,14 +103,14 @@ export function readyStub(engine: Engine): EngineReadiness {
 // Exported (not just internal) so the `run` subcommand
 // (src/commands/run.ts, phase 6.5/14) can call it via the barrel.
 // Without the export, the run path would re-implement the same gate.
-export function engineReady(
+export async function engineReady(
   engine: Engine,
   mode: "cli" | "bridge" | "dry",
   preflight?: PreflightFn,
-): boolean {
+): Promise<boolean> {
   if (mode !== "cli") return true;
-  const probe = preflight ?? ((e: Engine[]) => preflightAll(e, { probe: true }));
-  const [readiness] = probe([engine]);
+  const probe = preflight ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }));
+  const [readiness] = await probe([engine]);
   if (readiness?.level === "ready") return true;
   const detail = readiness?.detail ?? "engine not ready";
   out("vf");

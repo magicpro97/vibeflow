@@ -27,6 +27,7 @@ import {
   ConversationReceiptEffectExecutor,
   type ConversationReceiptEffectResultV1,
 } from "./conversation-receipt-effect-executor.js";
+import { ConversationReceiptCandidateUnavailableError } from "./conversation-receipt-errors.js";
 import {
   assertReceiptSource,
   materializeAssociationPlan,
@@ -58,12 +59,7 @@ function isReceiptActionType(value: string): value is ConversationReceiptActionK
   return RECEIPT_ACTIONS.has(value as BrowserHostActionRequestV1["type"]);
 }
 
-export class ConversationReceiptCandidateUnavailableError extends Error {
-  constructor(readonly action_type: ConversationReceiptActionKindV1) {
-    super(`The durable ${action_type} candidate is unavailable or expired.`);
-    this.name = "ConversationReceiptCandidateUnavailableError";
-  }
-}
+export { ConversationReceiptCandidateUnavailableError } from "./conversation-receipt-errors.js";
 
 function bytewise(left: string, right: string): number {
   return Buffer.compare(Buffer.from(left), Buffer.from(right));
@@ -82,6 +78,7 @@ export class ConversationReceiptActionAuthority {
       service: Pick<ConversationOrchestrator, "cancelOperation" | "events"> & {
         revisionOperationQuiescent(conversationId: string, operationId: string): boolean;
         retryRevisionLanes: ConversationOrchestrator["retryRevisionLanes"];
+        wakeMessageQueue: ConversationOrchestrator["wakeMessageQueue"];
       };
       traceStore: TraceStore;
       artifactStore: ConversationArtifactStore;
@@ -92,9 +89,11 @@ export class ConversationReceiptActionAuthority {
     this.controls = new ConversationRevisionControlAuthority({
       lineages: options.lineages,
       home: options.home,
+      artifactStore: options.artifactStore,
       quiescent: (conversationId, operationId) =>
         options.service.revisionOperationQuiescent(conversationId, operationId),
       retry: (input) => options.service.retryRevisionLanes(input),
+      wake: (conversationId) => options.service.wakeMessageQueue(conversationId),
     });
     this.literals = new ConversationLiteralActionAuthority({
       lineages: options.lineages,
@@ -121,6 +120,35 @@ export class ConversationReceiptActionAuthority {
       RECEIPT_ACTIONS.has(candidate.type as BrowserHostActionRequestV1["type"]) ||
       this.controls.supports(candidate)
     );
+  }
+
+  recoverCanceledLineageMutations(): void {
+    for (const reservation of this.options.home.lineageMutations.active()) {
+      const snapshot = this.options.home.actions.get(reservation.proposal_id);
+      const kind =
+        snapshot?.proposal.action.type === "conversation.publish_suspected_literal"
+          ? "public-literal"
+          : snapshot?.proposal.action.type === "context.compact"
+            ? "context-compaction"
+            : null;
+      if (
+        !snapshot?.approval ||
+        kind !== reservation.mutation_kind ||
+        snapshot.proposal.proposal_digest !== reservation.proposal_digest ||
+        snapshot.approval.approval_id !== reservation.approval_id ||
+        snapshot.approval.approval_digest !== reservation.approval_digest ||
+        deriveOperationId(snapshot.proposal, snapshot.approval.approval_id) !==
+          reservation.operation_id
+      )
+        throw new Error("active lineage mutation Action authority changed");
+      this.options.home.lineageMutations.releaseCanceled(snapshot);
+    }
+  }
+
+  releaseCanceledLineageMutation(proposalId: string): void {
+    const snapshot = this.options.home.actions.get(proposalId);
+    if (!snapshot) throw new Error("canceled conversation action authority is absent");
+    this.options.home.lineageMutations.releaseCanceled(snapshot);
   }
 
   async propose(input: {
@@ -324,7 +352,7 @@ export class ConversationReceiptActionAuthority {
     conversation_lock_digest: string;
   }): Promise<OrdinaryConversationOperationAuthorityV1> {
     if (this.options.artifactStore.operationOwner(input.operation_id) !== input.conversation_id)
-      throw new Error("ordinary operation authority is absent");
+      throw new ConversationReceiptCandidateUnavailableError("conversation.stop_operation");
     const events = await this.options.service.events(input.conversation_id, 0);
     if (!events) throw new Error("ordinary operation trace authority is absent");
     return foldOrdinaryConversationOperation({

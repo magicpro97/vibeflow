@@ -119,7 +119,7 @@ describe("coord shim (A1 #167 + #194)", () => {
     // Inject a custom spawner that simulates the engine trying
     // multiple tools (the production shim's PreToolUse wrapper would
     // call the denier for each; we simulate the denier calls here).
-    const spawner = async (_engine: string, _args: readonly string[]): Promise<number> => {
+    const spawner = async (): Promise<number> => {
       // The engine's wrapper would call the denier for every tool.
       // We mirror that here.
       for (const tool of ["Read", "Write", "Bash"]) {
@@ -280,14 +280,17 @@ describe("coord shim (A1 #167 + #194)", () => {
     const fresh = new Date(Date.now() - 60_000).toISOString();
     writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
     let capturedEngine: string | null = null;
-    const spawner = async (engine: string, _args: readonly string[]): Promise<number> => {
+    let capturedCommand: string | null = null;
+    const spawner = async (engine: string, command: string): Promise<number> => {
       capturedEngine = engine;
+      capturedCommand = command;
       return 0;
     };
     const code = await coord(["antigravity"], {}, { now: () => Date.now(), spawner });
     expect(code).toBe(0);
     expect(capturedEngine).not.toBeNull();
-    expect(capturedEngine as string | null).toBe("agy");
+    expect(capturedEngine as string | null).toBe("antigravity");
+    expect(capturedCommand as string | null).toBe("agy");
   });
 
   // ---- Unknown engine → exit 1 (usage error; same class as missing
@@ -305,23 +308,40 @@ describe("coord shim (A1 #167 + #194)", () => {
   test("(engine) coord forwards the engine's exit code", async () => {
     const fresh = new Date(Date.now() - 60_000).toISOString();
     writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
-    const spawner = async (_engine: string, _args: readonly string[]): Promise<number> => 7;
+    const spawner = async (): Promise<number> => 7;
     const code = await coord(["claude"], {}, { now: () => Date.now(), spawner });
     expect(code).toBe(7);
   });
 
-  // ---- defaultEngineSpawner (exported for the test seam) actually
-  //      spawns a real binary. Uses /bin/true on Unix (no output). Returns the
-  //      exit code (0 for success). ----
-  test("(defaultEngineSpawner) real /bin/echo spawn returns 0", async () => {
-    if (process.platform === "win32") return;
-    const code = await defaultEngineSpawner("/usr/bin/true", []);
+  // ---- defaultEngineSpawner delegates the exact engine + command to the
+  //      canonical owned route and returns its status. ----
+  test("(defaultEngineSpawner) owned route status 0 is returned", async () => {
+    const requests: Array<{ engine: string; command: string }> = [];
+    const code = await defaultEngineSpawner(
+      "claude",
+      "/usr/bin/true",
+      [],
+      process.env,
+      async (r) => {
+        requests.push({ engine: r.engine, command: r.command });
+        return { attemptId: "coord", status: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    );
     expect(code).toBe(0);
+    expect(requests).toEqual([{ engine: "claude", command: "/usr/bin/true" }]);
   });
 
-  // ---- defaultEngineSpawner with a missing binary returns 1 ----
-  test("(defaultEngineSpawner) missing binary returns 1", async () => {
-    const code = await defaultEngineSpawner("/this/does/not/exist", []);
+  // ---- owned-route failures map to the existing process failure exit code. ----
+  test("(defaultEngineSpawner) owned route failure returns 1", async () => {
+    const code = await defaultEngineSpawner(
+      "claude",
+      "/this/does/not/exist",
+      [],
+      process.env,
+      async () => {
+        throw new Error("missing binary");
+      },
+    );
     expect(code).toBe(1);
   });
 
@@ -334,7 +354,19 @@ describe("coord shim (A1 #167 + #194)", () => {
     const writes: Array<{ channel: string; level: string; text: string }> = [];
     setLogbusForTests({ write: (msg: any) => writes.push(msg) } as any);
     try {
-      const code = await defaultEngineSpawner(process.execPath, ["-e", "process.exit(0)"]);
+      const code = await defaultEngineSpawner(
+        "claude",
+        process.execPath,
+        ["-e", "process.exit(0)"],
+        process.env,
+        async () => ({
+          attemptId: "coord-hook",
+          status: 0,
+          stdout: "",
+          stderr: "",
+          timedOut: false,
+        }),
+      );
       expect(code).toBe(0);
       const warn = writes.find(
         (w) => w.level === "warn" && w.text.includes("hook emission failed"),
@@ -359,8 +391,26 @@ describe("coord shim (A1 #167 + #194)", () => {
         AWS_SECRET_ACCESS_KEY: "leak-me",
         VF_DENY_TOOLS: "Write,Edit",
       };
-      const code = await defaultEngineSpawner("/usr/bin/true", [], spawnEnv);
+      let passedEnv: NodeJS.ProcessEnv | undefined;
+      const code = await defaultEngineSpawner(
+        "claude",
+        "/usr/bin/true",
+        [],
+        spawnEnv,
+        async (request) => {
+          passedEnv = request.sourceEnv;
+          request.onAudit?.(["AWS_SECRET_ACCESS_KEY"]);
+          return {
+            attemptId: "coord-env",
+            status: 0,
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+          };
+        },
+      );
       expect(code).toBe(0);
+      expect(passedEnv?.VF_DENY_TOOLS).toBe("Write,Edit");
       const scrub = writes.find((w) => w.meta?.kind === "coord-env-scrub");
       expect(scrub).toBeDefined();
       const dropped = scrub?.meta?.dropped as string[];
@@ -380,8 +430,9 @@ describe("coord shim (A1 #167 + #194)", () => {
     writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
     let capturedEnv: Record<string, string | undefined> | null = null;
     const spawner = async (
-      _e: string,
-      _a: readonly string[],
+      _engine: string,
+      _command: string,
+      _args: readonly string[],
       env: NodeJS.ProcessEnv,
     ): Promise<number> => {
       capturedEnv = { ...env };

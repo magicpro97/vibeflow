@@ -1,3 +1,4 @@
+import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-trace-authority.js";
 import type { LiveConversation } from "./lifecycle-gate.js";
 import { durableTraceEventAuthority } from "./private-file-range-commit-authority.js";
 import type { ConversationRuntimeOptions } from "./runtime-options.js";
@@ -9,6 +10,7 @@ interface RuntimeUserMessageRequest {
   conversationId: string;
   request: MessageRequest;
   messageKey: string;
+  queueDelivery?: ConversationQueuedMessageDeliveryAuthorityV1;
   append(): Promise<unknown>;
 }
 
@@ -19,8 +21,18 @@ export async function publishRuntimeUserMessage({
   conversationId,
   request,
   messageKey,
+  queueDelivery,
   append,
 }: RuntimeUserMessageRequest): Promise<void> {
+  if (queueDelivery) {
+    queueDelivery.assertChild(conversationId);
+    queueDelivery.assertRequest(
+      request as MessageRequest & { target_participants: "all" | string[] },
+      messageKey,
+    );
+    if (live?.operationId !== queueDelivery.operationId)
+      throw new Error("queued message operation authority changed");
+  }
   const privateFileRange = request.private_file_range;
   const home = options.homeAuthorities;
   if (!privateFileRange || !home || !live) {

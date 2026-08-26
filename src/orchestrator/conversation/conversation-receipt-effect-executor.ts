@@ -38,7 +38,7 @@ export class ConversationReceiptEffectExecutor {
     private readonly options: {
       lineages: ConversationLineageService;
       home: ConversationHomeAuthorities;
-      service: Pick<ConversationOrchestrator, "cancelOperation" | "events">;
+      service: Pick<ConversationOrchestrator, "cancelOperation" | "events" | "wakeMessageQueue">;
       fault?(point: "after-effect-publish"): void;
     },
   ) {}
@@ -50,9 +50,13 @@ export class ConversationReceiptEffectExecutor {
     dispatch: ActionDispatchRecordV1;
   }): Promise<ConversationReceiptEffectResultV1> {
     let result: ConversationReceiptEffectResultV1;
-    if (input.plan.action_type === "conversation.select_lineage_head")
-      result = this.select(input.plan, input.proposal, input.approval, input.dispatch);
-    else if (input.plan.action_type === "conversation.associate_lineages")
+    if (input.plan.action_type === "conversation.select_lineage_head") {
+      try {
+        result = this.select(input.plan, input.proposal, input.approval, input.dispatch);
+      } finally {
+        this.options.service.wakeMessageQueue(input.plan.expected.conversation_id);
+      }
+    } else if (input.plan.action_type === "conversation.associate_lineages")
       result = this.associate(input.plan, input.proposal, input.approval, input.dispatch);
     else if (input.plan.action_type === "conversation.stop_operation")
       result = await this.stop(input.plan, input.proposal);

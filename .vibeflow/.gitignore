@@ -7,6 +7,7 @@
 !WORKFLOW_POLICY.md
 !REQUIREMENTS.md
 !SKILL_POLICY.json
+!PROJECT_ID.json
 
 # Shareable skills
 !skills/
@@ -20,6 +21,8 @@
 !skills/merge-when-green/**
 !skills/coordinator/
 !skills/coordinator/**
+!skills/typed-protocol-contracts/
+!skills/typed-protocol-contracts/**
 
 # Machine-specific (explicit for clarity):
 # PROJECT_CONTEXT.md, TASK_CONTEXT.md, SKILL_INDEX.md

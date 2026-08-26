@@ -143,4 +143,89 @@ describe("durable action authority store", () => {
       }).created,
     ).toBe(true);
   });
+
+  test("recorded inventory is deterministic and dispatch guards reject stale authority", () => {
+    const directory = root();
+    const resolver = {
+      ...testAuthorityResolver(),
+      prevalidateDispatch: () => undefined,
+      reserveDispatch: () => undefined,
+      assertDispatchReserved: () => undefined,
+    };
+    const store = new ActionAuthorityStore(directory, {
+      now: () => fixedNow,
+      authority_resolver: resolver,
+    });
+    const firstRequest = canonicalRequest();
+    const first = materializeProposal(proposalDraft());
+    store.createProposal({ authority, canonical_request: firstRequest, proposal: first });
+
+    const secondRequest = canonicalRequest({
+      request: {
+        ...firstRequest.request,
+        anchor_event_id: "event-2",
+        candidate: { type: "conversation.stop_operation", operation_id: "operation-2" },
+      },
+    });
+    const second = materializeProposal(
+      proposalDraft({
+        idempotency_key: "request-2",
+        origin_event_id: "event-2",
+        producer_request_binding: {
+          kind: "canonical-action-request",
+          digest: canonicalActionRequestDigest(secondRequest),
+        },
+        action: { type: "conversation.stop_operation", operation_id: "operation-2" },
+        created_at: "2026-08-25T00:00:30.000Z",
+        expires_at: "2026-08-25T01:00:30.000Z",
+      }),
+    );
+    store.createProposal({ authority, canonical_request: secondRequest, proposal: second });
+    expect(store.listRecorded().map((row) => row.proposal.proposal_id)).toEqual([
+      second.proposal_id,
+      first.proposal_id,
+    ]);
+
+    expect(() => store.prevalidateDispatch(first.proposal_id, "approval-missing")).toThrow(
+      ActionConflictError,
+    );
+    expect(() => store.reserveDispatch(first.proposal_id, "approval-missing")).toThrow(
+      ActionConflictError,
+    );
+  });
+
+  test("dispatch reservation rejects authority changed by the external resolver", () => {
+    const directory = root();
+    const proposal = materializeProposal(proposalDraft());
+    const resolver = {
+      ...testAuthorityResolver(),
+      reserveDispatch: () => {
+        store.cancel({
+          proposal_id: proposal.proposal_id,
+          proposal_digest: proposal.proposal_digest,
+          authority,
+          reason: "authority changed during reservation",
+        });
+      },
+      assertDispatchReserved: () => undefined,
+    };
+    const store = new ActionAuthorityStore(directory, {
+      now: () => fixedNow,
+      authority_resolver: resolver,
+    });
+    store.createProposal({ authority, canonical_request: canonicalRequest(), proposal });
+    const approvalId = store.decide({
+      proposal_id: proposal.proposal_id,
+      proposal_digest: proposal.proposal_digest,
+      authority,
+      decision: "approved",
+      challenge_id: null,
+      challenge_response: null,
+    }).approval_id;
+    store.prepareDispatch(proposal.proposal_id, approvalId);
+    expect(() => store.reserveDispatch(proposal.proposal_id, approvalId)).toThrow(
+      ActionConflictError,
+    );
+    expect(store.get(proposal.proposal_id)?.state).toBe("canceled");
+  });
 });

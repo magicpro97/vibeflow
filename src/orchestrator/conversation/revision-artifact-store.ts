@@ -7,13 +7,11 @@ import {
   type ConversationDurableRecord,
   assertConversationManifest,
 } from "./artifact-validation.js";
+import { fail as rejectConversationState } from "./fold-validation.js";
 import type { ConversationManifest } from "./types.js";
 
 const MAX_VISIBILITY_BYTES = 64 * 1024;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-const fail = (message: string): never => {
-  throw new Error(message);
-};
 
 export interface ConversationRevisionVisibilityV1 {
   schema_version: "1.0";
@@ -48,7 +46,7 @@ export function readConversationRevisionVisibility(
   try {
     value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
-    return fail("invalid revision visibility");
+    throw new Error("invalid revision visibility");
   }
   const { content_digest: _digest, ...preimage } = value;
   if (
@@ -63,7 +61,7 @@ export function readConversationRevisionVisibility(
     digestV1("VF-CONVERSATION-REVISION-VISIBILITY\0v1\0", preimage) !== value.content_digest ||
     !canonicalJsonBytes(value).equals(bytes)
   )
-    return fail("invalid revision visibility");
+    throw new Error("invalid revision visibility");
   return clone(value);
 }
 
@@ -80,7 +78,10 @@ export class ConversationRevisionArtifactStore {
     private readonly root: string,
     private readonly access: RevisionArtifactAccess,
   ) {
-    this.visibilityRoot = ensurePrivateDirectory(join(root, "revision-visibility"), fail);
+    this.visibilityRoot = ensurePrivateDirectory(
+      join(root, "revision-visibility"),
+      rejectConversationState,
+    );
   }
 
   readVisibility(conversationId: string): ConversationRevisionVisibilityV1 | null {
@@ -99,7 +100,7 @@ export class ConversationRevisionArtifactStore {
       conversationRevisionVisibilityPath(this.root, preimage.conversation_id),
       canonicalJsonBytes(marker),
       MAX_VISIBILITY_BYTES,
-      fail,
+      rejectConversationState,
     );
   }
 

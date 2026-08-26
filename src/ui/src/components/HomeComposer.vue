@@ -3,21 +3,16 @@
     <div v-if="!store.online" class="home-offline-note" role="status">
       You’re offline. This draft stays in memory and will not send itself when the connection returns.
     </div>
+    <HomeQueuedMessages :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
     <HomeQuoteSelectionList :chips="quoteChips" />
-    <section v-if="store.privateFileRange" class="home-quote-stack" aria-label="Private file range">
-      <article class="home-quote-card" data-status="ready">
-        <header>
-          <strong>Private file range selected</strong>
-          <small>{{ store.privateFileRange.repo_relative_path }} · Lines {{ store.privateFileRange.start_line }}–{{ store.privateFileRange.end_line }}</small>
-        </header>
-        <p>VibeFlow has staged this excerpt privately for one use. Only the binding stays in browser memory, and nothing is persisted in browser storage or exposed on the public timeline.</p>
-        <div class="home-quote-card__actions">
-          <button type="button" class="home-button" @click="openPrivateRangePanel(true)">Change</button>
-          <button type="button" class="home-button" @click="store.clearPrivateFileRange()">Remove</button>
-        </div>
-      </article>
-    </section>
+    <HomePrivateRangeSummary @change="openPrivateRangePanel(true)" />
     <form class="home-composer" aria-label="Message VibeFlow" @submit.prevent="submit">
+      <HomeQueueEditStatus
+        :queue-sequence="store.queuedMessageEdit?.queue_sequence ?? null"
+        :saving="store.queuedMessageEditSaving"
+        :send-as-new="store.queueSendAsNew"
+        @cancel="cancelQueuedEdit"
+      />
       <label id="home-composer-label" class="home-composer__label" for="home-composer">Message</label>
       <div
         class="home-composer__field"
@@ -37,11 +32,10 @@
           v-model="store.draft"
           rows="1"
           :placeholder="placeholder"
-          :disabled="store.submitting"
           :aria-activedescendant="activeSuggestionId"
           aria-autocomplete="list"
           :aria-controls="visibleSuggestions.length ? suggestionListId : undefined"
-          aria-describedby="composer-help composer-error"
+          :aria-describedby="composerDescription"
           @compositionstart="composing = true"
           @compositionend="composing = false"
           @beforeinput="onBeforeInput"
@@ -67,118 +61,100 @@
           <kbd>{{ suggestion.value }}</kbd>
         </button>
       </div>
+      <HomeCapabilityTargetChooser
+        v-if="store.capabilityTargetRequest?.selection_mode === 'explicit'"
+        @confirming="restoreComposerFocusAfterConfirmation"
+        @dismissed="restoreComposerFocus"
+      />
       <div class="home-composer__toolbar">
         <div class="home-composer__tools" aria-label="Conversation shortcuts">
-          <button type="button" title="Add an AI participant" @click="insert('+')">
+          <button type="button" title="Add an AI participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('+')">
             <span aria-hidden="true">+</span> Agent
           </button>
-          <button type="button" title="Message one participant" @click="insert('@')">
+          <button type="button" title="Remove an AI participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('-@')">
+            <span aria-hidden="true">−</span> Remove
+          </button>
+          <button type="button" title="Message one participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('@')">
             <span aria-hidden="true">@</span> Mention
           </button>
           <button
             type="button"
+            :disabled="Boolean(store.queuedMessageEdit)"
             :aria-expanded="privateRangeOpen"
             aria-controls="home-private-range-panel"
-            :title="store.privateFileRange ? 'Change the private file range' : 'Attach an exact private file range'"
+            :title="store.privateContextPresent ? 'Replace the private file range' : 'Attach an exact private file range'"
             @click="openPrivateRangePanel()"
           >
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM7 2v4M13 2v4M7 14h6" /></svg>
-            {{ store.privateFileRange ? "Change range" : "Private range" }}
+            {{ store.privateContextPresent ? "Replace range" : "Private range" }}
           </button>
-          <button type="button" title="Find a capability" @click="$emit('open-capabilities')">
+          <button type="button" title="Find a capability" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-capabilities')">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3h8v4h3v7h-3v3H6v-3H3V7h3V3Z" /></svg>
             Capabilities
           </button>
         </div>
         <button
           class="home-send"
+          :class="{
+            'home-send--labeled': store.queueSendAsNew || composerBusy.active,
+            'home-send--busy': composerBusy.active,
+          }"
           type="submit"
-          :disabled="!store.draft.trim() || store.submitting || !store.online"
-          :aria-label="store.submitting ? 'Sending message' : 'Send message'"
+          :disabled="!store.draft.trim() || store.queuedMessageEditSaving || !store.online"
+          :aria-label="sendLabel"
+          :aria-busy="composerBusy.active ? 'true' : 'false'"
         >
-          <span v-if="store.submitting" class="home-send__busy" />
-          <svg v-else viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 12-6-4 12-2-5-6-1Z" /></svg>
+          <template v-if="composerBusy.active">
+            <span class="home-send__label">{{ composerBusy.label }}</span>
+            <span class="home-send__busy" aria-hidden="true"><i /><i /><i /></span>
+          </template>
+          <template v-else>
+            <span v-if="store.queueSendAsNew" class="home-send__label">Send as new</span>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 12-6-4 12-2-5-6-1Z" /></svg>
+          </template>
         </button>
       </div>
-      <section
-        v-if="privateRangeOpen"
-        id="home-private-range-panel"
-        class="home-private-range-panel"
-        aria-labelledby="home-private-range-title"
-      >
-        <div class="home-private-range-panel__copy">
-          <strong id="home-private-range-title">{{ store.privateFileRange ? "Change private file range" : "Attach a private file range" }}</strong>
-          <p>Stage an exact repo-relative excerpt into VibeFlow&apos;s private one-shot handoff. Only the binding stays in browser memory, and nothing is persisted in browser storage or exposed on the public timeline.</p>
-        </div>
-        <div class="home-private-range-grid">
-          <label>
-            <span>Path</span>
-            <input
-              ref="privatePathInput"
-              v-model="privateRangeDraft.path"
-              type="text"
-              name="private-range-path"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="src/server.ts"
-            />
-          </label>
-          <label>
-            <span>Start line</span>
-            <input
-              v-model="privateRangeDraft.startLine"
-              type="number"
-              min="1"
-              step="1"
-              inputmode="numeric"
-              name="private-range-start"
-            />
-          </label>
-          <label>
-            <span>End line</span>
-            <input
-              v-model="privateRangeDraft.endLine"
-              type="number"
-              min="1"
-              step="1"
-              inputmode="numeric"
-              name="private-range-end"
-            />
-          </label>
-        </div>
-        <div class="home-private-range-panel__actions">
-          <button
-            type="button"
-            class="home-button home-button--primary"
-            :disabled="privateRangeBusy"
-            @click="stagePrivateRange"
-          >{{ privateRangeBusy ? "Selecting…" : "Select range" }}</button>
-          <button type="button" class="home-button" :disabled="privateRangeBusy" @click="resetPrivateRangeForm">Reset</button>
-          <button type="button" class="home-button" :disabled="privateRangeBusy" @click="closePrivateRangePanel">Close</button>
-        </div>
-        <p v-if="privateRangeError" class="home-private-range-panel__error" role="alert">
-          {{ privateRangeError }}
-        </p>
-      </section>
+      <HomePrivateRangePanel
+        ref="privateRangePanel"
+        @open-change="privateRangeOpen = $event"
+      />
     </form>
     <div class="home-composer__below">
-      <span id="composer-help">Enter to send · Shift+Enter for a new line</span>
+      <span id="composer-help">Enter to send · Shift+Enter for a new line · ArrowUp edits your latest queued message</span>
+      <span
+        v-if="composerBusy.active"
+        id="composer-status"
+        class="home-composer__status"
+        role="status"
+        aria-live="polite"
+      >{{ composerBusy.detail }}</span>
       <span id="composer-error" class="home-composer__error" role="alert">{{ store.composerError }}</span>
+    </div>
+    <div id="home-queue-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {{ store.queueAnnouncement }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useHomePrivateRangeComposer } from "../composables/useHomePrivateRangeComposer.js";
-import { resolveHomeQuoteStatus } from "../conversation-home-authoring.js";
-import { projectHomeTimeline } from "../conversation-home-projection.js";
+import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
+import { describeHomeComposerBusy } from "../conversation-home-loading.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
+import HomePrivateRangePanel from "./HomePrivateRangePanel.vue";
+import HomePrivateRangeSummary from "./HomePrivateRangeSummary.vue";
+import HomeQueueEditStatus from "./HomeQueueEditStatus.vue";
+import HomeQueuedMessages from "./HomeQueuedMessages.vue";
 import HomeQuoteSelectionList from "./HomeQuoteSelectionList.vue";
 
+const props = withDefaults(defineProps<{ transientUiOpen?: boolean }>(), {
+  transientUiOpen: false,
+});
 defineEmits<{ "open-capabilities": [] }>();
 const store = useConversationHomeStore();
+const { quoteChips } = useHomeComposerQuotes();
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const composing = ref(false);
 const activeSuggestion = ref(0);
@@ -186,68 +162,52 @@ const suggestionsDismissed = ref(false);
 const pendingEscapeDraft = ref<string | null>(null);
 const suggestionDraftSnapshot = ref("");
 const suggestionListId = "composer-suggestions";
-const {
-  privatePathInput,
-  privateRangeOpen,
-  privateRangeBusy,
-  privateRangeError,
-  privateRangeDraft,
-  resetPrivateRangeForm,
-  closePrivateRangePanel,
-  openPrivateRangePanel,
-  stagePrivateRange,
-} = useHomePrivateRangeComposer({
-  privateFileRange: computed(() => store.privateFileRange),
-  setPrivateFileRange: store.setPrivateFileRange,
-});
+const privateRangeOpen = ref(false);
+const privateRangePanel = ref<{ open(reset?: boolean): void } | null>(null);
+const openPrivateRangePanel = (reset = false) => privateRangePanel.value?.open(reset);
 
 const placeholder = computed(() =>
   store.activeSession
     ? "Ask, steer, add an agent, or extend the CLI…"
     : "What do you want the AI team to build?",
 );
-const visibleQuoteSources = computed(() => {
-  const sources = new Map<
-    string,
-    {
-      source_key: string;
-      root_session_id: string | null;
-      author: string;
-      excerpt: string;
-      target_event_id: string | null;
-      content_digest: string | null;
-    }
-  >();
-  for (const item of projectHomeTimeline(store.timeline?.items ?? [])) {
-    if (!item.anchorKey) continue;
-    sources.set(item.anchorKey, {
-      source_key: item.anchorKey,
-      root_session_id: store.activeRootId,
-      author: item.title,
-      excerpt: item.body,
-      target_event_id: item.messageRef?.target_event_id ?? null,
-      content_digest: item.messageRef?.content_digest ?? null,
-    });
-  }
-  return sources;
-});
-const quoteChips = computed(() =>
-  store.quoteRefs.map((reference) => {
-    const visible = visibleQuoteSources.value.get(reference.source_key) ?? null;
-    const resolved = resolveHomeQuoteStatus(reference, store.activeRootId, visible);
-    return {
-      reference,
-      status: resolved.status,
-      message: resolved.message,
-      canJump: Boolean(visible),
-    };
-  }),
-);
-
 const suggestions = computed(() =>
   matchHomeComposerSuggestions(store.draft, store.activeRevision?.participants ?? []),
 );
-const visibleSuggestions = computed(() => (suggestionsDismissed.value ? [] : suggestions.value));
+const visibleSuggestions = computed(() =>
+  store.queuedMessageEdit || suggestionsDismissed.value ? [] : suggestions.value,
+);
+const queueEditAvailable = computed(
+  () =>
+    store.draft === "" &&
+    !privateRangeOpen.value &&
+    store.capabilityTargetRequest?.selection_mode !== "explicit" &&
+    !props.transientUiOpen &&
+    visibleSuggestions.value.length === 0,
+);
+const composerDescription = computed(() =>
+  store.queuedMessageEdit
+    ? "composer-help queue-edit-help composer-error home-queue-status"
+    : store.queueSendAsNew
+      ? "composer-help queue-send-as-new-help composer-error home-queue-status"
+      : composerBusy.value.active
+        ? "composer-help composer-status composer-error home-queue-status"
+        : "composer-help composer-error home-queue-status",
+);
+const sendLabel = computed(() => {
+  if (store.queuedMessageEditSaving) return "Saving queued message";
+  if (store.queuedMessageEdit) return "Save queued message";
+  if (store.queueSendAsNew) return "Send preserved draft as a new queued message";
+  if (store.submitting) return "Preparing action";
+  return "Send message";
+});
+const composerBusy = computed(() =>
+  describeHomeComposerBusy({
+    hasActiveSession: Boolean(store.activeSession),
+    submitting: store.submitting,
+    savingQueuedEdit: store.queuedMessageEditSaving,
+  }),
+);
 const suggestionSignature = computed(() =>
   suggestions.value.map((suggestion) => suggestion.value).join("\0"),
 );
@@ -267,6 +227,10 @@ watch(
   },
   { immediate: true },
 );
+watch(
+  () => store.queueComposerFocusEpoch,
+  () => void restoreComposerFocus(),
+);
 
 function resize() {
   const element = textarea.value;
@@ -281,6 +245,28 @@ function insert(value: string) {
     textarea.value?.focus();
     resize();
   });
+}
+
+async function restoreComposerFocus() {
+  await nextTick();
+  textarea.value?.focus();
+}
+
+async function restoreComposerFocusAfterConfirmation(completion: Promise<boolean>) {
+  if (await completion) await restoreComposerFocus();
+}
+
+async function focusQueuedEdit() {
+  await restoreComposerFocus();
+  const end = store.draft.length;
+  textarea.value?.setSelectionRange(end, end);
+  resize();
+}
+
+async function cancelQueuedEdit() {
+  if (!store.cancelQueuedMessageEdit()) return;
+  await restoreComposerFocus();
+  resize();
 }
 
 function choose(value: string) {
@@ -311,6 +297,19 @@ function onKeydown(event: KeyboardEvent) {
       if (suggestion) choose(suggestion.value);
       return;
     }
+  }
+  if (event.key === "Escape" && store.queuedMessageEdit) {
+    event.preventDefault();
+    event.stopPropagation();
+    void cancelQueuedEdit();
+    return;
+  }
+  if (event.key === "ArrowUp" && queueEditAvailable.value) {
+    if (store.beginQueuedMessageEdit()) {
+      event.preventDefault();
+      void focusQueuedEdit();
+    }
+    return;
   }
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -362,6 +361,8 @@ async function submit() {
   if (composing.value) return;
   await store.submitDraft();
   await nextTick();
+  if (store.capabilityTargetRequest?.selection_mode === "explicit") return;
+  textarea.value?.focus();
   resize();
 }
 </script>

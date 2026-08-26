@@ -37,7 +37,11 @@ interface ControlRuntimeOptions {
   authority(id: string): ControlAuthority | null;
   read(id: string): Promise<InternalTraceStoreRecord[]>;
   correlation(authority: ControlAuthority, attemptId: string): TraceCorrelation;
-  appendActive(correlation: TraceCorrelation, emission: PolicyEmission): Promise<StoredTraceEvent>;
+  appendActive(
+    correlation: TraceCorrelation,
+    emission: PolicyEmission,
+    requestedEventId?: string,
+  ): Promise<StoredTraceEvent>;
   appendCancellation(
     correlation: TraceCorrelation,
     emission: PolicyEmission,
@@ -130,20 +134,29 @@ export class ControlRuntime {
     );
   }
 
-  userMessage(id: string, request: MessageRequest, key: string): Promise<StoredTraceEvent> {
+  userMessage(
+    id: string,
+    request: MessageRequest,
+    key: string,
+    requestedEventId?: string,
+  ): Promise<StoredTraceEvent> {
     const authority = this.options.authority(id);
     if (!authority) throw new Error("conversation not found");
-    return this.options.appendActive(this.options.correlation(authority, "control"), {
-      idempotency_key: key,
-      event: {
-        type: "user_message",
-        payload: {
-          content: request.content,
-          target_participants: request.target_participants ?? "all",
-          ...(request.quote_refs ? { quote_refs: structuredClone(request.quote_refs) } : {}),
+    return this.options.appendActive(
+      this.options.correlation(authority, "control"),
+      {
+        idempotency_key: key,
+        event: {
+          type: "user_message",
+          payload: {
+            content: request.content,
+            target_participants: request.target_participants ?? "all",
+            ...(request.quote_refs ? { quote_refs: structuredClone(request.quote_refs) } : {}),
+          },
         },
       },
-    });
+      requestedEventId,
+    );
   }
 
   async resolveApproval(

@@ -8,6 +8,7 @@ import {
   materializeProposalPublicationProof,
   materializeReviewAuthorityProof,
 } from "../../actions/index.js";
+import { isAgentProposalBrowserController } from "../../actions/store-rules.js";
 import { digestV1 } from "../../durability/index.js";
 import { conversationActionAuthorityHead } from "./conversation-action-planner.js";
 import type { ConversationActionReceiptStore } from "./conversation-action-receipt-store.js";
@@ -128,12 +129,17 @@ export class ConversationActionAuthorityResolverV1 implements ActionAuthorityRes
   review: ActionAuthorityResolverV1["review"] = ({ proposal, authority, now }) => {
     const root = proposal.base.root_session_id;
     if (!root) throw new Error("conversation action root is absent");
-    const current = conversationActionAuthorityHead({ root_session_id: root, authority });
-    if (
-      current.authority_epoch !== proposal.base.authority_epoch ||
-      current.authority_head_digest !== proposal.base.authority_head_digest
-    )
-      throw new ActionAuthorityStaleError(now, "authority-changed");
+    if (proposal.requested_by.kind === "agent") {
+      if (!isAgentProposalBrowserController(proposal, authority))
+        throw new ActionAuthorityStaleError(now, "controller-changed");
+    } else {
+      const current = conversationActionAuthorityHead({ root_session_id: root, authority });
+      if (
+        current.authority_epoch !== proposal.base.authority_epoch ||
+        current.authority_head_digest !== proposal.base.authority_head_digest
+      )
+        throw new ActionAuthorityStaleError(now, "authority-changed");
+    }
     return materializeReviewAuthorityProof(
       proposal,
       authority,
@@ -230,6 +236,14 @@ export class ConversationActionAuthorityResolverV1 implements ActionAuthorityRes
 export function multiplexActionAuthorityResolvers(
   conversation: ActionAuthorityResolverV1,
   capability: () => ActionAuthorityResolverV1 | undefined,
+  agentReview: () =>
+    | ((input: {
+        proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
+        now: string;
+        phase: "review" | "dispatch";
+        approval_id: string | null;
+      }) => string)
+    | undefined,
 ): ActionAuthorityResolverV1 {
   const selected = (domain: "conversation" | "capability") => {
     if (domain === "conversation") return conversation;
@@ -237,11 +251,52 @@ export function multiplexActionAuthorityResolvers(
     if (!resolver) throw new Error("capability action authority resolver is unavailable");
     return resolver;
   };
+  const validateAgentSource = (input: {
+    proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
+    now: string;
+    phase: "review" | "dispatch";
+    approval_id: string | null;
+  }): string | null => {
+    if (input.proposal.requested_by.kind !== "agent") return null;
+    const validate = agentReview();
+    if (!validate) throw new Error("agent proposal review source validator is absent");
+    return validate(input);
+  };
   return {
     validateProposalPublication: (input) =>
       selected(input.proposal.domain).validateProposalPublication(input),
-    review: (input) => selected(input.proposal.domain).review(input),
-    prepareDispatch: (input) => selected(input.proposal.domain).prepareDispatch(input),
+    review: (input) => {
+      validateAgentSource({ ...input, phase: "review", approval_id: null });
+      return selected(input.proposal.domain).review(input);
+    },
+    prevalidateDispatch: (input) => {
+      validateAgentSource({
+        ...input,
+        phase: "dispatch",
+        approval_id: input.approval.approval_id,
+      });
+      selected(input.proposal.domain).prevalidateDispatch?.(input);
+    },
+    prepareDispatch: (input) => {
+      validateAgentSource({
+        ...input,
+        phase: "dispatch",
+        approval_id: input.approval.approval_id,
+      });
+      return selected(input.proposal.domain).prepareDispatch(input);
+    },
+    reserveDispatch: (input) => {
+      const producerAuthorityDigest = validateAgentSource({
+        ...input,
+        phase: "dispatch",
+        approval_id: input.approval.approval_id,
+      });
+      const reserve = selected(input.proposal.domain).reserveDispatch;
+      if (!reserve) throw new Error("selected action domain has no dispatch reservation authority");
+      reserve({ ...input, producer_authority_digest: producerAuthorityDigest });
+    },
+    assertDispatchReserved: (input) =>
+      selected(input.proposal.domain).assertDispatchReserved?.(input),
     proveDomainPrepared: (input) => selected(input.proposal.domain).proveDomainPrepared(input),
     resolveTerminal: (input) => selected(input.proposal.domain).resolveTerminal(input),
     validateRecordedTerminal: (input) =>

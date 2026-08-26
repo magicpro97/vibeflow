@@ -88,12 +88,10 @@ export function projectConversationActionSnapshot(
   revisionEvents: readonly RevisionOperationEventV1[],
   receipt: ConversationActionReceiptV1 | null = null,
 ) {
-  return projectActionSnapshot(
-    snapshot,
-    receipt
-      ? projectConversationReceiptEvents(snapshot, receipt)
-      : projectRevisionActionEvents(snapshot, revisionEvents),
-  );
+  const events = receipt
+    ? projectConversationReceiptEvents(snapshot, receipt)
+    : projectRevisionActionEvents(snapshot, revisionEvents);
+  return projectActionSnapshot(snapshot, events);
 }
 
 function receiptPhase(receipt: ConversationActionReceiptV1): PublicOperationPhaseV1 {

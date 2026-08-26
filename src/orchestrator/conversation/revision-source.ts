@@ -9,14 +9,11 @@ import type { BindingAuthoritySnapshot, ConversationDurableRecord } from "./arti
 import { conversationLockDigest, semanticConversationJournalHead } from "./catalog-lock.js";
 import { resolveActiveCompaction } from "./conversation-active-compaction.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import { ConversationInteractionCorruptError } from "./conversation-interaction-store.js";
+import type { ConversationInteractionFoldV1 } from "./conversation-interaction-types.js";
 import { materializeConversationLockBinding } from "./conversation-lock.js";
 import { type BuiltContextHandoffV1, buildContextHandoff } from "./handoff-selection.js";
-import type {
-  PublicCompactionArtifactV1,
-  PublicHandoffBindingV1,
-  PublicHandoffMessageV1,
-  PublicHandoffResponseV1,
-} from "./handoff-types.js";
+import type { PublicCompactionArtifactV1, PublicHandoffBindingV1 } from "./handoff-types.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
 import {
   type PublishedRevisionTransitionInputV1,
@@ -34,10 +31,25 @@ import { bindingAuthorities } from "./policy-registry.js";
 import {
   ConversationRevisionConflictError,
   ConversationRevisionCorruptError,
+  ConversationRevisionInactiveHeadError,
+  ConversationRevisionNotStableTerminalError,
 } from "./revision-errors.js";
+import {
+  buildRevisionQuoteGraphArtifact,
+  revisionPublicTranscript,
+} from "./revision-handoff-context.js";
 import { readConversationSourceInventory } from "./source-inventory.js";
 import type { ConversationSnapshot } from "./types.js";
 import type { ConversationBinding, ConversationManifest } from "./types.js";
+
+export {
+  buildRevisionQuoteGraphArtifact,
+  revisionPublicTranscript,
+} from "./revision-handoff-context.js";
+export type {
+  RevisionPublicTranscriptV1,
+  RevisionQuoteSourceV1,
+} from "./revision-handoff-context.js";
 
 const TERMINAL = new Set(["COMPLETED", "STOPPED", "FAILED", "ABORTED"]);
 const key = (node: LineageNodeIdentityV1): string =>
@@ -51,6 +63,38 @@ export interface ResolvedRevisionBaseV1 {
   lock: ReturnType<typeof materializeConversationLockBinding>;
   published: readonly PublishedRevisionTransitionInputV1[];
   active_compaction: PublicCompactionArtifactV1 | null;
+  interaction_fold: ConversationInteractionFoldV1 | null;
+}
+
+export interface ResolvedConversationLineageSourceV1 {
+  lineage: ConversationLineageReadV1;
+  parent: ValidatedLineageNodeV1;
+  published: readonly PublishedRevisionTransitionInputV1[];
+}
+
+/** Resolves an authoritative lineage node without treating current head/terminal policy as identity. */
+export function resolveConversationLineageSource(input: {
+  artifactRoot: string;
+  traceRoot: string;
+  conversationId: string;
+  home: ConversationHomeAuthorities;
+}): ResolvedConversationLineageSourceV1 {
+  const published = input.home.publishedRevisionTransitions();
+  const inventory = readConversationSourceInventory({
+    artifactRoot: input.artifactRoot,
+    traceRoot: input.traceRoot,
+    actionAuthority: input.home.reviewedActionAuthority(),
+  });
+  const derivation = deriveConversationLineages(inventory, {
+    publishedRevisionTransitions: published,
+  });
+  const lineage = derivation.lineages.find((candidate) =>
+    candidate.nodes.some((node) => node.node.conversation_id === input.conversationId),
+  );
+  const parent = lineage?.nodes.find((node) => node.node.conversation_id === input.conversationId);
+  if (!inventory.authoritative || !derivation.authoritative || !lineage || !parent)
+    throw new ConversationRevisionCorruptError("conversation lineage is not authoritative");
+  return { lineage, parent, published };
 }
 
 export function defaultConversationActionAuthority(
@@ -88,21 +132,7 @@ export function resolveRevisionBase(input: {
   conversationId: string;
   home: ConversationHomeAuthorities;
 }): ResolvedRevisionBaseV1 {
-  const published = input.home.publishedRevisionTransitions();
-  const inventory = readConversationSourceInventory({
-    artifactRoot: input.artifactRoot,
-    traceRoot: input.traceRoot,
-    actionAuthority: input.home.reviewedActionAuthority(),
-  });
-  const derivation = deriveConversationLineages(inventory, {
-    publishedRevisionTransitions: published,
-  });
-  const lineage = derivation.lineages.find((candidate) =>
-    candidate.nodes.some((node) => node.node.conversation_id === input.conversationId),
-  );
-  const parent = lineage?.nodes.find((node) => node.node.conversation_id === input.conversationId);
-  if (!inventory.authoritative || !derivation.authoritative || !lineage || !parent)
-    throw new ConversationRevisionCorruptError("conversation lineage is not authoritative");
+  const { lineage, parent, published } = resolveConversationLineageSource(input);
   const transitions = publishedRevisionAuthorityMap(published);
   const stored = input.home.lineage.readHead(lineage.root_session_id);
   const head = validateLineageHeadForRead(
@@ -111,9 +141,9 @@ export function resolveRevisionBase(input: {
     transitions,
   );
   if (head.head_status !== "committed" || !head.active || key(head.active) !== key(parent.node))
-    throw new ConversationRevisionConflictError("conversation is not the active lineage head");
+    throw new ConversationRevisionInactiveHeadError();
   if (!TERMINAL.has(parent.source.journal_head.lifecycle))
-    throw new ConversationRevisionConflictError("conversation is not stable terminal");
+    throw new ConversationRevisionNotStableTerminalError();
   const reservation = input.home.lineage.readReservation(lineage.root_session_id);
   const claimEpoch = reservation?.revision_claim_epoch ?? 0;
   const semantic = semanticConversationJournalHead(lineage.root_session_id, parent.source);
@@ -137,6 +167,12 @@ export function resolveRevisionBase(input: {
     parent,
     public_events: [...selected.messages, ...selected.responses],
   });
+  let interactionFold: ConversationInteractionFoldV1 | null = null;
+  try {
+    interactionFold = input.home.interactions.readFold(lineage.root_session_id);
+  } catch (error) {
+    if (!(error instanceof ConversationInteractionCorruptError)) throw error;
+  }
   return {
     lineage,
     parent,
@@ -145,88 +181,8 @@ export function resolveRevisionBase(input: {
     lock,
     published,
     active_compaction: activeCompaction,
+    interaction_fold: interactionFold,
   };
-}
-
-function ancestry(lineage: ConversationLineageReadV1, parent: ValidatedLineageNodeV1) {
-  const byNode = new Map(lineage.nodes.map((node) => [key(node.node), node]));
-  const output: ValidatedLineageNodeV1[] = [];
-  let current: ValidatedLineageNodeV1 | undefined = parent;
-  while (current) {
-    output.push(current);
-    current = current.parent ? byNode.get(key(current.parent)) : undefined;
-  }
-  output.reverse();
-  if (output[0]?.node.conversation_id !== lineage.root_session_id)
-    throw new ConversationRevisionCorruptError("conversation ancestry is incomplete");
-  return output;
-}
-
-function redactionDigest(kind: string, value: unknown): string {
-  return digestV1("VF-PUBLIC-HANDOFF-REDACTION\0v1\0", {
-    schema_version: "1.0",
-    kind,
-    value,
-  });
-}
-
-function terminalStatus(lifecycle: string): PublicHandoffResponseV1["terminal_status"] {
-  if (lifecycle === "FAILED") return "failed";
-  if (lifecycle === "COMPLETED") return "completed";
-  return "stopped";
-}
-
-export function revisionPublicTranscript(
-  lineage: ConversationLineageReadV1,
-  parent: ValidatedLineageNodeV1,
-) {
-  const messages: PublicHandoffMessageV1[] = [];
-  const responses: PublicHandoffResponseV1[] = [];
-  for (const revision of ancestry(lineage, parent)) {
-    const partial = new Map<string, string>();
-    for (const { stored_event: stored } of revision.source.journal_records) {
-      if (stored.event.type === "user_message") {
-        messages.push({
-          event_id: stored.event_id,
-          conversation_id: revision.node.conversation_id,
-          revision_id: revision.node.revision_id,
-          revision_ordinal: revision.node.revision_ordinal,
-          public_seq: stored.seq,
-          author_public_id: "human",
-          text: stored.event.payload.content,
-          created_at: stored.ts,
-          redaction_manifest_digest: redactionDigest("user-message", stored.event.payload),
-        });
-      }
-      if (stored.event.type !== "agent_response_delta") continue;
-      const payload = stored.event.payload;
-      const responseKey = `${payload.round_id}\0${payload.participant_id}`;
-      const content = `${partial.get(responseKey) ?? ""}${payload.content_delta}`;
-      partial.set(responseKey, content);
-      if (!payload.completes_response) continue;
-      const role = revision.source.manifest.bindings.find(
-        (binding) => binding.participant_id === payload.participant_id,
-      )?.input.roleRef;
-      if (!role) throw new ConversationRevisionCorruptError("response binding is absent");
-      responses.push({
-        event_id: stored.event_id,
-        conversation_id: revision.node.conversation_id,
-        revision_id: revision.node.revision_id,
-        revision_ordinal: revision.node.revision_ordinal,
-        public_seq: stored.seq,
-        participant_id: payload.participant_id,
-        role_ref: role,
-        text: content,
-        terminal_status: terminalStatus(revision.source.journal_head.lifecycle),
-        created_at: stored.ts,
-        redaction_manifest_digest: redactionDigest("participant-response", {
-          participant_id: payload.participant_id,
-          content,
-        }),
-      });
-    }
-  }
-  return { messages, responses };
 }
 
 export function buildRevisionHandoff(input: {
@@ -236,6 +192,11 @@ export function buildRevisionHandoff(input: {
   promptBudgetBytes?: number;
 }): BuiltContextHandoffV1 {
   const selected = revisionPublicTranscript(input.base.lineage, input.base.parent);
+  const quoteGraph = buildRevisionQuoteGraphArtifact({
+    root_session_id: input.base.lineage.root_session_id,
+    transcript: selected,
+    interaction_fold: input.base.interaction_fold,
+  });
   return buildContextHandoff({
     source: {
       conversation_id: input.base.parent.node.conversation_id,
@@ -249,6 +210,7 @@ export function buildRevisionHandoff(input: {
     user_messages: selected.messages,
     final_responses: selected.responses,
     artifacts: [],
+    ...(quoteGraph ? { mandatory_artifacts: [quoteGraph] } : {}),
     consensus: { score: input.snapshot.consensus_score, synthesis: null },
     prompt_budget_bytes: input.promptBudgetBytes ?? 1024 * 1024,
     active_compaction: input.base.active_compaction,

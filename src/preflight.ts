@@ -1,13 +1,10 @@
 import { ENGINES, type Engine, hasCommand, resolveCommand, resolveEngineBinary } from "./core.js";
 import { checkEngineAsync, runAttempts } from "./preflight/check-async.js";
 import {
-  GH_AUTH_TIMEOUT_MS,
   checkCopilotAuth,
-  defaultSpawner,
   engineBinary,
   engineBinaryResolved,
   installHint,
-  probeTimeoutMs,
   runProbeSafe,
 } from "./preflight/probe.js";
 import type { EngineReadiness, PreflightOpts, ReadinessLevel } from "./preflight/types.js";
@@ -129,10 +126,7 @@ export function invalidateAllProbes(): void {
  */
 export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineReadiness {
   const has = opts.has ?? hasCommand;
-  const spawner =
-    opts.spawner ??
-    ((cmd: string, args: string[], input: string) =>
-      defaultSpawner(cmd, args, input, cmd === "gh" ? GH_AUTH_TIMEOUT_MS : probeTimeoutMs(engine)));
+  const spawner = opts.spawner;
   const now = opts.now ?? (() => new Date().toISOString());
   const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({
     engine,
@@ -163,6 +157,20 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
   const resolvedCmd =
     opts.spawner !== undefined ? effectiveCmd : (resolveCommand(effectiveCmd) ?? effectiveCmd);
 
+  if (opts.probe === false) {
+    const r = stamp("ready", `${engine}: installed (probe skipped)`);
+    writeToCache(engine, opts, r);
+    return r;
+  }
+
+  // Production live probes must use checkEngineAsync so the process is durably owned.
+  // A synchronous spawner remains an explicit test seam only.
+  if (spawner === undefined) {
+    const r = stamp("probe-failed", `${engine}: live probe requires async owned execution`);
+    writeToCache(engine, opts, r);
+    return r;
+  }
+
   if (engine === "copilot") {
     try {
       const auth = checkCopilotAuth(has, spawner, usesDefaultHas);
@@ -175,12 +183,6 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
       writeToCache(engine, opts, r);
       return r;
     }
-  }
-
-  if (opts.probe === false) {
-    const r = stamp("ready", `${engine}: installed (probe skipped)`);
-    writeToCache(engine, opts, r);
-    return r;
   }
 
   const probe = runProbeSafe(engine, (probeCmd, args, input) =>

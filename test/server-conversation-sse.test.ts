@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { PublicConversationMessageQueueInvalidationV1 } from "../src/orchestrator/conversation/conversation-message-queue-records.js";
 import type {
   ConversationService,
   ConversationSnapshot,
@@ -91,6 +92,73 @@ describe("conversation SSE stream", () => {
     expect(frame).toStartWith("id: 2\nevent: trace\ndata: ");
     expect(frame).toEndWith("\n\n");
     expect(frame).not.toContain("stream_token");
+  });
+
+  test("emits the exact queue invalidation DTO on the existing stream without an SSE id", async () => {
+    let queueListener: ((event: PublicConversationMessageQueueInvalidationV1) => void) | null =
+      null;
+    const service = {
+      snapshot: async () => snapshot,
+      subscribe: () => Object.assign(() => undefined, { replayReady: Promise.resolve() }),
+    } as unknown as ConversationService;
+    const url = new URL("http://local/api/conversations/conversation-a/events?stream_token=good");
+    const response = await handleConversationSse(
+      {
+        service,
+        tokens: { authorize: () => true },
+        heartbeatMs: 0,
+        messageQueue: {
+          rootSessionId: () => "conversation-root",
+          subscribe: (_root, listener) => {
+            queueListener = listener;
+            return () => undefined;
+          },
+        },
+      },
+      new Request(url.toString()),
+      url,
+      "conversation-a",
+    );
+    const emitQueue = queueListener as
+      | ((event: PublicConversationMessageQueueInvalidationV1) => void)
+      | null;
+    if (!emitQueue) throw new Error("queue listener was not installed");
+    const event: PublicConversationMessageQueueInvalidationV1 = {
+      schema_version: "1.0",
+      root_session_id: "conversation-root",
+      queue_item_id: `vf-queued-message-${"a".repeat(64)}`,
+      state: "queued",
+      item_digest: `sha256:${"b".repeat(64)}`,
+    };
+    emitQueue(event);
+    emitQueue({ ...event, root_session_id: "wrong-root" });
+    emitQueue({ ...event, queue_item_id: "private-claim-id" });
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("missing SSE body");
+    let output = "";
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const part = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("queue invalidation was not emitted")), 100),
+          ),
+        ]);
+        if (part.done) break;
+        output += new TextDecoder().decode(part.value);
+      }
+    } finally {
+      await reader.cancel();
+    }
+    const queueFrames = output
+      .split("\n\n")
+      .filter((frame) => frame.includes("event: message-queue-invalidated"));
+    expect(queueFrames).toHaveLength(1);
+    expect(queueFrames[0]).not.toContain("id:");
+    const data = queueFrames[0]?.split("\ndata: ")[1];
+    expect(JSON.parse(data ?? "null")).toEqual(event);
+    expect(queueFrames[0]).not.toContain("private-claim-id");
   });
 
   test("uses only a bound stream token and returns stable cursor/auth failures", async () => {

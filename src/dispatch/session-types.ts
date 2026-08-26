@@ -1,6 +1,10 @@
 import type { RoleSandbox } from "../agents/role.js";
 import type { Engine } from "../core.js";
 import { type EnvPolicy, isConversationEnvPolicy } from "./env-filter.js";
+import type { OwnedProcessPlatform } from "./owned-process-platform.js";
+import type { OwnedProcessController, OwnedProcessReleaseProof } from "./owned-process-runtime.js";
+import type { OwnedSupervisorExitOutcome } from "./owned-process-status.js";
+import type { EngineTerminalObservation } from "./session-terminal.js";
 import type { EngineSummary } from "./types.js";
 
 export type SessionMode = "exact" | "replay" | "fresh";
@@ -115,6 +119,11 @@ export type OperationLifecycleState =
   | "completed"
   | "ambiguous";
 
+export interface AttemptProcessRelease {
+  proof: OwnedProcessReleaseProof | null;
+  terminal: EngineTerminalObservation | null;
+}
+
 export interface EngineChunk {
   stream: "stdout" | "stderr";
   /** Public-safe, newline-framed content. Incomplete control records stay buffered. */
@@ -202,6 +211,8 @@ export interface EngineProcess {
   pid?: number;
   /** Startup I/O failed after spawn; the adapter still owns and must reap this process. */
   startupError?: Error;
+  /** Typed owned-supervisor terminal outcome, including whether stream drain was proved. */
+  rootExited?: Promise<OwnedSupervisorExitOutcome>;
   stdin?: { write(value: string | Uint8Array): unknown; end(): unknown } | null;
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
@@ -214,6 +225,7 @@ export interface EngineProcessSpawnOptions {
   env: NodeJS.ProcessEnv;
   stdinText: string;
   detached: boolean;
+  ownedRuntime?: OwnedProcessController;
 }
 
 export type EngineProcessSpawner = (
@@ -232,7 +244,10 @@ export interface EngineSessionAdapterOptions {
   /** The configured spawner creates a detached process group owned by this adapter. */
   ownsProcessGroup?: boolean;
   evidenceRoot?: string;
+  /** Trusted private root for bounded, lifecycle-owned Copilot argv prompt files. */
+  privatePromptFileRoot?: string;
   historyRoots?: Partial<Record<Engine, readonly string[]>>;
+  ownedProcessPlatform?: OwnedProcessPlatform;
   writeEvidence?: (
     attemptId: string,
     evidence: Readonly<Record<string, unknown>>,

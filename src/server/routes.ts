@@ -14,7 +14,10 @@ import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../c
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { writeGuidance } from "../dispatch/guidance.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
-import { askResponse } from "./ask-route.js";
+import {
+  type ConversationAskCompatibilityHttpAuthorityV1,
+  handleConversationAskCompatibilityRoute,
+} from "./conversation-ask-compatibility-route.js";
 import { handleCuratorSetupRoute } from "./curator-setup-route.js";
 import {
   ATTACH_CAP,
@@ -40,6 +43,7 @@ export interface RouteCtx {
   getActiveRepo: () => string;
   setActiveRepo: (repo: string) => void;
   orchestrateFn?: typeof orchestrate;
+  askCompatibility?: ConversationAskCompatibilityHttpAuthorityV1;
 }
 
 const GUIDANCE_NOTE_CAP = 100 * 1024;
@@ -109,6 +113,8 @@ export async function handleMutationRoute(
     const response = await handleCuratorSetupRoute(ctx.getActiveRepo(), path, req);
     if (response) return response;
   }
+  if (method === "POST" && path === "/api/ask")
+    return handleConversationAskCompatibilityRoute(ctx.askCompatibility, req, ctx.getActiveRepo());
   const payload = (await req.json()) as Record<string, unknown>;
 
   if (path === "/api/detect") {
@@ -164,7 +170,7 @@ export async function handleMutationRoute(
     if (typeof payload.repoPath === "string" && payload.repoPath.trim()) {
       ctx.setActiveRepo(resolveRepo(payload.repoPath));
     }
-    const { files, state } = applyIntake(payload, {
+    const { files, state } = await applyIntake(payload, {
       useAi: payload.useAi === true,
       base: ctx.getActiveRepo(),
     });
@@ -227,13 +233,6 @@ export async function handleMutationRoute(
     return Response.json({ ok: true, state: readState(ctx.getActiveRepo()) });
   }
 
-  if (path === "/api/ask") {
-    // #562 Stage B: thin glue. All validation/path-guard/slice/engine-pick lives
-    // in runAskRequest (ask-route.ts, unit-tested); real deps used here.
-    // #584: now async — do not block the Bun event loop.
-    return await askResponse(ctx.getActiveRepo(), payload);
-  }
-
   if (path === "/api/discover") {
     const rawKind = payload.kind;
     if (rawKind !== "skills" && rawKind !== "docs") {
@@ -291,7 +290,7 @@ export async function handleMutationRoute(
   }
 
   if (path === "/api/preflight") {
-    return Response.json(runPreflight(payload));
+    return Response.json(await runPreflight(payload));
   }
 
   if (path === "/api/settings" && ("envPolicy" in payload || "hooks" in payload))

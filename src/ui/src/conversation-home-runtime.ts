@@ -1,10 +1,6 @@
 import { ConversationHomeApiError } from "./conversation-home-api.js";
 import type { ActivationEpoch } from "./conversation-home-state.js";
-import type {
-  HomeActionOperationState,
-  HomePendingChallenge,
-  HomePrivateFileRangeBinding,
-} from "./conversation-home-types.js";
+import type { HomeActionOperationState, HomePendingChallenge } from "./conversation-home-types.js";
 
 export const HOME_ACTION_OPERATION_STATES: ReadonlySet<string> = new Set([
   "pending_review",
@@ -44,17 +40,6 @@ export function readableHomeError(error: unknown): string {
 export function createHomeActionKey(): string {
   const suffix = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2);
   return `home-${Date.now()}-${suffix}`.slice(0, 128);
-}
-
-export function sameHomePrivateFileRangeBinding(
-  left: HomePrivateFileRangeBinding | null,
-  right: HomePrivateFileRangeBinding | null,
-): boolean {
-  if (!left || !right) return left === right;
-  return (
-    left.handoff_id === right.handoff_id &&
-    left.handoff_record_digest === right.handoff_record_digest
-  );
 }
 
 export function isHomePendingChallengeExpired(

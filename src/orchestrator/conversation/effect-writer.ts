@@ -73,6 +73,28 @@ export class ConversationEffectWriter {
     });
   }
 
+  writeRequestedEvent(
+    correlation: Readonly<TraceCorrelation>,
+    emission: PolicyEmission,
+    requestedEventId: string,
+  ): Promise<StoredTraceEvent> {
+    const capturedCorrelation = snapshotRuntimeValue(correlation);
+    const capturedEmission = snapshotRuntimeValue(emission);
+    return this.serial(capturedCorrelation.conversation_id, async () => {
+      const append = this.options.traceStore.appendRequestedEvent;
+      if (!append) throw new Error("trace requested event append authority is absent");
+      const stored = await append.call(
+        this.options.traceStore,
+        capturedCorrelation,
+        capturedEmission,
+        requestedEventId,
+        null,
+      );
+      this.notify(stored, null);
+      return stored;
+    });
+  }
+
   writeBatch(
     correlation: Readonly<TraceCorrelation>,
     emissions: readonly PolicyEmission[],

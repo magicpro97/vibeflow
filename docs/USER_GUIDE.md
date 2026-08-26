@@ -1,8 +1,8 @@
 ---
 title: User Guide
-description: Verifiable end-to-end user guide for workflows, traced conversations, the web UI, CLI, generated files, and troubleshooting.
+description: Verifiable end-to-end user guide for the AI-first Home, workflows, traced conversations, the web UI, CLI, generated files, and troubleshooting.
 category: tutorial
-last_updated: 2026-08-23
+last_updated: 2026-08-26
 ---
 
 # VibeFlow User Guide
@@ -17,11 +17,12 @@ last_updated: 2026-08-23
 - [6. Generated Files](#6-generated-files)
 - [7. Troubleshooting](#7-troubleshooting)
 
-VibeFlow is a local-first CLI (`vf`) that opens a web UI and orchestrates Claude Code,
-Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI (`agy`) through shared context, Anthropic-style skills, hooks,
-and verification. It never lets an engine work blindly: it scans your repo, resolves the
-skills a task needs **on demand**, plans non-overlapping work units, dispatches them in
-parallel, and refuses to "complete" anything without recorded evidence.
+VibeFlow is a local-first CLI (`vf`) that opens a web UI and coordinates Claude Code,
+Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI (`agy`) through shared context,
+Anthropic-style skills, hooks, and verification. It never lets an engine work blindly: it
+scans your repo, resolves the skills a task needs **on demand**, plans non-overlapping work
+units, dispatches them in parallel, and refuses to "complete" anything without recorded
+evidence.
 
 This guide is verifiable end to end — every section ends with a command whose output you
 can check.
@@ -92,24 +93,14 @@ intake + scan  →  resolve skill NEEDS  →  plan work units  →  dispatch (pa
 vf            # or: vf ui
 ```
 
-Opens `http://127.0.0.1:<port>` (loopback only). The dashboard has:
+Opens `http://127.0.0.1:<port>` (loopback only). The default surface is AI-first Home:
 
-1. **New workflow** — repository path (with **Detect**), goal, engines, doc/task sources,
-   file types, sample attachments, and the Definition of Done. Click **Generate workflow**.
-2. **Resource meter** — units done, tokens, estimated cost, elapsed time (live via SSE).
-3. **Triage banner** — any blocked unit is surfaced at the top, before everything else.
-4. **Dispatch** — pick an engine, **Write dispatch prompt**, or **Orchestrate (dry)** to
-   plan + dispatch work units (browser orchestration is always dry — it never shells out).
-5. **Work units** — a board you can add/edit/delete; each card shows status, the
-   build/lint/test/review gate strip, confidence, resources, and recorded evidence.
-6. **Skills** — locally discovered skills and the demand-driven NEEDS (satisfied vs. must
-   acquire).
-7. **Discovery** — Context7 docs/skill lookup. The network is only touched after you tick
-   **approve network**.
-8. **Conversation workspace** — create or resume a direct, debate, plan, review, verify, or
-   orchestrate conversation; follow streamed rounds and deltas; inspect the decision matrix,
-   baseline, public trace, approvals, operations, and opaque artifacts; inject a message or
-   create a child revision from a completed result.
+1. **Searchable session rail** — recent conversations, search, and **New conversation**.
+2. **Central conversation pane** — topic, lifecycle state, participant avatars, and live stream status.
+3. **Composer** — durable FIFO queue, ArrowUp edit of the latest queued human message, private file range, and capability chooser.
+4. **Details inspector** — participants, continuity, lineage, and health.
+5. **Trace / capabilities drawers** — ordered public trace, evidence, and typed CLI capability actions.
+6. **Intake wizard** — when you run `vf init --interactive`, the UI switches to repo setup: path, goal, engines, sources, attachments, and Definition of Done.
 
 Security: the server binds to `127.0.0.1`, every write carries a per-process CSRF token,
 the Host/Origin must be loopback, uploads are sanitized and size-capped, and the page ships
@@ -117,30 +108,34 @@ no third-party JavaScript under a strict CSP.
 
 ### Conversation workspace
 
-Select **Open conversation workspace** in the top bar. The dialog is designed for a
-small-laptop viewport and keeps keyboard focus inside it until you press Escape or select
-**Close**.
+Choose a session in the rail and use it immediately, or select **New conversation**. Search
+filters the rail without changing the active session. The center timeline remains the source
+of truth while details, trace, and capability drawers open alongside it.
 
-To start a conversation:
+The composer keeps collaboration inside the conversation:
 
-1. Enter a topic. Leave **Policy** blank to let the coordinator decide, or enter
-   `direct`, `debate`, `plan`, `review`, `verify`, or `orchestrate`.
-2. Optionally set **Max rounds** to an integer from 1 through 100 and add one participant per
-   line as `role@engine[:model]`.
-3. Select **Start conversation**. The initial snapshot appears first; ordered replay and
-   live trace events then fill the message timeline, rounds, operations, and artifacts.
-4. Use **Pause**, **Resume**, or **Stop** only when enabled. Approval and cancellation cards
-   carry the exact operation identifiers shown in the trace. A `409` means another control
-   action won the race; refresh or resume instead of repeating blindly.
-5. Select **Trace** on a message or artifact to inspect public correlation fields and the
-   sanitized event payload. Result and approval `artifact_refs` are public catalog ids; select
-   **Preview** to fetch bytes with the separate opaque `ref` emitted by `artifact_created`.
+1. Send another message while agents are working; it joins the durable FIFO queue instead of
+   interrupting or replacing an earlier send.
+2. Press ArrowUp with an empty composer to edit the latest queued human message. Press Escape
+   to cancel. If dispatch wins the race before the edit commits, the draft is preserved and
+   the UI offers an explicit send-as-new action.
+3. Select **Agent** to add a participant. Select **Remove** or the `−` action beside a
+   participant in **Details** to prepare `-@participant`; submit it in chat so the removal is
+   visible and auditable. `@` mentions target participants without leaving the composer.
+4. Quote one through eight visible messages, including messages from different sources.
+   Quote chips preserve order and can be moved, removed, or used to jump to their source.
+5. React with the small supported set: 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, or ❗. Reactions are
+   typed conversation data, not prompt text; agents are capped at three distinct non-self
+   reactions so the social layer stays useful.
+6. Resolve approval, cancellation, installation, repair, and other capability cards inline.
+   A `409` means another operation won the race; reload the current state instead of retrying
+   blindly.
 
-Use the **Resume** tab to reconnect to an existing conversation id. If a stream disconnects,
-the UI renews its short-lived token and resumes after its last confirmed sequence. Duplicate
-replay/live events are ignored by `seq`. Sending a message to an active conversation steers
-that conversation; sending one to a completed conversation creates a child revision and
-shows a link back to its parent.
+If a stream disconnects, Home renews its short-lived token and resumes after its last
+confirmed sequence. Duplicate replay/live events are ignored by `seq`. Sending to an active
+conversation steers it; sending to a completed conversation creates a child revision and
+shows the parent link. **Trace** exposes sanitized public correlation fields. Public result
+and approval `artifact_refs` remain distinct from the opaque `ref` used to preview bytes.
 
 Conversation credentials have separate jobs. The browser receives an `HttpOnly`,
 `SameSite=Strict` session cookie for JSON and artifact requests; loopback writes also carry
@@ -261,7 +256,8 @@ Use `ask` for a file-range question, `chat` for the canonical persisted conversa
 
 ```bash
 vf ask src/server.ts:130-180 "what protects these routes?"
-vf ask --resume "which failure is fail-closed?"          # latest native engine session
+vf ask --conversation conversation-123 "which failure is fail-closed?"
+vf ask --conversation conversation-123 --resume "keep going"
 vf ask --conversation conversation-123 src/server.ts:130-180 "revise this explanation"
 
 vf chat "Explain the release flow"
@@ -273,10 +269,24 @@ vf brainstorm --yes --max-rounds 3 "Compare two storage designs"
 vf brainstorm --yes --no-baseline --json "Compare designs"
 ```
 
-`ask --resume` is engine-native and continues the selected CLI's most recent session; it
-does not select a VibeFlow conversation id. Claude, Codex, OpenCode, and Antigravity support
-that path, while Copilot reports it as unavailable. `ask --conversation <id>` is the explicit
-persisted path. It frames the file snippet and posts it to that conversation.
+`ask` stages the selected file range as private context and then routes the follow-up through
+the durable conversation runtime. Public turns use the canonical `VF-TURN/1` JSON envelope;
+private file ranges use a separate `VF-PRIVATE-FILE-RANGES/1` JSON payload that is cleared
+after the turn. The private payload is not written into public trace or browser persistence.
+`--conversation <id>` is the explicit persisted path and `--resume` is compatibility-only:
+it requires `--conversation` and never targets a native latest-session resume path. Claude,
+Codex, OpenCode, and Antigravity support native session resume in their own CLI paths;
+Copilot reports that path as unavailable.
+
+For an exact proved native resume, the CLI retains its own history and VibeFlow supplies only
+new applicable user messages plus peer-agent responses and reactions. The recipient's own
+prior output is not repeated. Missing or stale cursor proof falls back to the full applicable
+public handoff. Claude, Codex, and OpenCode receive prompts on stdin; Copilot and Antigravity
+receive native prompt argv. A large Copilot work-unit prompt may be written to
+`.vibeflow/dispatch/<unit>.md` and replaced on argv by a short absolute read pointer. That
+prompt file is a transport fallback, not a resumable session or memory store. Antigravity
+rejects prompts at or above 30 KiB because its print mode has no supported file/stdin
+replacement.
 
 `chat` accepts `--policy`, repeated `--participant <role@engine[:model]>`,
 `--max-rounds`, `--resume`, `--no-baseline`, and `--json`. `brainstorm` accepts repeated
@@ -300,10 +310,10 @@ contract.
 
 A plan paused at its approval gate is accepted, not failed: JSON reports
 `status: "awaiting_approval"` with its current artifact references and the command exits `0`.
-Resolve it from the conversation workspace or HTTP API before the workflow continues.
+Resolve it from the inline Home action card or HTTP API before the workflow continues.
 
-Those stable codes apply to `chat`, `brainstorm`, and persisted asks. Native `ask --resume`
-passes through the engine process status, while legacy local ask/readiness errors return `2`;
+Those stable codes apply to `chat`, `brainstorm`, and persisted asks. `ask --resume` passes
+through the engine process status, while legacy local ask/readiness errors return `2`;
 `ask` does not offer JSON output.
 
 ### Resolve which skills a task needs (demand-driven)
@@ -487,6 +497,13 @@ canonical context. Work units and skills appear only when a task actually needs 
 - **The conversation says it is reconnecting** — token renewal and cursor replay are
   automatic. If it persists, verify that the original process is still running; sessions,
   stream-token digests, and the live runtime are process-local.
+- **`vf doctor` reports an uncertain or orphaned CLI** — inspect the recorded owner first.
+  `vf doctor --fix` repairs only an exact proved orphan; a live or identity-unprovable owner
+  stays fail-closed. Every owned launch records supervisor and CLI PIDs plus exact process
+  start identity, and terminal release waits for exit/quiescence plus `streams-drained`.
+  Windows uses a kill-on-close Job Object (`kernel-contained`); Linux and macOS use an
+  isolated process group (`cooperative-lineage`, because descendants can escape it). The
+  shipped Windows contract is covered by injected platform tests, not a live Windows canary.
 - **An artifact preview is unavailable** — only opaque ids emitted by that conversation's
   public trace can be fetched. Raw paths and ids from a different conversation are rejected.
 - **`vf verify` fails on confidence** — raise the unit to `1.0` with evidence, or keep

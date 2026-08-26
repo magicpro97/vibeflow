@@ -4,6 +4,7 @@ import { conversationLockDigest } from "./catalog-lock.js";
 import { materializeStopControlEffectClosure } from "./conversation-control-effect-planner.js";
 import type { ConversationControlEffectStore } from "./conversation-control-effect-store.js";
 import type { OrdinaryConversationOperationAuthorityV1 } from "./conversation-operation-fold.js";
+import { ConversationReceiptCandidateUnavailableError } from "./conversation-receipt-errors.js";
 import type { LineageAssociationPlanV1 } from "./lineage-association.js";
 import type { LineageHeadSelectionPlanV1 } from "./lineage-head-authority.js";
 import type {
@@ -72,7 +73,7 @@ export function materializeSelectionPlan(
     resolved.head.head_status === "committed" ||
     candidate.root_session_id !== resolved.lineage.root_session_id
   )
-    throw new Error("lineage head does not require selection");
+    throw new ConversationReceiptCandidateUnavailableError("conversation.select_lineage_head");
   const selected = resolved.lineage.nodes.find(
     (node) =>
       node.node.conversation_id === candidate.candidate_conversation_id &&
@@ -83,7 +84,8 @@ export function materializeSelectionPlan(
           leaf.revision_id === node.node.revision_id,
       ),
   );
-  if (!selected) throw new Error("selected lineage candidate is not an eligible leaf");
+  if (!selected)
+    throw new ConversationReceiptCandidateUnavailableError("conversation.select_lineage_head");
   const leaves = resolved.head.candidate_heads.map((leaf) => {
     const node = resolved.lineage.nodes.find(
       (candidateNode) =>
@@ -127,7 +129,7 @@ export function materializeAssociationPlan(
   const root_bindings = candidate.root_session_ids.map((id) => {
     const resolved = lineages.resolve(id);
     if (resolved.lineage.root_session_id !== id)
-      throw new Error("association member does not name a lineage root");
+      throw new ConversationReceiptCandidateUnavailableError("conversation.associate_lineages");
     return {
       root_session_id: id,
       expected_head_digest: resolved.head.content_digest,

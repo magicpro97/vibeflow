@@ -37,13 +37,13 @@ function policy(raw: string): void {
   writeFileSync(join(dir, "SKILL_POLICY.json"), raw);
 }
 
-function run(rest: string[]): number {
+async function run(rest: string[]): Promise<number> {
   const cwd = process.cwd();
   const oldHome = process.env.VF_SKILLS_HOME;
   process.env.VF_SKILLS_HOME = base;
   process.chdir(base);
   try {
-    return skills("impact", rest);
+    return await skills("impact", rest);
   } finally {
     process.chdir(cwd);
     process.env.VF_SKILLS_HOME = oldHome;
@@ -306,22 +306,22 @@ describe("handleImpactSubcommand", () => {
 // ── CLI integration ─────────────────────────────────────────────────────
 
 describe("vf skills impact CLI", () => {
-  test("missing query returns 2", () => {
-    expect(run([])).toBe(2);
+  test("missing query returns 2", async () => {
+    expect(await run([])).toBe(2);
   });
 
-  test("no match returns 3", () => {
+  test("no match returns 3", async () => {
     fixture();
-    expect(run(["no-such-thing"])).toBe(3);
+    expect(await run(["no-such-thing"])).toBe(3);
   });
 
-  test("matched fact key returns 0", () => {
+  test("matched fact key returns 0", async () => {
     fixture();
-    expect(run(["ctc-domain"])).toBe(0);
+    expect(await run(["ctc-domain"])).toBe(0);
   });
 
-  test("matched path returns 0", () => {
+  test("matched path returns 0", async () => {
     fixture();
-    expect(run(["src/auth/login.ts"])).toBe(0);
+    expect(await run(["src/auth/login.ts"])).toBe(0);
   });
 });

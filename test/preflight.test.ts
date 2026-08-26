@@ -2,6 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolveEngineBinary } from "../src/core.js";
 import {
+  type OwnedAiRouteRequest,
+  type OwnedAiRouteRunner,
+  runOwnedAiRoute,
+} from "../src/dispatch/owned-ai-route.js";
+import { makeAsyncSpawner } from "../src/dispatch/spawners.js";
+import type { AsyncSpawnerOpts } from "../src/dispatch/types.js";
+import {
   type ProbeSpawner,
   anyReady,
   checkEngine,
@@ -39,6 +46,28 @@ const opts = (over: Record<string, unknown>) => ({
   skipCache: true,
   ...over,
 });
+
+function routeThroughInjectedSpawn(
+  spawn: NonNullable<AsyncSpawnerOpts["spawn"]>,
+): OwnedAiRouteRunner {
+  return (request: OwnedAiRouteRequest) =>
+    runOwnedAiRoute(request, {
+      randomUUID: () => "00000000-0000-4000-8000-000000000577",
+      makeSpawner: (route) =>
+        makeAsyncSpawner({
+          spawn,
+          sourceEnv: route.sourceEnv ?? process.env,
+          ...(route.envPolicy ? { envPolicy: route.envPolicy } : {}),
+          ...(route.cwd ? { cwd: route.cwd } : {}),
+          ...(route.timeoutMs !== undefined ? { timeoutMs: route.timeoutMs } : {}),
+          ...(route.idleTimeoutMs !== undefined ? { idleTimeoutMs: route.idleTimeoutMs } : {}),
+          ...(route.graceMs !== undefined ? { graceMs: route.graceMs } : {}),
+          ...(route.onChunk ? { onChunk: route.onChunk } : {}),
+          ...(route.onStderrChunk ? { onStderrChunk: route.onStderrChunk } : {}),
+          ...(route.onAudit ? { onAudit: route.onAudit } : {}),
+        }),
+    });
+}
 
 describe("preflight: presence", () => {
   test("missing binary short-circuits to no-binary", () => {
@@ -473,11 +502,7 @@ describe("preflight async: branches", () => {
     expect(r.detail).toContain("string error");
   });
 
-  // The real Bun.spawn async probe (lines 375-451) can now be exercised
-  // via spyOn(Bun, "spawn"). We mock the spawn call to return a
-  // controllable child handle.
-  test("async probe: real Bun.spawn path returns ready on success (line 375-421)", async () => {
-    const original = Bun.spawn;
+  test("async probe: owned route returns ready on async spawn success", async () => {
     const fakeChild = {
       stdin: { write: () => {}, end: () => {} },
       stdout: {
@@ -503,20 +528,19 @@ describe("preflight async: branches", () => {
       exited: Promise.resolve(0),
       kill: () => {},
     };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
-      fakeChild) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
-      expect(r.level).toBe("ready");
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    const r = await checkEngineAsync(
+      "codex",
+      opts({
+        has: () => true,
+        skipCache: true,
+        ownedRoute: routeThroughInjectedSpawn((() => fakeChild) as never),
+      }),
+    );
+    expect(r.level).toBe("ready");
   });
 
   test("async probe: stderr chunks flow into stderr variable (line 414-420)", async () => {
-    // Mock Bun.spawn to return a fake child that yields one stderr chunk
-    // and a non-zero exit. The stderr chunk must be read (line 414).
-    const original = Bun.spawn;
+    // The injected async-spawn seam yields one stderr chunk and a non-zero exit.
     const fakeChild = {
       stdin: { write: () => {}, end: () => {} },
       stdout: {
@@ -542,21 +566,19 @@ describe("preflight async: branches", () => {
       exited: Promise.resolve(1),
       kill: () => {},
     };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
-      fakeChild) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
-      // The stderr "warning-stderr-text" is captured but the level is
-      // determined by the exit code (1) → probe-failed
-      expect(r.level).toBe("probe-failed");
-      expect(r.detail).toContain("warning-stderr-text");
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    const r = await checkEngineAsync(
+      "codex",
+      opts({
+        has: () => true,
+        skipCache: true,
+        ownedRoute: routeThroughInjectedSpawn((() => fakeChild) as never),
+      }),
+    );
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("warning-stderr-text");
   });
 
-  test("async probe: real Bun.spawn path returns probe-failed on non-zero exit (line 410-423)", async () => {
-    const original = Bun.spawn;
+  test("async probe: owned route returns probe-failed on non-zero exit", async () => {
     const fakeChild = {
       stdin: { write: () => {}, end: () => {} },
       stdout: {
@@ -572,52 +594,37 @@ describe("preflight async: branches", () => {
       exited: Promise.resolve(1),
       kill: () => {},
     };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
-      fakeChild) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
-      expect(r.level).toBe("probe-failed");
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    const r = await checkEngineAsync(
+      "codex",
+      opts({
+        has: () => true,
+        skipCache: true,
+        ownedRoute: routeThroughInjectedSpawn((() => fakeChild) as never),
+      }),
+    );
+    expect(r.level).toBe("probe-failed");
   });
 
-  test("async probe: real Bun.spawn path returns probe-failed on timeout (line 392-396)", async () => {
-    const original = Bun.spawn;
-    const fakeChild = {
-      stdin: { write: () => {}, end: () => {} },
-      stdout: {
-        getReader: () => ({
-          // Stream never ends → triggers the timeout
-          read: () => new Promise(() => {}),
-        }),
-      },
-      stderr: {
-        getReader: () => ({
-          read: () => new Promise(() => {}),
-        }),
-      },
-      exited: new Promise(() => {}) as never,
-      kill: () => {},
+  test("async probe: owned route timeout remains probe-failed", async () => {
+    const ownedRoute: OwnedAiRouteRunner = async (request) => {
+      expect(request.timeoutMs).toBe(50);
+      return {
+        attemptId: "00000000-0000-4000-8000-000000000577",
+        status: 124,
+        stdout: "",
+        stderr: "",
+        timedOut: true,
+      };
     };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
-      fakeChild) as unknown as typeof Bun.spawn;
-    try {
-      // Use a short timeout via the test seam (probeTimeoutMs).
-      const r = await checkEngineAsync(
-        "codex",
-        opts({ has: () => true, skipCache: true, probeTimeoutMs: 50 }),
-      );
-      // The status 124 path is hit, which then fails probeSucceeded → probe-failed
-      expect(r.level).toBe("probe-failed");
-      expect(r.detail).toMatch(/timed out|status 124/i);
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    const r = await checkEngineAsync(
+      "codex",
+      opts({ has: () => true, skipCache: true, probeTimeoutMs: 50, ownedRoute }),
+    );
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toMatch(/timed out|status 124/i);
   });
 
-  test("async probe: real Bun.spawn with codex 0 fail ok returns ready (line 437-440)", async () => {
-    const original = Bun.spawn;
+  test("async probe: owned route with codex healthy summary returns ready", async () => {
     const enc = new TextEncoder();
     const fakeChild = {
       stdin: { write: () => {}, end: () => {} },
@@ -643,18 +650,18 @@ describe("preflight async: branches", () => {
       exited: Promise.resolve(0),
       kill: () => {},
     };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
-      fakeChild) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
-      expect(r.level).toBe("ready");
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    const r = await checkEngineAsync(
+      "codex",
+      opts({
+        has: () => true,
+        skipCache: true,
+        ownedRoute: routeThroughInjectedSpawn((() => fakeChild) as never),
+      }),
+    );
+    expect(r.level).toBe("ready");
   });
 
   test("async probe: exit promise reject yields probe-failed (line 423-427)", async () => {
-    const original = Bun.spawn;
     const fakeChild = {
       stdin: { write: () => {}, end: () => {} },
       stdout: {
@@ -670,29 +677,31 @@ describe("preflight async: branches", () => {
       exited: Promise.reject(new Error("exited promise failed")),
       kill: () => {},
     };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
-      fakeChild) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
-      expect(r.level).toBe("probe-failed");
-      expect(r.detail).toContain("exited promise failed");
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    const r = await checkEngineAsync(
+      "codex",
+      opts({
+        has: () => true,
+        skipCache: true,
+        ownedRoute: routeThroughInjectedSpawn((() => fakeChild) as never),
+      }),
+    );
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("exited promise failed");
   });
 
   test("async probe: spawn throw in runAttempt yields probe-failed (line 111-112)", async () => {
-    const original = Bun.spawn;
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
-      throw new Error("spawn crashed");
-    }) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
-      expect(r.level).toBe("probe-failed");
-      expect(r.detail).toContain("spawn crashed");
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    const r = await checkEngineAsync(
+      "codex",
+      opts({
+        has: () => true,
+        skipCache: true,
+        ownedRoute: routeThroughInjectedSpawn((() => {
+          throw new Error("spawn crashed");
+        }) as never),
+      }),
+    );
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("spawn crashed");
   });
 
   test("async probe: copilot with gh, real spawn, auth ok returns ready (line 425-446)", async () => {
@@ -1160,7 +1169,6 @@ describe("defaultSpawner env scrub (#577)", () => {
 
 describe("checkAsync Bun.spawn env scrub (#577)", () => {
   test("async Bun.spawn path receives scrubbed env", async () => {
-    const original = Bun.spawn;
     let capturedEnv: NodeJS.ProcessEnv | undefined;
     const fakeChild = {
       stdin: { write: () => {}, end: () => {} },
@@ -1187,27 +1195,27 @@ describe("checkAsync Bun.spawn env scrub (#577)", () => {
       exited: Promise.resolve(0),
       kill: () => {},
     };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = ((
-      _cmd: string[],
-      opts?: { env?: NodeJS.ProcessEnv },
-    ) => {
+    const spawn = ((_cmd: string[], opts?: { env?: NodeJS.ProcessEnv }) => {
       capturedEnv = opts?.env;
       return fakeChild;
-    }) as unknown as typeof Bun.spawn;
-    try {
-      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
-      expect(r.level).toBe("ready");
-      expect(capturedEnv).toBeDefined();
-      const env = capturedEnv as NodeJS.ProcessEnv;
-      // DEFAULT_DENY secrets should NOT be present
-      expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
-      expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
-      expect(env.STRIPE_API_KEY).toBeUndefined();
-      expect(env.DATABASE_URL).toBeUndefined();
-      // ALWAYS_KEEP vars should be present (PATH is cross-platform; HOME is unset on Windows)
-      expect(env.PATH).toBeDefined();
-    } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
-    }
+    }) as never;
+    const r = await checkEngineAsync(
+      "codex",
+      opts({
+        has: () => true,
+        skipCache: true,
+        ownedRoute: routeThroughInjectedSpawn(spawn),
+      }),
+    );
+    expect(r.level).toBe("ready");
+    expect(capturedEnv).toBeDefined();
+    const env = capturedEnv as NodeJS.ProcessEnv;
+    // DEFAULT_DENY secrets should NOT be present
+    expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.STRIPE_API_KEY).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+    // ALWAYS_KEEP vars should be present (PATH is cross-platform; HOME is unset on Windows)
+    expect(env.PATH).toBeDefined();
   });
 });

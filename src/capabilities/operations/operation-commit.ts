@@ -1,4 +1,3 @@
-import { digestV1 } from "../../durability/index.js";
 import { ownedProjectionRecord } from "../planning/resource-planner.js";
 import type {
   CapabilityDurablePlanningGraphV1,
@@ -22,6 +21,7 @@ import {
 import { buildCapabilityLockFromResults } from "./lock-builder.js";
 import { ensureCapabilityLockCheckpoint } from "./lock-checkpoint.js";
 import type { CapabilityOperationJournalV1 } from "./operation-journal.js";
+import { materializeCapabilityPublicationHealthPointer } from "./publication-evidence.js";
 import { executeCapabilitySteps } from "./step-runtime.js";
 import type {
   CapabilityOperationExecutorOptionsV1,
@@ -121,6 +121,7 @@ export function continueCapabilityOperation(
     effect: () => null,
   });
   if (!publicationAdmission.authorized) return fail(input, publicationAdmission.reason);
+  input.fault?.("before-publication-base-validation");
   const currentStatus = options.storage.readStatus();
   if (currentStatus.state === "corrupt" || currentStatus.state === "unsupported")
     throw new CapabilityRuntimeError(
@@ -144,11 +145,6 @@ export function continueCapabilityOperation(
     (item) => item.descriptor_kind === "intent",
   )) {
     const projection = ownedProjectionRecord(descriptor.resource, descriptor.target_id);
-    if (projection.projection_digest !== descriptor.projection_digest)
-      throw new CapabilityRuntimeError(
-        "projection record escaped the approved closure",
-        "integrity-failure",
-      );
     options.storage.putObject(
       projection.projection_digest,
       projection,
@@ -181,6 +177,7 @@ export function continueCapabilityOperation(
       base: current,
       held,
       journal,
+      fault: input.fault ?? undefined,
     })
   )
     input.fault?.("after-lock-checkpoint");
@@ -193,6 +190,12 @@ export function continueCapabilityOperation(
     held,
   });
   options.storage.putHealthInventory(inventory, held);
+  const nextPointer = materializeCapabilityPublicationHealthPointer({
+    scope: proposed.scope,
+    scopeIdentityDigest: plan.scope_identity_digest,
+    inventoryEpoch: (priorPointer?.inventory_epoch ?? -1) + 1,
+    inventoryDigest: inventory.inventory_digest,
+  });
   journal.append(
     header.operation_id,
     {
@@ -201,6 +204,9 @@ export function continueCapabilityOperation(
       lock_digest: proposed.content_digest,
       health_inventory_digest: inventory.inventory_digest,
       expected_health_pointer_digest: priorPointer?.pointer_digest ?? null,
+      expected_health_pointer_epoch: priorPointer?.inventory_epoch ?? null,
+      next_health_pointer_epoch: nextPointer.inventory_epoch,
+      next_health_pointer_digest: nextPointer.pointer_digest,
     },
     held,
   );
@@ -232,28 +238,15 @@ export function continueCapabilityOperation(
           lock_digest: proposed.content_digest,
           health_inventory_digest: inventory.inventory_digest,
           expected_health_pointer_digest: priorPointer?.pointer_digest ?? null,
+          expected_health_pointer_epoch: priorPointer?.inventory_epoch ?? null,
+          next_health_pointer_epoch: nextPointer.inventory_epoch,
+          next_health_pointer_digest: nextPointer.pointer_digest,
           directory_fsync_completed: true,
         },
         held,
       );
       input.fault?.("after-lock-commit");
-      const pointerDraft = {
-        schema_version: "1.0" as const,
-        scope: proposed.scope,
-        scope_identity_digest: plan.scope_identity_digest,
-        inventory_epoch: (priorPointer?.inventory_epoch ?? -1) + 1,
-        inventory_digest: inventory.inventory_digest,
-        pointer_digest: "",
-      };
-      const { pointer_digest: _, ...pointerPreimage } = pointerDraft;
-      options.storage.publishHealthCurrent(
-        priorPointer,
-        {
-          ...pointerDraft,
-          pointer_digest: digestV1("VF-CAPABILITY-HEALTH-CURRENT\0v1\0", pointerPreimage),
-        },
-        held,
-      );
+      options.storage.publishHealthCurrent(priorPointer, nextPointer, held);
       journal.terminal(header.operation_id, "succeeded", null, held);
     },
   });

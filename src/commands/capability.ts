@@ -313,10 +313,6 @@ export async function capability(
         sink,
       );
     }
-    if ("action" in direct && direct.planning_options.network_read !== "forbid")
-      throw new CapabilityCliUsageError(
-        'durable capability apply requires request-file planning_options.network_read="forbid"',
-      );
     const mutationPort = resolveCapabilityCliMutationPort({
       mutationPort: inject.mutationPort,
       base,

@@ -182,6 +182,14 @@ export class ConversationLiteralActionAuthority {
         digest: receipt.receipt_digest,
         recorded_at: receipt.recorded_at,
       });
+      this.options.home.lineageMutations.release({
+        kind: "public-literal",
+        proposal: snapshot.proposal,
+        approval: snapshot.approval,
+        outcome: receipt.outcome === "succeeded" ? "succeeded" : "aborted",
+        terminal_digest: receipt.receipt_digest,
+        now: receipt.recorded_at,
+      });
       return;
     }
     const plan = stored.native_plan.effect_binding as unknown as {
@@ -211,10 +219,59 @@ export class ConversationLiteralActionAuthority {
         ) !== plan.expected_conversation_lock_digest)
     )
       throw new Error("public literal source head changed");
-    const dispatch = this.options.home.actions.dispatch(proposalId, snapshot.approval.approval_id, {
-      digest: stored.record_digest,
-      recorded_at: snapshot.approval.decided_at,
-    });
+    const currentMutation = this.options.home.lineageMutations.current(
+      resolved.lineage.root_session_id,
+    );
+    if (!already || currentMutation?.proposal_id === proposalId)
+      this.options.home.lineageMutations.claim({
+        kind: "public-literal",
+        proposal: snapshot.proposal,
+        approval: snapshot.approval,
+        now: snapshot.approval.decided_at,
+        resolveSource: () => {
+          const current = this.options.lineages.resolve(
+            stored.native_plan.expected.conversation_id,
+          );
+          const currentSource = current.requested.source;
+          const currentLock = conversationLockDigest(
+            current.lineage.root_session_id,
+            currentSource,
+            current.revision_claim_epoch,
+          );
+          if (
+            currentSource.journal_head.last_seq !== plan.expected_last_seq ||
+            currentLock !== plan.expected_conversation_lock_digest
+          )
+            throw new Error("public literal source head changed");
+          return {
+            root_session_id: current.lineage.root_session_id,
+            conversation_id: current.requested.node.conversation_id,
+            revision_id: current.requested.node.revision_id,
+            last_seq: currentSource.journal_head.last_seq,
+            conversation_lock_digest: currentLock,
+            lineage_head_digest: current.head.content_digest,
+            lineage_head_epoch: current.head.head_epoch,
+          };
+        },
+      });
+    const dispatch = (() => {
+      try {
+        return this.options.home.actions.dispatch(proposalId, snapshot.approval.approval_id, {
+          digest: stored.record_digest,
+          recorded_at: snapshot.approval.decided_at,
+        });
+      } catch (error) {
+        this.options.home.lineageMutations.release({
+          kind: "public-literal",
+          proposal: snapshot.proposal,
+          approval: snapshot.approval,
+          outcome: "aborted",
+          terminal_digest: snapshot.proposal.proposal_digest,
+          now: this.options.home.now(),
+        });
+        throw error;
+      }
+    })();
     const event =
       already ??
       (await this.options.traceStore.append(
@@ -299,6 +356,14 @@ export class ConversationLiteralActionAuthority {
       outcome: "succeeded",
       digest: terminal.receipt_digest,
       recorded_at: terminal.recorded_at,
+    });
+    this.options.home.lineageMutations.release({
+      kind: "public-literal",
+      proposal: snapshot.proposal,
+      approval: snapshot.approval,
+      outcome: "succeeded",
+      terminal_digest: terminal.receipt_digest,
+      now: terminal.recorded_at,
     });
   }
 }

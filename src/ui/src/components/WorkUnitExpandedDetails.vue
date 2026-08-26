@@ -261,9 +261,13 @@ async function useInConversation(entry: ClassifiedEvidence) {
   handoffError.value = "";
   handoffSuccess.value = "";
   try {
-    const binding = await api.stagePrivateFileRange(range.path, range.startLine, range.endLine);
-    homeStore.setPrivateFileRange(binding);
-    handoffSuccess.value = `Private file range selected: ${binding.repo_relative_path}:${binding.start_line}-${binding.end_line}`;
+    const selected = await homeStore.stagePrivateContext({
+      repo_relative_path: range.path,
+      start_line: range.startLine,
+      end_line: range.endLine,
+    });
+    if (!selected) return;
+    handoffSuccess.value = "Private file range ready in Conversation Home.";
     await nextTick();
     document.querySelector<HTMLTextAreaElement>("#home-composer")?.focus();
   } catch (error) {

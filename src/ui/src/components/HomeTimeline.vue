@@ -13,6 +13,21 @@
       <p class="home-welcome__copy">
         Start naturally. VibeFlow will connect the right AI CLIs, preserve the conversation, and bring every reviewable action back here.
       </p>
+      <div
+        v-if="store.submitting"
+        class="home-loading-panel home-loading-panel--welcome"
+        role="status"
+        aria-live="polite"
+      >
+        <header class="home-loading-panel__header">
+          <span>{{ welcomeLoading.eyebrow }}</span>
+          <strong>{{ welcomeLoading.title }}</strong>
+        </header>
+        <p class="home-loading-panel__copy">{{ welcomeLoading.detail }}</p>
+        <ul class="home-loading-panel__checkpoints" aria-label="Conversation creation progress">
+          <li v-for="checkpoint in welcomeLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
+        </ul>
+      </div>
       <div class="home-starters" aria-label="Conversation starters">
         <button v-for="starter in starters" :key="starter.title" type="button" @click="useStarter(starter.prompt)">
           <span aria-hidden="true">{{ starter.glyph }}</span>
@@ -23,8 +38,49 @@
       <p class="home-welcome__hint">No setup form. Describe the outcome; refine the team and tools in the conversation.</p>
     </section>
     <section v-else class="home-thread" aria-label="Conversation timeline" aria-live="polite" aria-relevant="additions text">
-      <div v-if="store.activationLoading && !store.timeline" class="home-thread-skeleton" aria-label="Loading conversation">
-        <span v-for="width in ['52%', '78%', '64%', '84%']" :key="width" :style="{ width }" />
+      <div
+        v-if="store.activationLoading && !store.timeline"
+        class="home-loading-panel home-loading-panel--thread"
+        aria-label="Loading conversation"
+        role="status"
+        aria-live="polite"
+      >
+        <header class="home-loading-panel__header">
+          <span>{{ activationLoading.eyebrow }}</span>
+          <strong>{{ activationLoading.title }}</strong>
+        </header>
+        <p class="home-loading-panel__copy">{{ activationLoading.detail }}</p>
+        <ul class="home-loading-panel__checkpoints" aria-label="Conversation restore progress">
+          <li v-for="checkpoint in activationLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
+        </ul>
+        <div class="home-loading-thread" aria-hidden="true">
+          <article data-tone="human">
+            <span class="home-loading-thread__avatar">Y</span>
+            <div class="home-loading-thread__copy">
+              <strong />
+              <small />
+              <span class="home-loading-thread__line" />
+              <span class="home-loading-thread__line home-loading-thread__line--short" />
+            </div>
+          </article>
+          <article data-tone="assistant">
+            <span class="home-loading-thread__avatar">AI</span>
+            <div class="home-loading-thread__copy">
+              <strong />
+              <small />
+              <span class="home-loading-thread__line" />
+              <span class="home-loading-thread__line home-loading-thread__line--medium" />
+            </div>
+          </article>
+          <article data-tone="system">
+            <span class="home-loading-thread__avatar">+</span>
+            <div class="home-loading-thread__copy">
+              <strong />
+              <small />
+              <span class="home-loading-thread__line home-loading-thread__line--medium" />
+            </div>
+          </article>
+        </div>
       </div>
       <div v-else-if="!rendered.length && !store.pendingActions.length" class="home-empty-thread">
         <span aria-hidden="true">✦</span>
@@ -60,43 +116,15 @@
               </article>
             </div>
             <p v-else-if="showInteractionPending(item)" class="home-interaction-hint">{{ interactionHint(item) }}</p>
-            <div v-if="item.messageRef" class="home-message-tools" :aria-busy="reactionBusy(item)">
-              <button
-                type="button"
-                class="home-button"
-                :aria-pressed="quoteSelected(item)"
-                @click="toggleQuote(item)"
-              >{{ quoteSelected(item) ? "Remove quote" : "Quote" }}</button>
-              <ul v-if="item.reactions.length" class="home-reaction-counts" aria-label="Reactions">
-                <li v-for="reaction in item.reactions" :key="`${item.id}-${reaction.emoji}`">
-                  <button
-                    type="button"
-                    class="home-button"
-                    :aria-pressed="reaction.reacted_by_recipient"
-                    :disabled="reactionBusy(item) || !store.online"
-                    :aria-label="reactionAriaLabel(reaction)"
-                    :title="homeReactionSummaryTitle(reaction)"
-                    @click="toggleReaction(item, reaction.emoji)"
-                  >{{ reaction.emoji }} {{ reaction.label }} · {{ reaction.count }}</button>
-                </li>
-              </ul>
-              <details class="home-reaction-picker">
-                <summary>{{ reactionBusy(item) ? "Updating reaction…" : "React" }}</summary>
-                <div class="home-reaction-picker__grid" role="group" :aria-label="`Reactions for ${item.title}`">
-                  <button
-                    v-for="option in reactionOptions"
-                    :key="option.emoji"
-                    type="button"
-                    class="home-button"
-                    :aria-pressed="reactionSelected(item, option.emoji)"
-                    :disabled="reactionBusy(item) || !store.online"
-                    :title="`Add or remove your ${option.label.toLowerCase()} reaction`"
-                    @click="toggleReaction(item, option.emoji)"
-                  >{{ option.emoji }} {{ option.label }}</button>
-                </div>
-                <p class="home-reaction-picker__note">Counts update only after the public fold returns.</p>
-              </details>
-            </div>
+            <HomeMessageInteractions
+              v-if="item.messageRef"
+              :item="item"
+              :busy="reactionBusy(item)"
+              :online="store.online"
+              :quote-selected="quoteSelected(item)"
+              @toggle-quote="toggleQuote(item)"
+              @toggle-reaction="toggleReaction(item, $event)"
+            />
           </div>
         </article>
         <article v-else-if="item.kind === 'assistant'" class="home-message home-message--assistant">
@@ -129,43 +157,15 @@
               <summary>{{ item.evidence.length }} evidence reference{{ item.evidence.length === 1 ? '' : 's' }}</summary>
               <ul><li v-for="evidence in item.evidence" :key="evidence">{{ evidence }}</li></ul>
             </details>
-            <div v-if="item.messageRef" class="home-message-tools" :aria-busy="reactionBusy(item)">
-              <button
-                type="button"
-                class="home-button"
-                :aria-pressed="quoteSelected(item)"
-                @click="toggleQuote(item)"
-              >{{ quoteSelected(item) ? "Remove quote" : "Quote" }}</button>
-              <ul v-if="item.reactions.length" class="home-reaction-counts" aria-label="Reactions">
-                <li v-for="reaction in item.reactions" :key="`${item.id}-${reaction.emoji}`">
-                  <button
-                    type="button"
-                    class="home-button"
-                    :aria-pressed="reaction.reacted_by_recipient"
-                    :disabled="reactionBusy(item) || !store.online"
-                    :aria-label="reactionAriaLabel(reaction)"
-                    :title="homeReactionSummaryTitle(reaction)"
-                    @click="toggleReaction(item, reaction.emoji)"
-                  >{{ reaction.emoji }} {{ reaction.label }} · {{ reaction.count }}</button>
-                </li>
-              </ul>
-              <details class="home-reaction-picker">
-                <summary>{{ reactionBusy(item) ? "Updating reaction…" : "React" }}</summary>
-                <div class="home-reaction-picker__grid" role="group" :aria-label="`Reactions for ${item.title}`">
-                  <button
-                    v-for="option in reactionOptions"
-                    :key="option.emoji"
-                    type="button"
-                    class="home-button"
-                    :aria-pressed="reactionSelected(item, option.emoji)"
-                    :disabled="reactionBusy(item) || !store.online"
-                    :title="`Add or remove your ${option.label.toLowerCase()} reaction`"
-                    @click="toggleReaction(item, option.emoji)"
-                  >{{ option.emoji }} {{ option.label }}</button>
-                </div>
-                <p class="home-reaction-picker__note">Counts update only after the public fold returns.</p>
-              </details>
-            </div>
+            <HomeMessageInteractions
+              v-if="item.messageRef"
+              :item="item"
+              :busy="reactionBusy(item)"
+              :online="store.online"
+              :quote-selected="quoteSelected(item)"
+              @toggle-quote="toggleQuote(item)"
+              @toggle-reaction="toggleReaction(item, $event)"
+            />
           </div>
         </article>
         <div v-else class="home-system-event" :class="{ 'home-system-event--error': item.kind === 'error' }">
@@ -175,43 +175,15 @@
             :tabindex="item.anchorKey ? -1 : undefined"
           >
             <p><strong>{{ item.title }}</strong>{{ item.body }}</p>
-            <div v-if="item.messageRef" class="home-message-tools" :aria-busy="reactionBusy(item)">
-              <button
-                type="button"
-                class="home-button"
-                :aria-pressed="quoteSelected(item)"
-                @click="toggleQuote(item)"
-              >{{ quoteSelected(item) ? "Remove quote" : "Quote" }}</button>
-              <ul v-if="item.reactions.length" class="home-reaction-counts" aria-label="Reactions">
-                <li v-for="reaction in item.reactions" :key="`${item.id}-${reaction.emoji}`">
-                  <button
-                    type="button"
-                    class="home-button"
-                    :aria-pressed="reaction.reacted_by_recipient"
-                    :disabled="reactionBusy(item) || !store.online"
-                    :aria-label="reactionAriaLabel(reaction)"
-                    :title="homeReactionSummaryTitle(reaction)"
-                    @click="toggleReaction(item, reaction.emoji)"
-                  >{{ reaction.emoji }} {{ reaction.label }} · {{ reaction.count }}</button>
-                </li>
-              </ul>
-              <details class="home-reaction-picker">
-                <summary>{{ reactionBusy(item) ? "Updating reaction…" : "React" }}</summary>
-                <div class="home-reaction-picker__grid" role="group" :aria-label="`Reactions for ${item.title}`">
-                  <button
-                    v-for="option in reactionOptions"
-                    :key="option.emoji"
-                    type="button"
-                    class="home-button"
-                    :aria-pressed="reactionSelected(item, option.emoji)"
-                    :disabled="reactionBusy(item) || !store.online"
-                    :title="`Add or remove your ${option.label.toLowerCase()} reaction`"
-                    @click="toggleReaction(item, option.emoji)"
-                  >{{ option.emoji }} {{ option.label }}</button>
-                </div>
-                <p class="home-reaction-picker__note">Counts update only after the public fold returns.</p>
-              </details>
-            </div>
+            <HomeMessageInteractions
+              v-if="item.messageRef"
+              :item="item"
+              :busy="reactionBusy(item)"
+              :online="store.online"
+              :quote-selected="quoteSelected(item)"
+              @toggle-quote="toggleQuote(item)"
+              @toggle-reaction="toggleReaction(item, $event)"
+            />
           </div>
           <time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time>
         </div>
@@ -244,25 +216,31 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { homeTimelineMessageDomId, sameHomeQuoteRef } from "../conversation-home-authoring.js";
 import {
-  HOME_REACTION_OPTIONS,
-  homeReactionSummaryTitle,
-  homeTimelineMessageDomId,
-  sameHomeQuoteRef,
-} from "../conversation-home-authoring.js";
+  describeHomeActivationLoading,
+  describeHomeWelcomeLoading,
+} from "../conversation-home-loading.js";
 import { projectHomeTimeline } from "../conversation-home-projection.js";
 import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import type { HomeQuoteReference, HomeReactionSummary } from "../conversation-home-types.js";
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
+import HomeMessageInteractions from "./HomeMessageInteractions.vue";
 const store = useConversationHomeStore();
 const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);
 const followLatest = ref(true);
 const showJump = ref(false);
 const rendered = computed(() => projectHomeTimeline(store.timeline?.items ?? []));
-const reactionOptions = HOME_REACTION_OPTIONS;
+const activationLoading = computed(() =>
+  describeHomeActivationLoading({
+    topic: store.activeSession?.active?.topic ?? store.activeSession?.root.topic ?? null,
+    streamStatus: store.streamStatus,
+  }),
+);
+const welcomeLoading = computed(() => describeHomeWelcomeLoading());
 const starters = [
   {
     glyph: "↗",
@@ -349,9 +327,6 @@ function toggleReaction(item: RenderedHomeTimelineItem, emoji: HomeReactionSumma
 function reactionBusy(item: RenderedHomeTimelineItem): boolean {
   return item.messageRef ? Boolean(store.reactionBusy[item.messageRef.target_event_id]) : false;
 }
-const reactionSelected = (item: RenderedHomeTimelineItem, emoji: HomeReactionSummary["emoji"]) =>
-  item.reactions.some((reaction) => reaction.emoji === emoji && reaction.reacted_by_recipient);
-
 function showInteractionPending(item: RenderedHomeTimelineItem): boolean {
   return !item.messageRef && (item.kind === "user" || (item.kind === "assistant" && item.complete));
 }
@@ -369,10 +344,6 @@ function jumpToQuoteTarget(targetEventId: string): void {
 
 const quoteAuthor = (authorPublicId: string) =>
   authorPublicId === "human" ? "You" : authorPublicId;
-
-function reactionAriaLabel(reaction: HomeReactionSummary): string {
-  return `${reaction.label}, ${reaction.count} reaction${reaction.count === 1 ? "" : "s"}${reaction.actor_public_ids.length ? `, from ${reaction.actor_public_ids.join(", ")}` : ""}${reaction.reacted_by_recipient ? ", including you" : ""}`;
-}
 
 function trackScroll() {
   const element = scroller.value;

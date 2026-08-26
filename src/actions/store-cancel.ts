@@ -2,7 +2,12 @@ import { ActionConflictError } from "./errors.js";
 import type { ActionFilePersistence } from "./persistence.js";
 import { materializeAuthorityEvent } from "./records.js";
 import { foldActionAuthority } from "./state.js";
-import { assertRequestAuthority, equalCanonical, requireOwnedSnapshot } from "./store-rules.js";
+import {
+  assertRequestAuthority,
+  equalCanonical,
+  isAgentProposalBrowserController,
+  requireOwnedSnapshot,
+} from "./store-rules.js";
 import type { ActionAuthoritySnapshotV1, ActionRequestAuthorityV1 } from "./types.js";
 
 export interface CancelActionInputV1 {
@@ -39,7 +44,10 @@ export function cancelAction(
       input.proposal_digest,
       input.authority,
     );
-    if (!equalCanonical(snapshot.proposal.requested_by, input.authority.actor))
+    if (
+      !equalCanonical(snapshot.proposal.requested_by, input.authority.actor) &&
+      !isAgentProposalBrowserController(snapshot.proposal, input.authority)
+    )
       throw new ActionConflictError(
         "stale_proposal",
         "Cancellation actor does not control this proposal.",

@@ -56,6 +56,7 @@ import {
   workflow,
 } from "../src/commands.js";
 import { COMMAND_HELP } from "../src/commands/help-commands.js";
+import { makeEnrichmentSpawner } from "../src/commands/init-ai.js";
 import {
   CTX_DIR,
   type Engine,
@@ -64,7 +65,7 @@ import {
   readState,
   writeState,
 } from "../src/core.js";
-import type { AsyncSpawner } from "../src/dispatch.js";
+import { type AsyncSpawner, runDispatchAsync } from "../src/dispatch.js";
 import { conversationEnvPolicy } from "../src/dispatch/env-filter.js";
 import { writeGuidance } from "../src/dispatch/guidance.js";
 import {
@@ -425,9 +426,9 @@ describe("commands.applyDispatch", () => {
 // ---------------------------------------------------------------------------
 
 describe("commands.applyIntake branches", () => {
-  test("dry-run does not write any files (line 366-425 dry path)", () => {
+  test("dry-run does not write any files (line 366-425 dry path)", async () => {
     const dir = freshDir("vf-intake-dry-");
-    const r = applyIntake(
+    const r = await applyIntake(
       { goal: "g", engines: ["claude"] },
       { useAi: false, base: dir, dry: true },
     );
@@ -437,11 +438,11 @@ describe("commands.applyIntake branches", () => {
     }
   });
 
-  test("applyIntake without goal + existing preserved file keeps it (line 386-403)", () => {
+  test("applyIntake without goal + existing preserved file keeps it (line 386-403)", async () => {
     const dir = freshDir("vf-intake-preserve-");
     mkdirSync(join(dir, CTX_DIR), { recursive: true });
     writeFileSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"), "human curated");
-    const r = applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const r = await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     expect(existsSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"))).toBe(true);
     const kept = readFileSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"), "utf8");
     expect(kept).toBe("human curated");
@@ -449,32 +450,32 @@ describe("commands.applyIntake branches", () => {
     expect(r.files.some((f) => f.endsWith("TASK_CONTEXT.md"))).toBe(false);
   });
 
-  test("applyIntake with explicit goal OVERWRITES preserved file (line 386-403 explicit)", () => {
+  test("applyIntake with explicit goal OVERWRITES preserved file (line 386-403 explicit)", async () => {
     const dir = freshDir("vf-intake-overwrite-");
     mkdirSync(join(dir, CTX_DIR), { recursive: true });
     writeFileSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"), "human curated");
-    applyIntake({ goal: "new explicit", engines: ["claude"] }, { useAi: false, base: dir });
+    await applyIntake({ goal: "new explicit", engines: ["claude"] }, { useAi: false, base: dir });
     const kept = readFileSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"), "utf8");
     expect(kept).not.toBe("human curated");
   });
 
-  test("applyIntake hand-edited root engine file gets archived under .vibeflow/backup (line 410-421)", () => {
+  test("applyIntake hand-edited root engine file gets archived under .vibeflow/backup (line 410-421)", async () => {
     const dir = freshDir("vf-intake-backup-");
     writeFileSync(join(dir, "CLAUDE.md"), "# pre-existing hand-edited CLAUDE.md\n");
-    const r = applyIntake({ goal: "new", engines: ["claude"] }, { useAi: false, base: dir });
+    const r = await applyIntake({ goal: "new", engines: ["claude"] }, { useAi: false, base: dir });
     expect(r.backedUp ?? []).toContain("CLAUDE.md");
     // At least one backup file should exist on disk.
     const backupRoot = join(dir, ".vibeflow", "backup");
     expect(existsSync(backupRoot)).toBe(true);
   });
 
-  test("applyIntake refuses when no engine is ready (line 363)", () => {
+  test("applyIntake refuses when no engine is ready (line 363)", async () => {
     const dir = freshDir("vf-intake-refused-");
     // With useAi: false and no engine ready, the function still
     // creates the workflow files (it's a soft refusal — files are
     // generated but the gate is set so dispatch will refuse later).
     // Verify it doesn't crash and produces a non-empty files list.
-    const r = applyIntake(
+    const r = await applyIntake(
       { engines: ["claude"] },
       {
         useAi: false,
@@ -1523,18 +1524,18 @@ describe("commands.skills subcommand branches", () => {
     }
   });
 
-  test("skills: list with no skills found returns 0 (line 1660-1666)", () => {
-    expect(skills("list", [])).toBe(0);
+  test("skills: list with no skills found returns 0 (line 1660-1666)", async () => {
+    expect(await skills("list", [])).toBe(0);
   });
 
-  test("skills: validate on empty repo returns 1 (no skills found)", () => {
+  test("skills: validate on empty repo returns 1 (no skills found)", async () => {
     // The validate subcommand returns exit 1 when validateSkillRoots
     // reports ok:false (no skills found). This is fail-closed: a repo
     // with no skills is not a "valid" VibeFlow setup.
-    expect(skills("validate", [])).toBe(1);
+    expect(await skills("validate", [])).toBe(1);
   });
 
-  test("skills: validate on repo with valid skills returns 0 (line 1740-1742)", () => {
+  test("skills: validate on repo with valid skills returns 0 (line 1740-1742)", async () => {
     // Scaffold a temp repo with a single VALID skill → validate returns 0
     const dir = freshDir("vf-skills-validate-pass-");
     mkdirSync(join(dir, CTX_DIR, "skills", "valid-skill"), { recursive: true });
@@ -1560,14 +1561,14 @@ describe("commands.skills subcommand branches", () => {
     const origCwd = process.cwd();
     process.chdir(dir);
     try {
-      expect(skills("validate", [])).toBe(0);
+      expect(await skills("validate", [])).toBe(0);
     } finally {
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("skills: list with found skills prints the index (line 1738-1740)", () => {
+  test("skills: list with found skills prints the index (line 1738-1740)", async () => {
     // Scaffold a temp repo with a single valid skill → list prints the index
     const dir = freshDir("vf-skills-list-");
     mkdirSync(join(dir, CTX_DIR, "skills", "list-skill"), { recursive: true });
@@ -1593,14 +1594,14 @@ describe("commands.skills subcommand branches", () => {
     const origCwd = process.cwd();
     process.chdir(dir);
     try {
-      expect(skills("list", [])).toBe(0);
+      expect(await skills("list", [])).toBe(0);
     } finally {
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("skills: validate with a single broken skill returns 1 (line 1747-1748)", () => {
+  test("skills: validate with a single broken skill returns 1 (line 1747-1748)", async () => {
     const dir = freshDir("vf-skills-validate-fail-");
     mkdirSync(join(dir, CTX_DIR, "skills", "broken-skill"), { recursive: true });
     // A SKILL.md with bad kebab-case name (uppercase) → validator reports error
@@ -1611,42 +1612,42 @@ describe("commands.skills subcommand branches", () => {
     const origCwd = process.cwd();
     process.chdir(dir);
     try {
-      expect(skills("validate", [])).toBe(1);
+      expect(await skills("validate", [])).toBe(1);
     } finally {
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("skills: search with no term returns 2 (line 1683-1688)", () => {
-    expect(skills("search", [])).toBe(2);
+  test("skills: search with no term returns 2 (line 1683-1688)", async () => {
+    expect(await skills("search", [])).toBe(2);
   });
 
-  test("skills: search with no matches prints 'No skill matched' (line 1690-1693)", () => {
-    expect(skills("search", ["definitely-no-match-zzz"])).toBe(0);
+  test("skills: search with no matches prints 'No skill matched' (line 1690-1693)", async () => {
+    expect(await skills("search", ["definitely-no-match-zzz"])).toBe(0);
   });
 
-  test("skills: search with a found skill prints match (line 1694-1697)", () => {
+  test("skills: search with a found skill prints match (line 1694-1697)", async () => {
     // Scaffold a skill so the search can find it.
-    expect(skills("init", ["my-skill"])).toBe(0);
-    expect(skills("search", ["trigger-keyword"])).toBe(0);
+    expect(await skills("init", ["my-skill"])).toBe(0);
+    expect(await skills("search", ["trigger-keyword"])).toBe(0);
   });
 
-  test("skills: init rejects empty name (returns 2)", () => {
-    expect(skills("init", [])).toBe(2);
+  test("skills: init rejects empty name (returns 2)", async () => {
+    expect(await skills("init", [])).toBe(2);
   });
 
-  test("skills: init rejects bad name (returns 2)", () => {
-    expect(skills("init", ["Bad_Name"])).toBe(2);
+  test("skills: init rejects bad name (returns 2)", async () => {
+    expect(await skills("init", ["Bad_Name"])).toBe(2);
   });
 
-  test("skills: init refuses to overwrite existing skill (returns 1)", () => {
-    expect(skills("init", ["dup-init"])).toBe(0);
-    expect(skills("init", ["dup-init"])).toBe(1);
+  test("skills: init refuses to overwrite existing skill (returns 1)", async () => {
+    expect(await skills("init", ["dup-init"])).toBe(0);
+    expect(await skills("init", ["dup-init"])).toBe(1);
   });
 
-  test("skills: draft scaffolds a status:draft skill (#335)", () => {
-    expect(skills("draft", ["fix-flaky-db-test"])).toBe(0);
+  test("skills: draft scaffolds a status:draft skill (#335)", async () => {
+    expect(await skills("draft", ["fix-flaky-db-test"])).toBe(0);
     const md = join(dir, CTX_DIR, "skills", "fix-flaky-db-test", "SKILL.md");
     expect(existsSync(md)).toBe(true);
     const body = readFileSync(md, "utf8");
@@ -1655,39 +1656,39 @@ describe("commands.skills subcommand branches", () => {
     expect(body).toContain("## Evidence");
   });
 
-  test("skills: draft rejects a bad name (returns 2)", () => {
-    expect(skills("draft", ["Bad_Name"])).toBe(2);
-    expect(skills("draft", [])).toBe(2);
+  test("skills: draft rejects a bad name (returns 2)", async () => {
+    expect(await skills("draft", ["Bad_Name"])).toBe(2);
+    expect(await skills("draft", [])).toBe(2);
   });
 
-  test("skills: draft refuses to overwrite an existing skill (returns 1)", () => {
-    expect(skills("draft", ["dup-skill"])).toBe(0);
-    expect(skills("draft", ["dup-skill"])).toBe(1);
+  test("skills: draft refuses to overwrite an existing skill (returns 1)", async () => {
+    expect(await skills("draft", ["dup-skill"])).toBe(0);
+    expect(await skills("draft", ["dup-skill"])).toBe(1);
   });
 
-  test("skills: resolve prints the needs table (line 1699-1712)", () => {
-    applyIntake({ goal: "g" }, { useAi: false, base: dir });
-    expect(skills("resolve", [])).toBe(0);
+  test("skills: resolve prints the needs table (line 1699-1712)", async () => {
+    await applyIntake({ goal: "g" }, { useAi: false, base: dir });
+    expect(await skills("resolve", [])).toBe(0);
   });
 
-  test("skills: sync rejects bad mode (line 1722-1729)", () => {
-    expect(skills("sync", ["--mode", "weird"])).toBe(2);
-    expect(skills("sync", ["--mode=weird"])).toBe(2);
+  test("skills: sync rejects bad mode (line 1722-1729)", async () => {
+    expect(await skills("sync", ["--mode", "weird"])).toBe(2);
+    expect(await skills("sync", ["--mode=weird"])).toBe(2);
   });
 
-  test("skills crystallize: no run-id → usage error (2)", () => {
-    expect(skills("crystallize", [])).toBe(2);
+  test("skills crystallize: no run-id → usage error (2)", async () => {
+    expect(await skills("crystallize", [])).toBe(2);
   });
 
-  test("skills crystallize: no recurring patterns → 0, no draft written", () => {
+  test("skills crystallize: no recurring patterns → 0, no draft written", async () => {
     // Fresh dir has no logs/journal → crystallize sees empty sources.
-    expect(skills("crystallize", ["empty-run"])).toBe(0);
+    expect(await skills("crystallize", ["empty-run"])).toBe(0);
     expect(existsSync(join(dir, ".vibeflow", "skills", "crystallized-empty-run", "SKILL.md"))).toBe(
       false,
     );
   });
 
-  test("skills crystallize: matching pattern prints proposal and writes no draft (0)", () => {
+  test("skills crystallize: matching pattern prints proposal and writes no draft (0)", async () => {
     mkdirSync(join(dir, ".vibeflow", "skills", "vf-verify"), { recursive: true });
     mkdirSync(join(dir, ".vibeflow", "logs"), { recursive: true });
     writeFileSync(
@@ -1698,59 +1699,59 @@ describe("commands.skills subcommand branches", () => {
       join(dir, ".vibeflow", "logs", "current.log"),
       ["$ vf verify", "$ vf verify", "$ vf verify"].join("\n"),
     );
-    expect(skills("crystallize", ["run-7"])).toBe(0);
+    expect(await skills("crystallize", ["run-7"])).toBe(0);
     expect(existsSync(join(dir, ".vibeflow", "skills", "crystallized-run-7", "SKILL.md"))).toBe(
       false,
     );
   });
 
-  test("skills crystallize: refuses to overwrite an existing draft (1)", () => {
+  test("skills crystallize: refuses to overwrite an existing draft (1)", async () => {
     mkdirSync(join(dir, ".vibeflow", "logs"), { recursive: true });
     writeFileSync(
       join(dir, ".vibeflow", "logs", "current.log"),
       ["$ bun test", "$ bun test", "$ bun test"].join("\n"),
     );
-    expect(skills("crystallize", ["dup-run"])).toBe(0);
+    expect(await skills("crystallize", ["dup-run"])).toBe(0);
     // second call hits the already-exists guard
-    expect(skills("crystallize", ["dup-run"])).toBe(1);
+    expect(await skills("crystallize", ["dup-run"])).toBe(1);
   });
 
-  test.skip("skills: sync rejects bad engine (line 1733-1735)", () => {
-    expect(skills("sync", ["--engine", "bogus"])).toBe(2);
-    expect(skills("sync", ["--engine=bogus"])).toBe(2);
+  test.skip("skills: sync rejects bad engine (line 1733-1735)", async () => {
+    expect(await skills("sync", ["--engine", "bogus"])).toBe(2);
+    expect(await skills("sync", ["--engine=bogus"])).toBe(2);
   });
 
-  test("skills: migrate with nothing to migrate returns 0 (line 304-306)", () => {
+  test("skills: migrate with nothing to migrate returns 0 (line 304-306)", async () => {
     // No .vibeflow/skills/ in this fresh repo → migrateToSharedCatalog
     // returns empty result → early-return branch.
-    expect(skills("migrate", [])).toBe(0);
+    expect(await skills("migrate", [])).toBe(0);
   });
 
-  test("skills: migrate moves project skills to the shared catalog and returns 0 (line 312-320)", () => {
+  test("skills: migrate moves project skills to the shared catalog and returns 0 (line 312-320)", async () => {
     mkdirSync(join(dir, ".vibeflow", "skills", "migrate-me"), { recursive: true });
     writeFileSync(
       join(dir, ".vibeflow", "skills", "migrate-me", "SKILL.md"),
       "---\nname: migrate-me\ndescription: a skill to migrate.\n---\n\n# Migrate\n",
     );
-    expect(skills("migrate", [])).toBe(0);
+    expect(await skills("migrate", [])).toBe(0);
     expect(existsSync(join(dir, ".vibeflow", "skills", "migrate-me"))).toBe(false);
   });
 
-  test("skills: migrate reports a collision and still returns 0 (line 308-310)", () => {
+  test("skills: migrate reports a collision and still returns 0 (line 308-310)", async () => {
     // First migrate seeds the shared catalog with "clash".
     mkdirSync(join(dir, ".vibeflow", "skills", "clash"), { recursive: true });
     writeFileSync(
       join(dir, ".vibeflow", "skills", "clash", "SKILL.md"),
       "---\nname: clash\ndescription: version one.\n---\n\n# v1\n",
     );
-    expect(skills("migrate", [])).toBe(0);
+    expect(await skills("migrate", [])).toBe(0);
     // Recreate the same-named project skill so the second migrate collides.
     mkdirSync(join(dir, ".vibeflow", "skills", "clash"), { recursive: true });
     writeFileSync(
       join(dir, ".vibeflow", "skills", "clash", "SKILL.md"),
       "---\nname: clash\ndescription: version two.\n---\n\n# v2\n",
     );
-    expect(skills("migrate", [])).toBe(0);
+    expect(await skills("migrate", [])).toBe(0);
   });
 
   test("skills: migrate surfaces per-entry errors and returns 1 (line 311, 320)", async () => {
@@ -1774,7 +1775,7 @@ describe("commands.skills subcommand branches", () => {
       "---\nname: err-skill\ndescription: will fail to migrate.\n---\n\n# Fail\n",
     );
     try {
-      expect(skills("migrate", [])).toBe(1);
+      expect(await skills("migrate", [])).toBe(1);
     } finally {
       if (process.platform === "win32") {
         const { execSync } = await import("node:child_process");
@@ -1787,9 +1788,9 @@ describe("commands.skills subcommand branches", () => {
     }
   });
 
-  test("skills: sync --mode=full returns 0 (line 1743-1754)", () => {
-    expect(skills("sync", ["--mode", "full"])).toBe(0);
-    expect(skills("sync", ["--mode=full"])).toBe(0);
+  test("skills: sync --mode=full returns 0 (line 1743-1754)", async () => {
+    expect(await skills("sync", ["--mode", "full"])).toBe(0);
+    expect(await skills("sync", ["--mode=full"])).toBe(0);
   });
 
   test("skills: sync with read-only mirror returns 1 (line 1830-1832)", async () => {
@@ -1828,7 +1829,7 @@ describe("commands.skills subcommand branches", () => {
       try {
         // Try to sync — the mkdirSync inside the loop should fail
         // (or rmSync should fail) → result.ok=false → exit 1
-        const code = skills("sync", []);
+        const code = await skills("sync", []);
         expect(code).toBe(1);
       } finally {
         try {
@@ -1843,18 +1844,18 @@ describe("commands.skills subcommand branches", () => {
     }
   });
 
-  test("skills: verify-sync on empty repo (line 1758-1766)", () => {
-    expect(skills("verify-sync", [])).toBe(0);
+  test("skills: verify-sync on empty repo (line 1758-1766)", async () => {
+    expect(await skills("verify-sync", [])).toBe(0);
   });
 
-  test("skills: verify-sync with --engine=claude filters to one mirror (line 1026-1029)", () => {
-    expect(skills("verify-sync", ["--engine", "claude"])).toBe(0);
-    expect(skills("verify-sync", ["--engine=claude"])).toBe(0);
+  test("skills: verify-sync with --engine=claude filters to one mirror (line 1026-1029)", async () => {
+    expect(await skills("verify-sync", ["--engine", "claude"])).toBe(0);
+    expect(await skills("verify-sync", ["--engine=claude"])).toBe(0);
   });
 
-  test("skills: verify-sync with --engine=bogus is silently ignored (line 1028/1032)", () => {
+  test("skills: verify-sync with --engine=bogus is silently ignored (line 1028/1032)", async () => {
     // Unknown engine names are filtered out — falls through to "all engines".
-    expect(skills("verify-sync", ["--engine", "bogus"])).toBe(0);
+    expect(await skills("verify-sync", ["--engine", "bogus"])).toBe(0);
   });
 
   test("skills: verify-sync with missing mirror SKILL.md returns 1 (line 1840-1842)", async () => {
@@ -1871,7 +1872,7 @@ describe("commands.skills subcommand branches", () => {
         join(dir, CTX_DIR, "skills", "missing-from-mirror", "SKILL.md"),
         "---\nname: missing-from-mirror\ndescription: A test skill for verify-sync fail branch.\n---\n\n# M\n\nUse when x. Body text padding to make this over 50 chars so validation passes.\n\n## Steps\n\n1. Step one. Step two. Step three. Step four. Step five. Step six.\n",
       );
-      const code = skills("verify-sync", []);
+      const code = await skills("verify-sync", []);
       expect(code).toBe(1);
     } finally {
       process.chdir(origCwd);
@@ -1879,16 +1880,16 @@ describe("commands.skills subcommand branches", () => {
     }
   });
 
-  test("skills: import with no target returns 2 (line 1769-1775)", () => {
-    expect(skills("import", [])).toBe(2);
+  test("skills: import with no target returns 2 (line 1769-1775)", async () => {
+    expect(await skills("import", [])).toBe(2);
   });
 
-  test("skills: import context7: prints hint + returns 2 (line 1780-1788)", () => {
-    expect(skills("import", ["context7:react-hooks"])).toBe(2);
+  test("skills: import context7: prints hint + returns 2 (line 1780-1788)", async () => {
+    expect(await skills("import", ["context7:react-hooks"])).toBe(2);
   });
 
-  test("skills: import from a non-existent path returns 1 (line 1789-1804)", () => {
-    expect(skills("import", ["/does/not/exist-skill-x"])).toBe(1);
+  test("skills: import from a non-existent path returns 1 (line 1789-1804)", async () => {
+    expect(await skills("import", ["/does/not/exist-skill-x"])).toBe(1);
   });
 
   test("skills: import with broken SKILL.md in source dir returns 1 (line 1871-1877)", async () => {
@@ -1904,7 +1905,7 @@ describe("commands.skills subcommand branches", () => {
         join(sourceDir, "broken-skill", "SKILL.md"),
         "not frontmatter, no name, no body",
       );
-      const code = skills("import", [sourceDir]);
+      const code = await skills("import", [sourceDir]);
       expect(code).toBe(1);
     } finally {
       process.chdir(origCwd);
@@ -1940,7 +1941,7 @@ describe("commands.skills subcommand branches", () => {
           "",
         ].join("\n"),
       );
-      const code = skills("import", [sourceDir]);
+      const code = await skills("import", [sourceDir]);
       expect(code).toBe(0);
     } finally {
       process.chdir(origCwd);
@@ -1953,26 +1954,26 @@ describe("commands.skills subcommand branches", () => {
     }
   });
 
-  test("skills: unknown sub returns 0 (line 1832-1836)", () => {
-    expect(skills("some-other-sub", [])).toBe(0);
+  test("skills: unknown sub returns 0 (line 1832-1836)", async () => {
+    expect(await skills("some-other-sub", [])).toBe(0);
   });
 
-  test("skills: curator scan returns 0 when no issues (cover curator dispatch)", () => {
-    expect(skills("curator", ["scan"])).toBe(0);
+  test("skills: curator scan returns 0 when no issues (cover curator dispatch)", async () => {
+    expect(await skills("curator", ["scan"])).toBe(0);
   });
 
-  test("skills: registry add dry-run returns 0 (cover skills.ts registry branch)", () => {
-    expect(skills("registry", ["add", "https://x.com/s.git", "--name", "x", "--ref", "v1"])).toBe(
-      0,
-    );
+  test("skills: registry add dry-run returns 0 (cover skills.ts registry branch)", async () => {
+    expect(
+      await skills("registry", ["add", "https://x.com/s.git", "--name", "x", "--ref", "v1"]),
+    ).toBe(0);
   });
 
-  test("skills: registry unknown sub returns 2 (cover handleRegistrySubcommand usage)", () => {
-    expect(skills("registry", ["bogus"])).toBe(2);
+  test("skills: registry unknown sub returns 2 (cover handleRegistrySubcommand usage)", async () => {
+    expect(await skills("registry", ["bogus"])).toBe(2);
   });
 
-  test("skills: semantic-filter dispatch with no candidates returns 0 (cover skills.ts semantic-filter branch)", () => {
-    expect(skills("semantic-filter", [])).toBe(0);
+  test("skills: semantic-filter dispatch with no candidates returns 0 (cover skills.ts semantic-filter branch)", async () => {
+    expect(await skills("semantic-filter", [])).toBe(0);
   });
 });
 
@@ -2922,13 +2923,14 @@ describe("commands.help branches", () => {
     expect(printCommandHelp("definitely-not-real")).toBe(0);
   });
 
-  test("ask help --engine lists all engines incl opencode+antigravity, resume lists claude/codex/opencode/antigravity", () => {
+  test("ask help lists every engine and documents durable conversation resume", () => {
     const render = COMMAND_HELP.ask;
     expect(render).toBeDefined();
     if (!render) throw new Error("ask help missing");
     const askHelp = render();
     expect(askHelp).toMatch(/claude \| codex \| copilot \| opencode \| antigravity/);
-    expect(askHelp).toMatch(/claude\/codex\/opencode\/antigravity/);
+    expect(askHelp).toContain("--conversation");
+    expect(askHelp).toContain('no native "most recent engine session" resume path remains');
   });
 });
 
@@ -4629,66 +4631,30 @@ describe("commands.orchestrate: orchestrator-level safety-net onStderrChunk (lin
   test("orchestrator's safety-net stderr capture fires (line 1150-1153)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-orch-stderr-"));
     try {
-      applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
-      // Mock Bun.spawn to emit stderr text so the orchestrator-level
-      // makeAsyncSpawner factory's onStderrChunk callback fires.
-      const enc = new TextEncoder();
-      const originalSpawn = Bun.spawn;
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => ({
-        stdin: { write: () => {}, end: () => {} },
-        stdout: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return {
-                    done: false,
-                    value: enc.encode('```json\n{"confidence": 1, "uncertainty": ""}\n```'),
-                  };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
+      await applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+      const code = await orchestrate({ engine: "claude", yes: true }, dir, {
+        sessionRuntime: {
+          ...dispatchSessionSeam("orchestrate stderr safety net"),
+          processSpawner: staticProcessSpawner(
+            '```json\n{"confidence": 1, "uncertainty": ""}\n```',
+            { stderr: "stderr from spawn" },
+          ),
         },
-        stderr: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return { done: false, value: enc.encode("stderr from spawn") };
-                }
-                return { done: true, value: undefined };
-              },
-            };
+        preflight: () => [
+          {
+            engine: "claude",
+            level: "ready" as const,
+            detail: "ok",
+            checkedAt: "2026-06-13",
           },
-        },
-        exited: Promise.resolve(0),
-        kill: () => {},
-      })) as unknown as typeof Bun.spawn;
-      try {
-        // NO inject.spawner → orchestrator-level safety-net is used.
-        // Inject preflight so the engine is "ready" and orchestrate
-        // proceeds to the dispatch path.
-        const code = await orchestrate({ engine: "claude", yes: true }, dir, {
-          sessionRuntime: dispatchSessionSeam("orchestrate stderr safety net"),
-          preflight: () => [
-            {
-              engine: "claude",
-              level: "ready" as const,
-              detail: "ok",
-              checkedAt: "2026-06-13",
-            },
-          ],
-        });
-        expect([0, 1]).toContain(code);
-      } finally {
-        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
-      }
+        ],
+      });
+      expect([0, 1]).toContain(code);
+      await getLogbus()?.close();
+      setLogbusForTests(null);
+      expect(readFileSync(join(dir, CTX_DIR, "logs", "current.log"), "utf8")).toContain(
+        "stderr from spawn",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -4843,89 +4809,25 @@ describe("commands.run (test seam)", () => {
     }
   });
 
-  // PR28 coverage: the factory onStderrChunk in launchEngine (lines 1739-1742)
-  // calls out("engine-stderr", ...) when the factory's makeAsyncSpawner
-  // reads stderr. This test does NOT inject a spawner, so the factory path
-  // is exercised. We mock Bun.spawn to emit a stderr chunk.
-  test("launchEngine: factory onStderrChunk fires (line 1739-1742) via Bun.spawn mock", async () => {
+  test("launchEngine: factory onStderrChunk fires through the canonical owned bridge", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-run-factory-stderr-"));
     try {
-      const { execSync } = await import("node:child_process");
-      execSync(
-        "git init -q && git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init && git config user.email t@t && git config user.name t",
-        { cwd: dir },
+      const bridgeScript = join(dir, "bridge-engine.mjs");
+      writeFileSync(
+        bridgeScript,
+        'process.stdout.write("ok\\n"); process.stderr.write("factory-stderr-test\\n");',
       );
-      const { writeState } = await import("../src/core.js");
-      writeState(dir, {
-        task_id: "t1",
-        goal: "test goal",
-        success_criteria: ["c1"],
-        work_units: [
-          {
-            name: "u1",
-            status: "pending",
-            confidence: 1,
-            scope: ["./"],
-            gates: {
-              build: "pending",
-              lint: "pending",
-              test: "pending",
-              review: "pending",
-            },
-            resources: { agents: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
-          },
-        ],
-        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      const stderr: string[] = [];
+      const result = await runDispatchAsync({
+        engine: "claude",
+        prompt: "prompt",
+        mode: "bridge",
+        bridgeCmd: `${JSON.stringify(process.execPath)} ${JSON.stringify(bridgeScript)}`,
+        base: dir,
+        onStderrChunk: (chunk) => stderr.push(chunk),
       });
-      const origCwd = process.cwd();
-      const origSpawn = Bun.spawn;
-      const enc = new TextEncoder();
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => ({
-        stdin: { write: () => {}, end: () => {} },
-        stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
-        stderr: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return { done: false, value: enc.encode("factory-stderr-test\n") };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
-        },
-        exited: Promise.resolve(0),
-        kill: () => {},
-      })) as unknown as typeof Bun.spawn;
-      try {
-        process.chdir(dir);
-        // No inject.spawner → factory path is used. The factory's
-        // onStderrChunk callback fires when the mock emits stderr.
-        // We just need the test to complete without error; coverage
-        // instrumentation will record the callback execution.
-        const code = await run(
-          "claude",
-          { yes: true, "auto-wip": true },
-          {
-            probe: { has: () => true, version: () => "1.0.0" },
-            preflight: () => [
-              {
-                engine: "claude",
-                level: "ready" as const,
-                detail: "ok",
-                checkedAt: "2026-06-13",
-              },
-            ],
-          },
-        );
-        expect([0, 1]).toContain(code);
-      } finally {
-        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
-        process.chdir(origCwd);
-      }
+      expect(result.ok).toBe(true);
+      expect(stderr.join("")).toContain("factory-stderr-test");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -5388,174 +5290,81 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
     }
   });
 
-  test("init --ai WITHOUT inject.aiSpawner: streamSpawner factory callbacks fire (line 1300-1318)", async () => {
-    // No aiSpawner injected → makeAsyncSpawner factory path is used.
-    // Mock Bun.spawn to emit one stdout chunk and one stderr chunk
-    // so the factory's onChunk/onStderrChunk callbacks fire.
+  test("the default enrichment factory owns the process and relays complete stdout/stderr lines", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-ai-factory-"));
-    mkdirSync(join(dir, CTX_DIR), { recursive: true });
-    writeFileSync(join(dir, CTX_DIR, "WORKFLOW_STATE.json"), "{}");
     const origCwd = process.cwd();
-    const origSpawn = Bun.spawn;
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
-      const enc = new TextEncoder();
-      return {
-        stdin: { write: () => {}, end: () => {} },
-        stdout: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return {
-                    done: false,
-                    value: enc.encode('```json\n{"confidence":1}\n```\n'),
-                  };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
-        },
-        stderr: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return { done: false, value: enc.encode("warning\n") };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
-        },
-        exited: Promise.resolve(0),
-        kill: () => {},
-      } as never;
-    }) as unknown as typeof Bun.spawn;
+    const bus = new Logbus({ runId: "enrichment-factory", dir: join(dir, "logs") });
+    const events: LogEvent[] = [];
+    const unsubscribe = bus.subscribe((event) => events.push(event));
+    const engineScript = join(dir, "enrichment-engine.mjs");
+    writeFileSync(
+      engineScript,
+      'process.stdin.resume(); process.stdin.on("end", () => { process.stdout.write("enriched\\n"); process.stderr.write("warning\\n"); });',
+    );
     try {
       process.chdir(dir);
-      const code = await init(
-        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+      setLogbusForTests(bus);
+      const result = await makeEnrichmentSpawner("[claude]")(
+        process.execPath,
+        [engineScript],
+        "prompt",
         {
-          hasCommandFn: () => true,
-          syncSpawner: () => ({ status: 0 }),
-          hookSetup: null,
-          // NO aiSpawner injected — factory path is used
-          preflight: () => [
-            {
-              engine: "claude",
-              level: "ready" as const,
-              detail: "ok",
-              checkedAt: "2026-06-13",
-            },
-          ],
-          aiPreflight: () => [
-            {
-              engine: "claude",
-              level: "ready" as const,
-              detail: "ok",
-              checkedAt: "2026-06-13",
-            },
-          ],
+          attemptId: "enrichment-complete-lines",
+          engine: "claude",
+          evidenceRoot: join(dir, CTX_DIR, "attempts"),
         },
       );
-      expect([0, 1]).toContain(code);
+      expect(result.status).toBe(0);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ channel: "engine-stdout", text: "[claude] enriched" }),
+          expect.objectContaining({ channel: "engine-stderr", text: "[claude] warning" }),
+        ]),
+      );
     } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      unsubscribe();
+      setLogbusForTests(null);
+      await bus.close();
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 15_000); // CI can be slow on first-run codegraph init
+  });
 
-  test("init --ai agent-team factory callbacks stream inline stdout/stderr", async () => {
+  test("the enrichment factory flushes final partial stdout/stderr without a newline", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-agent-team-stream-"));
-    mkdirSync(join(dir, ".vibeflow", "ai-context"), { recursive: true });
-    writeFileSync(join(dir, ".vibeflow", "ai-context", "stack-evidence.md"), "# test");
     const origCwd = process.cwd();
-    const origSpawn = Bun.spawn;
-    const origLog = console.log;
-    const origErr = console.error;
-    const lines: string[] = [];
-    console.log = (...args: unknown[]) => {
-      lines.push(args.map((a) => String(a)).join(" "));
-    };
-    console.error = (...args: unknown[]) => {
-      lines.push(args.map((a) => String(a)).join(" "));
-    };
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
-      const enc = new TextEncoder();
-      return {
-        stdin: { write: () => {}, end: () => {} },
-        stdout: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return { done: false, value: enc.encode("agent stdout\n") };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
-        },
-        stderr: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return { done: false, value: enc.encode("agent stderr\n") };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
-        },
-        exited: Promise.resolve(0),
-        kill: () => {},
-      } as never;
-    }) as unknown as typeof Bun.spawn;
+    const bus = new Logbus({ runId: "enrichment-partial", dir: join(dir, "logs") });
+    const events: LogEvent[] = [];
+    const unsubscribe = bus.subscribe((event) => events.push(event));
+    const engineScript = join(dir, "partial-engine.mjs");
+    writeFileSync(
+      engineScript,
+      'process.stdin.resume(); process.stdin.on("end", () => { process.stdout.write("agent stdout"); process.stderr.write("agent stderr"); });',
+    );
     try {
       process.chdir(dir);
-      const code = await init(
-        { ai: true, "no-ask": true, engine: "claude" },
+      setLogbusForTests(bus);
+      const result = await makeEnrichmentSpawner("[claude]")(
+        process.execPath,
+        [engineScript],
+        "prompt",
         {
-          hasCommandFn: () => true,
-          syncSpawner: () => ({ status: 0 }),
-          hookSetup: null,
-          preflight: () => [
-            {
-              engine: "claude",
-              level: "ready" as const,
-              detail: "ok",
-              checkedAt: "2026-06-13",
-            },
-          ],
-          aiPreflight: () => [
-            {
-              engine: "claude",
-              level: "ready" as const,
-              detail: "ok",
-              checkedAt: "2026-06-13",
-            },
-          ],
+          attemptId: "enrichment-partial-lines",
+          engine: "claude",
+          evidenceRoot: join(dir, CTX_DIR, "attempts"),
         },
       );
-      expect(code).toBe(0);
-      const output = lines.join("\n");
-      expect(output).toContain("[engine-stdout] [claude] agent stdout");
-      expect(output).toContain("[engine-stderr] [claude] agent stderr");
+      expect(result.status).toBe(0);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ channel: "engine-stdout", text: "[claude] agent stdout" }),
+          expect.objectContaining({ channel: "engine-stderr", text: "[claude] agent stderr" }),
+        ]),
+      );
     } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
-      console.log = origLog;
-      console.error = origErr;
+      unsubscribe();
+      setLogbusForTests(null);
+      await bus.close();
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
@@ -6325,7 +6134,7 @@ describe("commands facade re-exports (PR7 sentinel, issue #80 phase 7/14)", () =
     // The body definitions must be in the per-subcommand files. The `m`
     // flag anchors the regex to start-of-line so it does NOT match the
     // facade `export { skills } from "./commands/skills.js"` re-export.
-    expect(skills).toMatch(/^export\s+function\s+skills\s*\(/m);
+    expect(skills).toMatch(/^export\s+async\s+function\s+skills\s*\(/m);
     expect(discover).toMatch(/^export\s+async\s+function\s+discover\s*\(/m);
     expect(hooks).toMatch(/^export\s+async\s+function\s+hook\s*\(/m);
     expect(hooks).toMatch(/^export\s+function\s+hookSelftest\s*\(/m);
@@ -6573,7 +6382,7 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
     // anchors to start-of-line so it does NOT match a facade re-export.
     expect(init).toMatch(/^export\s+async\s+function\s+init\s*\(/m);
     expect(init).toMatch(/^export\s+function\s+reportPreflightRefusal\s*\(/m);
-    expect(apply).toMatch(/^export\s+function\s+applyIntake\s*\(/m);
+    expect(apply).toMatch(/^export\s+async\s+function\s+applyIntake\s*\(/m);
     expect(apply).toMatch(/^export\s+const\s+DEFAULT_ENGINE\b/m);
     expect(ctx7).toMatch(/^export\s+async\s+function\s+ensureCtx7Auth\s*\(/m);
     expect(ctx7).toMatch(/^export\s+function\s+defaultAskConfirm\s*\(/m);

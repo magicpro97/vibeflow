@@ -6,6 +6,7 @@ import { canonicalJsonBytes } from "./canonical.js";
 import { cleanupThenThrow, withCleanup } from "./cleanup.js";
 import { DurabilityError, durabilityError } from "./errors.js";
 import {
+  type ProcessLockOwnerRuntime,
   type ProcessLockOwnerV1,
   boundedOwnerAscii,
   parseProcessLockOwner,
@@ -34,13 +35,14 @@ import {
   validatePrivateFileFd,
 } from "./path.js";
 
-export type { ProcessLockOwnerV1 } from "./lock-owner.js";
+export type { ProcessLockOwnerRuntime, ProcessLockOwnerV1 } from "./lock-owner.js";
 export { processStartIdentity } from "./lock-owner.js";
 export interface AcquireProcessLockOptions {
   operation: string;
   coverageRoot?: string;
   timeoutMs?: number;
   pollIntervalMs?: number;
+  processRuntime?: Partial<ProcessLockOwnerRuntime>;
   fault?: (point: LockPublicationFaultPoint) => void;
 }
 
@@ -58,11 +60,9 @@ export interface ProcessLock {
   assertHeld(): void;
   release(): void;
 }
-
 export type ProcessLockStatus =
   | { status: "absent"; owner: null }
   | { status: "live" | "dead" | "unprovable"; owner: ProcessLockOwnerV1 };
-
 interface LockState {
   root: PinnedDirectory;
   coverageRoot: PinnedDirectory | null;
@@ -288,11 +288,11 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
     durabilityError("bounds", "invalid process lock timeout");
   if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 1 || pollIntervalMs > 1_000)
     durabilityError("bounds", "invalid process lock polling interval");
-  const startIdentity = processStartIdentity();
+  const startIdentity = processStartIdentity(process.pid, options.processRuntime);
   if (!startIdentity) durabilityError("unsupported", "process start identity is unavailable");
   if (!boundedOwnerAscii(startIdentity, 512))
     durabilityError("invalid_value", "generated process start identity is outside owner bounds");
-  const localHost = hostname();
+  const localHost = options.processRuntime?.host ?? hostname();
   if (!boundedOwnerAscii(localHost, 255))
     durabilityError("invalid_value", "generated hostname is outside process lock owner bounds");
   const owner: ProcessLockOwnerV1 = {
@@ -349,12 +349,12 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
     const prior = ensureStableLockInitialized(fd, name);
     const observed = ownerFromRecord(prior);
     if (observed) {
-      const alive = processLockOwnerIsAlive(observed);
+      const alive = processLockOwnerIsAlive(observed, options.processRuntime);
       if (alive === true) durabilityError("lock_busy", "process lock metadata names a live owner");
       if (alive === null)
         durabilityError(
           "lock_busy",
-          observed.host === hostname()
+          observed.host === localHost
             ? "process lock owner death is unprovable"
             : "process lock has an unprovable remote owner",
         );

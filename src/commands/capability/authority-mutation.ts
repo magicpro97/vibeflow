@@ -22,7 +22,18 @@ import {
 import type { Scope } from "./parser-types.js";
 import { ephemeralIdempotencyKey } from "./runtime.js";
 
-type AuthorityAction = Exclude<HostActionRequestV1, { type: "authority.repair" }>;
+type AuthorityAction = Extract<
+  HostActionRequestV1,
+  {
+    type:
+      | "grant.create"
+      | "grant.renew"
+      | "grant.revoke"
+      | "policy.update_authority"
+      | "secret.revoke"
+      | "registry.trust_key";
+  }
+>;
 const TRUST_TRANSITIONS = {
   "authority.trust.add": "added",
   "authority.trust.rescope": "rescoped",
@@ -89,7 +100,7 @@ function decodeAuthorityRequestFile(
     throw new CapabilityCliUsageError(
       'authority request-file planning_options.network_read must be "forbid"',
     );
-  const action = validateHostActionRequest(row.action) as AuthorityAction;
+  const action = validateHostActionRequest(row.action);
   if (!matchesAuthorityCommand(command, action))
     throw new CapabilityCliUsageError(
       "request-file action does not match the selected authority command",
@@ -254,24 +265,15 @@ function requireTrustFile(
 }
 
 function scopeForAuthorityAction(action: AuthorityAction): Scope {
-  switch (action.type) {
-    case "grant.create":
-    case "grant.renew":
-      return action.grant.scope;
-    case "grant.revoke":
-    case "policy.update_authority":
-    case "secret.revoke":
-    case "registry.trust_key":
-      return action.scope;
-    default:
-      throw new CapabilityCliUsageError("request-file action must target the authority domain");
-  }
+  return action.type === "grant.create" || action.type === "grant.renew"
+    ? action.grant.scope
+    : action.scope;
 }
 
 function matchesAuthorityCommand(
   command: Exclude<FabricCliAuthorityMutationCommandV1, "authority.repair">,
-  action: AuthorityAction,
-): boolean {
+  action: HostActionRequestV1,
+): action is AuthorityAction {
   switch (command) {
     case "authority.grant.create":
       return action.type === "grant.create";

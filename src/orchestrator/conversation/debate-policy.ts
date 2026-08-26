@@ -5,6 +5,7 @@ import {
   parseDebateEvaluatorOutput,
   parseDebateParticipantOutput,
 } from "../debate.js";
+import type { AgentActionCandidateOutput } from "../debate.js";
 import type { StoredTraceEvent } from "../trace/types.js";
 import { persistBaselineResult, projectBaselineComparison } from "./baseline.js";
 import type { AgentSocialIntentRequestV1 } from "./conversation-interaction-types.js";
@@ -26,6 +27,7 @@ interface ParticipantRoundResult {
   claim: string | null;
   evidence: string[];
   socialIntent: AgentSocialIntentRequestV1;
+  actionCandidate?: AgentActionCandidateOutput;
 }
 
 interface TranscriptRound {
@@ -274,6 +276,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
         claim: parsed.claim,
         evidence: parsed.evidence,
         socialIntent: parsed.social_intent,
+        ...(parsed.action_candidate ? { actionCandidate: parsed.action_candidate } : {}),
       };
     });
   }

@@ -29,7 +29,7 @@
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { filterEnv } from "../dispatch/env-filter.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { readSettings } from "../settings.js";
 import {
   BRIEF_FRESH_MS,
@@ -70,10 +70,12 @@ export interface CoordInject {
    *  The default `defaultEngineSpawner` (see below) merges
    *  `spawnEnv` into `process.env` and spawns the engine. */
   spawner?: (
-    engine: string,
+    engine: Engine,
+    command: string,
     args: readonly string[],
     spawnEnv: NodeJS.ProcessEnv,
   ) => Promise<number>;
+  ownedRoute?: OwnedAiRouteRunner;
   /** Tool-deny-list policy. Receives a tool name; returns null if
    *  allowed, or a `DeniedToolCall` if denied. Default policy denies
    *  the mutation/side-effect tools: Write, Edit, MultiEdit, NotebookEdit,
@@ -194,7 +196,10 @@ export async function coord(
   // The `toolDenier` inject in tests proves the policy; the env var
   // is the production enforcement signal (engines that support it
   // apply the policy natively).
-  const spawner = inject.spawner ?? defaultEngineSpawner;
+  const spawner =
+    inject.spawner ??
+    ((exactEngine, command, args, env) =>
+      defaultEngineSpawner(exactEngine, command, args, env, inject.ownedRoute ?? runOwnedAiRoute));
   const engineArgs = _args.slice(1);
   // Build the deny-list env: comma-separated, matching the engine's
   // native tool name. The env var is read by `vf hook` (armed via
@@ -215,7 +220,7 @@ export async function coord(
   // ponytail: single-entry binary-name map; expand when another engine
   // needs a different executable name than its engine ID.
   const engineBinary = engine === "antigravity" ? "agy" : engine;
-  const code = await spawner(engineBinary, engineArgs, spawnEnv);
+  const code = await spawner(engine, engineBinary, engineArgs, spawnEnv);
 
   // The deny-list is enforced by the engine's PreToolUse hook in
   // production (the engine's wrapper calls `denier(tool)` for every
@@ -244,9 +249,11 @@ export async function coord(
  *  read-only filesystem), we still spawn so the engine doesn't break —
  *  the deny-list is best-effort, never a hard environment requirement. */
 export async function defaultEngineSpawner(
-  engine: string,
+  engine: Engine,
+  command: string,
   _args: readonly string[],
   spawnEnv: NodeJS.ProcessEnv = process.env,
+  ownedRoute: OwnedAiRouteRunner = runOwnedAiRoute,
 ): Promise<number> {
   // A1 FU #198 + cross-review #219: arm the PreToolUse hook configs so
   // tool deny-list enforcement is live when the engine spawns.
@@ -265,33 +272,26 @@ export async function defaultEngineSpawner(
       { level: "warn" },
     );
   }
-  // Use a dynamic import so the node:child_process dependency is
-  // not pulled into the test bundle (most unit tests inject a
-  // stub spawner and never reach this code).
-  const { spawn } = await import("node:child_process");
-  // #556: scrub the host env before handing it to the engine subprocess so
-  // AWS_*/STRIPE_*/DB URLs/unrelated tokens never leak to a third-party agent
-  // CLI. VF_DENY_TOOLS (layered by coord() at :195) is in ALWAYS_KEEP's VF_*
-  // prefix, so the deny-list hint survives the filter. Audit the dropped NAMES
-  // (never values) via the existing out() channel.
   const policy = readSettings(cwd()).envPolicy ?? {};
-  const { env: filteredEnv, dropped } = filterEnv(spawnEnv, policy);
-  if (dropped.length > 0) {
-    // NOTE: out() only consumes the trailing opts bag when it carries a `level`
-    // field (logbus/out.ts extractOptsAndParts). A bare { meta } is joined into
-    // the text and the meta is dropped — so `level` is REQUIRED for the audit
-    // meta ({ kind, dropped }) to reach the bus for `vf logs`/tests.
-    out("vf", c.dim(`coord: env scrub dropped ${dropped.length} host var(s) before spawn`), {
-      level: "info",
-      meta: { kind: "coord-env-scrub", dropped },
+  try {
+    const result = await ownedRoute({
+      engine,
+      command,
+      args: _args,
+      input: "",
+      cwd: cwd(),
+      sourceEnv: spawnEnv,
+      envPolicy: policy,
+      onAudit: (dropped) => {
+        if (dropped.length === 0) return;
+        out("vf", c.dim(`coord: env scrub dropped ${dropped.length} host var(s) before spawn`), {
+          level: "info",
+          meta: { kind: "coord-env-scrub", dropped },
+        });
+      },
     });
+    return result.status;
+  } catch {
+    return 1;
   }
-  return await new Promise<number>((resolve) => {
-    const child = spawn(engine, _args, {
-      stdio: "inherit",
-      env: filteredEnv,
-    });
-    child.on("exit", (code) => resolve(code ?? 1));
-    child.on("error", () => resolve(1));
-  });
 }

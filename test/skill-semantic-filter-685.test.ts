@@ -132,15 +132,15 @@ describe("no low-similarity calls", () => {
 
 // ── Opt-in only reviewer ─────────────────────────────────────────────
 describe("opt-in only reviewer", () => {
-  test("no reviewer -> no review calls", () => {
+  test("no reviewer -> no review calls", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     const candidates = filterCandidates(base);
-    const results = reviewCandidates(candidates, undefined, 10);
+    const results = await reviewCandidates(candidates, undefined, 10);
     expect(results).toHaveLength(0);
   });
 
-  test("reviewer called when provided", () => {
+  test("reviewer called when provided", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     const candidates = filterCandidates(base);
@@ -150,7 +150,7 @@ describe("opt-in only reviewer", () => {
         return { candidate: c, verdict: "related" };
       },
     };
-    const results = reviewCandidates(candidates, reviewer, 10);
+    const results = await reviewCandidates(candidates, reviewer, 10);
     expect(results).toHaveLength(1);
     expect(results[0]?.verdict).toBe("related");
   });
@@ -158,7 +158,7 @@ describe("opt-in only reviewer", () => {
 
 // ── Cap ──────────────────────────────────────────────────────────────
 describe("cap", () => {
-  test("maxReviews 0 yields no reviews", () => {
+  test("maxReviews 0 yields no reviews", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     const candidates = filterCandidates(base);
@@ -168,10 +168,10 @@ describe("cap", () => {
         return { candidate: c, verdict: "related" };
       },
     };
-    expect(reviewCandidates(candidates, reviewer, 0)).toHaveLength(0);
+    expect(await reviewCandidates(candidates, reviewer, 0)).toHaveLength(0);
   });
 
-  test("maxReviews caps at limit", () => {
+  test("maxReviews caps at limit", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     scaffold("c", { owns: ["f1"] });
@@ -183,7 +183,7 @@ describe("cap", () => {
         return { candidate: c, verdict: "related" };
       },
     };
-    expect(reviewCandidates(candidates, reviewer, 1)).toHaveLength(1);
+    expect(await reviewCandidates(candidates, reviewer, 1)).toHaveLength(1);
   });
 });
 
@@ -221,7 +221,7 @@ describe("malformed config/arguments", () => {
 
 // ── Reviewer errors isolated ─────────────────────────────────────────
 describe("reviewer errors isolated", () => {
-  test("throwing reviewer produces error result", () => {
+  test("throwing reviewer produces error result", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     const candidates = filterCandidates(base);
@@ -231,13 +231,13 @@ describe("reviewer errors isolated", () => {
         throw new Error("boom");
       },
     };
-    const results = reviewCandidates(candidates, reviewer, 10);
+    const results = await reviewCandidates(candidates, reviewer, 10);
     expect(results).toHaveLength(1);
     expect(results[0]?.verdict).toBe("error");
     expect(results[0]?.error).toBe("boom");
   });
 
-  test("one throwing reviewer does not affect other candidates", () => {
+  test("one throwing reviewer does not affect other candidates", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     scaffold("c", { owns: ["f1"] });
@@ -251,7 +251,7 @@ describe("reviewer errors isolated", () => {
         return { candidate: c, verdict: "related" };
       },
     };
-    const results = reviewCandidates(candidates, reviewer, 10);
+    const results = await reviewCandidates(candidates, reviewer, 10);
     expect(results).toHaveLength(candidates.length);
     expect(results.filter((r) => r.verdict === "error")).toHaveLength(1);
     expect(results.filter((r) => r.verdict === "related")).toHaveLength(candidates.length - 1);
@@ -290,7 +290,9 @@ describe("stable output", () => {
 
 // ── CLI subcommand ───────────────────────────────────────────────────
 describe("CLI handleSemanticFilterSubcommand", () => {
-  function captureConsole(fn: () => number): { code: number; lines: string[] } {
+  async function captureConsole(
+    fn: () => number | Promise<number>,
+  ): Promise<{ code: number; lines: string[] }> {
     const lines: string[] = [];
     const origLog = console.log;
     const origErr = console.error;
@@ -300,7 +302,7 @@ describe("CLI handleSemanticFilterSubcommand", () => {
     console.log = spy as typeof console.log;
     console.error = spy as typeof console.error;
     try {
-      const code = fn();
+      const code = await fn();
       return { code, lines };
     } finally {
       console.log = origLog;
@@ -308,14 +310,14 @@ describe("CLI handleSemanticFilterSubcommand", () => {
     }
   }
 
-  test("no candidates -> exit 0", () => {
-    const { code, lines } = captureConsole(() => handleSemanticFilterSubcommand(base, []));
+  test("no candidates -> exit 0", async () => {
+    const { code, lines } = await captureConsole(() => handleSemanticFilterSubcommand(base, []));
     expect(code).toBe(0);
     expect(lines.some((l) => l.includes("No candidate"))).toBe(true);
   });
 
-  test("filter exception returns 1", () => {
-    const { code, lines } = captureConsole(() =>
+  test("filter exception returns 1", async () => {
+    const { code, lines } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, [], {
         discoverSkills: () => {
           throw new Error("scan unavailable");
@@ -326,53 +328,55 @@ describe("CLI handleSemanticFilterSubcommand", () => {
     expect(lines.some((l) => l.includes("filter failed: scan unavailable"))).toBe(true);
   });
 
-  test("candidates found, no reviewer -> exit 0 lists them", () => {
+  test("candidates found, no reviewer -> exit 0 lists them", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
-    const { code, lines } = captureConsole(() => handleSemanticFilterSubcommand(base, []));
+    const { code, lines } = await captureConsole(() => handleSemanticFilterSubcommand(base, []));
     expect(code).toBe(0);
     expect(lines.some((l) => l.includes("candidate pair"))).toBe(true);
     expect(lines.some((l) => l.includes("a"))).toBe(true);
     expect(lines.some((l) => l.includes("b"))).toBe(true);
   });
 
-  test("--max-reviews with invalid value -> exit 2", () => {
-    const { code } = captureConsole(() =>
+  test("--max-reviews with invalid value -> exit 2", async () => {
+    const { code } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--max-reviews", "abc"]),
     );
     expect(code).toBe(2);
   });
 
-  test("--max-reviews with out-of-range value -> exit 2", () => {
-    const { code } = captureConsole(() =>
+  test("--max-reviews with out-of-range value -> exit 2", async () => {
+    const { code } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--max-reviews", "10001"]),
     );
     expect(code).toBe(2);
   });
 
-  test("--max-reviews with valid value -> exit 0", () => {
+  test("--max-reviews with valid value -> exit 0", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
-    const { code } = captureConsole(() =>
+    const { code } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--max-reviews", "5"]),
     );
     expect(code).toBe(0);
   });
 
-  test("--reviewer flag accepted", () => {
+  test("--reviewer flag accepted", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
-    const { code, lines } = captureConsole(() =>
+    const { code, lines } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--reviewer", "test"]),
     );
     expect(code).toBe(0);
     expect(lines.some((l) => l.includes("test"))).toBe(true);
   });
 
-  test("--reviewer with no value -> exit 2", () => {
+  test("--reviewer with no value -> exit 2", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
-    const { code } = captureConsole(() => handleSemanticFilterSubcommand(base, ["--reviewer"]));
+    const { code } = await captureConsole(() =>
+      handleSemanticFilterSubcommand(base, ["--reviewer"]),
+    );
     expect(code).toBe(2);
   });
 });
@@ -500,35 +504,72 @@ describe("makeCheapReviewerFromBridge", () => {
     expect(r?.id).toBe("echo-reviewer");
   });
 
-  test("review calls bridge and parses RELATED", () => {
+  test("review calls bridge and parses RELATED through owned route", async () => {
     process.env.VIBEFLOW_AI = "echo RELATED";
-    const r = makeCheapReviewerFromBridge("echo-reviewer");
-    expect(r).toBeDefined();
-    const result = r?.review({ skills: ["a", "b"], reason: "duplicate-fact", similarity: 0 });
-    expect(result?.verdict).toBe("related");
+    const requests: string[] = [];
+    const r = makeCheapReviewerFromBridge("echo-reviewer", base, async (request) => {
+      requests.push(`${request.engine}:${request.command}`);
+      return {
+        attemptId: "semantic-related",
+        status: 0,
+        stdout: "RELATED\n",
+        stderr: "",
+        timedOut: false,
+      };
+    });
+    if (!r) throw new Error("missing reviewer");
+    const result = await r.review({
+      skills: ["a", "b"],
+      reason: "duplicate-fact",
+      similarity: 0,
+    });
+    expect(result.verdict).toBe("related");
+    expect(requests).toEqual(["claude:echo RELATED"]);
   });
 
-  test("review calls bridge and parses UNRELATED", () => {
+  test("review calls bridge and parses UNRELATED", async () => {
     process.env.VIBEFLOW_AI = "echo UNRELATED";
-    const r = makeCheapReviewerFromBridge("echo-reviewer");
-    expect(r).toBeDefined();
-    const result = r?.review({ skills: ["a", "b"], reason: "duplicate-fact", similarity: 0 });
-    expect(result?.verdict).toBe("unrelated");
+    const r = makeCheapReviewerFromBridge("echo-reviewer", base, async () => ({
+      attemptId: "semantic-unrelated",
+      status: 0,
+      stdout: "UNRELATED\n",
+      stderr: "",
+      timedOut: false,
+    }));
+    if (!r) throw new Error("missing reviewer");
+    const result = await r.review({
+      skills: ["a", "b"],
+      reason: "duplicate-fact",
+      similarity: 0,
+    });
+    expect(result.verdict).toBe("unrelated");
   });
 
-  test("review returns error on bridge failure", () => {
+  test("review returns error on bridge failure", async () => {
     process.env.VIBEFLOW_AI = "false";
-    const r = makeCheapReviewerFromBridge("fail-reviewer");
-    expect(r).toBeDefined();
-    const result = r?.review({ skills: ["a", "b"], reason: "duplicate-fact", similarity: 0 });
-    expect(result?.verdict).toBe("error");
-    expect(result?.error).toMatch(/exit/);
+    const r = makeCheapReviewerFromBridge("fail-reviewer", base, async () => ({
+      attemptId: "semantic-failure",
+      status: 1,
+      stdout: "",
+      stderr: "failed",
+      timedOut: false,
+    }));
+    if (!r) throw new Error("missing reviewer");
+    const result = await r.review({
+      skills: ["a", "b"],
+      reason: "duplicate-fact",
+      similarity: 0,
+    });
+    expect(result.verdict).toBe("error");
+    expect(result.error).toMatch(/exit/);
   });
 });
 
 // ── Integrated flow with injected reviewer ──────────────────────────
 describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
-  function captureConsole(fn: () => number): { code: number; lines: string[] } {
+  async function captureConsole(
+    fn: () => number | Promise<number>,
+  ): Promise<{ code: number; lines: string[] }> {
     const lines: string[] = [];
     const origLog = console.log;
     const origErr = console.error;
@@ -538,7 +579,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
     console.log = spy as typeof console.log;
     console.error = spy as typeof console.error;
     try {
-      const code = fn();
+      const code = await fn();
       return { code, lines };
     } finally {
       console.log = origLog;
@@ -546,7 +587,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
     }
   }
 
-  test("injected reviewer runs and reports results", () => {
+  test("injected reviewer runs and reports results", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     const reviewer: CheapReviewer = {
@@ -555,7 +596,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
         return { candidate: c, verdict: "related" };
       },
     };
-    const { code, lines } = captureConsole(() =>
+    const { code, lines } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--reviewer", "injected", "--max-reviews", "1"], {
         cheapReviewer: reviewer,
       }),
@@ -565,7 +606,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
     expect(lines.some((l) => l.includes("related"))).toBe(true);
   });
 
-  test("injected reviewer with zero max-reviews -> no reviews", () => {
+  test("injected reviewer with zero max-reviews -> no reviews", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     let callCount = 0;
@@ -576,7 +617,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
         return { candidate: c, verdict: "related" };
       },
     };
-    const { code, lines } = captureConsole(() =>
+    const { code, lines } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--reviewer", "injected"], { cheapReviewer: reviewer }),
     );
     expect(code).toBe(0);
@@ -585,7 +626,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
     expect(lines.some((l) => l.includes("max-reviews=0"))).toBe(true);
   });
 
-  test("injected reviewer reports unrelated", () => {
+  test("injected reviewer reports unrelated", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     const reviewer: CheapReviewer = {
@@ -594,7 +635,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
         return { candidate: c, verdict: "unrelated" };
       },
     };
-    const { code, lines } = captureConsole(() =>
+    const { code, lines } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--reviewer", "injected", "--max-reviews", "1"], {
         cheapReviewer: reviewer,
       }),
@@ -603,7 +644,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
     expect(lines.some((l) => l.includes("unrelated"))).toBe(true);
   });
 
-  test("injected reviewer with error", () => {
+  test("injected reviewer with error", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
     const reviewer: CheapReviewer = {
@@ -612,7 +653,7 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
         throw new Error("review failed");
       },
     };
-    const { code, lines } = captureConsole(() =>
+    const { code, lines } = await captureConsole(() =>
       handleSemanticFilterSubcommand(base, ["--reviewer", "injected", "--max-reviews", "1"], {
         cheapReviewer: reviewer,
       }),
@@ -622,14 +663,14 @@ describe("handleSemanticFilterSubcommand with cheapReviewer", () => {
     expect(lines.some((l) => l.includes("review failed"))).toBe(true);
   });
 
-  test("no bridge env -> exits 0 with warning when reviewer requested", () => {
+  test("no bridge env -> exits 0 with warning when reviewer requested", async () => {
     const orig = process.env.VIBEFLOW_AI;
     // biome-ignore lint/performance/noDelete: genuinely unset so absent bridge behavior is covered
     delete process.env.VIBEFLOW_AI;
     try {
       scaffold("a", { owns: ["f1"] });
       scaffold("b", { owns: ["f1"] });
-      const { code, lines } = captureConsole(() =>
+      const { code, lines } = await captureConsole(() =>
         handleSemanticFilterSubcommand(base, ["--reviewer", "fast"]),
       );
       expect(code).toBe(0);

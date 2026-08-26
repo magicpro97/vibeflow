@@ -80,7 +80,11 @@ export function assertSpawnProjection(
   assertReadOnlyTools(spawn);
 }
 
-export function sessionInvocation(spawn: SpawnOptionsProjection, nativeSessionId?: string) {
+export function sessionInvocation(
+  spawn: SpawnOptionsProjection,
+  nativeSessionId?: string,
+  prompt = spawn.rendered_prompt,
+) {
   const exactId = spawn.sessionMode === "exact" ? nativeSessionId : undefined;
   const base = engineCommand(
     spawn.engine,
@@ -129,7 +133,7 @@ export function sessionInvocation(spawn: SpawnOptionsProjection, nativeSessionId
     else if (spawn.engine === "codex") args.unshift("--sandbox", "danger-full-access");
     else if (spawn.engine === "copilot") args.push("--allow-all");
   }
-  return materializePrompt({ ...base, args }, spawn.rendered_prompt);
+  return materializePrompt({ ...base, args }, prompt);
 }
 
 function hasJsonLine(

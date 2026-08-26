@@ -1,5 +1,6 @@
 import type { Ref, ShallowRef } from "vue";
 import { conversationHomeApi } from "./conversation-home-api.js";
+import type { HomeMessageQueueSnapshot } from "./conversation-home-message-queue-types.js";
 import { watchHomeOperation } from "./conversation-home-operation-stream.js";
 import { mergeHomePage } from "./conversation-home-pagination.js";
 import type { ActivationEpoch, ActivationResourceRegistry } from "./conversation-home-state.js";
@@ -18,6 +19,7 @@ interface RefreshHomeActiveSelectionInput {
   authoritativeHead: ShallowRef<HomeAuthoritativeHeadResponse | null>;
   timeline: ShallowRef<HomeTimelineResponse | null>;
   pendingActions: Ref<HomeActionView[]>;
+  adoptMessageQueueSnapshot(snapshot: HomeMessageQueueSnapshot, rootSessionId: string): void;
   paging: {
     timeline: { nextCursor: string | null };
     pending: { nextCursor: string | null };
@@ -79,15 +81,17 @@ export async function refreshHomeActiveSelection(
 ): Promise<void> {
   const head = await conversationHomeApi.head(input.rootSessionId, input.token.signal);
   const active = committedHead(head, input.rootSessionId, input.expectedConversationId);
-  const [nextTimeline, actions] = await Promise.all([
+  const [nextTimeline, actions, messageQueue] = await Promise.all([
     conversationHomeApi.timeline(
       { rootSessionId: input.rootSessionId, limit: 50 },
       input.token.signal,
     ),
     conversationHomeApi.pending(active.conversation_id, { limit: 50 }, input.token.signal),
+    conversationHomeApi.messageQueue(input.rootSessionId, input.token.signal),
   ]);
   if (!input.token.isCurrent() || !input.isRefreshCurrent()) return;
   assertTimelineBinding(nextTimeline, head);
+  input.adoptMessageQueueSnapshot(messageQueue, input.rootSessionId);
 
   input.authoritativeHead.value = head;
   input.timeline.value = nextTimeline;

@@ -11,7 +11,7 @@ import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
 import { out } from "./_shared.js";
 import type { Engine, Reviewer } from "./_shared.js";
 import { type DiffReader, analyzeDiff, defaultDiffReader } from "./dispatch-diff.js";
-import { getUnitDiff, makeVibflowLLMFn, runLLMReview } from "./dispatch-reviewer-llm.js";
+import { getUnitDiff, runLLMReview } from "./dispatch-reviewer-llm.js";
 
 /**
  * Independent reviewer. Signature: `(unit, outcome) → { pass, reason }` — the first arg is the
@@ -40,9 +40,9 @@ export function makeReviewer(
   const readDiff = inject?.diffReader ?? defaultDiffReader;
   const cwd = inject?.cwd ?? process.cwd();
   // ADR-001: auto-wire llmFn only when VF_LLM_REVIEW=1 (opt-in) to avoid smoke/test interference.
-  const llmReviewFn =
-    inject?.llmReviewFn ??
-    (inject?.goal && process.env.VF_LLM_REVIEW === "1" ? makeVibflowLLMFn() : undefined);
+  const llmReviewFn = inject?.llmReviewFn;
+  const autoLlmReview =
+    Boolean(inject?.goal) && process.env.VF_LLM_REVIEW === "1" && Boolean(process.env.VIBEFLOW_AI);
 
   return async (unit, outcome) => {
     if (mode === "dry") {
@@ -92,13 +92,14 @@ export function makeReviewer(
     };
 
     // ADR-001 phase 2: LLM review after local gate passes.
-    if (inject?.goal && llmReviewFn) {
+    if (inject?.goal && (llmReviewFn || autoLlmReview)) {
       const llmDiff = getUnitDiff(cwd, unit.scope ?? []);
       const llmResult = await runLLMReview({
         goal: inject.goal,
         spec: unit.spec,
         diff: llmDiff,
-        llmFn: llmReviewFn,
+        ...(llmReviewFn ? { llmFn: llmReviewFn } : {}),
+        cwd,
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
         ...(inject?.implementer

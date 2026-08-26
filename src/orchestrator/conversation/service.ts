@@ -1,21 +1,23 @@
 import type { ActionProposalRequestV1, ActionRequestAuthorityV1 } from "../../actions/index.js";
+import { digestV1 } from "../../durability/index.js";
 import { TraceLifecycleConflictError } from "../trace/store.js";
 import { projectDryRunResult } from "./boundary-projection.js";
 import { ConversationContinuationRuntime } from "./continuation-runtime.js";
+import {
+  ConversationMessageQueueDispatcherV1,
+  type ConversationQueuedMessageDeliveryHostV1,
+} from "./conversation-message-queue-dispatcher.js";
+import { ConversationMessageQueueRuntimeV1 } from "./conversation-message-queue-runtime.js";
+import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-trace-authority.js";
 import { snapshotRuntimeValue } from "./emission-authority.js";
 import { ConversationAuthorityClosedError } from "./lifecycle-gate.js";
 import {
   ConversationSubscribers,
   type RuntimeCreateRequest,
-  bindingAuthorities,
   canonicalMessageRequest,
   isTerminalLifecycle,
   messageRevisionKey,
 } from "./policy-registry.js";
-import {
-  settleConfiguredPrivateFileRange,
-  settlePersistFailedPrivateFileRange,
-} from "./private-file-range-commit-authority.js";
 import { ConversationRequestMaterializer } from "./request-materializer.js";
 import { proposeDeferredConversationAction } from "./revision-action-service.js";
 import type { ConversationRevisionAuthority } from "./revision-authority.js";
@@ -35,7 +37,13 @@ import {
   rethrowControlConflict,
 } from "./service-errors.js";
 import { ConversationExecutionRuntime } from "./service-execution-runtime.js";
+import { ConversationPreparedSourcePublicationV1 } from "./service-prepared-publication.js";
+import { ConversationServiceQueueWakeV1 } from "./service-queue-wake.js";
 import { revisionQuiescenceReader } from "./service-revision-quiescence.js";
+import {
+  type ConversationAllocatedStartV1,
+  ConversationStartAuthorityV1,
+} from "./service-start-authority.js";
 export {
   ConversationControlConflictError,
   ConversationInvalidTargetParticipantError,
@@ -61,7 +69,9 @@ import type {
   Unsubscribe,
 } from "./types.js";
 /** Public domain service. It delegates every append/launch into its private runtime authority. */
-export class ConversationOrchestrator implements ConversationService {
+export class ConversationOrchestrator
+  implements ConversationService, ConversationQueuedMessageDeliveryHostV1
+{
   private readonly options: ConversationRuntimeOptions;
   private readonly runtime: ConversationRuntime;
   private readonly subscribers = new ConversationSubscribers();
@@ -71,8 +81,12 @@ export class ConversationOrchestrator implements ConversationService {
   private readonly requests: ConversationRequestMaterializer;
   private readonly revisionLaneRetry: RevisionLaneRetryRuntime | null;
   private readonly execution: ConversationExecutionRuntime;
+  private readonly starts: ConversationStartAuthorityV1;
   private readonly now: () => string;
   private readonly schedule: (task: () => void) => void;
+  private readonly preparedPublication: ConversationPreparedSourcePublicationV1;
+  private readonly queueWake: ConversationServiceQueueWakeV1;
+  readonly messageQueue: ConversationMessageQueueRuntimeV1 | null;
   constructor(options: ConversationRuntimeOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.options = withConversationHomeAuthorities(options, this.now);
@@ -80,132 +94,82 @@ export class ConversationOrchestrator implements ConversationService {
     this.schedule = this.options.schedule ?? ((task) => setTimeout(task, 0));
     this.requests = new ConversationRequestMaterializer(this.runtime, this.options, this.now);
     this.execution = new ConversationExecutionRuntime(this.runtime, this.options);
+    this.queueWake = new ConversationServiceQueueWakeV1(this.execution, () => this.messageQueue);
+    this.preparedPublication = new ConversationPreparedSourcePublicationV1(
+      this.subscribers,
+      this.options.onConversationSourceCommitted,
+    );
+    this.starts = new ConversationStartAuthorityV1(
+      this.runtime,
+      this.requests,
+      { execute: (manifest, operationId) => this.queueWake.execute(manifest, operationId) },
+      this.options,
+      this.now,
+      this.schedule,
+      this.preparedPublication.authority,
+    );
     this.revisionLaneRetry = this.options.homeAuthorities
       ? new RevisionLaneRetryRuntime(this.options, this.options.homeAuthorities.handoffs)
       : null;
-    this.runtime.onAppend((event) => {
-      this.subscribers.notify(event);
-      this.options.onConversationSourceCommitted?.(event);
-    });
+    this.runtime.onAppend((event) => this.preparedPublication.append(event));
     this.continuations = new ConversationContinuationRuntime(
       this.runtime,
       this.options,
       (manifest, operationId, result) => this.execution.finalize(manifest, operationId, result),
+      (conversationId) => this.queueWake.wake(conversationId),
     );
     this.revisions = createConversationRevisionAuthority(
       this.options,
       this.runtime,
       this.now,
       this.schedule,
-      (manifest, operationId) => this.execution.execute(manifest, operationId),
+      (manifest, operationId) => this.queueWake.execute(manifest, operationId),
+      (conversationId) => this.queueWake.wake(conversationId),
     );
     this.deferredRevisions = createConversationDeferredRevisionAuthority(
       this.options,
       this.runtime,
       this.now,
       this.schedule,
-      (manifest, operationId) => this.execution.execute(manifest, operationId),
+      (manifest, operationId) => this.queueWake.execute(manifest, operationId),
+      (conversationId) => this.queueWake.wake(conversationId),
     );
+    const broker = this.options.privateContextBroker;
+    const messages = this.options.messageQueueUserAuthority;
+    const home = this.options.homeAuthorities;
+    const social = this.options.socialAuthority;
+    if (broker && messages && home && social && this.options.artifactRoot) {
+      this.messageQueue = new ConversationMessageQueueRuntimeV1({
+        artifactRoot: this.options.artifactRoot,
+        traceStore: this.options.traceStore,
+        messages,
+        broker,
+        social,
+        now: this.now,
+      });
+      new ConversationMessageQueueDispatcherV1({
+        queue: this.messageQueue,
+        messages,
+        broker,
+        home,
+        delivery: this,
+        now: this.now,
+        schedule: this.schedule,
+      });
+      this.messageQueue.recover();
+    } else this.messageQueue = null;
   }
   async start(
     input: ConversationCreateRequest | RuntimeCreateRequest,
     options: ConversationInvocationOptions = {},
   ): Promise<ConversationStartResult> {
-    const request = await this.requests.materialize(input, options);
-    if (!request.topic || !request.policy || request.maxRounds < 1 || !request.bindings.length)
-      throw new Error("invalid conversation create request");
-    this.options.policies.require(request.policy);
-    const manifest = this.requests.manifest(request);
-    const bindings = request.bindings.map((binding) => binding.materialized);
-    const privateFileRange = request.private_file_range;
-    const createContextKey = `conversation-create:${manifest.conversation_id}`;
-    if (privateFileRange && !this.options.homeAuthorities)
-      throw new Error("private file range authority is unavailable");
-    if (privateFileRange && this.options.homeAuthorities) {
-      this.options.homeAuthorities.privateFileRanges.reserve(
-        privateFileRange,
-        createContextKey,
-        this.now(),
-      );
-      try {
-        this.options.homeAuthorities.privateTurnContexts.writeCreate({
-          conversationId: manifest.conversation_id,
-          targetParticipantIds: manifest.bindings.map((binding) => binding.participant_id),
-          createdAt: this.now(),
-          handoff: privateFileRange,
-          fileRange: this.options.homeAuthorities.privateFileRanges.content(privateFileRange),
-        });
-      } catch (error) {
-        this.options.homeAuthorities.privateFileRanges.release(
-          privateFileRange,
-          createContextKey,
-          this.now(),
-        );
-        throw error;
-      }
-    }
-    let operationId: string;
-    try {
-      operationId = this.runtime.begin(manifest, bindings);
-    } catch (error) {
-      if (privateFileRange && this.options.homeAuthorities)
-        this.options.homeAuthorities.privateFileRanges.release(
-          privateFileRange,
-          createContextKey,
-          this.now(),
-        );
-      throw error;
-    }
-    try {
-      this.runtime.persist(manifest, bindings);
-    } catch (error) {
-      if (privateFileRange && this.options.homeAuthorities)
-        settlePersistFailedPrivateFileRange(
-          this.options.artifactStore,
-          this.options.homeAuthorities,
-          privateFileRange,
-          manifest.conversation_id,
-          createContextKey,
-          this.now(),
-          manifest,
-          bindingAuthorities(manifest, bindings),
-        );
-      await this.runtime.abandon(manifest.conversation_id, "conversation persistence failed");
-      throw error;
-    }
-    try {
-      await this.runtime.configure(manifest.conversation_id);
-    } catch (error) {
-      if (privateFileRange && this.options.homeAuthorities)
-        await settleConfiguredPrivateFileRange(
-          this.options.traceStore,
-          this.options.homeAuthorities,
-          privateFileRange,
-          manifest.conversation_id,
-          createContextKey,
-          this.now(),
-        );
-      await this.runtime.abandon(manifest.conversation_id, "conversation configure failed");
-      throw error;
-    }
-    if (privateFileRange && this.options.homeAuthorities) {
-      this.options.homeAuthorities.privateFileRanges.consume(
-        privateFileRange,
-        createContextKey,
-        `conversation:${manifest.conversation_id}:create`,
-        this.now(),
-      );
-    }
-    const completion = new Promise<ConversationCreateResult>((resolve, reject) => {
-      this.schedule(() => void this.execution.execute(manifest, operationId).then(resolve, reject));
-    });
-    void completion.catch(() => undefined);
-    return Object.freeze({
-      conversation_id: manifest.conversation_id,
-      revision_id: manifest.revision_id,
-      operation_id: operationId,
-      completion,
-    });
+    return this.starts.start(input, options);
+  }
+  startAllocated(
+    input: ConversationAllocatedStartV1,
+    options: ConversationInvocationOptions = {},
+  ): Promise<ConversationStartResult> {
+    return this.starts.startAllocated(input, options);
   }
   async create(
     input: ConversationCreateRequest | RuntimeCreateRequest,
@@ -231,6 +195,15 @@ export class ConversationOrchestrator implements ConversationService {
   }
   async message(id: string, request: MessageRequest): Promise<MessageResponse> {
     const captured = canonicalMessageRequest(snapshotRuntimeValue(request));
+    if (this.messageQueue) {
+      const key = this.runtime.ids("message");
+      const principal = digestV1("VF-CONVERSATION-SERVICE-MESSAGE-PRINCIPAL\0v1\0", {
+        schema_version: "1.0",
+        principal: "conversation-service",
+      });
+      const result = this.messageQueue.enqueueCompatibility(id, principal, key, captured);
+      return { message_id: result.item.queue_item_id, accepted: true };
+    }
     const manifest = this.runtime.manifest(id);
     const state = await this.snapshot(id);
     if (!manifest || !state) throw new ConversationNotFoundError("conversation not found");
@@ -272,7 +245,29 @@ export class ConversationOrchestrator implements ConversationService {
       .catch(rethrowControlConflict);
     return { message_id: messageId, accepted: true };
   }
-
+  async deliverQueuedMessage(input: {
+    conversation_id: string;
+    request: MessageRequest & { target_participants: "all" | string[] };
+    message_key: string;
+    authority: ConversationQueuedMessageDeliveryAuthorityV1;
+  }): Promise<{ childId: string }> {
+    const snapshot = await this.snapshot(input.conversation_id);
+    if (!snapshot || !isTerminalLifecycle(snapshot.lifecycle))
+      throw new ConversationControlConflictError("queued message requires stable terminal");
+    const result = await this.revisions.continueMessageAction(
+      input.conversation_id,
+      snapshot,
+      input.request,
+      input.message_key,
+      undefined,
+      undefined,
+      input.authority,
+    );
+    return { childId: result.childId };
+  }
+  queuedMessageReady(conversationId: string, revisionOperationId: string | null): boolean {
+    return this.revisionOperationQuiescent(conversationId, revisionOperationId);
+  }
   async proposeConversationAction(
     id: string,
     request: ActionProposalRequestV1,
@@ -287,7 +282,6 @@ export class ConversationOrchestrator implements ConversationService {
       revisions: this.deferredRevisions,
     });
   }
-
   commitConversationAction(input: {
     conversationId: string;
     proposalId: string;
@@ -338,6 +332,7 @@ export class ConversationOrchestrator implements ConversationService {
       .terminal(id, "STOPPED", state.health, null, null, "conversation stopped")
       .catch(rethrowControlConflict);
     this.runtime.finish(id);
+    this.queueWake.wake(id);
     if (terminal !== "STOPPED")
       throw new ConversationControlConflictError("conversation is terminal");
     return { stopped: true, terminal_state: "STOPPED" };
@@ -372,17 +367,22 @@ export class ConversationOrchestrator implements ConversationService {
     if (durable) return durable;
     return this.runtime.cancelOperation(captured);
   }
-
-  revisionOperationQuiescent(conversationId: string, operationId: string): boolean {
+  revisionOperationQuiescent(conversationId: string, revisionOperationId: string | null): boolean {
     return revisionQuiescenceReader(
       this.runtime,
       this.revisionLaneRetry,
       this.options.homeAuthorities?.revisionLanes ?? null,
-    )(conversationId, operationId);
+    )(conversationId, revisionOperationId);
   }
   retryRevisionLanes(input: Parameters<RevisionLaneRetryRuntime["retry"]>[0]) {
     if (!this.revisionLaneRetry) throw new Error("revision retry runtime authority is absent");
-    return this.revisionLaneRetry.retry(input);
+    return this.queueWake.settle(
+      input.operation.root_session_id,
+      this.revisionLaneRetry.retry(input),
+    );
+  }
+  wakeMessageQueue(conversationId: string): void {
+    this.queueWake.wake(conversationId);
   }
   snapshot(id: string) {
     return this.runtime.snapshot(id);

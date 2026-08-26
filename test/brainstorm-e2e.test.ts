@@ -662,6 +662,10 @@ describe("brainstorm Phase 3 acceptance", () => {
         }),
       );
       expect(message.status).toBe(202);
+      expect(await message.json()).toEqual({
+        accepted: true,
+        message_id: expect.stringMatching(/^vf-queued-message-[a-f0-9]{64}$/),
+      });
       expect(
         await (
           await http.route(
@@ -677,8 +681,9 @@ describe("brainstorm Phase 3 acceptance", () => {
         ).json(),
       ).toEqual({ resumed: true, active_state: "ACTIVE" });
 
-      expect(scheduled).toHaveLength(1);
+      expect(scheduled).toHaveLength(2);
       scheduled.shift()?.();
+      expect(scheduled).toHaveLength(1);
       const approval = await waitForEvent(bootstrap, created.conversation_id, "approval_requested");
       if (approval.event.type !== "approval_requested") throw new Error("approval unavailable");
       const decision = {
@@ -741,7 +746,6 @@ describe("brainstorm Phase 3 acceptance", () => {
         "participant_bound",
         "skill_injected",
         "state_change",
-        "user_message",
         "operation_lifecycle",
         "tool_action",
         "artifact_created",
@@ -863,7 +867,7 @@ describe("brainstorm Phase 3 acceptance", () => {
           "Write,Edit,Bash",
         ]),
       );
-      expect(launches[0]?.options.stdinText).toBe(PRIVATE_PROMPT);
+      expect(launches[0]?.options.stdinText).toBe(`${PRIVATE_PROMPT}\n`);
       expect(launches[0]?.options.cwd).toBeUndefined();
       expect(launches[0]?.options.env.ANTHROPIC_API_KEY).toBe(privateEnv.ANTHROPIC_API_KEY);
       expect(launches[0]?.options.env.OPENAI_API_KEY).toBeUndefined();

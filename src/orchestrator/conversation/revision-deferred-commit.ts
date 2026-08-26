@@ -246,6 +246,8 @@ export async function commitDeferredRevision(input: {
     sharedPrompt: contextHandoffSharedPromptBytes(handoff.prompt_projection).toString("utf8"),
     request: revisionMessageRequest(action),
     messageKey: actionState.proposal.idempotency_key,
+    runtimeOperationId: operation.operation_id,
+    queueDelivery: null,
     priorPublished: base.published,
   };
   try {
@@ -266,6 +268,7 @@ export async function commitDeferredRevision(input: {
         reservation,
         materializeReleasedRevisionReservation(reservation, input.options.now()),
       );
+      input.options.revisionSettled(base.lineage.root_session_id);
     }
     throw error;
   }

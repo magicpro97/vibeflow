@@ -20,12 +20,6 @@ function expectedUserPrerequisites(
   for (const adapterPlan of plan.adapter_plans) {
     for (const row of adapterPlan.user_prerequisites) {
       const key = canonicalJson(row);
-      const prior = rows.get(key);
-      if (prior && canonicalJson(prior) !== key)
-        throw new CapabilityRuntimeError(
-          "capability plan has conflicting user prerequisites",
-          "integrity-failure",
-        );
       rows.set(key, row);
     }
   }

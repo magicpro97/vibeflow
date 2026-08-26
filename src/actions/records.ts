@@ -37,13 +37,6 @@ function timestamp(value: string, field: string): number {
   return epoch;
 }
 
-function uniqueSorted(values: readonly string[], field: string): void {
-  if (new Set(values).size !== values.length) fail(`${field} contains duplicates`);
-  const sorted = [...values].sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
-  if (sorted.some((value, index) => value !== values[index]))
-    fail(`${field} is not bytewise sorted`);
-}
-
 function digestId(prefix: string, digest: string): string {
   return `${prefix}${digestHex(digest)}`;
 }

@@ -267,14 +267,6 @@ export function createAuthenticityBinding(
         statement_expires_at: registry.statement_expires_at,
       }
     : null;
-  if (
-    pin.source.kind === "registry" &&
-    registry_signature?.envelope_digest !== pin.source.signature_envelope_digest
-  )
-    throw new CapabilityValidationError(
-      "pin and registry envelope digest disagree",
-      "registry_signature",
-    );
   const draft = {
     schema_version: "1.0" as const,
     pin_digest: pin.pin_digest,

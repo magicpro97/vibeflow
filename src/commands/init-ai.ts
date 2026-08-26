@@ -71,9 +71,9 @@ export function makeEnrichmentSpawner(prefix: string): AsyncSpawner {
   });
   // Flush the final partial line (no trailing newline) after each spawn and
   // reset buffers so output never leaks across spawn calls.
-  return async (cmd, args, input) => {
+  return async (cmd, args, input, owned) => {
     try {
-      return await inner(cmd, args, input);
+      return await inner(cmd, args, input, owned);
     } finally {
       flush(lineBuf, "engine-stdout");
       flush(errLineBuf, "engine-stderr");

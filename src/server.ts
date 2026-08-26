@@ -8,8 +8,8 @@ import type { CapabilityRuntimeFactoryOptionsV1 } from "./capabilities/runtime-f
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
 import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
 import { scanRepo } from "./scanner.js";
-import { askStreamResponse } from "./server/ask-route.js";
 import { handleCapabilityRoute } from "./server/capability-route.js";
+import { handleConversationAskCompatibilityStream } from "./server/conversation-ask-compatibility-route.js";
 import { conversationUrlHost, isConversationLoopbackHost } from "./server/conversation-host.js";
 import {
   type ConversationHttpAuthority,
@@ -461,15 +461,34 @@ export function startServer(
       if (method === "GET" && path === "/api/ask/stream") {
         if (!guarded(req) && url.searchParams.get("token") !== token)
           return Response.json({ error: "forbidden" }, { status: 403 });
-        const body = {
-          path: url.searchParams.get("path") ?? "",
-          start: Number(url.searchParams.get("start")),
-          end: Number(url.searchParams.get("end")),
-          question: url.searchParams.get("question") ?? "",
-          engine: url.searchParams.get("engine") ?? undefined,
-          resume: url.searchParams.get("resume") === "true",
-        };
-        return await askStreamResponse(activeRepo, body);
+        const resume = url.searchParams.get("resume") === "true";
+        const body = resume
+          ? {
+              resume: true,
+              conversation_id: url.searchParams.get("conversation_id") ?? "",
+              question: url.searchParams.get("question") ?? "",
+              engine: url.searchParams.get("engine") ?? undefined,
+            }
+          : {
+              path: url.searchParams.get("path") ?? "",
+              start: Number(url.searchParams.get("start")),
+              end: Number(url.searchParams.get("end")),
+              question: url.searchParams.get("question") ?? "",
+              engine: url.searchParams.get("engine") ?? undefined,
+            };
+        return handleConversationAskCompatibilityStream(
+          conversation?.askCompatibility
+            ? {
+                ...conversation.askCompatibility,
+                sessions: conversation.sessions,
+                csrf: (request) => guarded(request) || url.searchParams.get("token") === token,
+              }
+            : undefined,
+          req,
+          activeRepo,
+          body,
+          url.searchParams.get("idempotency_key") ?? undefined,
+        );
       }
 
       // --- GET /api/logs/session --- returns session start seq (to skip stale logs)
@@ -810,6 +829,15 @@ export function startServer(
               setActiveRepo: (r) => {
                 activeRepo = r;
               },
+              ...(conversation?.askCompatibility
+                ? {
+                    askCompatibility: {
+                      ...conversation.askCompatibility,
+                      sessions: conversation.sessions,
+                      csrf: guarded,
+                    },
+                  }
+                : {}),
             },
             method,
             path,

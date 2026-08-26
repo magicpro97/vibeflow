@@ -16,6 +16,7 @@ import {
   readPrivateDirectoryNames,
   readPrivateFileBytesAt,
 } from "./catalog-read-safety.js";
+import { assertConversationLineageWritable } from "./conversation-lineage-mutation-guard.js";
 import {
   type LineageAssociationRecordV1,
   assertLineageAssociationRecordV1,
@@ -27,6 +28,7 @@ import {
   type RevisionReservationRecordV1,
   assertRevisionReservationRecordV1,
 } from "./lineage-reservation.js";
+import { lineageStorageKey } from "./lineage-storage-key.js";
 import {
   type LineageHeadRecordV1,
   assertLineageHeadRecordV1,
@@ -42,13 +44,6 @@ export class LineageAuthorityCorruptError extends Error {
     super(message, options);
     this.name = "LineageAuthorityCorruptError";
   }
-}
-
-export function lineageStorageKey(rootSessionId: string): string {
-  return digestV1("VF-LINEAGE-STORAGE-KEY\0v1\0", {
-    schema_version: "1.0",
-    root_session_id: rootSessionId,
-  });
 }
 
 function sameBytes(left: Buffer, right: Buffer): boolean {
@@ -227,6 +222,7 @@ export class LineageAuthorityStore {
     )
       throw new Error("invalid lineage head replacement edge");
     return this.withLock("lineage-commit-head", (lock) => {
+      assertConversationLineageWritable(this.paths.root, lineage.root_session_id);
       const path = this.authorityPath("heads", lineage.root_session_id);
       const expected = canonicalJsonBytes(prior);
       const current = privateFileBytes(path, MAX_HEAD_BYTES);
@@ -297,6 +293,7 @@ export class LineageAuthorityStore {
     if (prior) assertRevisionReservationRecordV1(prior);
     assertReservationEdge(prior, replacement);
     return this.withLock("lineage-commit-reservation", (lock) => {
+      assertConversationLineageWritable(this.paths.root, replacement.root_session_id);
       const path = this.authorityPath("reservations", replacement.root_session_id);
       const expected = prior ? canonicalJsonBytes(prior) : null;
       if (prior)

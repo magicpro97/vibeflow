@@ -94,12 +94,12 @@ export async function bindWithIsolation<T>(
   repoRoot: string,
   phase: number,
   taskText: string,
-  bind: (options: MaterializeAgentBindingOptions) => T,
+  bind: (options: MaterializeAgentBindingOptions) => T | Promise<T>,
 ): Promise<T> {
-  if (phase === 1 || !authority) return bind({ repoRoot, phase, taskText });
+  if (phase === 1 || !authority) return await bind({ repoRoot, phase, taskText });
   const isolation = authority.acquire(repoRoot);
   try {
-    return bind({ repoRoot, phase, taskText, isolation });
+    return await bind({ repoRoot, phase, taskText, isolation });
   } finally {
     await releaseIsolationLease(isolation);
   }

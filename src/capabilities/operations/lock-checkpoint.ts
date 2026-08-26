@@ -15,6 +15,7 @@ import type { CapabilityLockV1 } from "../wire/lock.js";
 import type { CapabilityWalPayloadV1 } from "../wire/operation.js";
 import { CapabilityRuntimeError } from "./errors.js";
 import type { CapabilityOperationJournalV1 } from "./operation-journal.js";
+import type { CapabilityRuntimeFaultPointV1 } from "./types.js";
 
 type LockCheckpointPayloadV1 = Extract<CapabilityWalPayloadV1, { kind: "lock-checkpoint" }>;
 
@@ -60,13 +61,11 @@ export function ensureCapabilityLockCheckpoint(input: {
   base: CapabilityLockV1 | null;
   held: CapabilityScopeLockV1;
   journal: CapabilityOperationJournalV1;
+  fault?: (point: CapabilityRuntimeFaultPointV1) => void;
 }): boolean {
-  const selected = readCapabilityWal(input.storage.paths, input.operationId)
-    .filter((event) => event.payload.kind === "lock-checkpoint")
-    .map((event) => {
-      if (event.payload.kind !== "lock-checkpoint") throw new Error("checkpoint narrowing failed");
-      return event.payload;
-    });
+  const selected = readCapabilityWal(input.storage.paths, input.operationId).flatMap((event) =>
+    event.payload.kind === "lock-checkpoint" ? [event.payload] : [],
+  );
   if (input.base === null) {
     if (selected.length > 0)
       throw new CapabilityRuntimeError(
@@ -88,6 +87,7 @@ export function ensureCapabilityLockCheckpoint(input: {
     lock: input.held.processLock,
     maxBytes: 8 * 1024 * 1024,
   });
+  input.fault?.("after-lock-checkpoint-materialized");
   const retained = privateFileBytes(expected.path, 8 * 1024 * 1024);
   if (!retained || !Buffer.from(retained).equals(expected.bytes))
     throw new CapabilityRuntimeError(

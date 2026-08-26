@@ -108,9 +108,9 @@ describe("doctor", () => {
 // 3. applyIntake generates state
 // ---------------------------------------------------------------------------
 describe("applyIntake", () => {
-  test("generates state from minimal answers", () => {
+  test("generates state from minimal answers", async () => {
     const dir = mkdtempSync(join(tmpdir(), "test-intake-"));
-    const result = applyIntake(
+    const result = await applyIntake(
       { goal: "test", engines: ["claude"] },
       { base: dir, dry: true, skipPreflight: true },
     );

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type { Engine } from "../core.js";
 import {
   type AsyncSpawner,
@@ -47,6 +49,7 @@ export function defaultAiInitDispatcher(
     backoffCapMs?: number;
     /** Test seam: inject a sleep fn to keep the suite deterministic. */
     sleep?: (ms: number) => Promise<void>;
+    evidenceRoot?: string;
   } = {},
 ): UnitDispatcher {
   const {
@@ -57,6 +60,7 @@ export function defaultAiInitDispatcher(
     backoffBaseMs = 2000,
     backoffCapMs = 60_000,
     sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+    evidenceRoot = join(process.cwd(), ".vibeflow", "attempts"),
   } = opts;
   const resolveInvocation = engineCommandFn ?? engineCommand;
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
@@ -91,7 +95,11 @@ export function defaultAiInitDispatcher(
     );
     let lastNonZero = 1;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input);
+      const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input, {
+        attemptId: randomUUID(),
+        engine,
+        evidenceRoot,
+      });
       if (result.timedOut) {
         const reason = `timed out after ${timeoutMs}ms`;
         process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);

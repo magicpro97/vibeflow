@@ -8,7 +8,10 @@ export interface DebateParticipantResult {
   claim: string | null;
   evidence: string[];
   social_intent: AgentSocialIntentRequestV1;
+  action_candidate?: AgentActionCandidateOutput;
 }
+
+export type AgentActionCandidateOutput = { present: false } | { present: true; value: unknown };
 
 interface PriorDebatePosition {
   claim: string | null;
@@ -45,6 +48,7 @@ export function parseAgentTurnOutput(output: string): {
   answer: string;
   structured: boolean;
   social_intent: AgentSocialIntentRequestV1;
+  action_candidate?: AgentActionCandidateOutput;
 } {
   const parsed = parseJson(output);
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -54,6 +58,9 @@ export function parseAgentTurnOutput(output: string): {
         answer: record.answer,
         structured: true,
         social_intent: parseAgentSocialIntent(record),
+        ...(Object.hasOwn(record, "propose_action")
+          ? { action_candidate: { present: true as const, value: record.propose_action } }
+          : {}),
       };
   }
   return {
@@ -78,6 +85,9 @@ export function parseDebateParticipantOutput(output: string): DebateParticipantR
         claim,
         evidence,
         social_intent: parseAgentSocialIntent(record),
+        ...(Object.hasOwn(record, "propose_action")
+          ? { action_candidate: { present: true as const, value: record.propose_action } }
+          : {}),
       };
     }
   }

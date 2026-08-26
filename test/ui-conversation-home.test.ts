@@ -31,13 +31,13 @@ import type {
   HomeAuthoritativeHeadResponse,
   HomeCanonicalMessageReference,
   HomeCapabilityItem,
-  HomePrivateFileRangeBinding,
   HomeQuoteReference,
   HomeReactionSummary,
   HomeSessionSummary,
   HomeTimelineItem,
   HomeTimelineResponse,
 } from "../src/ui/src/conversation-home-types.js";
+import { matchHomeComposerSuggestions } from "../src/ui/src/home-composer-suggestions.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -59,6 +59,12 @@ const readyLocator = (
   target_kind: "completed-agent-response",
   content_digest: "sha256:timeline",
   ...overrides,
+});
+
+const emptyQueueHooks = () => ({
+  adoptMessageQueueSnapshot: () => {},
+  clearMessageQueueProjection: () => {},
+  messageQueueHasLiveItems: () => false,
 });
 
 describe("AI-first conversation Home", () => {
@@ -150,6 +156,14 @@ describe("AI-first conversation Home", () => {
       engine: "codex",
       model: null,
     });
+    expect(parseComposerIntent("-@agent-review")).toEqual({
+      kind: "remove-participant",
+      participantId: "agent-review",
+    });
+    expect(parseComposerIntent("-@bad participant")).toEqual({
+      kind: "invalid",
+      message: "That command is incomplete. Choose a suggestion below.",
+    });
     expect(parseComposerIntent("@agent-review Please check the permission diff")).toEqual({
       kind: "message",
       content: "Please check the permission diff",
@@ -165,6 +179,18 @@ describe("AI-first conversation Home", () => {
       kind: "invalid",
       message: "Choose one of: claude, codex, copilot, opencode, antigravity.",
     });
+    expect(
+      matchHomeComposerSuggestions("-@", [
+        { participant_id: "agent-review", role_ref: "reviewer", engine: "codex", model: null },
+      ]),
+    ).toEqual([
+      {
+        glyph: "−",
+        label: "Remove reviewer",
+        description: "codex",
+        value: "-@agent-review",
+      },
+    ]);
   });
 
   test("streamed participant deltas form one readable message", () => {
@@ -754,6 +780,7 @@ describe("AI-first conversation Home", () => {
     const originalHead = conversationHomeApi.head;
     const originalTimeline = conversationHomeApi.timeline;
     const originalPending = conversationHomeApi.pending;
+    const originalMessageQueue = conversationHomeApi.messageQueue;
     const timelineCalls: Array<{
       input: Parameters<typeof conversationHomeApi.timeline>[0];
       signal?: AbortSignal;
@@ -792,6 +819,13 @@ describe("AI-first conversation Home", () => {
       pendingCalls.push(row);
       return row.deferred.promise;
     }) as typeof conversationHomeApi.pending;
+    conversationHomeApi.messageQueue = (async (rootSessionId) => ({
+      schema_version: "1.0",
+      root_session_id: rootSessionId,
+      current_authority_digest: headDigest(rootSessionId),
+      max_nonterminal_items: 32,
+      items: [],
+    })) as typeof conversationHomeApi.messageQueue;
 
     try {
       const sessions = ref([session("root-a", "Session A"), session("root-b", "Session B")]);
@@ -835,6 +869,7 @@ describe("AI-first conversation Home", () => {
         authoritativeHead,
         timeline,
         pendingActions,
+        ...emptyQueueHooks(),
         activationLoading,
         activationError,
         online,
@@ -939,6 +974,7 @@ describe("AI-first conversation Home", () => {
       conversationHomeApi.head = originalHead;
       conversationHomeApi.timeline = originalTimeline;
       conversationHomeApi.pending = originalPending;
+      conversationHomeApi.messageQueue = originalMessageQueue;
     }
   });
 
@@ -1035,6 +1071,7 @@ describe("AI-first conversation Home", () => {
         authoritativeHead,
         timeline,
         pendingActions,
+        ...emptyQueueHooks(),
         activationLoading,
         activationError,
         online,
@@ -1157,6 +1194,7 @@ describe("AI-first conversation Home", () => {
         authoritativeHead,
         timeline,
         pendingActions,
+        ...emptyQueueHooks(),
         activationLoading,
         activationError,
         online,
@@ -1222,16 +1260,13 @@ describe("AI-first conversation Home", () => {
     };
     const originalDocument = browserGlobal.document;
     browserGlobal.document = { querySelector: () => null };
-    const { api } = await import("../src/ui/src/api.js");
     const { useHomePrivateRangeComposer } = await import(
       "../src/ui/src/composables/useHomePrivateRangeComposer.js"
     );
-    const originalStage = api.stagePrivateFileRange;
-    const staged = deferred<HomePrivateFileRangeBinding>();
-    api.stagePrivateFileRange = (() => staged.promise) as typeof api.stagePrivateFileRange;
+    const staged = deferred<boolean>();
+    const stageRequests: unknown[] = [];
 
     try {
-      const privateFileRange = ref<HomePrivateFileRangeBinding | null>(null);
       const activeRootId = ref<string | null>("root-a");
       const composerEpoch = ref(0);
       const scope = effectScope();
@@ -1240,9 +1275,9 @@ describe("AI-first conversation Home", () => {
           useHomePrivateRangeComposer({
             activeRootId,
             composerEpoch,
-            privateFileRange,
-            setPrivateFileRange(binding) {
-              privateFileRange.value = binding;
+            async stagePrivateContext(request) {
+              stageRequests.push(structuredClone(request));
+              return staged.promise;
             },
           }),
         ) ?? null;
@@ -1255,24 +1290,16 @@ describe("AI-first conversation Home", () => {
 
       activeRootId.value = "root-b";
       composerEpoch.value += 1;
-      staged.resolve({
-        schema_version: "1.0",
-        handoff_id: "vf-file-range-stale",
-        handoff_record_digest: "sha256:stale",
-        repo_relative_path: "src/private.ts",
-        start_line: 10,
-        end_line: 12,
-        line_count: 3,
-        staged_at: "2026-08-25T00:00:00.000Z",
-        expires_at: "2026-08-25T00:10:00.000Z",
-      });
+      staged.resolve(true);
       await staging;
 
-      expect(privateFileRange.value).toBeNull();
+      expect(stageRequests).toEqual([
+        { repo_relative_path: "src/private.ts", start_line: 10, end_line: 12 },
+      ]);
+      expect(composer.privateRangeOpen.value).toBeFalse();
       expect(composer.privateRangeBusy.value).toBeFalse();
       scope.stop();
     } finally {
-      api.stagePrivateFileRange = originalStage;
       browserGlobal.document = originalDocument;
     }
   });
@@ -1283,25 +1310,13 @@ describe("AI-first conversation Home", () => {
     };
     const originalDocument = browserGlobal.document;
     browserGlobal.document = { querySelector: () => null };
-    const { api } = await import("../src/ui/src/api.js");
     const { useHomePrivateRangeComposer } = await import(
       "../src/ui/src/composables/useHomePrivateRangeComposer.js"
     );
-    const originalStage = api.stagePrivateFileRange;
-    const staged = deferred<HomePrivateFileRangeBinding>();
+    const staged = deferred<boolean>();
     let stageSignal: AbortSignal | undefined;
-    api.stagePrivateFileRange = ((path, startLine, endLine, signal) => {
-      stageSignal = signal;
-      signal?.addEventListener(
-        "abort",
-        () => staged.reject(new DOMException("The operation was aborted.", "AbortError")),
-        { once: true },
-      );
-      return staged.promise;
-    }) as typeof api.stagePrivateFileRange;
 
     try {
-      const privateFileRange = ref<HomePrivateFileRangeBinding | null>(null);
       const activeRootId = ref<string | null>("root-a");
       const composerEpoch = ref(0);
       const scope = effectScope();
@@ -1310,9 +1325,14 @@ describe("AI-first conversation Home", () => {
           useHomePrivateRangeComposer({
             activeRootId,
             composerEpoch,
-            privateFileRange,
-            setPrivateFileRange(binding) {
-              privateFileRange.value = binding;
+            async stagePrivateContext(_request, signal) {
+              stageSignal = signal;
+              signal?.addEventListener(
+                "abort",
+                () => staged.reject(new DOMException("The operation was aborted.", "AbortError")),
+                { once: true },
+              );
+              return staged.promise;
             },
           }),
         ) ?? null;
@@ -1329,101 +1349,118 @@ describe("AI-first conversation Home", () => {
 
       await staging;
 
-      expect(privateFileRange.value).toBeNull();
       expect(composer.privateRangeBusy.value).toBeFalse();
     } finally {
-      api.stagePrivateFileRange = originalStage;
       browserGlobal.document = originalDocument;
     }
   });
 
-  test("private file ranges survive a failed send and clear after a successful reply send", async () => {
-    const originalMessage = conversationHomeApi.message;
-    const binding: HomePrivateFileRangeBinding = {
-      schema_version: "1.0",
-      handoff_id: "vf-file-range-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      handoff_record_digest:
-        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      repo_relative_path: "src/private.ts",
-      start_line: 10,
-      end_line: 12,
-      line_count: 3,
-      staged_at: "2026-08-25T00:00:00.000Z",
-      expires_at: "2026-08-25T00:10:00.000Z",
-    };
-    const requests: Array<Record<string, unknown>> = [];
+  test("queue admissions snapshot only private presence and clear context after success", async () => {
+    const requests: Array<{
+      idempotency_key?: string;
+      content: string;
+      private_context_present: boolean;
+    }> = [];
+    const privateKey = "private-message-key";
+    let privateContextPresent = true;
+    const capturePrivateContext = () =>
+      privateContextPresent
+        ? {
+            idempotency_key: privateKey,
+            private_context_present: true as const,
+            clearIfCurrent() {
+              privateContextPresent = false;
+            },
+            restoreIfVacant() {
+              if (privateContextPresent) return false;
+              privateContextPresent = true;
+              return true;
+            },
+          }
+        : null;
     let attempt = 0;
-    conversationHomeApi.message = (async (_conversationId, input) => {
-      requests.push(structuredClone(input) as unknown as Record<string, unknown>);
-      attempt += 1;
-      if (attempt === 1) throw new Error("send failed");
-      return { message_id: `message-${attempt}`, accepted: true };
-    }) as typeof conversationHomeApi.message;
+    const activeRevision = computed(
+      () =>
+        ({
+          conversation_id: "conversation-a",
+          revision_id: "revision-a",
+        }) as unknown as import("../src/ui/src/conversation-home-types.js").HomeRevisionSummary,
+    );
+    const activeRootId = ref<string | null>("root-a");
+    const draft = ref("Use the selected file range.");
+    const online = ref(true);
+    const submitting = ref(false);
+    const submittingToken = ref<string | null>(null);
+    const composerError = ref("");
+    const activationError = ref("");
+    const quoteRefs = ref<HomeQuoteReference[]>([]);
+    const reactionBusyTokens = ref<Record<string, string>>({});
+    const reactionBusy = ref<Record<string, boolean>>({});
+    const pendingActions = ref([]);
+    const timeline = ref<HomeTimelineResponse | null>(null);
+    const sessions = ref([
+      { root_session_id: "root-a", root: { conversation_id: "conversation-a" } },
+    ]);
+    const sessionQuery = ref("");
+    const activation = new ActivationEpoch();
+    activation.begin("root-a");
+    const selectedConversationId = computed(() => activeRevision.value?.conversation_id ?? null);
+    const runtime = createHomeCommandRuntime({
+      activation,
+      activeRevision,
+      activeRootId,
+      selectedConversationId,
+      draft,
+      online,
+      submitting,
+      submittingToken,
+      privateContext: {
+        present: () => privateContextPresent,
+        captureForMessage: capturePrivateContext,
+        captureForCreate: capturePrivateContext,
+      },
+      composerError,
+      activationError,
+      quoteRefs,
+      reactionBusy,
+      reactionBusyTokens,
+      pendingActions,
+      timeline,
+      refreshSessions: async () => undefined,
+      refreshActiveSelection: async () => true,
+      refreshAuthoritativeActiveHead: async () => true,
+      selectSession: async () => undefined,
+      sessions,
+      sessionQuery,
+      messageQueue: {
+        enqueue: async (admission) => {
+          requests.push({
+            idempotency_key: admission.idempotency_key,
+            content: admission.content,
+            private_context_present: admission.private_context_present,
+          });
+          attempt += 1;
+          if (attempt === 1) throw new Error("send failed");
+          admission.clearIfCurrent();
+          return true;
+        },
+        currentEdit: () => null,
+        saveEdit: async () => false,
+      },
+    });
 
-    try {
-      const activeRevision = computed(
-        () =>
-          ({
-            conversation_id: "conversation-a",
-            revision_id: "revision-a",
-          }) as unknown as import("../src/ui/src/conversation-home-types.js").HomeRevisionSummary,
-      );
-      const activeRootId = ref<string | null>("root-a");
-      const draft = ref("Use the selected file range.");
-      const online = ref(true);
-      const submitting = ref(false);
-      const submittingToken = ref<string | null>(null);
-      const privateFileRange = ref<HomePrivateFileRangeBinding | null>(binding);
-      const composerError = ref("");
-      const activationError = ref("");
-      const quoteRefs = ref<HomeQuoteReference[]>([]);
-      const reactionBusyTokens = ref<Record<string, string>>({});
-      const reactionBusy = ref<Record<string, boolean>>({});
-      const pendingActions = ref([]);
-      const timeline = ref<HomeTimelineResponse | null>(null);
-      const sessions = ref([
-        { root_session_id: "root-a", root: { conversation_id: "conversation-a" } },
-      ]);
-      const sessionQuery = ref("");
-      const activation = new ActivationEpoch();
-      activation.begin("root-a");
-      const selectedConversationId = computed(() => activeRevision.value?.conversation_id ?? null);
-      const runtime = createHomeCommandRuntime({
-        activation,
-        activeRevision,
-        activeRootId,
-        selectedConversationId,
-        draft,
-        online,
-        submitting,
-        submittingToken,
-        privateFileRange,
-        composerError,
-        activationError,
-        quoteRefs,
-        reactionBusy,
-        reactionBusyTokens,
-        pendingActions,
-        timeline,
-        refreshSessions: async () => undefined,
-        refreshActiveSelection: async () => true,
-        refreshAuthoritativeActiveHead: async () => true,
-        selectSession: async () => undefined,
-        sessions,
-        sessionQuery,
-      });
+    await runtime.submitDraft();
+    expect(composerError.value).toContain("send failed");
+    expect(privateContextPresent).toBeTrue();
+    expect(requests[0]).toEqual({
+      idempotency_key: privateKey,
+      content: "Use the selected file range.",
+      private_context_present: true,
+    });
 
-      await runtime.submitDraft();
-      expect(composerError.value).toContain("send failed");
-      expect(privateFileRange.value).toEqual(binding);
-      expect(requests[0]?.private_file_range).toEqual(binding);
-
-      await runtime.submitDraft();
-      expect(privateFileRange.value).toBeNull();
-      expect(draft.value).toBe("");
-      expect(requests[1]?.private_file_range).toEqual(binding);
-    } finally {
-      conversationHomeApi.message = originalMessage;
-    }
+    await runtime.submitDraft();
+    expect(privateContextPresent).toBeFalse();
+    expect(draft.value).toBe("");
+    expect(requests[1]).toEqual(requests[0]);
   });
 });

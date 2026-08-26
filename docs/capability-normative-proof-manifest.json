@@ -3,7 +3,7 @@
   "profile": "vf-normative-proof-manifest/2",
   "design": {
     "path": "docs/superpowers/specs/2026-08-24-ai-first-home-capability-fabric-design.md",
-    "sha256": "7ad044d46a36dc71fcda51331f9df51c15392fbb77a80c37746ae0134b705541"
+    "sha256": "204efac78401ae29e2d01d5bb3278e2ec43f14f04cd815486128e4e5c6118c78"
   },
   "proof_catalog": [
     {
@@ -18,7 +18,7 @@
         "src/durability"
       ],
       "test_sha256": "ebfd4cedc8abe3d0b0d54270aae537f4391bd018414ce26008a27a3f3d9edd86",
-      "production_sha256": "53e758c2ebbba021c50e370898be7e272dab4a455bd8ae99b3b94592404cbedf"
+      "production_sha256": "f13295e80a8a18300a7f2d69a362f3a2439f4e0dece59fe3ac09c8d4fa65a3c3"
     },
     {
       "id": "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
@@ -31,7 +31,7 @@
         "src/actions"
       ],
       "test_sha256": "beaf50397fba027361b0867e3db36d44e3476d4424a01823b72a83ad5479e4fd",
-      "production_sha256": "b704b9c14e2dcbab84c43759901e4133d216b8045ed00be4d4427f523864f6b7"
+      "production_sha256": "38a993e8df77be881cfdd6ba86aa893451707de516e61086bcf0dc7f5e2f5eef"
     },
     {
       "id": "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
@@ -44,7 +44,7 @@
         "src/durability"
       ],
       "test_sha256": "a6e690df8f1f535905552e31429b911d6aec32996e0ab7810ae37790028747f5",
-      "production_sha256": "03ce54d66ac8dc98f24233d81c5231a601c8b1276d3286cfc42e06154c0922df"
+      "production_sha256": "e4bb13305c7a4d75a96d49227c1db98a5f3de116f94e62042baeef2ea88d7553"
     },
     {
       "id": "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
@@ -57,7 +57,7 @@
         "src/durability"
       ],
       "test_sha256": "fe61f4c5936fa4bbe186b22a310beda838c57c5d7818350dfda3368c36a8d918",
-      "production_sha256": "03ce54d66ac8dc98f24233d81c5231a601c8b1276d3286cfc42e06154c0922df"
+      "production_sha256": "e4bb13305c7a4d75a96d49227c1db98a5f3de116f94e62042baeef2ea88d7553"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
@@ -70,7 +70,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "eb4d9642dd996344dcd554429c512bd5a61c9097f3dd08c6612558d26bf69164",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
@@ -83,7 +83,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "85a0a194ca28b34799bb088a779ce83803ea50602027c81e1e2277608f6684e4",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
@@ -96,7 +96,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "d3e02717d898de49a939373aff451600c27b9f8bf4e1802fff563ab7ccedb631",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
@@ -109,7 +109,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "6df67b2861a4035b4ea6e8f797f55c7650ad393e6a591bf3852e6ed4912be89a",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
@@ -122,7 +122,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "60727a4e46c76d4bf46d76cbfb8ab5a0084e7cdab0920bf23c43e492a9b36fe2",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
@@ -134,8 +134,8 @@
       "production_paths": [
         "src/orchestrator/conversation"
       ],
-      "test_sha256": "b5933a03a13ea9a9c18589eb87097e96b61af4486184cb7f7eed15aff54a4be9",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "test_sha256": "b15d2082f3756dc3f0e22f7ca044cab299c997569209c89c4cf76e0bad6ea7ab",
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
@@ -148,7 +148,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "7e2a3b586bed16924d7d1d423b840af352696654c9a559fc68bd0eb4767ec16b",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
@@ -161,8 +161,8 @@
         "src/orchestrator/conversation",
         "src/durability"
       ],
-      "test_sha256": "4dba3c6d36bb6966672cee5c9cdebac831d7ff8d3ae9eca78a8b3f2badeefecf",
-      "production_sha256": "977d07b87ae9a1daf714b69ede969a6bb7df97ec9dbec0579e33e884ebc7e685"
+      "test_sha256": "8355f07c58b791316f317a8042119269ae897aaeb6f59b0c20c0dadab818cc86",
+      "production_sha256": "7d80b0cd034966470874eb545e94abe7fb2fafcfafcd2ae8c9953b1a79bc1b86"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
@@ -176,8 +176,8 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "2a42b508694bb5ce5bd503b82852afe8856bb01fef83c947234521c17832b9d7",
-      "production_sha256": "39784619f797a5f27d86fbe1f1f1968b5071c9957405f600daea77d6bbd30c3c"
+      "test_sha256": "d1991e950e3f5f6097e0e8da246c1bdd3f338cb0696f94d92d7699820da27d2a",
+      "production_sha256": "736fc28baa43011cba3f64cdb59b77ce463d479764fc0cf1dcf4c251a665b0c6"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
@@ -191,8 +191,8 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "2a42b508694bb5ce5bd503b82852afe8856bb01fef83c947234521c17832b9d7",
-      "production_sha256": "39784619f797a5f27d86fbe1f1f1968b5071c9957405f600daea77d6bbd30c3c"
+      "test_sha256": "d1991e950e3f5f6097e0e8da246c1bdd3f338cb0696f94d92d7699820da27d2a",
+      "production_sha256": "736fc28baa43011cba3f64cdb59b77ce463d479764fc0cf1dcf4c251a665b0c6"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
@@ -206,8 +206,8 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "2a42b508694bb5ce5bd503b82852afe8856bb01fef83c947234521c17832b9d7",
-      "production_sha256": "39784619f797a5f27d86fbe1f1f1968b5071c9957405f600daea77d6bbd30c3c"
+      "test_sha256": "d1991e950e3f5f6097e0e8da246c1bdd3f338cb0696f94d92d7699820da27d2a",
+      "production_sha256": "736fc28baa43011cba3f64cdb59b77ce463d479764fc0cf1dcf4c251a665b0c6"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
@@ -219,8 +219,8 @@
       "production_paths": [
         "src/orchestrator/conversation"
       ],
-      "test_sha256": "bc8e100a967d6c5de4e796b2fa30a445a326c4770443f08d175a7f9bf166486c",
-      "production_sha256": "45e0c9aa636df84c128db0e091212f6cd5524ca10f3b72a10b26280529cd5578"
+      "test_sha256": "41f0da1c29cbc639ae023556494f5271b9b2a352ad43ba0c5261aba519d82389",
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
     },
     {
       "id": "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
@@ -234,7 +234,7 @@
         "src/server"
       ],
       "test_sha256": "04a3ad479cc18467f991e125ea3435abe92e3c80a2a6f4113a8468febc213bc5",
-      "production_sha256": "0600792beb8b428388a0cec7d13fc67a69afc55af235405e3e5e1b70c6396624"
+      "production_sha256": "82ee87edda5a6e6290efb25c5d5876e2526b633fe492c9f878c7eba744fc6f52"
     },
     {
       "id": "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
@@ -247,7 +247,7 @@
         "src/capabilities"
       ],
       "test_sha256": "a1b730ecef1332164e10e01cf2208cb5333a9e218243dd504bfc57d38855f93c",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
@@ -260,7 +260,7 @@
         "src/capabilities"
       ],
       "test_sha256": "50107fd79bd49652570290926e2dda18de7b2cef8e0abca9cd84377c714782ba",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
@@ -273,7 +273,7 @@
         "src/capabilities"
       ],
       "test_sha256": "86e00527b41f4f46dc0be032e0043450de101b858a72cb60bb0159d0468429d0",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
@@ -286,7 +286,7 @@
         "src/capabilities"
       ],
       "test_sha256": "3b46291b5df5ece1e396ca41286b12d30979583b6deee1fa0a28223b8e4218d7",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
@@ -299,7 +299,34 @@
         "src/capabilities"
       ],
       "test_sha256": "ce694e5ea8894beceb119d37ddf37d6bc6b9f7b210ba67cc9e7abf9708ce562b",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
+    },
+    {
+      "id": "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance",
+      "owner": "capability-core",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/manifest-coverage-postfreeze.test.ts",
+      "title": "validates file integrity and parser provenance",
+      "production_paths": [
+        "src/capabilities/manifest/validation.ts"
+      ],
+      "test_sha256": "d249e7edb49d47d63383f8604d073d821b5bcd22ce7c393af9ef5893f583a125",
+      "production_sha256": "48ea005f5c63fcc5925a167239a4e09e9c3c89d578fbe84165fd233a16f8a488"
+    },
+    {
+      "id": "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked",
+      "owner": "capability-core",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/capabilities/project-identity-tracking.test.ts",
+      "title": "upgrades an existing broad context ignore without clobbering it",
+      "production_paths": [
+        "src/commands/init.ts",
+        "src/safety/checkpoint.ts"
+      ],
+      "test_sha256": "838295477689727947a3e5258a63c8d64ece2e28c2a8aca35c2f1231abffcbfd",
+      "production_sha256": "94aac7440d91eb2a7e6a3ad1fd2edd734c1cd7e098f8c57158c147588a57056b"
     },
     {
       "id": "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
@@ -312,8 +339,8 @@
         "src/capabilities",
         "src/server"
       ],
-      "test_sha256": "fa3efab4b228cc4de448cad3d1668f2d3df144e04e944b760d6ae9c1622bb5d6",
-      "production_sha256": "891e5ab620924f49cac68987b3ed11486df1aee767c15c8131bf543ba2ce373c"
+      "test_sha256": "8a5a7b96a46d6c0ad97856ee1f23ec51ee303500abcf2b229b992883b19fd1a8",
+      "production_sha256": "01345572f4246e252b938e69f5620e0699bad2e25566d0b8d63bf5416004f08f"
     },
     {
       "id": "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
@@ -326,7 +353,7 @@
         "src/capabilities"
       ],
       "test_sha256": "e06661f2ccdd61b2b8ecb156f52ae26ba053abfb6218a90a51548622cbfbb6d4",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
@@ -339,7 +366,7 @@
         "src/capabilities"
       ],
       "test_sha256": "2b0b4662489319e1e24c3fc13ea18627da4e70aeb2993532fdd774dfbd6127e9",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
@@ -352,7 +379,7 @@
         "src/capabilities"
       ],
       "test_sha256": "42cfa76b9437cbdd90dc6a7b1e08ea1ae194de848faafceaa49113c00b22e1df",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
@@ -365,7 +392,7 @@
         "src/capabilities"
       ],
       "test_sha256": "5c5f929e35305c04de1890d42e28d009e995281dd48a24874e01c7017d04fc25",
-      "production_sha256": "b83cd98d467632cafe886bd418a8ed59e8d1260fa565dc2ad620fd85b26d47ff"
+      "production_sha256": "96a3967408bc63fe7c2bce968b6f654cadbe288889478c71cf99045452f5e9b6"
     },
     {
       "id": "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
@@ -381,7 +408,7 @@
         "src/cli.ts"
       ],
       "test_sha256": "d55046fb6daae00ce8fe9e3a69b6ad0cdc789204393818814a20af53645f072f",
-      "production_sha256": "6b53c4d76bef7f16863065c7d7d0f380e73e3704a674024f4bf6180e15dec3f2"
+      "production_sha256": "7d10c9672ec603cdc7caa9aee80fe81fa34a3bf7782fa051dd57c0fcb5f63114"
     },
     {
       "id": "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
@@ -397,7 +424,7 @@
         "src/cli.ts"
       ],
       "test_sha256": "3b02b8134fe89d265d65f6195ce52167b3df277f0c645f3f26e11d8920f37ebe",
-      "production_sha256": "6b53c4d76bef7f16863065c7d7d0f380e73e3704a674024f4bf6180e15dec3f2"
+      "production_sha256": "7d10c9672ec603cdc7caa9aee80fe81fa34a3bf7782fa051dd57c0fcb5f63114"
     },
     {
       "id": "proof:bun:test/capability-command.test.ts#private-input-no-echo",
@@ -411,7 +438,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "73c2205a2aaa9514ee3bb56f1676c9ad420376a7d6f0b3a05abb2871308caeb7",
-      "production_sha256": "770dc7f32f4b2a3e60b76f3571eb48c637b7e2609fd3f2f33237dd3693e0d7f3"
+      "production_sha256": "3986015127e643c278684be66db8199202947da62657e25f87660e24e2924a01"
     },
     {
       "id": "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
@@ -425,7 +452,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "cb783beffefb4551b578bf144539a8be1e66b2f356b4719ac636c55c96aaf0b5",
-      "production_sha256": "770dc7f32f4b2a3e60b76f3571eb48c637b7e2609fd3f2f33237dd3693e0d7f3"
+      "production_sha256": "3986015127e643c278684be66db8199202947da62657e25f87660e24e2924a01"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
@@ -437,8 +464,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
-      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+      "test_sha256": "b6bfc1a1a338d2650c9bc3852f060b2d4f4cbdd206cff3007ce5d1f557744a31",
+      "production_sha256": "28613ef7c0f0773539d8937a7c652ed0bdbe65c789aa5ef9a8b4a2c9a049ff80"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
@@ -450,8 +477,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
-      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+      "test_sha256": "b6bfc1a1a338d2650c9bc3852f060b2d4f4cbdd206cff3007ce5d1f557744a31",
+      "production_sha256": "28613ef7c0f0773539d8937a7c652ed0bdbe65c789aa5ef9a8b4a2c9a049ff80"
     },
     {
       "id": "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
@@ -463,8 +490,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "68016b03c2926fc32db368a48039c0a9c8d45974c0905c911427a266aaad77bd",
-      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+      "test_sha256": "8e62143168f8ee72c165cff055c48cbb2a2dbde178653a2dd2cb32f886cd3e61",
+      "production_sha256": "28613ef7c0f0773539d8937a7c652ed0bdbe65c789aa5ef9a8b4a2c9a049ff80"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
@@ -472,12 +499,12 @@
       "runner": "bun",
       "assurance": "behavioral",
       "path": "test/ui-conversation-home.test.ts",
-      "title": "private file ranges survive a failed send and clear after a successful reply send",
+      "title": "queue admissions snapshot only private presence and clear context after success",
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
-      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+      "test_sha256": "b6bfc1a1a338d2650c9bc3852f060b2d4f4cbdd206cff3007ce5d1f557744a31",
+      "production_sha256": "28613ef7c0f0773539d8937a7c652ed0bdbe65c789aa5ef9a8b4a2c9a049ff80"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
@@ -489,8 +516,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "b7f14a51f26203e8c2521e53bcc9a1beb63eed1b7063dbc24eaf5e8e8a530327",
-      "production_sha256": "2a1a363ef247caa9614694c526c1058e4805715e0a61ec126c4ebd4ae82d9243"
+      "test_sha256": "b6bfc1a1a338d2650c9bc3852f060b2d4f4cbdd206cff3007ce5d1f557744a31",
+      "production_sha256": "28613ef7c0f0773539d8937a7c652ed0bdbe65c789aa5ef9a8b4a2c9a049ff80"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
@@ -504,8 +531,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
@@ -519,8 +546,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
@@ -534,8 +561,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
@@ -549,8 +576,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
@@ -558,14 +585,14 @@
       "runner": "playwright",
       "assurance": "behavioral",
       "path": "e2e/conversation-home.spec.ts",
-      "title": "stages inline private file ranges without browser persistence and clears them after one send",
+      "title": "stages, replaces, discards, and sends root private context without browser leakage",
       "production_paths": [
         "src/ui/src",
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
@@ -579,8 +606,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
@@ -595,8 +622,8 @@
         "src/server",
         "src/actions"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "ef577c319b2dd8c40fbeeec400ab67d994ae96a4fa1cac4c447a2d23012e2d98"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "8e29d64e4c0f234202200586d585cad66d4f630edfc4a33dc4dc62e9ce8e53a6"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
@@ -610,8 +637,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
@@ -625,8 +652,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
@@ -640,8 +667,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
@@ -655,8 +682,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
@@ -670,8 +697,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "bf1a17a5dc39279c6656a27aeba51b88779571166f11f9e2d6ad833b56e12d87",
-      "production_sha256": "1a4c85d52a80fd95289ffd3e8b689d732ffe99a2cca1f186d7476297e30cc10e"
+      "test_sha256": "2017e75d434259aa2b9607632ac60d72a6a9bc2cbb5af88b40f391f3d508a390",
+      "production_sha256": "3464b4992fbe26752fc8d2ae5c1cd6e3976efcdd7c52b6aef149a71741ad61e2"
     },
     {
       "id": "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
@@ -684,8 +711,35 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "4906b6507b49290476193951f5ab2e72197091401326a46201f7c950ff87448d",
-      "production_sha256": "0600792beb8b428388a0cec7d13fc67a69afc55af235405e3e5e1b70c6396624"
+      "test_sha256": "5601d1646d444f8541cc96b0b911528b3d67607db362d136e12195a6a9fd0d04",
+      "production_sha256": "82ee87edda5a6e6290efb25c5d5876e2526b633fe492c9f878c7eba744fc6f52"
+    },
+    {
+      "id": "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
+      "owner": "conversation-revisions-api",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/orchestrator/conversation-message-queue.test.ts",
+      "title": "admits idempotent messages and drains the oldest durable FIFO item across restart",
+      "production_paths": [
+        "src/orchestrator/conversation"
+      ],
+      "test_sha256": "bfc9b552c96ccf185d32a1fc6bee6f573bd8331f447ccc8574ea6db18826a181",
+      "production_sha256": "1670ce31c1e5846d7c6034cec944bdb67d9da62fa2ff6eb8745c0d1d21673a5f"
+    },
+    {
+      "id": "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/dispatch-owned-process-windows.test.ts",
+      "title": "Windows Job Object containment is installed before receipt and untrusted spawn",
+      "production_paths": [
+        "src/dispatch",
+        "src/durability"
+      ],
+      "test_sha256": "de2aeab077771c7db5ecab60c618a2275914ebb51bf7d691f944ba238ff2f616",
+      "production_sha256": "0e80e5feccc6c7e8e0b5f0bcc3f04c1681146ba579b25bb9a1da4fc59aef0cff"
     }
   ],
   "section_dispositions": [
@@ -693,7 +747,7 @@
       "section_id": "section:ai-first-home-and-cli-capability-fabric-design:8a60f8b1f424",
       "heading": "AI-first Home and CLI Capability Fabric design",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "f6a7a89393f97eabaa8b41bc5fd061fd5328d404958219e1e6d284ba915f80fa",
+      "semantic_atom_sha256": "03ff92c62a5c8bf225eef1f444f62409300f22edacdf9c634a1227cdc1d9a464",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -714,19 +768,21 @@
       "section_id": "section:decision:640ae4baf960",
       "heading": "Decision",
       "semantic_atom_count": 26,
-      "semantic_atom_sha256": "9d190bfca41025546edd1281839df8f72fcb144433cee7b07b2e490933f98242",
+      "semantic_atom_sha256": "4c490abf6b83db0a0cf85dae1527f2056a99cf4c6b81025eaa10cce75233cb95",
       "candidate_count": 10,
-      "candidate_sha256": "7c06284148ba7ee68d482efcead060f0c136e54345f9a16ea2faeab0c92f8d02",
+      "candidate_sha256": "3bc29837c4677a8d01be8d2c7ec23bd64c2219cfa63a94a148ae0e698f7e7c60",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui",
         "capability-runtime",
-        "capability-cli-compat"
+        "capability-cli-compat",
+        "conversation-revisions-api"
       ],
       "proof_ids": [
         "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
         "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
-        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing"
+        "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo"
       ],
       "rationale": "The selected AI-first Home, capability runtime, and compatibility CLI are exercised at their real boundaries.",
       "waiver_id": null
@@ -735,7 +791,7 @@
       "section_id": "section:why-this-change-is-necessary:ed22165c693a",
       "heading": "Why this change is necessary",
       "semantic_atom_count": 24,
-      "semantic_atom_sha256": "86b9bebaecdab807641e2a6a08c2c2f9918c6fba37cf5e17ffb36b5d04519f46",
+      "semantic_atom_sha256": "0a6da9021190b76bcb168d40202309591828112cd5458934baa3df21316d7e02",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -756,9 +812,9 @@
       "section_id": "section:goals:116cd3982a9b",
       "heading": "Goals",
       "semantic_atom_count": 13,
-      "semantic_atom_sha256": "664260ecfbaa2cf3b82069951a7c143c8b9a03c88ec3d2309e507e06ec641da5",
+      "semantic_atom_sha256": "f998a6b53bb726fbceb2191ee4d7d817406368720b58174128ab4a2a46c147a9",
       "candidate_count": 3,
-      "candidate_sha256": "a540cd0be26279fff7ca308e2313dc5922c08eb0eddbda9cd56fb63de696078a",
+      "candidate_sha256": "df59ef5f7ab0c27bbdff5c56aa6f93a18a37d552e0f19cf1a8f02f19e984eb9d",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui",
@@ -778,7 +834,7 @@
       "section_id": "section:non-goals:185e74bc1685",
       "heading": "Non-goals",
       "semantic_atom_count": 10,
-      "semantic_atom_sha256": "23da407391f6f04e83bcf21b93daedfcdd48fca0f13ab8d2669020d68890bbf1",
+      "semantic_atom_sha256": "bfa08768debfd57b28900f65e331caaacf9f0cdf038d7440b2d004ee9d9fdbd3",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -796,10 +852,10 @@
     {
       "section_id": "section:product-and-authority-principles:ace80ea7883a",
       "heading": "Product and authority principles",
-      "semantic_atom_count": 24,
-      "semantic_atom_sha256": "847219f388b644f1a2fbe687801589e7fd67c43dc4b5fbd5abff2c9bff6d9c62",
-      "candidate_count": 7,
-      "candidate_sha256": "ce13136f32a1bd53cb4be436f0d5cb106c64b7b4182add8c6d14549c63bafe45",
+      "semantic_atom_count": 27,
+      "semantic_atom_sha256": "b3bd1520e4e1959803f30e1d92aefdfa27279fe79e04c9754a4232696a675b5c",
+      "candidate_count": 8,
+      "candidate_sha256": "7f1b2bd444ef7adedc11d63f118539c6b93c5fca844a4ba3c0805c15cd32f074",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -813,7 +869,8 @@
         "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
         "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
         "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
-        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain"
+        "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo"
       ],
       "rationale": "Shared authority, immutable review, process-bound revision ownership, and host-owned effects are exercised across all three domains.",
       "waiver_id": null
@@ -822,9 +879,9 @@
       "section_id": "section:system-architecture:b6a6e848dc5d",
       "heading": "System architecture",
       "semantic_atom_count": 28,
-      "semantic_atom_sha256": "02716e05485178cd169e915d8fb1730de4194faf1f61ac73ba766e9f79a63ad5",
+      "semantic_atom_sha256": "6c6d779df5e8764dbd7e04e56ece45bf0fec56af391c2ccaa2cf6c0fadb52a82",
       "candidate_count": 10,
-      "candidate_sha256": "b75df1dccb525ab05aa61b8f60354f40698ec1a179e5857a6d0a296f937cd6bb",
+      "candidate_sha256": "9157f9f622b3c5b88f39e01931acb1f53f572441acb837f6e73af11e2377250d",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -861,9 +918,9 @@
       "section_id": "section:information-architecture:ffcf612a00a5",
       "heading": "Information architecture",
       "semantic_atom_count": 18,
-      "semantic_atom_sha256": "20505dbd944ce6ec9345e8e3f7a66ca933c64bf2fd2665883d7c224552fa5e81",
+      "semantic_atom_sha256": "bae4cc71d7ba6a70b2ac3fed20608aaf4603bfc816f7f9f447ffdd8f4f4bdf39",
       "candidate_count": 1,
-      "candidate_sha256": "f0696aa4de1169310aef2b6503d89eb180bd3602c64c375219bc7d9fa213fa34",
+      "candidate_sha256": "9b8c78e8236309ec7f7427f71abdbf36dd0b09ec4905151be99b20e6c3c367f8",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui"
@@ -878,10 +935,10 @@
     {
       "section_id": "section:durable-session-catalog:3d0e1be90bcc",
       "heading": "Durable session catalog",
-      "semantic_atom_count": 290,
-      "semantic_atom_sha256": "eb310ee14d045b7dd625fbacbbf8200a2369ae714f96d72bc55d9cc673b9cc92",
+      "semantic_atom_count": 294,
+      "semantic_atom_sha256": "5f72ca3b19e8db4984fc6b6df49d4e1c1f5bf1734481f20e7adfbf8fa0f1801b",
       "candidate_count": 31,
-      "candidate_sha256": "fbc45c09c97d68976f1adf28c38b4f30f6208fe1d05c32525aa6995f0b2bde42",
+      "candidate_sha256": "a45e50fbad9bf268fcb2eae9a0618cb641877486722737b828dd1478a524920e",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -900,7 +957,7 @@
       "section_id": "section:safe-session-switching:0266266f588c",
       "heading": "Safe session switching",
       "semantic_atom_count": 7,
-      "semantic_atom_sha256": "874700cf70653b94de2eb6ebf075d5ffde0703021c71cb0f8fb47a7cb37ebe44",
+      "semantic_atom_sha256": "56dc8bd9dd3fd1b37f5b1e34444455540f3a9926aca264c380f4bbae774bf49f",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -917,12 +974,29 @@
       "waiver_id": null
     },
     {
+      "section_id": "section:durable-user-message-admission-queue:ab47673660ed",
+      "heading": "Durable user-message admission queue",
+      "semantic_atom_count": 639,
+      "semantic_atom_sha256": "8283223280ea09f4d8492d0a5dd3f069bda93d0e36dcffd041115a1f71c3edb3",
+      "candidate_count": 120,
+      "candidate_sha256": "86e16cef5b6849864d50343badb3b4f688c9f2b80bb79d6ac77d725eb100ae38",
+      "disposition": "behavioral",
+      "owners": [
+        "conversation-revisions-api"
+      ],
+      "proof_ids": [
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo"
+      ],
+      "rationale": "The durable queue proof exercises fsynced idempotent admission, restart recovery, and causal FIFO delivery.",
+      "waiver_id": null
+    },
+    {
       "section_id": "section:natural-language-and-friendly-actions:e0d3c97fd54a",
       "heading": "Natural language and friendly actions",
       "semantic_atom_count": 43,
-      "semantic_atom_sha256": "8629ff3abc7802237f97fb4d5fd70d374302a1ef25b62637a045b03831ffd50b",
+      "semantic_atom_sha256": "edc27506be02106d46d4fd5f6e166dcf1af37612069384cc1685ef5dc7dfbab1",
       "candidate_count": 7,
-      "candidate_sha256": "8fba7be3e8122d491cb0b7a3ae84c956f4cf613fda27fbc14cb02a8715dba7da",
+      "candidate_sha256": "9f0cf6ee1395cfe1d310e984c0e19944670637d1525031597581a1a412ad6229",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui",
@@ -941,9 +1015,9 @@
       "section_id": "section:action-lifecycle-in-the-ui:b3c9a628e345",
       "heading": "Action lifecycle in the UI",
       "semantic_atom_count": 8,
-      "semantic_atom_sha256": "12d7507dde9b230adbe8d778060d1e4bcbce697cbaeedef1ed3af1c623f78db5",
+      "semantic_atom_sha256": "5f37e0d0cfd7f3ff77a4723e7570ee12472a9d750e0d3265c123e3132ee10b93",
       "candidate_count": 6,
-      "candidate_sha256": "4f3d0ce9524e0aa48087524516011186031fb334c278740a6ff3db9b18dab735",
+      "candidate_sha256": "31b71b1817494b3cc3b8e6c5a94dd6c8c1cef7a59aeee70415a2b9318de4d243",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui",
@@ -963,9 +1037,9 @@
       "section_id": "section:visual-production-standard:b2781158b82b",
       "heading": "Visual production standard",
       "semantic_atom_count": 14,
-      "semantic_atom_sha256": "bc3f0a5d5e49d09ac5092fff3a5cb879d4ab80fcf7258b1864c93765966c5c92",
+      "semantic_atom_sha256": "0ab39df838c00c7997681cf1db8a5c50e396840141b48f67863fa4f592b72d13",
       "candidate_count": 2,
-      "candidate_sha256": "a79776c45f3cdbc7b4171de352791cec0d395b1c1e9ff6423645fc2b89ecfc9f",
+      "candidate_sha256": "402a6653efde4446a3acf235adec24cfd525040f4f8a376a5677229dd217f1b4",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui"
@@ -982,10 +1056,10 @@
     {
       "section_id": "section:accessibility-contract:25329480e3df",
       "heading": "Accessibility contract",
-      "semantic_atom_count": 9,
-      "semantic_atom_sha256": "7a4eea2f41d9fa804442048bd458422d34b6f02af9ac6ac5acbc4bb62788f37e",
+      "semantic_atom_count": 11,
+      "semantic_atom_sha256": "fb9d0382b7ad962fc682b607d3ade6bf8243d83adcf7adf55a8144c28f64ca4d",
       "candidate_count": 6,
-      "candidate_sha256": "5fb0a44229b2ab02ee8ba9d7bba341dddea2b89fb6bacac6ce19a33015bf3218",
+      "candidate_sha256": "c2a343c559f6d1b9b4c59ce7cad918b635293ada1bed4c22644b766f81269eac",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui"
@@ -1025,9 +1099,9 @@
       "section_id": "section:generalized-child-revisions:23a4704c9957",
       "heading": "Generalized child revisions",
       "semantic_atom_count": 112,
-      "semantic_atom_sha256": "6232356fb20048c864afcb9ad051126c38e618f36a718a9429e798211f2edab0",
+      "semantic_atom_sha256": "4947d4bc586081bd221f8091925ade4136c6253918539d3a3241b11d9028b57b",
       "candidate_count": 32,
-      "candidate_sha256": "4c44807505dddc14307f4d51a52a7d133dfb18fc15fb3e2ef0ea2f98edd8f2cc",
+      "candidate_sha256": "737b139c32ea50e49f736ebd915b668e20214e22c5c319960bf552c444b06b0c",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api",
@@ -1050,9 +1124,9 @@
       "section_id": "section:canonical-context-handoff:92ae1f7f9b1d",
       "heading": "Canonical context handoff",
       "semantic_atom_count": 76,
-      "semantic_atom_sha256": "71d44ffb04bc858d17580f4ad4177bc7ce728a5574bf421e2c66f9a0a044a16b",
+      "semantic_atom_sha256": "706ff23fe941260b8f938849d072f90520d3af1be6f95fbf973430250eaaaa24",
       "candidate_count": 8,
-      "candidate_sha256": "9d306fbcc45ba8d74a653e9d6cb414aeb052aa7074bf6d232169336ec455e607",
+      "candidate_sha256": "bc16d820d8facad237d593c651469960e9e2fd90196389b8dad5520b77dbc555",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api"
@@ -1068,9 +1142,9 @@
       "section_id": "section:same-revision-structured-turn-delivery:444bc2c76fbe",
       "heading": "Same-revision structured turn delivery",
       "semantic_atom_count": 118,
-      "semantic_atom_sha256": "0a49da0bbd3487b0df62049f2c44f753d68e80a2c93fdbd4f98fe9a08098612d",
+      "semantic_atom_sha256": "ebc73a7b60e70e933c7d43b19da5f909b4465825622b7fb1a892c24835cdd73b",
       "candidate_count": 14,
-      "candidate_sha256": "8b5f2b4ffd36141c68ffcd2440a1e31c91889741cf50edf0115bd0f197ca5db4",
+      "candidate_sha256": "6032f6184cfcde30e1c23f0610061b215c3608413975c5746f9a03f75238fba0",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api"
@@ -1086,9 +1160,9 @@
       "section_id": "section:reactions-and-multi-source-quotes:1c136903f85e",
       "heading": "Reactions and multi-source quotes",
       "semantic_atom_count": 84,
-      "semantic_atom_sha256": "bbacfaed797a432048c434e8747dd7a54c9bc00a76e6e84477e6c48d40f12841",
+      "semantic_atom_sha256": "973f104e1f829365e95c906ef64c195fb579ae7b3e8e87e7204e5b751f998eb1",
       "candidate_count": 10,
-      "candidate_sha256": "5a95c55885aeb6f6dbfd67a3ab3197d83b8ef18ddd745d8f940b2ca55579f87d",
+      "candidate_sha256": "e15dc11bb09c75d49c4413952f44cedf82b9e5ccb6823bbe9d6246a3b7ccfd13",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api",
@@ -1106,9 +1180,9 @@
       "section_id": "section:action-proposal-model:2454c73b904f",
       "heading": "Action proposal model",
       "semantic_atom_count": 155,
-      "semantic_atom_sha256": "4beafea7fabb022520e7b4c504a3a57988142f3ef0ccc5b8a6c06e08f4b4e58c",
+      "semantic_atom_sha256": "6bcda337683b7c7ec12ebe4bbda273196d771a90a2360066180084cf447554aa",
       "candidate_count": 26,
-      "candidate_sha256": "e27b5eb18db20ddc978ccfd9f3c452ef6bd7a64f22a36c59949f321bc2cb9526",
+      "candidate_sha256": "07484b148c2eb8f7828b9650d26a81005e27f820e541327d0303e641451a5b7b",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1127,9 +1201,9 @@
       "section_id": "section:actor-policy-grant-and-approval-authority:f09eaf631ae5",
       "heading": "Actor, policy, grant, and approval authority",
       "semantic_atom_count": 89,
-      "semantic_atom_sha256": "bc616a550605b9c4f87da0ff1fd16480133a3ebb0d9a9c9716ea106348b4e833",
+      "semantic_atom_sha256": "fdf821d826bffc6d856f7016a3ff1766429c311cf485b98e156728e9a940e867",
       "candidate_count": 22,
-      "candidate_sha256": "a28a7586f70dc3e0269649d161a79ffcc531bee5066f79e8362b7b4a66780fbb",
+      "candidate_sha256": "480885d1ea37c68ce25ce52a0b352b887d3eff8eb5e0f43e4915fc9c22aa6bea",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1146,10 +1220,10 @@
     {
       "section_id": "section:public-api:ab3aa426f807",
       "heading": "Public API",
-      "semantic_atom_count": 246,
-      "semantic_atom_sha256": "790cfec1a11055fd8297f43d0adf5d8458be7405d8a13aef15b2cdd6b906033a",
-      "candidate_count": 72,
-      "candidate_sha256": "50ffca42210032d4127ebadb728f256e523e917e89f70b6deb4c57ccc8ff324f",
+      "semantic_atom_count": 304,
+      "semantic_atom_sha256": "cf0a6fd4a2d8949808671ff847d111d62d9a9518f039303797a16d4ceb53b86f",
+      "candidate_count": 83,
+      "candidate_sha256": "8eda8e7001612e86027957ed74e55b6f41603fcbed4141aa1be51855da34a921",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api",
@@ -1159,7 +1233,8 @@
       "proof_ids": [
         "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
         "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
-        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create"
+        "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo"
       ],
       "rationale": "Authenticated HTTP, capability action routes, and the real browser client exercise public API behavior.",
       "waiver_id": null
@@ -1168,9 +1243,9 @@
       "section_id": "section:cross-domain-outbox-and-reconciliation:06429f9bb514",
       "heading": "Cross-domain outbox and reconciliation",
       "semantic_atom_count": 32,
-      "semantic_atom_sha256": "830343c4880180e0ec6851917eb4db80edb87599c0705a9004d51209ad703e67",
+      "semantic_atom_sha256": "40658825484ee3c37555e35dea333e731639a3f816d4e5b4d01c5c136267782c",
       "candidate_count": 4,
-      "candidate_sha256": "98dd970caf454519e34641ace1560fb385918ee897dd40f7e8f63147f4606f17",
+      "candidate_sha256": "8df67f48d817c8d7c3b8a3e1b06613e71570b7cd1d7a01820835351f54578cdf",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime",
@@ -1187,10 +1262,10 @@
     {
       "section_id": "section:public-private-boundary:895ae1f0546a",
       "heading": "Public/private boundary",
-      "semantic_atom_count": 959,
-      "semantic_atom_sha256": "7139ac20c4843338eb92d7ced72735d8fd52bb3c1bdaed8039f0e72d4217095b",
+      "semantic_atom_count": 965,
+      "semantic_atom_sha256": "514110255dc0d9747a2b67e4ecc01f4f39e1c4525d5bdce7430d354d59ab613f",
       "candidate_count": 119,
-      "candidate_sha256": "3b4a78b622a3bec7cc1fe1545ab67deea04c1faf07bc5396307e9bbe32e1c855",
+      "candidate_sha256": "d614395ff70c68e26e045a38b3f0e355d697b72da05d3e7f8ffce4e945105099",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1204,7 +1279,8 @@
         "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
         "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
         "proof:bun:test/capability-command.test.ts#private-input-no-echo",
-        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo"
       ],
       "rationale": "Public scanning, target-only and browser-memory-only one-shot private delivery, no-echo CLI, and scrubbed broker projections are exercised.",
       "waiver_id": null
@@ -1232,9 +1308,9 @@
       "section_id": "section:package-model:e5d1b00e1593",
       "heading": "Package model",
       "semantic_atom_count": 419,
-      "semantic_atom_sha256": "56900f1ebee7435ba8c34dd58676c7c4727179ee059bd885a7ad4bdf8fec6934",
+      "semantic_atom_sha256": "1277e46d4ec16518d71ed014af79b336ef25404d8f8a65055d267e5277624530",
       "candidate_count": 65,
-      "candidate_sha256": "dbe7e7991979dfe9737035bff3f5fcf7abae4dba73a53a85aae144193ebdea3d",
+      "candidate_sha256": "eee5b8e96b95034453bce4080fccd279247848ec94e5fab4c4ff1cf410f4c7f7",
       "disposition": "behavioral",
       "owners": [
         "capability-core",
@@ -1244,7 +1320,8 @@
         "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
         "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
         "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
-        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution"
+        "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
+        "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance"
       ],
       "rationale": "Manifest, source resolution, immutable planning, and exact graph preimages cover package behavior.",
       "waiver_id": null
@@ -1253,9 +1330,9 @@
       "section_id": "section:three-durable-sources-of-truth:2939bd546dd3",
       "heading": "Three durable sources of truth",
       "semantic_atom_count": 78,
-      "semantic_atom_sha256": "ccd723e9c5964f476f1d5d93379ec01a549fda2f128210daa6cfe1645572ef5d",
+      "semantic_atom_sha256": "e87dec038cfa7c377468b7e5ff51a1df9fcba614662e7364f0db7f9aaf735542",
       "candidate_count": 13,
-      "candidate_sha256": "4795e52e87c8f63dae5240e76e9661d0aa40dc6a2900c02b2468f5b0b0c91e22",
+      "candidate_sha256": "bb7cbb7f627b5b3136d1e107b42b43e59aeab1876a179bf573aecfe6455b3e06",
       "disposition": "behavioral",
       "owners": [
         "capability-core",
@@ -1264,7 +1341,8 @@
       "proof_ids": [
         "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
         "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
-        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked"
       ],
       "rationale": "Authority, portable lock, and WAL publication proofs cover all durable sources.",
       "waiver_id": null
@@ -1273,9 +1351,9 @@
       "section_id": "section:adapter-contract:5e7d29fc44a8",
       "heading": "Adapter contract",
       "semantic_atom_count": 587,
-      "semantic_atom_sha256": "bfdd4ec37de7bfe0a003508925b51b609449817bfca43639e87cec9fd2135b11",
+      "semantic_atom_sha256": "c4eb4356c26be7a160729d4f0fa92744f85e4714be05acea4bda3307583c58fc",
       "candidate_count": 79,
-      "candidate_sha256": "d6ab806366b041e7599c98c47dbf62a5547f3e1f59687213ea3659c661cd76dc",
+      "candidate_sha256": "7e61dcce4f1832cf85f1a41d0513a858847dd982e01c24c13647a712365a6ad5",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime"
@@ -1293,9 +1371,9 @@
       "section_id": "section:existing-implementation-to-reuse:a609ac7aa4f6",
       "heading": "Existing implementation to reuse",
       "semantic_atom_count": 15,
-      "semantic_atom_sha256": "ca62fba987b977c3fbe57bd8853588afab5df27e1ccef13853e618b3bf9dc015",
+      "semantic_atom_sha256": "8bfefe1ec97da223d251035a4f9ee1fd601a1c3872b730ca801a81ceb72e9fb7",
       "candidate_count": 1,
-      "candidate_sha256": "9013403f3c36dbe18359b06196b22b178aaf9a610a5805fa1dc77cc8b340c39e",
+      "candidate_sha256": "e8ef9b31fa5160c8f209a6288432da63f0f8a584fc6a8bf1959f9916fafdd603",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions"
@@ -1312,9 +1390,9 @@
       "section_id": "section:permission-model:7e13e8df4eba",
       "heading": "Permission model",
       "semantic_atom_count": 121,
-      "semantic_atom_sha256": "044262ceb8f9b1abafe65bc004975cbea3f5a5c83fb22aba3d23bd25d1c51f82",
+      "semantic_atom_sha256": "6be28d1c7fef7ebe9e0d6e0b0fd25bd727fc2d95aa25fc21495d6b5eab9628d8",
       "candidate_count": 21,
-      "candidate_sha256": "89a8c0bc7f5b65c752dfd7cfcf30492870281f6a0db97ece45595572c4741572",
+      "candidate_sha256": "bf6f540c8c968492a0d22592382e18a851eb35d75aeb21c5902d1ad42fcfff9f",
       "disposition": "behavioral",
       "owners": [
         "capability-core",
@@ -1332,9 +1410,9 @@
       "section_id": "section:install-lifecycle:c04846cfbb11",
       "heading": "Install lifecycle",
       "semantic_atom_count": 88,
-      "semantic_atom_sha256": "ee2d590f7bb59aaeb88cf4dffeb1d0f3c7f10d9f08736614e6629eb884a5bbf9",
+      "semantic_atom_sha256": "14d3653cbd5cfe0d8839fb48cd2da06e3e754e88813b1bb43fd7bbe547e327f6",
       "candidate_count": 31,
-      "candidate_sha256": "c3c870a53f0c3f9928d1a12c73a909818841e56c877c9cbb4e244abce9647a9b",
+      "candidate_sha256": "322e3a4d57d3d59c7684244451066ec36dcadd7f3a0cff843d5eb5becbef511c",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime"
@@ -1352,9 +1430,9 @@
       "section_id": "section:update-remove-rollback-repair-and-status:030064ec54dd",
       "heading": "Update, remove, rollback, repair, and status",
       "semantic_atom_count": 65,
-      "semantic_atom_sha256": "9820a20d59961f71f0d70abece084a5a1f1b2babb1a8aa29aebdb59756dac528",
+      "semantic_atom_sha256": "7a99f8063f5438a2a63aa583e2e57898f3fb0df13e8f1a1898cf1fcbbc516d27",
       "candidate_count": 11,
-      "candidate_sha256": "4091334d60f1328e3b21a66bebd7609a221051ec09951c2439a05da94b20a173",
+      "candidate_sha256": "644510a4f3e830a0b33b093e1ac60b714f848aae1692d963ea5d977987577d90",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime",
@@ -1373,9 +1451,9 @@
       "section_id": "section:friendly-cli-surface:4bb48b30168a",
       "heading": "Friendly CLI surface",
       "semantic_atom_count": 22,
-      "semantic_atom_sha256": "485ada3b1936f3692d2460f5df7c22e3d78de09b3667fa179b9584b81b6e4d66",
+      "semantic_atom_sha256": "f6c19a42eacbd1ce444391264d0962ef1d3d47e48a617f5a8973f381ce256fe1",
       "candidate_count": 4,
-      "candidate_sha256": "0410fa47dcd53654a77015cf2c2b98cb7594955d831c78fa9465931c17fbee77",
+      "candidate_sha256": "2bfd05014b97cb0772fc4cc489a13e7f70e2382ae0f618402218c75329316fae",
       "disposition": "behavioral",
       "owners": [
         "capability-cli-compat"
@@ -1393,7 +1471,7 @@
       "section_id": "section:shared-non-tty-direct-mode-suffix:6163a9391d20",
       "heading": "shared non-TTY direct-mode suffix",
       "semantic_atom_count": 1,
-      "semantic_atom_sha256": "c33063366b26596b6518cee4cec44ee57f73b9887e5e99699c195abe11cc8741",
+      "semantic_atom_sha256": "01c65b6ea5857f1bda3b357aad71d8daafd6f10618c5e397518cc2f9a138fcf1",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -1411,9 +1489,9 @@
       "section_id": "section:request-file-mode-is-the-exclusive-alternative-its-dto-owns-the-key-auth:964be6b3ce16",
       "heading": "request-file mode is the exclusive alternative; its DTO owns the key (authority repair excluded)",
       "semantic_atom_count": 106,
-      "semantic_atom_sha256": "c6d97b6bf7cd8f91715a57141d79886a0a8ce652629262609e4bf383e9698790",
+      "semantic_atom_sha256": "6f364cf3fdea6d875dabc63e49789ead6069afb6f83fd367c4ae6550c20c4dba",
       "candidate_count": 41,
-      "candidate_sha256": "4900808dd65449df0b9c87ec74c16fc0082ea18dc5343bec71d3b9a7a99e50a8",
+      "candidate_sha256": "501a5b78a3e5cda476c2edfbd26ede47dcf4d0b3e15eb4cefcd44fb09d07bf6d",
       "disposition": "behavioral",
       "owners": [
         "capability-cli-compat"
@@ -1430,7 +1508,7 @@
       "section_id": "section:migration-and-cutover:74f000ca6040",
       "heading": "Migration and cutover",
       "semantic_atom_count": 1,
-      "semantic_atom_sha256": "876a3ed85b7a6ad6724d77d04a2d35e4e222a10a05bc630bd9fab7f95a4a7f40",
+      "semantic_atom_sha256": "9f05329264538aa7bc7d5f641c96129680e98c67563ebb01cf9d587069e5ab71",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -1451,9 +1529,9 @@
       "section_id": "section:phase-1-characterization-and-reader-compatibility:8dec9cf0e91e",
       "heading": "Phase 1: characterization and reader compatibility",
       "semantic_atom_count": 8,
-      "semantic_atom_sha256": "87f6f7b658df61607d71f301a6d3a6dd89853661d6f8dac6cef4aa9158f4c3da",
+      "semantic_atom_sha256": "f5bdc45219e2fb79de767dbf8215c3b7ac98e9db925f6aa618a363c0d7ce907d",
       "candidate_count": 2,
-      "candidate_sha256": "39637f7e99d1c621e28ad55c6f15400342630623cf831842aa9247f4a83b0196",
+      "candidate_sha256": "79b5fe9cf1dba8943fee54d8b6f7fd814080012700e0920a633a60d7f6b9577e",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1471,18 +1549,20 @@
       "section_id": "section:phase-2-derived-catalog-and-shared-action-authority:a72e0015bfc0",
       "heading": "Phase 2: derived catalog and shared action authority",
       "semantic_atom_count": 22,
-      "semantic_atom_sha256": "2f69d66135ddc5076600681b8b23d25d3f34de0f584e19ebf40033471bca9f7f",
+      "semantic_atom_sha256": "9a15aa2e00b2f5804af33c9fc111a2727e428659b451e07b9ab3275dfcce07ca",
       "candidate_count": 4,
-      "candidate_sha256": "469cb8b020b599728cbeb7cb5b2ec591773d48abf8f367375d0187d060ac76ee",
+      "candidate_sha256": "2e21058a1857b8ec4c486af056d1bebaa8641165b9e3a4cd48eb1206a34fe1d4",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
-        "foundation-durability-actions"
+        "foundation-durability-actions",
+        "capability-core"
       ],
       "proof_ids": [
         "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
         "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
-        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal"
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked"
       ],
       "rationale": "Derived reads and shared action authority are directly exercised.",
       "waiver_id": null
@@ -1491,9 +1571,9 @@
       "section_id": "section:phase-3-revision-continuity-and-capability-fabric:bcfee721a849",
       "heading": "Phase 3: revision continuity and Capability Fabric",
       "semantic_atom_count": 135,
-      "semantic_atom_sha256": "ac79bd7aa617dfef9f559bcda1f1c188afa2d92586e45cb7534ace6a7bf5e7f6",
+      "semantic_atom_sha256": "04186a78b1047dbad2b1d2c60d968f71773869270258409482b8fc9dcd11f3d8",
       "candidate_count": 43,
-      "candidate_sha256": "cc3fe27dcf0de8dc9b41c5ce294dece3fd9a75609d9ffc9add8774ec5d5fecb1",
+      "candidate_sha256": "71b4c1a22e92451d2e0829a197b8c6b04ce486966b7e68e0631d2cd849759d0b",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1524,7 +1604,8 @@
         "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
         "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
         "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
-        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker"
+        "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo"
       ],
       "rationale": "Revision continuity and the full capability authority/runtime surface have executable proofs.",
       "waiver_id": null
@@ -1532,10 +1613,10 @@
     {
       "section_id": "section:phase-4-ai-home-cutover:7f81f95a5383",
       "heading": "Phase 4: AI Home cutover",
-      "semantic_atom_count": 8,
-      "semantic_atom_sha256": "8942268a073312f065cc24937679d0723e5a3ac03d55cb7330583635f34bc5fc",
-      "candidate_count": 0,
-      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "semantic_atom_count": 11,
+      "semantic_atom_sha256": "694d9721a3c7cd1aaebdcae7588bbbf14034c247f88aed47249aeb4f0f3a3871",
+      "candidate_count": 1,
+      "candidate_sha256": "c9f3ec1b503814df5c892b63d01ca036defdfe024f6609ad97d58149a13862d1",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui"
@@ -1565,10 +1646,10 @@
     {
       "section_id": "section:phase-5-delete-duplicate-implementations:7e07ecdb1652",
       "heading": "Phase 5: delete duplicate implementations",
-      "semantic_atom_count": 13,
-      "semantic_atom_sha256": "ed437a956ca6eef3873d6e215ff88d987a04e3fbebedc53e9f20b08a4c3b2950",
+      "semantic_atom_count": 15,
+      "semantic_atom_sha256": "70b96a7d21f398d18f03d7ed7a2567766a9b554324cda30a8cfc617b60ea3208",
       "candidate_count": 2,
-      "candidate_sha256": "7f68ead728ab3832f1ec443b4a51504453cde88bcb41dac294a571a84e1dee9c",
+      "candidate_sha256": "f275d0bc5104da93b216fc67cd3ef1df1ed213fc4b78b7c9f2ad77fac03efebd",
       "disposition": "behavioral",
       "owners": [
         "capability-cli-compat",
@@ -1587,9 +1668,9 @@
       "section_id": "section:normative-wire-and-storage-contract:8049de246ac8",
       "heading": "Normative wire and storage contract",
       "semantic_atom_count": 2,
-      "semantic_atom_sha256": "2b25eeb8b1f803f02fbdc28208700cb7684a2cf6bb6ef2601d7f34b2bfbe7ab7",
+      "semantic_atom_sha256": "93248e226f87ae12e4ad638d4f28874510ddf39a373c7d92d3198ef59ac11fa3",
       "candidate_count": 1,
-      "candidate_sha256": "f3c4f995bd0905de914186c0c024486219b330c5601ebd8c47512a5f09940514",
+      "candidate_sha256": "4ec767768f994a6b42b6488be77d8dca63f4fba70787a550b9d2919538884ee9",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1598,7 +1679,8 @@
       "proof_ids": [
         "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
         "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
-        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets"
+        "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked"
       ],
       "rationale": "Canonical digest, framing, and portable storage validators exercise the wire/storage umbrella.",
       "waiver_id": null
@@ -1606,10 +1688,10 @@
     {
       "section_id": "section:canonical-values-and-bounds:c04074a55273",
       "heading": "Canonical values and bounds",
-      "semantic_atom_count": 47,
-      "semantic_atom_sha256": "58dabce9f3543de1cf554677766d34fcd5d27c6bb76522a2b9b2c73d5e7e939e",
+      "semantic_atom_count": 48,
+      "semantic_atom_sha256": "40fc9a666f1e0002003c6176eebc62e1934ab6c6642592de6b69cc7360c92301",
       "candidate_count": 14,
-      "candidate_sha256": "9136ca01b30dd998af1322e8dfb3d3fef8ccb00b88339a18440426a53cb59d5f",
+      "candidate_sha256": "78aee43b8fcf1bfb4b6c1e6cfd149980bc7fe4869b914292adcb5a6065dfeb8c",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1618,7 +1700,8 @@
       "proof_ids": [
         "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
         "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
-        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner"
+        "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
+        "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance"
       ],
       "rationale": "Canonical value, bounded manifest, and public projection validators exercise exact bounds.",
       "waiver_id": null
@@ -1627,9 +1710,9 @@
       "section_id": "section:handoff-wire-contract:4b062d57e2cf",
       "heading": "Handoff wire contract",
       "semantic_atom_count": 349,
-      "semantic_atom_sha256": "60510f7bc34284478d4b33772fef44e5d89833a5a8c93a52541bb173fb055568",
+      "semantic_atom_sha256": "2b61ee46cf5568802124aff86fe756dc90eb4e8a6c970d7ae7991809ee450508",
       "candidate_count": 55,
-      "candidate_sha256": "2a55ff1620020aa6f5068a6c9250e223cdbaf5b64b25bf2943ff22160d2c91cd",
+      "candidate_sha256": "254ff7e819d3c3ffc6e9eb87efefc2331583d2796314532488032be3a85059f8",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api"
@@ -1645,10 +1728,10 @@
     {
       "section_id": "section:action-enums-and-preview:0890ae5f93b0",
       "heading": "Action enums and preview",
-      "semantic_atom_count": 3597,
-      "semantic_atom_sha256": "e7553b77932db8621ca94b8541e45271eea6bede7f5d619309cc3f244eb10ce5",
+      "semantic_atom_count": 3598,
+      "semantic_atom_sha256": "3c0db60de3604dd0e346a9cf27593e0f88e4877cb86e22caa90c84eab834796d",
       "candidate_count": 590,
-      "candidate_sha256": "236f4d07c78bcb344f5782cac36bf3c72f480b437e5eb7178780076d6f8a6d7e",
+      "candidate_sha256": "dc5e126c2cd809e53a69660e5410558b08cb001c12c15899b93c8e406d9b33e0",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1668,9 +1751,9 @@
       "section_id": "section:proposal-and-operation-wire-bodies:96731e9d398a",
       "heading": "Proposal and operation wire bodies",
       "semantic_atom_count": 446,
-      "semantic_atom_sha256": "b681f332b1803c4abdff7075f84bfefe7796df4f287c65a2ed849e74c3ff34b1",
+      "semantic_atom_sha256": "a0056437db591d0f2f15c95dc197f4721ab3f15ef4209ebf62c9b5070cbbc508",
       "candidate_count": 75,
-      "candidate_sha256": "f538e44c1c0ab9609976d21f724c6092b4dfdb32a76812f069cd429d1fb8c46c",
+      "candidate_sha256": "d77f719d3a9d761707720aba84d41b504d9602e4cb813c7f2a0f99a830dd849e",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1688,9 +1771,9 @@
       "section_id": "section:action-approval-and-challenge-authority-records:b30cf5d9e880",
       "heading": "Action, approval, and challenge authority records",
       "semantic_atom_count": 236,
-      "semantic_atom_sha256": "e31f4127866383dc2b0676098cd5fa4101dc1a465690d95ff7d7845e9324a94c",
+      "semantic_atom_sha256": "3688ae99e5488d124060ec64de3ccee4bb5702f43bcd053c3e729317dbd2d641",
       "candidate_count": 51,
-      "candidate_sha256": "80d0aa41116072c35a1ce40623a269554055707f867f1c902bec9af4cbe7fcd9",
+      "candidate_sha256": "f61cafcf76ab7bf649a1a6aafbe81949feda53636f6aa8a474df69a28beaa7ed",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1707,9 +1790,9 @@
       "section_id": "section:authoritative-capability-records:4187611fc949",
       "heading": "Authoritative capability records",
       "semantic_atom_count": 1061,
-      "semantic_atom_sha256": "c115feddab1f0507efae2d3de9a7e7d47698898ceecf1ece47b9a01095db3926",
+      "semantic_atom_sha256": "e9f44cf1de03774de1b4d1433cc54482a0cde45fb241c2e865ec7944bcc56197",
       "candidate_count": 164,
-      "candidate_sha256": "97cc01b5582403085e7a7ca89af7da660e1fd3824f5c37437f26eb7cab4c11a4",
+      "candidate_sha256": "b5964d9fa93bb2f7aab24df584cd4f36934e8f38c54e0dad7a90806260da2173",
       "disposition": "behavioral",
       "owners": [
         "capability-core",
@@ -1721,7 +1804,9 @@
         "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
         "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
         "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
-        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked",
+        "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance"
       ],
       "rationale": "All authoritative capability record families have concrete validators and runtime proofs.",
       "waiver_id": null
@@ -1730,9 +1815,9 @@
       "section_id": "section:lineage-revision-start-and-grant-authority-records:d3cdb272d2fe",
       "heading": "Lineage, revision-start, and grant authority records",
       "semantic_atom_count": 1755,
-      "semantic_atom_sha256": "dccdf769a1c0534cc16b4a2d8de3dfd36546f2e6dd4aa2d52a3ba11e7da45d41",
+      "semantic_atom_sha256": "26f2cca8a41849142958c54e8229429f2648fbe078b3ae47ade771dea3774c0b",
       "candidate_count": 470,
-      "candidate_sha256": "0ade94070d9290e58ba43635a559f889c1173d8a348969e431149bd191f6c484",
+      "candidate_sha256": "17974743605f7e9d31bd8441a3b78fc74cc8580c0e234d169e3985f1aa86f90c",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1747,7 +1832,8 @@
         "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
         "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
         "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
-        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal"
+        "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked"
       ],
       "rationale": "Lineage, process-bound revision ownership, exact terminal mirroring, delivery receipt, grant, and action authority records are exercised.",
       "waiver_id": null
@@ -1755,10 +1841,10 @@
     {
       "section_id": "section:http-errors-and-status-mapping:c36fa1a9bfdb",
       "heading": "HTTP errors and status mapping",
-      "semantic_atom_count": 272,
-      "semantic_atom_sha256": "7c6cab2791d4b1543dbf517f3e52f75728264d52dcf8ecec34613f60884360b9",
-      "candidate_count": 8,
-      "candidate_sha256": "d14956efe92bdd7e8ecfbd8f60c1e5c927eecba0b23c416556881bbb6b1b4329",
+      "semantic_atom_count": 299,
+      "semantic_atom_sha256": "133be49e02dd0c56f50ab5fed7e69dbe6b7be56448ae80bc8351ab3b81ae7c69",
+      "candidate_count": 11,
+      "candidate_sha256": "499b3c1f0fbe024b1908da3b03c983a2d443648463abb4c88bfdffdd9ea42fed",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api",
@@ -1777,9 +1863,9 @@
       "section_id": "section:cli-json-and-exit-contract:ed80509e174e",
       "heading": "CLI JSON and exit contract",
       "semantic_atom_count": 471,
-      "semantic_atom_sha256": "eaa4f66ff1dbf53794b831ee401b4975575a2ee34f5ff0630108efaee601e6e5",
+      "semantic_atom_sha256": "66d8522412f5051ca74ec52cd835c308eb23d91a1ab422d3c567e3cdbed53bda",
       "candidate_count": 33,
-      "candidate_sha256": "b8efbaf22197a5f6df4eca834340aa5bb4d564a5a2df24fdd63173c730a5c1ed",
+      "candidate_sha256": "1438be720d1e25f6f7f352792aa32cb4b905c069d9fae3132a98b5f324eeddeb",
       "disposition": "behavioral",
       "owners": [
         "capability-cli-compat"
@@ -1797,9 +1883,9 @@
       "section_id": "section:storage-framing-and-permissions:40a57a65427c",
       "heading": "Storage framing and permissions",
       "semantic_atom_count": 306,
-      "semantic_atom_sha256": "ede0980cfc40921736a422aaa0dbb1e79484b8954a3bfefe2c84db1c747bd1c8",
+      "semantic_atom_sha256": "82ea6f4cce162b9b3872db7735ebd62dda22f8e17c832b44cdda425bf03f1149",
       "candidate_count": 66,
-      "candidate_sha256": "a5f09a034179439e700b8adca2e79a6f1e6973ac750b86216cf8414ae0ad5307",
+      "candidate_sha256": "dd83b56ab76104c41524510abaca31e6ddf71856396bd3ba996309fd25412421",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1818,10 +1904,10 @@
     {
       "section_id": "section:error-and-recovery-contract:2fb3df9f09a7",
       "heading": "Error and recovery contract",
-      "semantic_atom_count": 29,
-      "semantic_atom_sha256": "c7bb5d11e354e1906dd5d842acf5302305164288974d8a4be867de0af9a7b570",
-      "candidate_count": 31,
-      "candidate_sha256": "1c3e4b094a55522e7ff0cbb54cc54a5e7ff1916857c993718a6e0b1401ed143f",
+      "semantic_atom_count": 35,
+      "semantic_atom_sha256": "966c35a05ab588addc739b075d303a092d84ffcfeb8cf34de0e569c30b6ad0c4",
+      "candidate_count": 36,
+      "candidate_sha256": "dd4636f5f1092593f00d1ad1a4f72d0cb5889142ef2a86cdfa10557c4e21e58e",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1837,7 +1923,8 @@
         "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
         "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
         "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
-        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication"
+        "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
       ],
       "rationale": "Each durable domain has tamper, owner-loss, mirror-failure, idempotent terminal, or crash-recovery behavior under test.",
       "waiver_id": null
@@ -1845,10 +1932,10 @@
     {
       "section_id": "section:security-requirements:bc4ab2b454b6",
       "heading": "Security requirements",
-      "semantic_atom_count": 24,
-      "semantic_atom_sha256": "881a70216657c9a949041a8370b52064d77e0963b553ef4efb2ba90ef36cf90c",
-      "candidate_count": 9,
-      "candidate_sha256": "4de25bf0467c82d26b379c17b61aeaa5999a49fa3f6eef8c53a33d4a403e60da",
+      "semantic_atom_count": 33,
+      "semantic_atom_sha256": "08601145f55a0a6359bdeb8b4c729f3534be184ef50e7673492e460ea52605c5",
+      "candidate_count": 12,
+      "candidate_sha256": "eb1ec5e1b582a10fcfca5caf4b9ea09476d9886908236662e4cfd7e13ce3aff4",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1862,7 +1949,10 @@
         "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
         "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
         "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
-        "proof:bun:test/capability-command.test.ts#private-input-no-echo"
+        "proof:bun:test/capability-command.test.ts#private-input-no-echo",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked",
+        "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance",
+        "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
       ],
       "rationale": "Secret projection, authentication, portable storage, graph substitution, and CLI no-echo are exercised.",
       "waiver_id": null
@@ -1882,7 +1972,8 @@
         "capability-runtime",
         "capability-cli-compat",
         "ai-home-ui",
-        "product-acceptance-ship"
+        "product-acceptance-ship",
+        "capability-core"
       ],
       "proof_ids": [
         "proof:bun:test/actions/authority-hardening.test.ts#action-authority-wal",
@@ -1892,7 +1983,8 @@
         "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
         "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
         "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
-        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream"
+        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
+        "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance"
       ],
       "rationale": "The strategy umbrella references executable proofs across every work unit and the pinned server runtime.",
       "waiver_id": null
@@ -1900,10 +1992,10 @@
     {
       "section_id": "section:characterization-tests:73c09992b026",
       "heading": "Characterization tests",
-      "semantic_atom_count": 8,
-      "semantic_atom_sha256": "020ed5723d7a50b53510f3936c46c45979cc311cd95faeab2b328611ed95ca6b",
-      "candidate_count": 0,
-      "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "semantic_atom_count": 11,
+      "semantic_atom_sha256": "95ce37745a985fbbf6016abdae47b3e056316b3850d6fd3165cea4fac6faa1c6",
+      "candidate_count": 1,
+      "candidate_sha256": "aeb04d416123207a41df72b3c1274c8184d6bd887e59f44ccf6c0f058a287e1b",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1920,10 +2012,10 @@
     {
       "section_id": "section:unit-and-property-tests:1d706bff3f0d",
       "heading": "Unit and property tests",
-      "semantic_atom_count": 252,
-      "semantic_atom_sha256": "6f4ab52f3d670d3cc024d46933c1ada3ba5b06d1e767253403701589e21ffc8d",
-      "candidate_count": 49,
-      "candidate_sha256": "19869ceddf2a3e92730bde6cf6f0c50a7a35d7719c6b02fcc313063a13754ef8",
+      "semantic_atom_count": 268,
+      "semantic_atom_sha256": "72e5e4d774625841058a64a7baf1dd766b1f2ac13afb2dafcfdf2a0ed1e2cd5f",
+      "candidate_count": 51,
+      "candidate_sha256": "fe4b76547a0d795f088a0285698b8b3a79035040eb6ae6fdddc6397bb098c4f7",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1969,7 +2061,11 @@
         "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
         "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
         "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
-        "proof:bun:test/ui-conversation-home.test.ts#home-quotes"
+        "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked",
+        "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
+        "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
       ],
       "rationale": "The explicit catalog binds unit/property oracles across every implementation domain.",
       "waiver_id": null
@@ -1977,10 +2073,10 @@
     {
       "section_id": "section:integration-and-fault-injection-tests:9cc1eaa72e6c",
       "heading": "Integration and fault-injection tests",
-      "semantic_atom_count": 168,
-      "semantic_atom_sha256": "f21e41ed57904864627b3ed57f017b086cb325aa3b0046334e8acd88bf32857a",
-      "candidate_count": 48,
-      "candidate_sha256": "1cf9fea239a21f40cac89043061742e5af772264b7945162f9263466a226573e",
+      "semantic_atom_count": 172,
+      "semantic_atom_sha256": "2b585dc8aec3371ffd430b5350a5b10228911ab2932559f433cfd8c12de0959f",
+      "candidate_count": 49,
+      "candidate_sha256": "f9a28ce2e277248b6a390cd7c93a17547d39363e04b750bd2a4362496228b338",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2000,18 +2096,37 @@
         "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
         "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
         "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
-        "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority"
+        "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
+        "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
       ],
       "rationale": "Crash, race, owner-loss, terminal-mirror, restart, route, and real browser integration proofs are selected.",
       "waiver_id": null
     },
     {
+      "section_id": "section:owned-cli-process-lifecycle-and-orphan-recovery:7115418d87a2",
+      "heading": "Owned CLI process lifecycle and orphan recovery",
+      "semantic_atom_count": 39,
+      "semantic_atom_sha256": "0aac78905b3af721142d4248252bb3b8c71ecfb96c1905977b0c622709b3b1c7",
+      "candidate_count": 13,
+      "candidate_sha256": "10cf54fad5f12b91e069e7a824dba0fea80c2520e564615a057e787a33886124",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
+      ],
+      "rationale": "The owned-process proof binds Windows Job Object containment before receipt publication and untrusted CLI launch.",
+      "waiver_id": null
+    },
+    {
       "section_id": "section:ui-and-end-to-end-tests:ddcadd3a61e0",
       "heading": "UI and end-to-end tests",
-      "semantic_atom_count": 17,
-      "semantic_atom_sha256": "558e6ceb53972976a8524329177e81ac424d89a2271483879b9b75f600c3c851",
-      "candidate_count": 2,
-      "candidate_sha256": "f3d995922fb558653fc8076240d215649ec0a18a56da31b96a624bd734d91a2c",
+      "semantic_atom_count": 26,
+      "semantic_atom_sha256": "a08addb9d699d8b96081bcc317911c1ad53d96dff754d79da39d32d3ac9ca4cd",
+      "candidate_count": 5,
+      "candidate_sha256": "096adc6f5d19164b15750b5d5d7890a125154cc385adc91619a39a645dd797a7",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui"
@@ -2041,10 +2156,10 @@
     {
       "section_id": "section:migration-and-release-rehearsal:a1883e32b951",
       "heading": "Migration and release rehearsal",
-      "semantic_atom_count": 11,
-      "semantic_atom_sha256": "db9e6e6cbef27e1d9b39c2647860929dae44e04caf788792d8362208e04f1fc0",
+      "semantic_atom_count": 14,
+      "semantic_atom_sha256": "60568092fd0633296c07224831d8d6dcc8f1de109878d766a6f371994d137849",
       "candidate_count": 2,
-      "candidate_sha256": "fb6b095b7d89a648b7897727a0563256b1bf33ad650089d079a76e53a4b867f8",
+      "candidate_sha256": "771af4da294b835aa960a1601935375d3b8bc9fab6ed2dcb97526994a9c1dd13",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -2067,9 +2182,9 @@
       "section_id": "section:whole-repository-gate:0dfabe20ccbf",
       "heading": "Whole-repository gate",
       "semantic_atom_count": 10,
-      "semantic_atom_sha256": "4c6b08ca09861fa1123f46428df4fc7023e1beca23e1229e698c155ac068c5aa",
+      "semantic_atom_sha256": "d003880459e978c09d5c0e51f6c8585a041b39494767d55c6af7907e31a7bc25",
       "candidate_count": 5,
-      "candidate_sha256": "466533c67d9dfc097e3c06d7c2c42b863abe51b3c82c7377e34e368fbf61c21f",
+      "candidate_sha256": "55232fe2b64331b9946381d648222f524a326da9e0dfb8d69f3d339e930ee291",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2090,7 +2205,9 @@
         "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
         "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
         "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
-        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream"
+        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
+        "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
       ],
       "rationale": "Representative exact proofs from every unit and the pinned Bun server runtime are re-executed in the same verify invocation.",
       "waiver_id": null
@@ -2099,9 +2216,9 @@
       "section_id": "section:implementation-boundaries-and-sequencing:65577cf5d6d1",
       "heading": "Implementation boundaries and sequencing",
       "semantic_atom_count": 32,
-      "semantic_atom_sha256": "fce213239c699ec395aee696ba4e71486b0750516d8b5d399f2cfea844adb87c",
+      "semantic_atom_sha256": "e5092ea2938dfa87455435d43415ecb81e80fc758ca5c2f269c4a54e599b95b1",
       "candidate_count": 1,
-      "candidate_sha256": "c81357f03d603344c0a98ff448ce7313e34559d880a0bac5f0ed11ab6db87ad3",
+      "candidate_sha256": "2012aac81a76c3313e0d5e0ee2925937e52bec2b90a5a8de1273b0da4b1d91b6",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2145,7 +2262,7 @@
       "section_id": "section:general-plugin-ui-platform:6603f9128587",
       "heading": "General plugin UI platform",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "75c3af23b67f717bfd29f7e07d753d6102e2a9f9b1cb0a3b0ad8180ab174fbb1",
+      "semantic_atom_sha256": "0c04984dafc9f1465d3dc48b99344f65b7003514b27011a01279cd3a0a66db94",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2164,9 +2281,9 @@
       "section_id": "section:mcp-for-every-capability:a2b50d9ee3e2",
       "heading": "MCP for every capability",
       "semantic_atom_count": 2,
-      "semantic_atom_sha256": "8517598eb1f6ad2e5afc1a158b1da7606c24a0b5e9e669bf9edc956707906023",
+      "semantic_atom_sha256": "840da9944ad635f454d2ae330715e0445ac8322ceeda39f481c09ac2c9fdc493",
       "candidate_count": 1,
-      "candidate_sha256": "0f1a19549cc5f248155ac5d6333448e0b25aebfa45016c5df9eec82f7bf8161b",
+      "candidate_sha256": "f06b1e71ffa39d48036824e5af45037c0179769ed4b83a0079a37b5158c36013",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime"
@@ -2182,9 +2299,9 @@
       "section_id": "section:independent-installers-behind-chat-cards:6de17146a98c",
       "heading": "Independent installers behind chat cards",
       "semantic_atom_count": 2,
-      "semantic_atom_sha256": "155f075941977558e708b93023bd8b255d1e9a0f009209bd69a9e686a6713bfa",
+      "semantic_atom_sha256": "61b0a822e55af5b92b7be365dc6b232f2291f4195abecc3d5a86b0e0b008f376",
       "candidate_count": 1,
-      "candidate_sha256": "5c46c4943c3365b7874097a2fb76b0bb2d32fb284b076a60d954312638fe54b4",
+      "candidate_sha256": "4e532a3d4aa13eba630319e6fb34a6dfb3f8fcbfcd0adcff94de71d85c5c3a81",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime",
@@ -2202,7 +2319,7 @@
       "section_id": "section:in-place-participant-mutation-or-retained-native-sessions:2c958eccfd3d",
       "heading": "In-place participant mutation or retained native sessions",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "9b336522b95d4e9f9f22b4a3ecaba60a88ef638c09491da6e212707edc6c6c09",
+      "semantic_atom_sha256": "a0ecb66de79f20011d354e10733dd16d857b513e6c8fbb1126207ac96ea6e522",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2220,7 +2337,7 @@
       "section_id": "section:in-memory-session-list-or-journal-fold-on-every-request:a22e96fca75e",
       "heading": "In-memory session list or journal fold on every request",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "acfe752f2c343bdbd743b50092baf8d6e27678a03269526f0b253f544c7413ea",
+      "semantic_atom_sha256": "aab21a3442fb42bec72c5c545cb24e4c9550a77b48fade531cf049df3c141700",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2239,7 +2356,7 @@
       "section_id": "section:big-bang-cutover-or-permanent-dual-implementation:2ea159c0b751",
       "heading": "Big-bang cutover or permanent dual implementation",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "0901ffcd0a033d2a075b68574baf13db92d33cd10bbc4a41691662362face9c8",
+      "semantic_atom_sha256": "4b31b52c16a03f322f515395b160bb837b1cd3962d58b8c06042c88af68e3d15",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2259,10 +2376,10 @@
     {
       "section_id": "section:completion-criteria:74382a22fa1f",
       "heading": "Completion criteria",
-      "semantic_atom_count": 20,
-      "semantic_atom_sha256": "3f24981102ee261449d54bab13f647e49bd5583a67d18906355dae4ec4c17a15",
-      "candidate_count": 2,
-      "candidate_sha256": "ed69264f27c774106b3786a85ac08b15888b02f588945fe1ff8633581761b085",
+      "semantic_atom_count": 29,
+      "semantic_atom_sha256": "5e60993baa89dfdfefd53fd1c26d263539cdb663ac4344748d7bdd44858d50f4",
+      "candidate_count": 4,
+      "candidate_sha256": "d366bc75a57739e71adb2ed23a8d4fddd0db44e8e54595563b5b307f76e16bca",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2323,7 +2440,11 @@
         "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
         "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
         "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
-        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream"
+        "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
+        "proof:bun:test/capabilities/project-identity-tracking.test.ts#project-identity-tracked",
+        "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance",
+        "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
+        "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
       ],
       "rationale": "Completion is bound to the complete explicit proof catalog across all product units and the pinned Bun server runtime.",
       "waiver_id": null
@@ -2331,8 +2452,8 @@
   ],
   "waivers": [],
   "review": {
-    "reviewer": "implement-normative-proofs",
+    "reviewer": "codex-normative-review-2026-08-26",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "eb542fbe3c8bf75acb58f62ad3438848960bceffac8dec8bb604f954bdef1695"
+    "reviewed_payload_sha256": "8de278f8edc3f8222dfb1b3484c60bbbf6ac46369e17f5cb170886744c165f60"
   }
 }

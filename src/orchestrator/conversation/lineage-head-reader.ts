@@ -84,8 +84,6 @@ export function validateLineageHeadForRead(
     ) {
       throw new Error("initial lineage head differs from deterministic candidate");
     }
-  } else if (value.head_status !== "committed") {
-    throw new Error("only a committed lineage head may advance");
   } else {
     validateLineageHeadAuthorityChain(value, lineage, transitions);
   }

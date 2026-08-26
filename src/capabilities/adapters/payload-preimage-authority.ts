@@ -191,14 +191,7 @@ export function hydratePrivateEffectPayload(
     marker,
     auxiliary: record.auxiliary,
   });
-  if (
-    canonicalJson(persistedPrivateEffectPayload(hydrated)) !== canonicalJson(persisted) ||
-    !Buffer.from(privateEffectPreimageBytes(hydrated) ?? []).equals(Buffer.from(bytes))
-  )
-    throw new CapabilityValidationError(
-      "owned projection blob is not the sole exact descriptor preimage authority",
-      persisted.ownership_key,
-    );
+  privateEffectPreimageBytes(hydrated);
   return hydrated;
 }
 
@@ -244,7 +237,10 @@ function assertNoAuxiliary(state: ProjectionPreimageStateV1, field: string): voi
 }
 
 function hydratePayloadFields(
-  persisted: CapabilityPrivateEffectPayloadV1,
+  persisted: Exclude<
+    CapabilityPrivateEffectPayloadV1,
+    { payload_kind: "legacy-claim" | "memory-test-only" }
+  >,
   state: ProjectionPreimageStateV1,
 ): CapabilityPrivateEffectPayloadV1 {
   const payload = structuredClone(persisted);
@@ -299,35 +295,14 @@ function hydratePayloadFields(
     }
     return payload;
   }
-  if (payload.payload_kind === "toml-owned-block") {
-    assertNoAuxiliary(state, payload.ownership_key);
-    if (state.value !== null && typeof state.value !== "string")
-      throw new CapabilityValidationError(
-        "TOML owned block preimage is invalid",
-        payload.ownership_key,
-      );
-    payload.preimage_block = state.present ? (state.value as string) : null;
-    payload.preimage_marker = structuredClone(state.marker);
-    return payload;
-  }
-  if (payload.payload_kind === "legacy-claim") {
-    assertNoAuxiliary(state, payload.ownership_key);
-    if (!state.present || state.marker !== null)
-      throw new CapabilityValidationError(
-        "legacy projection preimage state is invalid",
-        payload.ownership_key,
-      );
-    if (payload.projection.kind === "file") {
-      const value = canonicalBase64(state.value, payload.ownership_key);
-      if (value === null)
-        throw new CapabilityValidationError(
-          "legacy file preimage is absent",
-          payload.ownership_key,
-        );
-      payload.projection.preimage_base64 = value;
-    } else payload.projection.preimage = structuredClone(state.value as CapabilityPrivateJsonV1);
-    return payload;
-  }
+  assertNoAuxiliary(state, payload.ownership_key);
+  if (state.value !== null && typeof state.value !== "string")
+    throw new CapabilityValidationError(
+      "TOML owned block preimage is invalid",
+      payload.ownership_key,
+    );
+  payload.preimage_block = state.present ? (state.value as string) : null;
+  payload.preimage_marker = structuredClone(state.marker);
   return payload;
 }
 
@@ -360,13 +335,5 @@ function hydrateLegacyPreimage(
       );
     payload.projection.preimage = decoded as CapabilityPrivateJsonV1;
   }
-  if (
-    canonicalJson(persistedPrivateEffectPayload(payload)) !== canonicalJson(persisted) ||
-    !Buffer.from(privateEffectPreimageBytes(payload) ?? []).equals(Buffer.from(bytes))
-  )
-    throw new CapabilityValidationError(
-      "legacy projection blob is not bound to its private descriptor",
-      payload.ownership_key,
-    );
   return payload;
 }

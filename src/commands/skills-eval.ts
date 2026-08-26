@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { c, writeFileSafe } from "../core.js";
 import { ENGINES, type Engine, type Skill } from "../core/types.js";
-import { type Spawner, runDispatch } from "../dispatch.js";
+import { type AsyncSpawner, runDispatchAsync } from "../dispatch.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import {
@@ -141,11 +141,14 @@ function formatSummary(result: EvalResult): string {
 // Signature matches skills.ts pattern: (repo, rest) → number
 // where rest includes the skill dir and optional flags.
 
-export function skillsEvalCmd(
+export async function skillsEvalCmd(
   _repo: string,
   rest: string[] = [],
-  inject: { runner?: (prompt: string, skillContext?: string) => string; spawner?: Spawner } = {},
-): number {
+  inject: {
+    runner?: (prompt: string, skillContext?: string) => string | Promise<string>;
+    spawner?: AsyncSpawner;
+  } = {},
+): Promise<number> {
   let jsonFlag = false;
   let outFile = "";
   let previousFile = "";
@@ -239,20 +242,21 @@ export function skillsEvalCmd(
     );
     const runner =
       inject.runner ??
-      ((prompt: string, skillContext?: string) => {
+      (async (prompt: string, skillContext?: string) => {
         const fullPrompt = skillContext
           ? `${prompt}\n\nFollow this skill for the task:\n${skillContext}`
           : prompt;
-        const dispatched = runDispatch({
+        const dispatched = await runDispatchAsync({
           engine,
           prompt: fullPrompt,
           mode: "cli",
           spawner: inject.spawner,
+          base: _repo,
         });
         if (!dispatched.ok) throw new Error(dispatched.reason ?? `${engine} eval failed`);
         return engineText(dispatched.raw);
       });
-    result.task = runTaskEval(evalsFile, text, runner, previous?.taskPassRate);
+    result.task = await runTaskEval(evalsFile, text, runner, previous?.taskPassRate);
     if (previous) result.previousSummary = previous;
 
     if (jsonFlag) {

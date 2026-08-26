@@ -72,7 +72,8 @@ export function createActionProposal(
           input.proposal.proposal_id,
         );
       assertCanonicalRequestAuthority(input.canonical_request, input.authority, input.proposal);
-      if (existing.length === 1) {
+      const authority = files.readAuthority(input.proposal.proposal_id);
+      if (existing.length === 1 && authority.length === 0) {
         assertPublicationWindow(input.proposal, sampledNow);
         assertPublicationClosure(resolver, input.proposal, requestDigest, sampledNow);
       }

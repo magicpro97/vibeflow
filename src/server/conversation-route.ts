@@ -1,8 +1,5 @@
-import { assertPrivateFileRangeHandoffBindingV1 } from "../orchestrator/conversation/private-file-range-staging-store.js";
 import type {
   ApprovalDecision,
-  ConversationCreateParticipant,
-  ConversationCreateRequest,
   ConversationService,
   MessageRequest,
   OperationCancelCommand,
@@ -11,6 +8,7 @@ import {
   type ConversationArtifactAuthority,
   handleConversationArtifact,
 } from "./conversation-artifact.js";
+import type { ConversationAskCompatibilityHttpAuthorityV1 } from "./conversation-ask-compatibility-route.js";
 import type {
   ConversationSessionAuthority,
   ConversationStreamTokenAuthority,
@@ -19,18 +17,23 @@ import {
   type ConversationBrowserHttpAuthorityV1,
   handleOptionalConversationBrowserRoute,
 } from "./conversation-browser-route.js";
+import {
+  type ConversationCompatibilityMessageAuthorityV1,
+  handleConversationCompatibilityMessageRoute,
+} from "./conversation-compatibility-message-route.js";
+import {
+  type ConversationHomeCreateHttpAuthorityV1,
+  handleConversationHomeCreateRoute,
+} from "./conversation-home-create-route.js";
+import { createLegacyConversationRequest } from "./conversation-legacy-create-request.js";
 import { decodeConversationMessageRequest } from "./conversation-message-request.js";
 import { conversationRouteError } from "./conversation-route-error.js";
 import { handleConversationSse } from "./conversation-sse.js";
 
 const PREFIX = "/api/conversations";
 const BODY_LIMIT = 64 * 1024;
-const TEXT_LIMIT = 32 * 1024;
 const SHORT_LIMIT = 256;
 const REASON_LIMIT = 4 * 1024;
-const PARTICIPANT_LIMIT = 64;
-const ROUND_LIMIT = 100;
-const ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
 const APPROVAL_TOKEN_PATTERN = /^approval:[0-9a-f]{64}$/;
 
@@ -56,6 +59,10 @@ export interface ConversationHttpAuthority {
   csrf?(request: Request): boolean;
   heartbeatMs?: number;
   browser?: Omit<ConversationBrowserHttpAuthorityV1, "sessions" | "csrf">;
+  homeCreate?: Omit<ConversationHomeCreateHttpAuthorityV1, "sessions" | "streamTokens" | "csrf">;
+  compatibilityMessages?: ConversationCompatibilityMessageAuthorityV1;
+  askCompatibility?: Omit<ConversationAskCompatibilityHttpAuthorityV1, "sessions" | "csrf">;
+  messageQueueEvents?: import("./conversation-sse.js").ConversationSseAuthority["messageQueue"];
 }
 
 export { isConversationNamespace } from "./conversation-browser-route.js";
@@ -124,65 +131,6 @@ async function readBoundedJson(request: Request): Promise<ParsedBody> {
   }
   if (value === null || typeof value !== "object" || Array.isArray(value)) return { ok: false };
   return { ok: true, body: value as JsonObject };
-}
-
-function createRequest(body: JsonObject): ConversationCreateRequest | null {
-  if (!exactKeys(body, ["topic", "policy", "participants", "max_rounds", "private_file_range"]))
-    return null;
-  if (!boundedString(body.topic, TEXT_LIMIT)) return null;
-  if (body.policy !== undefined && !boundedString(body.policy, SHORT_LIMIT)) return null;
-  if (
-    body.max_rounds !== undefined &&
-    (typeof body.max_rounds !== "number" ||
-      !Number.isSafeInteger(body.max_rounds) ||
-      body.max_rounds < 1 ||
-      body.max_rounds > ROUND_LIMIT)
-  )
-    return null;
-  let participants: ConversationCreateParticipant[] | undefined;
-  if (body.participants !== undefined) {
-    if (
-      !Array.isArray(body.participants) ||
-      body.participants.length < 1 ||
-      body.participants.length > PARTICIPANT_LIMIT
-    )
-      return null;
-    participants = [];
-    for (const value of body.participants) {
-      if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-      const participant = value as JsonObject;
-      if (!exactKeys(participant, ["role_ref", "engine", "model"])) return null;
-      if (
-        !boundedString(participant.role_ref, SHORT_LIMIT) ||
-        !boundedString(participant.engine, SHORT_LIMIT) ||
-        !ENGINES.has(participant.engine)
-      )
-        return null;
-      if (participant.model !== undefined && !boundedString(participant.model, SHORT_LIMIT))
-        return null;
-      participants.push({
-        role_ref: participant.role_ref,
-        engine: participant.engine,
-        ...(participant.model === undefined ? {} : { model: participant.model as string }),
-      });
-    }
-  }
-  let privateFileRange: ConversationCreateRequest["private_file_range"];
-  if (body.private_file_range !== undefined) {
-    try {
-      assertPrivateFileRangeHandoffBindingV1(body.private_file_range);
-      privateFileRange = structuredClone(body.private_file_range);
-    } catch {
-      return null;
-    }
-  }
-  return {
-    topic: body.topic,
-    ...(body.policy === undefined ? {} : { policy: body.policy as string }),
-    ...(participants === undefined ? {} : { participants }),
-    ...(body.max_rounds === undefined ? {} : { max_rounds: body.max_rounds as number }),
-    ...(privateFileRange ? { private_file_range: privateFileRange } : {}),
-  };
 }
 
 function emptyRequest(body: JsonObject): boolean {
@@ -282,6 +230,7 @@ export async function handleConversationRoute(
       {
         service: authority.service,
         tokens: authority.streamTokens,
+        ...(authority.messageQueueEvents ? { messageQueue: authority.messageQueueEvents } : {}),
         ...(authority.heartbeatMs === undefined ? {} : { heartbeatMs: authority.heartbeatMs }),
       },
       request,
@@ -295,9 +244,19 @@ export async function handleConversationRoute(
 
   try {
     if (request.method === "POST" && path.length === 0) {
+      if (authority.homeCreate)
+        return handleConversationHomeCreateRoute(
+          {
+            ...authority.homeCreate,
+            sessions: authority.sessions,
+            streamTokens: authority.streamTokens,
+            ...(authority.csrf ? { csrf: authority.csrf } : {}),
+          },
+          request,
+        );
       const body = await parsedBody(request);
       if (body instanceof Response) return body;
-      const input = createRequest(body);
+      const input = createLegacyConversationRequest(body);
       if (!input) return response(400, "invalid_request");
       const started = await authority.service.start(input);
       const token = authority.streamTokens.issue(started.conversation_id);
@@ -328,6 +287,12 @@ export async function handleConversationRoute(
       );
     }
     if (request.method !== "POST") return response(404, "route_not_found");
+    if (path.length === 2 && action === "messages" && authority.compatibilityMessages)
+      return handleConversationCompatibilityMessageRoute(
+        authority.compatibilityMessages,
+        request,
+        conversationId,
+      );
     const body = await parsedBody(request);
     if (body instanceof Response) return body;
     if (path.length === 2 && action === "messages") {

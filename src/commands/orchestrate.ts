@@ -217,7 +217,7 @@ export async function orchestrate(
     (inject.spawner || inject.sessionRuntime?.processSpawner
       ? () => [readyStub(engine)]
       : undefined);
-  if (!engineReady(engine, mode, preflight)) return 1;
+  if (!(await engineReady(engine, mode, preflight))) return 1;
 
   // Source-protection: only on a REAL (cli) dispatch — never dry/bridge (nothing irreversible).
   const settings = readSettings(base);

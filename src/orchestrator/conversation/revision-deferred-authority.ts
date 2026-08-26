@@ -86,48 +86,52 @@ export class ConversationDeferredRevisionAuthority {
     replay: ValidatedPublishedRevisionReplayV1,
     validated: ValidatedDeferredRevisionCommitV1,
   ): Promise<void> {
-    const proposalId = validated.actionState.proposal.proposal_id;
-    const startState = foldRevisionOperation(
-      replay.operation,
-      this.options.home.revisions.readEvents(replay.operation.operation_id),
-    ).state;
-    if (!["published", "starting"].includes(startState)) {
-      this.options.home.revisions.publish(replay.operation.operation_id);
-      this.options.artifactStore.publishRevision(
+    try {
+      const proposalId = validated.actionState.proposal.proposal_id;
+      const startState = foldRevisionOperation(
+        replay.operation,
+        this.options.home.revisions.readEvents(replay.operation.operation_id),
+      ).state;
+      if (!["published", "starting"].includes(startState)) {
+        this.options.home.revisions.publish(replay.operation.operation_id);
+        this.options.artifactStore.publishRevision(
+          replay.childId,
+          replay.operation.operation_id,
+          replay.operation.created_at,
+        );
+        reconcilePublishedRevisionReservation({
+          lineage: this.options.home.lineage,
+          reservation: replay.reservation,
+          consumedAt: replay.operation.created_at,
+        });
+        reconcilePublishedRevisionStartTerminal({
+          operation: replay.operation,
+          proposalId,
+          home: this.options.home,
+        });
+        return;
+      }
+      const owner = this.options.runtime.operationOwnerState(
         replay.childId,
         replay.operation.operation_id,
-        replay.operation.created_at,
       );
-      reconcilePublishedRevisionReservation({
-        lineage: this.options.home.lineage,
-        reservation: replay.reservation,
-        consumedAt: replay.operation.created_at,
-      });
-      reconcilePublishedRevisionStartTerminal({
+      if (owner === "conversation_mismatch")
+        throw new Error("published revision child live authority changed");
+      if (owner === "local" || owner === "same_process_live") return;
+      if (this.startOwners.status(replay.operation.operation_id) !== "dead") return;
+      await recoverInterruptedPublishedRevisionStart({
         operation: replay.operation,
+        revisionPlan: replay.revisionPlan,
+        reservation: replay.reservation,
         proposalId,
+        runtime: this.options.runtime,
         home: this.options.home,
+        artifactStore: this.options.artifactStore,
+        startOwners: this.startOwners,
       });
-      return;
+    } finally {
+      this.options.revisionSettled(replay.operation.root_session_id);
     }
-    const owner = this.options.runtime.operationOwnerState(
-      replay.childId,
-      replay.operation.operation_id,
-    );
-    if (owner === "conversation_mismatch")
-      throw new Error("published revision child live authority changed");
-    if (owner === "local" || owner === "same_process_live") return;
-    if (this.startOwners.status(replay.operation.operation_id) !== "dead") return;
-    await recoverInterruptedPublishedRevisionStart({
-      operation: replay.operation,
-      revisionPlan: replay.revisionPlan,
-      reservation: replay.reservation,
-      proposalId,
-      runtime: this.options.runtime,
-      home: this.options.home,
-      artifactStore: this.options.artifactStore,
-      startOwners: this.startOwners,
-    });
   }
 
   private async commit(

@@ -129,9 +129,11 @@ export function createConversationRuntimeAuthorities(
     read: (id) => options.traceStore.readConversation(id),
     correlation: ({ manifest, operationId }, attemptId) =>
       host.correlation(manifest, operationId, attemptId),
-    appendActive: (correlation, emission) =>
+    appendActive: (correlation, emission, requestedEventId) =>
       emissions.control(correlation.conversation_id, correlation.operation_id, false, () =>
-        effects.write(correlation, emission),
+        requestedEventId
+          ? effects.writeRequestedEvent(correlation, emission, requestedEventId)
+          : effects.write(correlation, emission),
       ),
     appendCancellation: (correlation, emission) => effects.write(correlation, emission),
     appendTransition: (correlation, emission) => effects.write(correlation, emission),

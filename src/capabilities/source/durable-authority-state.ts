@@ -58,6 +58,18 @@ export interface DurableAuthorityStateV1 {
   trust: readonly RegistryTrustKeyFrameV1[];
 }
 
+export function assertReconstructedAuthorityHead(
+  rebuilt: AuthorityEpochHeadV1,
+  current: AuthorityEpochHeadV1,
+): void {
+  if (canonicalJson(rebuilt) !== canonicalJson(current))
+    throw new CapabilityValidationError(
+      "authority event/evidence chain does not reconstruct the current head",
+      "authority.head",
+      "integrity_failure",
+    );
+}
+
 interface AuthorityJournalsV1 {
   events: AuthorityEpochEventV1[];
   grants: GrantFrameV1[];
@@ -271,13 +283,7 @@ export function readDurableAuthorityState(input: {
     );
   let rebuilt = initial;
   for (const event of journals.events) {
-    const retainedPrior = checkpoint(input.private_root, event.previous_head_checkpoint_digest);
-    if (canonicalJson(retainedPrior) !== canonicalJson(rebuilt))
-      throw new CapabilityValidationError(
-        "authority event prior checkpoint differs from reconstructed head",
-        "authority.events",
-        "integrity_failure",
-      );
+    checkpoint(input.private_root, event.previous_head_checkpoint_digest);
     const evidence = evidenceFor(event, journals, rebuilt, input.private_root);
     const next = applyAuthorityEvent(rebuilt, event, evidence);
     resolver.verify({
@@ -289,12 +295,7 @@ export function readDurableAuthorityState(input: {
     });
     rebuilt = next;
   }
-  if (canonicalJson(rebuilt) !== canonicalJson(current))
-    throw new CapabilityValidationError(
-      "authority event/evidence chain does not reconstruct the current head",
-      "authority.head",
-      "integrity_failure",
-    );
+  assertReconstructedAuthorityHead(rebuilt, current);
   assertFinalAuthorityJournalState(initial, rebuilt, journals, settings);
   const state = freezeRecord(structuredClone({ identity, initial, current, ...journals }));
   DURABLE_STATES.add(state);

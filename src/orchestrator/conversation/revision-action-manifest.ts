@@ -1,5 +1,7 @@
 import type { BrowserHostActionRequestV1, HostActionV1 } from "../../actions/index.js";
 import { digestHex, digestV1 } from "../../durability/index.js";
+import { materializeConversationHostTools } from "./conversation-host-tool-policy.js";
+import { ConversationRevisionCandidateInvalidError } from "./revision-errors.js";
 import type { ConversationBinding, ConversationManifest, MessageRequest } from "./types.js";
 
 export type ConversationRevisionMutationV1 = Extract<
@@ -56,6 +58,7 @@ function addedBinding(
   const participant = action.participant;
   return {
     participant_id: participantId(parent, action, idempotencyKey),
+    host_tools: materializeConversationHostTools({ roleRef: participant.role_ref }),
     input: {
       roleRef: participant.role_ref,
       engine: participant.engine,
@@ -82,7 +85,14 @@ function updatedBinding(
   if (changes.engine !== undefined) input.engine = changes.engine;
   if (changes.model !== null && changes.model !== undefined) input.modelOverride = changes.model;
   if (changes.skill_refs !== undefined) input.additionalSkillRefs = [...changes.skill_refs];
-  return { participant_id: binding.participant_id, input };
+  return {
+    participant_id: binding.participant_id,
+    input,
+    host_tools: materializeConversationHostTools({
+      roleRef: input.roleRef,
+      explicit: binding.host_tools ?? [],
+    }),
+  };
 }
 
 /** Materializes the complete immutable child manifest preimage for revision-owned actions. */
@@ -96,19 +106,23 @@ export function applyConversationRevisionMutation(input: {
   if (action.type === "conversation.add_participant") {
     const addition = addedBinding(manifest, action, input.idempotencyKey);
     if (manifest.bindings.some((binding) => binding.participant_id === addition.participant_id))
-      throw new Error("derived participant identity already exists");
+      throw new ConversationRevisionCandidateInvalidError(
+        "derived participant identity already exists",
+      );
     manifest.bindings = [...manifest.bindings.map(fresh), addition];
   } else if (action.type === "conversation.remove_participant") {
     if (!manifest.bindings.some((binding) => binding.participant_id === action.participant_id))
-      throw new Error("revision participant is absent");
+      throw new ConversationRevisionCandidateInvalidError("revision participant is absent");
     manifest.bindings = manifest.bindings
       .filter((binding) => binding.participant_id !== action.participant_id)
       .map(fresh);
     if (manifest.bindings.length === 0)
-      throw new Error("conversation revision requires at least one participant");
+      throw new ConversationRevisionCandidateInvalidError(
+        "conversation revision requires at least one participant",
+      );
   } else if (action.type === "conversation.update_participant") {
     if (!manifest.bindings.some((binding) => binding.participant_id === action.participant_id))
-      throw new Error("revision participant is absent");
+      throw new ConversationRevisionCandidateInvalidError("revision participant is absent");
     manifest.bindings = manifest.bindings.map((binding) => updatedBinding(binding, action));
   } else {
     manifest.bindings = manifest.bindings.map(fresh);

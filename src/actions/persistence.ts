@@ -49,7 +49,7 @@ export interface ActionIdempotencyBindingV1 {
 
 type JournalRecord = ActionAuthorityEventV1 | ActionIdempotencyBindingV1 | ApprovalChallengeFrameV1;
 
-const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
+const ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,255}$/;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_PROPOSAL_BYTES = MAX_ACTION_PROPOSAL_BYTES;
 const MAX_AUTHORITY_EVENT_BYTES = MAX_PROPOSAL_BYTES + 16 * 1024;

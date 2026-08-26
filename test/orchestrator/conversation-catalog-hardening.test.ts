@@ -20,6 +20,7 @@ import {
 import { deriveLineageAssociations } from "../../src/orchestrator/conversation/lineage-association.js";
 import { validateLineageHeadForRead } from "../../src/orchestrator/conversation/lineage-head-reader.js";
 import { deriveConversationLineages } from "../../src/orchestrator/conversation/lineage-reader.js";
+import { activeRevisionOperationIdForHead } from "../../src/orchestrator/conversation/lineage-service.js";
 import {
   createInitialLineageHead,
   lineageHeadDigest,
@@ -360,6 +361,7 @@ test("positive lineage heads require an exact approved prior-head transition", (
   expect(valid.diagnostics).toEqual([]);
   expect(valid.response.catalog_health).toBe("ready");
   expect(valid.response.items[0]?.active_conversation_id).toBe("a");
+  expect(activeRevisionOperationIdForHead(current, transition, [])).toBeNull();
   expect(
     project(
       new Map([

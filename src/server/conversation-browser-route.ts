@@ -12,17 +12,24 @@ import {
 } from "./conversation-legacy-adopt-route.js";
 import { handleConversationLineageRoute } from "./conversation-lineage-route.js";
 import { conversationReadError, handleConversationListRoute } from "./conversation-list-route.js";
+import {
+  type ConversationMessageQueueHttpAuthorityV1,
+  handleConversationDraftPrivateContextRoute,
+  handleConversationMessageQueueRoute,
+} from "./conversation-message-queue-route.js";
 import { handleConversationReactionRoute } from "./conversation-reaction-route.js";
 import { handleConversationTimelineRoute } from "./conversation-timeline-route.js";
 
 const CONVERSATIONS = "/api/conversations";
 const SESSIONS = "/api/conversation-sessions";
+const DRAFTS = "/api/conversation-drafts";
 
 export interface ConversationBrowserHttpAuthorityV1 extends ReturnTypeOfBrowserAuthorities {
   sessions: Pick<ConversationSessionAuthority, "authorize">;
   csrf?(request: Request): boolean;
   principal?: ConversationActionRouteAuthorityV1["principal"];
   legacyAdopt?: ConversationLegacyAdoptRouteAuthorityV1["legacyAdopt"];
+  messageQueue?: ConversationMessageQueueHttpAuthorityV1["queue"];
 }
 
 export function isConversationNamespace(path: string): boolean {
@@ -30,7 +37,9 @@ export function isConversationNamespace(path: string): boolean {
     path === CONVERSATIONS ||
     path.startsWith(`${CONVERSATIONS}/`) ||
     path === SESSIONS ||
-    path.startsWith(`${SESSIONS}/`)
+    path.startsWith(`${SESSIONS}/`) ||
+    path === DRAFTS ||
+    path.startsWith(`${DRAFTS}/`)
   );
 }
 
@@ -71,10 +80,50 @@ export async function handleConversationBrowserRoute(
   request: Request,
   url: URL,
 ): Promise<Response | null> {
+  const drafts = decodedPath(url.pathname, DRAFTS);
+  if (drafts) {
+    if (!authority.messageQueue) return null;
+    if (drafts.length === 1 && drafts[0] === "private-context")
+      return handleConversationDraftPrivateContextRoute(
+        {
+          sessions: authority.sessions,
+          csrf: authority.csrf,
+          principal: authority.principal,
+          queue: authority.messageQueue,
+        },
+        request,
+        false,
+      );
+    if (drafts.length === 2 && drafts[0] === "private-context" && drafts[1] === "discard")
+      return handleConversationDraftPrivateContextRoute(
+        {
+          sessions: authority.sessions,
+          csrf: authority.csrf,
+          principal: authority.principal,
+          queue: authority.messageQueue,
+        },
+        request,
+        true,
+      );
+    return null;
+  }
   const sessions = decodedPath(url.pathname, SESSIONS);
   if (sessions) {
-    const [rootSessionId, resource] = sessions;
-    if (sessions.length !== 2 || !rootSessionId) return null;
+    const [rootSessionId, resource, ...tail] = sessions;
+    if (!rootSessionId) return null;
+    if (resource === "messages" && authority.messageQueue && tail.length > 0)
+      return handleConversationMessageQueueRoute(
+        {
+          sessions: authority.sessions,
+          csrf: authority.csrf,
+          principal: authority.principal,
+          queue: authority.messageQueue,
+        },
+        request,
+        rootSessionId,
+        tail,
+      );
+    if (sessions.length !== 2) return null;
     if (resource === "head") return handleConversationHeadRoute(authority, request, rootSessionId);
     if (resource === "timeline")
       return handleConversationTimelineRoute(authority, request, url, rootSessionId);

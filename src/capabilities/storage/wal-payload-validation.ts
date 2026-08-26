@@ -71,7 +71,7 @@ function validatePublication(
       "expected_health_pointer_digest",
       ...(payload.kind === "lock-commit" ? ["directory_fsync_completed"] : []),
     ],
-    [],
+    ["expected_health_pointer_epoch", "next_health_pointer_epoch", "next_health_pointer_digest"],
     path,
   );
   boundedWalId(payload.generation_id, `${path}.generation_id`);
@@ -81,6 +81,33 @@ function validatePublication(
     payload.expected_health_pointer_digest,
     `${path}.expected_health_pointer_digest`,
   );
+  const hasExpectedEpoch = payload.expected_health_pointer_epoch !== undefined;
+  const hasNextEpoch = payload.next_health_pointer_epoch !== undefined;
+  const hasNextDigest = payload.next_health_pointer_digest !== undefined;
+  if (hasExpectedEpoch !== hasNextEpoch || hasExpectedEpoch !== hasNextDigest)
+    throw new CapabilityValidationError(
+      "health pointer publication identity must contain prior epoch, next epoch, and next digest",
+      path,
+    );
+  if (hasExpectedEpoch) {
+    if (payload.expected_health_pointer_epoch !== null)
+      integer(payload.expected_health_pointer_epoch, `${path}.expected_health_pointer_epoch`);
+    if (
+      (payload.expected_health_pointer_epoch === null) !==
+      (payload.expected_health_pointer_digest === null)
+    )
+      throw new CapabilityValidationError(
+        "health pointer prior epoch/digest nullability differs",
+        path,
+      );
+    integer(payload.next_health_pointer_epoch, `${path}.next_health_pointer_epoch`);
+    digest(payload.next_health_pointer_digest, `${path}.next_health_pointer_digest`);
+    if (payload.next_health_pointer_epoch !== (payload.expected_health_pointer_epoch ?? -1) + 1)
+      throw new CapabilityValidationError(
+        "health pointer successor epoch is not monotonic",
+        `${path}.next_health_pointer_epoch`,
+      );
+  }
   if (payload.kind === "lock-commit" && payload.directory_fsync_completed !== true)
     throw new CapabilityValidationError("lock commit lacks directory fsync proof", path);
 }
@@ -167,6 +194,9 @@ export function validateCapabilityWalPayload(
       "lock_digest",
       "health_inventory_digest",
       "expected_health_pointer_digest",
+      "expected_health_pointer_epoch",
+      "next_health_pointer_epoch",
+      "next_health_pointer_digest",
       "directory_fsync_completed",
       "outbox_event_id",
       "payload_ref",

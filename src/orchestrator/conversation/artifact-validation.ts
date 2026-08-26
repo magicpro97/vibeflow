@@ -151,9 +151,20 @@ const assertBindingInput = (value: unknown): void => {
 };
 
 const assertManifestBinding = (value: unknown): void => {
-  if (!plain(value) || !exact(value, ["input", "participant_id"]) || !ref(value.participant_id))
-    fail();
+  if (!plain(value)) fail();
+  const keys = Object.hasOwn(value, "host_tools")
+    ? ["input", "participant_id", "host_tools"]
+    : ["input", "participant_id"];
+  if (!exact(value, keys) || !ref(value.participant_id)) fail();
   assertBindingInput(value.input);
+  if (
+    value.host_tools !== undefined &&
+    (!Array.isArray(value.host_tools) ||
+      value.host_tools.length > 1 ||
+      new Set(value.host_tools).size !== value.host_tools.length ||
+      value.host_tools.some((tool) => tool !== "propose_action"))
+  )
+    fail();
 };
 
 export function assertConversationManifest(

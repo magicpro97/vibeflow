@@ -28,6 +28,7 @@ export async function runOwnedRevisionStart(input: {
     const accepted = await options.runtime.startRevisionBarrier(
       prepared.manifest.conversation_id,
       prepared.revisionPlan,
+      prepared.operation.operation_id,
     );
     if (!accepted) {
       const destination = finalizePublishedRevisionStart({
@@ -55,7 +56,7 @@ export async function runOwnedRevisionStart(input: {
     if (destination !== "started") return;
     owner.assertHeld();
     configured = true;
-    await options.executeConfigured(prepared.manifest, prepared.operation.operation_id);
+    await options.executeConfigured(prepared.manifest, prepared.runtimeOperationId);
   } catch {
     try {
       const current = foldRevisionOperation(
@@ -89,7 +90,7 @@ export async function runOwnedRevisionStart(input: {
         if (current === "started" && !configured) {
           owner.assertHeld();
           configured = true;
-          await options.executeConfigured(prepared.manifest, prepared.operation.operation_id);
+          await options.executeConfigured(prepared.manifest, prepared.runtimeOperationId);
         } else if (current === "started") options.runtime.finish(prepared.manifest.conversation_id);
       }
     } catch {

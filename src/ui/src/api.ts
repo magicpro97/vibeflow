@@ -1,4 +1,3 @@
-import type { HomePrivateFileRangeBinding } from "./conversation-home-types.js";
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
 import type {
   DashboardSelection,
@@ -221,17 +220,6 @@ export const api = {
     req<{ ok: boolean; content?: string; reason?: string; path?: string }>(
       "GET",
       `/api/file?path=${encodeURIComponent(path)}${line ? `&line=${line}` : ""}`,
-    ),
-  stagePrivateFileRange: (path: string, startLine: number, endLine: number, signal?: AbortSignal) =>
-    req<HomePrivateFileRangeBinding>(
-      "POST",
-      "/api/home/private-file-range-handoffs",
-      {
-        path,
-        start_line: startLine,
-        end_line: endLine,
-      },
-      signal,
     ),
   // #557: a unit's append-only status-transition ledger (token-guarded, name-sanitized).
   unitTimeline: (name: string) =>

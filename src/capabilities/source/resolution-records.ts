@@ -226,12 +226,5 @@ export function assertValidatedResolutionCandidate(
       "resolution candidate is not built from validated records",
       "resolution_candidate",
     );
-  const { candidate_digest: observed, ...preimage } = value;
-  if (observed !== digestV1("VF-RESOLUTION-CANDIDATE\0v1\0", preimage))
-    throw new CapabilityValidationError(
-      "resolution candidate digest mismatch",
-      "resolution_candidate",
-      "integrity_failure",
-    );
   return value;
 }

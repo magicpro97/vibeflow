@@ -12,7 +12,7 @@ export type ConversationLifecycle =
 export interface HomeParticipant {
   participant_id: string;
   role_ref: string;
-  engine: "claude" | "codex" | "copilot" | "opencode" | "antigravity";
+  engine: Engine;
   model: string | null;
 }
 
@@ -202,18 +202,6 @@ export interface HomeCanonicalQuoteReference extends HomeCanonicalMessageReferen
   author_public_id: string;
 }
 
-export interface HomePrivateFileRangeBinding {
-  schema_version: "1.0";
-  handoff_id: string;
-  handoff_record_digest: string;
-  repo_relative_path: string;
-  start_line: number;
-  end_line: number;
-  line_count: number;
-  staged_at: string;
-  expires_at: string;
-}
-
 export interface HomeQuoteProjection extends HomeCanonicalQuoteReference {
   preview_text: string;
   created_at: string;
@@ -332,7 +320,7 @@ export interface HomeCapabilityItem {
   summary: string;
   version: string | null;
   package_pin_digest: string | null;
-  scope: "project" | "user" | null;
+  scope: CapabilityScope | null;
   status: CapabilityStatus;
   source_trust: string | null;
   scan_status: string;
@@ -361,3 +349,5 @@ export interface HomeApiErrorBody {
   recovery_action?: string | null;
   details?: unknown;
 }
+import type { CapabilityScope } from "../../capabilities/manifest/types.js";
+import type { Engine } from "../../core/types.js";

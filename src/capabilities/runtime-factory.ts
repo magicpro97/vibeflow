@@ -9,7 +9,10 @@ import { actionIdempotencyScopeDigest } from "../actions/index.js";
 import { canonicalJson } from "../durability/index.js";
 import { digestV1 } from "../durability/index.js";
 import type { ConversationActionService } from "../orchestrator/conversation/conversation-action-service.js";
-import { CapabilityConversationActionDomainV1 } from "./action-domain/domain-handler.js";
+import {
+  type CapabilityConversationActionDomainOptionsV1,
+  CapabilityConversationActionDomainV1,
+} from "./action-domain/domain-handler.js";
 import { CapabilityActionObjectStoreV1 } from "./action-domain/object-store.js";
 import { FilesystemCapabilityEffectBrokerV1 } from "./adapters/filesystem-broker.js";
 import { FilesystemLegacyMarkerReaderV1 } from "./legacy/filesystem-reader.js";
@@ -124,8 +127,9 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
 
   conversationActionDomain(
     actions: ConversationActionService,
+    options: CapabilityConversationActionDomainOptionsV1 = {},
   ): CapabilityConversationActionDomainV1 {
-    return new CapabilityConversationActionDomainV1(this, actions);
+    return new CapabilityConversationActionDomainV1(this, actions, options);
   }
 
   packageCache(scope: "project" | "user"): FilesystemCapabilityPackageCacheV1 {

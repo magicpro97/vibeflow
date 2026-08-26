@@ -9,6 +9,7 @@ import {
   parseActionCommitRequestJson,
   parseActionProposalRequestJson,
 } from "../actions/index.js";
+import { CapabilityConversationSourceStaleError } from "../orchestrator/conversation/capability-proposal-base.js";
 import type { ConversationActionCursorCodec } from "../orchestrator/conversation/conversation-action-cursor.js";
 import {
   ConversationActionCursorError,
@@ -89,7 +90,10 @@ function actionError(error: unknown): Response {
     });
   if (error instanceof ConversationNotFoundError)
     return conversationReadError("not_found", { message: "The conversation was not found." });
-  if (error instanceof ConversationControlConflictError)
+  if (
+    error instanceof ConversationControlConflictError ||
+    error instanceof CapabilityConversationSourceStaleError
+  )
     return conversationReadError("stale_conversation", {
       message: "The writable conversation revision changed.",
       recoveryAction: "refresh-proposal",
@@ -113,6 +117,23 @@ async function readMutationContext(
   const root = await authority.rootSessionId(conversationId);
   if (!root) throw new ConversationNotFoundError("conversation not found");
   return authority.principal?.(request, root) ?? deriveBrowserActionAuthority(request, root);
+}
+
+async function commitActionMutation(
+  authority: ConversationActionRouteAuthorityV1,
+  context: {
+    conversation_id: string;
+    proposal_id: string;
+    authority: ActionRequestAuthorityV1;
+  },
+  source: string,
+): Promise<Response> {
+  const result = await authority.actions.commit({
+    ...context,
+    request: parseActionCommitRequestJson(source),
+  });
+  const terminal = ["succeeded", "failed", "needs_recovery"].includes(result.operation.state);
+  return noStore(result, terminal ? 200 : 202);
 }
 
 /** Handles only the additive typed-action subroutes; unmatched paths return null. */
@@ -177,16 +198,7 @@ export async function handleConversationActionRoute(
           request: parseActionApprovalRequestJson(source),
         }),
       );
-    if (mutation === "commit") {
-      const result = await authority.actions.commit({
-        ...context,
-        request: parseActionCommitRequestJson(source),
-      });
-      return noStore(
-        result,
-        ["succeeded", "failed", "needs_recovery"].includes(result.operation.state) ? 200 : 202,
-      );
-    }
+    if (mutation === "commit") return commitActionMutation(authority, context, source);
     if (mutation === "cancel")
       return noStore(
         await authority.actions.cancel({

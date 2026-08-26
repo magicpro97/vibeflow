@@ -55,7 +55,7 @@ export function publicTurnResponses(
   events: readonly PublicStoredTraceEvent[],
   recipientId: string,
   afterSeq: number,
-  includeSelf: boolean,
+  includeRecipientResponse: boolean,
 ): ConversationTurnResponseV1[] {
   const partial = new Map<string, PartialResponse>();
   const output: ConversationTurnResponseV1[] = [];
@@ -85,7 +85,7 @@ export function publicTurnResponses(
     for (const reference of stored.evidence_refs ?? []) current.evidence_refs.add(reference);
     partial.set(key, current);
     if (!payload.completes_response || stored.seq <= afterSeq) continue;
-    if (!includeSelf && payload.participant_id === recipientId) continue;
+    if (!includeRecipientResponse && payload.participant_id === recipientId) continue;
     const preimage = {
       message_id: stored.event_id,
       public_seq: stored.seq,

@@ -965,4 +965,42 @@ describe("vf brainstorm", () => {
       process.stdout.write = write;
     }
   });
+
+  test("fresh production --yes create routes through durable Home create compatibility", async () => {
+    let seen: Record<string, unknown> | undefined;
+    let dryRuns = 0;
+    const code = await brainstorm(["--yes", "compare", "options"], {
+      dryRun: async () => {
+        dryRuns += 1;
+        return debatePreview() as never;
+      },
+      durable: {
+        create: async (input) => {
+          seen = input as unknown as Record<string, unknown>;
+          return {
+            conversation_id: "conversation-1",
+            conversationId: "conversation-1",
+            revision_id: "revision-1",
+            revisionId: "revision-1",
+            artifact_refs: [],
+            artifactRefs: [],
+            status: "completed",
+            output: "",
+            events: [],
+          };
+        },
+        message: async () => {
+          throw new Error("unexpected durable message call");
+        },
+      },
+    });
+    expect(code).toBe(0);
+    expect(dryRuns).toBe(1);
+    expect(seen).toMatchObject({
+      request: {
+        topic: "compare options",
+        policy: "debate",
+      },
+    });
+  });
 });

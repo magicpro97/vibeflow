@@ -105,6 +105,8 @@ export type CapabilityRuntimeFaultPointV1 =
   | "after-health-row"
   | "after-refusal-observation"
   | "after-refusal"
+  | "before-publication-base-validation"
+  | "after-lock-checkpoint-materialized"
   | "after-lock-checkpoint"
   | "after-health-inventory-prepared"
   | "after-lock-publish"

@@ -12,7 +12,7 @@ import type {
   SpawnOptionsProjection,
 } from "../dispatch/session-types.js";
 import { createSpawnOptionsProjection } from "../dispatch/session-types.js";
-import { type PreflightOpts, preflightAll } from "../preflight.js";
+import { preflightAll, preflightAllAsync } from "../preflight.js";
 import {
   type ResolvedSkill,
   materializeDiscoveredDispatchSkills,
@@ -138,11 +138,18 @@ function assertAdmission(
   }
 }
 
-function engineReady(engine: Engine, repoRoot: string, execution = true): boolean {
-  const probeOptions: PreflightOpts = execution
-    ? { probe: true, skipCache: true, cacheKey: repoRoot }
-    : { probe: false, cacheKey: repoRoot };
-  const readiness = preflightAll([engine], probeOptions);
+function engineAvailable(engine: Engine, repoRoot: string): boolean {
+  const readiness = preflightAll([engine], { probe: false, cacheKey: repoRoot });
+  const exact = readiness.length === 1 ? readiness[0] : undefined;
+  return exact?.engine === engine && exact.level === "ready";
+}
+
+async function engineReady(engine: Engine, repoRoot: string): Promise<boolean> {
+  const readiness = await preflightAllAsync([engine], {
+    probe: true,
+    skipCache: true,
+    cacheKey: repoRoot,
+  });
   const exact = readiness.length === 1 ? readiness[0] : undefined;
   return exact?.engine === engine && exact.level === "ready";
 }
@@ -267,7 +274,7 @@ export function previewAgentBinding(
   const authority = resolveBindingAuthority(binding, options, "preview");
   const preview = Object.freeze({
     resolved: authority.resolved,
-    engineAvailable: engineReady(binding.engine, realpathSync(resolve(options.repoRoot)), false),
+    engineAvailable: engineAvailable(binding.engine, realpathSync(resolve(options.repoRoot))),
     modelValid: modelValidForPreview(authority.resolved.model),
   });
   canonicalPreviewBindings.add(preview);
@@ -275,12 +282,12 @@ export function previewAgentBinding(
 }
 
 /** Resolve all role/skill authority before a conversation attempt can be spawned. */
-export function materializeAgentBinding(
+export async function materializeAgentBinding(
   binding: AgentBinding,
   options: MaterializeAgentBindingOptions,
-): MaterializedAgentBinding {
+): Promise<MaterializedAgentBinding> {
   const canonicalRepoRoot = realpathSync(resolve(options.repoRoot));
-  if (!engineReady(binding.engine, canonicalRepoRoot)) {
+  if (!(await engineReady(binding.engine, canonicalRepoRoot))) {
     throw new Error(`conversation binding requires a verified engine: ${binding.engine}`);
   }
   const authority = resolveBindingAuthority(binding, options);

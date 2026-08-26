@@ -188,6 +188,20 @@ function nativeEvent(engine: EngineName, event: "pre-tool" | "post-tool"): strin
   return event === "pre-tool" ? "PreToolUse" : "PostToolUse";
 }
 
+export function requireCheckedInHookEvent(
+  config: Record<string, CapabilityPrivateJsonV1>,
+  keyPath: readonly string[],
+  event: string,
+): { present: true; value: CapabilityPrivateJsonV1 | null } {
+  const incoming = readJsonSlice(config, keyPath);
+  if (!incoming.present)
+    throw new CapabilityValidationError(
+      "checked-in hook renderer lacks the requested event",
+      event,
+    );
+  return { present: true, value: incoming.value };
+}
+
 function featurePostimage(text: string): {
   block: string;
   placement: "append" | "after-features-header";
@@ -217,12 +231,7 @@ function jsonHook(
         ? ".codex/hooks.json"
         : ".agents/hooks.json";
   const keyPath = engine === "antigravity" ? ["vibeflow-guardrail", event] : ["hooks", event];
-  const incoming = readJsonSlice(parsedConfig(engine), keyPath);
-  if (!incoming.present)
-    throw new CapabilityValidationError(
-      "checked-in hook renderer lacks the requested event",
-      event,
-    );
+  const incoming = requireCheckedInHookEvent(parsedConfig(engine), keyPath, event);
   const rootKind = input.target.scope;
   const root = roots[rootKind];
   const beforeConfig = parseProjectionJson(

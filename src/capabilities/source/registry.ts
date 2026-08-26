@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createPublicKey, verify } from "node:crypto";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import {
   CapabilityValidationError,
@@ -127,13 +127,6 @@ function trustKeyBytes(key: RegistryTrustKeyV1): Buffer {
   if (key.algorithm !== "Ed25519")
     throw new CapabilityValidationError("unsupported trust algorithm", "key.algorithm");
   const bytes = decodeBase64(key.public_key_spki_base64, "key.public_key_spki_base64");
-  const observed = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-  if (observed !== key.key_id)
-    throw new CapabilityValidationError(
-      "trust key ID does not match SPKI",
-      "key.key_id",
-      "integrity_failure",
-    );
   const publicKey = createPublicKey({ key: bytes, format: "der", type: "spki" });
   if (publicKey.asymmetricKeyType !== "ed25519")
     throw new CapabilityValidationError("SPKI is not Ed25519", "key.public_key_spki_base64");

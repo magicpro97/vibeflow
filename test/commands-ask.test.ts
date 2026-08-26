@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,11 @@ import {
   sliceRange,
 } from "../src/commands/ask.js";
 import { parseFlags } from "../src/core.js";
+import type {
+  OwnedAiRouteRequest,
+  OwnedAiRouteResult,
+  OwnedAiRouteRunner,
+} from "../src/dispatch/owned-ai-route.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
 
 function ready(engine: string, level: EngineReadiness["level"] = "ready"): EngineReadiness {
@@ -218,160 +223,129 @@ describe("resumeInvocation (#562 multi-turn — engine-native continue)", () => 
   });
 });
 
-describe("inheritSpawn (real process, cross-platform via active runtime)", () => {
-  test("stdin mode: pipes prompt, returns exit status 0", () => {
-    // The active runtime exits cleanly after accepting piped stdin — proving the pipe branch runs.
-    const code = inheritSpawn(
-      { cmd: process.execPath, args: ["-e", "process.exit(0)"], promptMode: "stdin" },
+function ownedRouteResult(overrides: Partial<OwnedAiRouteResult> = {}): OwnedAiRouteResult {
+  return {
+    attemptId: "ask-attempt",
+    status: 0,
+    stdout: "",
+    stderr: "",
+    timedOut: false,
+    ...overrides,
+  };
+}
+
+function ownedRouteFake(
+  result: OwnedAiRouteResult,
+  inspect?: (request: OwnedAiRouteRequest) => void,
+): OwnedAiRouteRunner {
+  return async (request) => {
+    inspect?.(request);
+    return result;
+  };
+}
+
+describe("inheritSpawn (canonical owned-process route)", () => {
+  test("stdin mode forwards exact engine, prompt and cloned environment", async () => {
+    let request: OwnedAiRouteRequest | undefined;
+    const code = await inheritSpawn(
+      askInvocation("claude"),
       "hello",
+      ownedRouteFake(ownedRouteResult(), (value) => {
+        request = value;
+      }),
     );
     expect(code).toBe(0);
+    expect(request).toMatchObject({
+      engine: "claude",
+      command: "claude",
+      args: ["-p"],
+      input: "hello",
+    });
+    expect(request?.sourceEnv).not.toBe(process.env);
+    expect(request?.sourceEnv?.PATH).toBe(process.env.PATH);
   });
-  test("arg mode: prompt appended to argv (no -p flag to splice after)", () => {
-    // materializeArgs order-after-`-p` is proven in its own describe; here just
-    // confirm arg-mode delivers the prompt as an argv token. Avoid a literal `-p`
-    // in the runtime args — the runtime would consume it as its OWN print flag.
-    const code = inheritSpawn(
-      {
-        cmd: process.execPath,
-        args: ["-e", "process.exit(process.argv[1] === 'PING' ? 0 : 4)"],
-        promptMode: "arg",
-      },
+
+  test("arg mode materializes the prompt in argv and leaves stdin empty", async () => {
+    let request: OwnedAiRouteRequest | undefined;
+    const code = await inheritSpawn(
+      askInvocation("copilot"),
       "PING",
+      ownedRouteFake(ownedRouteResult(), (value) => {
+        request = value;
+      }),
     );
     expect(code).toBe(0);
+    expect(request).toMatchObject({
+      engine: "copilot",
+      command: "copilot",
+      args: ["-p", "PING", "--allow-all"],
+      input: "",
+    });
   });
-  test("nonzero engine exit propagates", () => {
-    const code = inheritSpawn(
-      { cmd: process.execPath, args: ["-e", "process.exit(2)"], promptMode: "stdin" },
+
+  test("nonzero engine exit propagates", async () => {
+    const code = await inheritSpawn(
+      askInvocation("codex"),
       "x",
+      ownedRouteFake(ownedRouteResult({ status: 2 })),
     );
     expect(code).toBe(2);
   });
 });
 
-describe("captureSpawn (real process, cross-platform via active runtime) — #562 Stage B", () => {
-  test("stdin mode: captures stdout, code 0, onChunk fires with the text", () => {
+describe("captureSpawn (canonical owned-process route)", () => {
+  test("captures stdout and calls onChunk once with the completed text", async () => {
     let chunk: string | undefined;
-    const r = captureSpawn(
-      {
-        cmd: process.execPath,
-        args: ["-e", 'process.stdout.write("HELLO")'],
-        promptMode: "stdin",
-      },
+    const result = await captureSpawn(
+      askInvocation("claude"),
       "x",
-      (s) => {
-        chunk = s;
+      (text) => {
+        chunk = text;
       },
+      ownedRouteFake(ownedRouteResult({ stdout: "HELLO" })),
     );
-    expect(r.code).toBe(0);
-    expect(r.text).toContain("HELLO");
-    expect(chunk).toBe(r.text);
+    expect(result).toEqual({ code: 0, text: "HELLO" });
+    expect(chunk).toBe("HELLO");
   });
 
-  test("arg mode: prompt delivered as an argv token, captured back", () => {
-    // Ordering-after-`-p` is proven in the materializeArgs describe. Here confirm
-    // arg-mode captures the prompt token. No literal `-p` (the runtime would eat it).
-    const r = captureSpawn(
-      {
-        cmd: process.execPath,
-        args: ["-e", "process.stdout.write(process.argv[1])"],
-        promptMode: "arg",
-      },
+  test("arg mode threads exact engine identity and materialized argv", async () => {
+    let request: OwnedAiRouteRequest | undefined;
+    const result = await captureSpawn(
+      askInvocation("antigravity"),
       "PING",
+      undefined,
+      ownedRouteFake(ownedRouteResult({ stdout: "PING" }), (value) => {
+        request = value;
+      }),
     );
-    expect(r.code).toBe(0);
-    expect(r.text).toBe("PING");
+    expect(result).toEqual({ code: 0, text: "PING" });
+    expect(request).toMatchObject({
+      engine: "antigravity",
+      command: "agy",
+      args: ["-p", "PING"],
+      input: "",
+    });
   });
 
-  test("nonzero engine exit propagates in code", () => {
-    const r = captureSpawn(
-      { cmd: process.execPath, args: ["-e", "process.exit(3)"], promptMode: "stdin" },
+  test("nonzero status propagates and empty stdout falls back to stderr", async () => {
+    const result = await captureSpawn(
+      askInvocation("opencode"),
       "x",
+      undefined,
+      ownedRouteFake(ownedRouteResult({ status: 3, stderr: "BOOM" })),
     );
-    expect(r.code).toBe(3);
+    expect(result).toEqual({ code: 3, text: "BOOM" });
   });
 
-  test("empty stdout falls back to stderr so failures are visible", () => {
-    const r = captureSpawn(
-      {
-        cmd: process.execPath,
-        args: ["-e", 'process.stderr.write("BOOM"); process.exit(1)'],
-        promptMode: "stdin",
-      },
-      "x",
-    );
-    expect(r.code).toBe(1);
-    expect(r.text).toBe("BOOM"); // stderr surfaced, not blank
-  });
-
-  // #582: env-filtering — DEFAULT_DENY scrubs secrets; ALWAYS_KEEP preserves PATH.
-  const AWS_SECRET_KEY = "AWS_SECRET_ACCESS_KEY";
-  const origSecret = process.env[AWS_SECRET_KEY];
-  const origPath = process.env.PATH;
-
-  test("DEFAULT_DENY scrubs secret-shaped vars from captureSpawn child env", () => {
-    process.env[AWS_SECRET_KEY] = "test-secret-should-not-leak";
-    try {
-      const r = captureSpawn(
-        {
-          cmd: process.execPath,
-          args: ["-e", `process.stdout.write(process.env.${AWS_SECRET_KEY} || 'SCRUBBED')`],
-          promptMode: "stdin",
-        },
+  test("rejects commands that cannot be mapped to an exact engine", async () => {
+    await expect(
+      captureSpawn(
+        { cmd: "unknown-ai", args: [], promptMode: "stdin" },
         "x",
-      );
-      expect(r.code).toBe(0);
-      expect(r.text).toBe("SCRUBBED");
-    } finally {
-      delete process.env[AWS_SECRET_KEY];
-    }
-  });
-
-  test("ALWAYS_KEEP preserves PATH in captureSpawn child env", () => {
-    const save = process.env.PATH;
-    // spawn via the absolute active-runtime path so a mutated PATH can't break process lookup;
-    // the child prints its inherited PATH to prove ALWAYS_KEEP passed it through.
-    process.env.PATH = `/test/path:${save}`;
-    try {
-      const r = captureSpawn(
-        {
-          cmd: process.execPath,
-          args: [
-            "-e",
-            "process.stdout.write((process.env.PATH || '').includes('/test/path') ? 'HASPATH' : 'NOPATH')",
-          ],
-          promptMode: "stdin",
-        },
-        "x",
-      );
-      expect(r.code).toBe(0);
-      expect(r.text).toBe("HASPATH");
-    } finally {
-      process.env.PATH = save;
-    }
-  });
-
-  test("inheritSpawn returns 0 with filtered env (secret dropped, child still exits clean)", () => {
-    process.env[AWS_SECRET_KEY] = "test-secret-should-not-leak-inherit";
-    try {
-      const code = inheritSpawn(
-        { cmd: process.execPath, args: ["-e", "process.exit(0)"], promptMode: "stdin" },
-        "x",
-      );
-      expect(code).toBe(0);
-    } finally {
-      delete process.env[AWS_SECRET_KEY];
-    }
-  });
-
-  // Restore env after all #582 tests
-  afterAll(() => {
-    if (origSecret !== undefined) process.env[AWS_SECRET_KEY] = origSecret;
-    else delete process.env[AWS_SECRET_KEY];
-    if (origPath !== undefined) process.env.PATH = origPath;
-    // biome-ignore lint/performance/noDelete: restore to truly-absent, not the string "undefined"
-    else delete process.env.PATH;
+        undefined,
+        ownedRouteFake(ownedRouteResult()),
+      ),
+    ).rejects.toThrow("unsupported ask engine command");
   });
 });
 
@@ -397,6 +371,13 @@ describe("pickEngine", () => {
 describe("ask() integration (injected seams)", () => {
   function withFile(body: string, fn: (path: string) => Promise<void>) {
     const dir = mkdtempSync(join(tmpdir(), "vf-ask-"));
+    const path = join(dir, "snippet.ts");
+    writeFileSync(path, body);
+    return fn(path).finally(() => rmSync(dir, { recursive: true, force: true }));
+  }
+
+  function withRepoFile(body: string, fn: (path: string) => Promise<void>) {
+    const dir = mkdtempSync(join(process.cwd(), ".vf-ask-"));
     const path = join(dir, "snippet.ts");
     writeFileSync(path, body);
     return fn(path).finally(() => rmSync(dir, { recursive: true, force: true }));
@@ -694,6 +675,129 @@ describe("ask() integration (injected seams)", () => {
       });
       expect(String(started?.topic)).toContain("b\nc");
       expect(String(started?.topic)).toContain("explain this");
+    });
+  });
+
+  test("production fresh ask stages a repo-relative private range instead of embedding source bytes", async () => {
+    await withRepoFile("alpha\nbeta\n", async (path) => {
+      let seen: Record<string, unknown> | undefined;
+      const code = await quiet(() =>
+        ask(
+          [`${path}:1-2`, "why"],
+          {},
+          {
+            readiness: () => [ready("claude")],
+            durable: {
+              ask: async (input) => {
+                seen = input as unknown as Record<string, unknown>;
+                return {
+                  conversation_id: "conversation-1",
+                  conversationId: "conversation-1",
+                  status: "completed",
+                  output: "",
+                  events: [],
+                };
+              },
+              message: async () => {
+                throw new Error("unexpected durable message call");
+              },
+            },
+          },
+        ),
+      );
+      expect(code).toBe(0);
+      expect(seen).toMatchObject({
+        request: {
+          kind: "fresh",
+          question: "why",
+          start_line: 1,
+          end_line: 2,
+          engine: "claude",
+          repo_relative_path: expect.stringMatching(/snippet\.ts$/),
+        },
+      });
+      expect(JSON.stringify(seen)).not.toContain("alpha");
+      expect(JSON.stringify(seen)).not.toContain("beta");
+    });
+  });
+
+  test("production resume fails closed without --conversation", async () => {
+    let called = false;
+    const code = await quiet(() =>
+      ask(
+        ["follow", "up"],
+        { resume: true },
+        {
+          durable: {
+            ask: async () => {
+              called = true;
+              return {
+                conversation_id: "conversation-1",
+                conversationId: "conversation-1",
+                status: "completed",
+                output: "",
+                events: [],
+              };
+            },
+            message: async () => {
+              called = true;
+              return {
+                conversation_id: "conversation-1",
+                conversationId: "conversation-1",
+                status: "completed",
+                output: "",
+                events: [],
+              };
+            },
+          },
+        },
+      ),
+    );
+    expect(code).not.toBe(0);
+    expect(called).toBe(false);
+  });
+
+  test("production conversation ask with a target queues only the question plus private context", async () => {
+    await withRepoFile("alpha\nbeta\n", async (path) => {
+      let seen: Record<string, unknown> | undefined;
+      const code = await quiet(() =>
+        ask(
+          [`${path}:1-2`, "revise", "that"],
+          { conversation: "conversation-123" },
+          {
+            durable: {
+              ask: async () => {
+                throw new Error("unexpected durable ask create");
+              },
+              message: async (input) => {
+                seen = input as unknown as Record<string, unknown>;
+                return {
+                  conversation_id: "conversation-124",
+                  conversationId: "conversation-124",
+                  child_conversation_id: "conversation-124",
+                  childConversationId: "conversation-124",
+                  status: "completed",
+                  output: "",
+                  events: [],
+                };
+              },
+            },
+          },
+        ),
+      );
+      expect(code).toBe(0);
+      expect(seen).toMatchObject({
+        conversation_id: "conversation-123",
+        content: "revise that",
+        private_file_range: {
+          start_line: 1,
+          end_line: 2,
+          repo_relative_path: expect.stringMatching(/snippet\.ts$/),
+        },
+      });
+      expect(String(seen?.content)).not.toContain("In file");
+      expect(JSON.stringify(seen)).not.toContain("alpha");
+      expect(JSON.stringify(seen)).not.toContain("beta");
     });
   });
 });

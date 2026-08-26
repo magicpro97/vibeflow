@@ -190,6 +190,9 @@ function assertPublicationReady(
 ): void {
   const receipts = latestCapabilityReceipts(events, sequence);
   const health = selectedHealth(events, sequence);
+  const requiredTargetIds = new Set(
+    plan.targets.filter((target) => target.target.required).map((target) => target.target_id),
+  );
   for (const adapterPlan of plan.adapter_plans) {
     const appliedTargets = new Set<string>();
     for (const step of adapterPlan.steps) {
@@ -198,14 +201,10 @@ function assertPublicationReady(
         corrupt("lock publication precedes a terminal receipt chain");
       if (receipt.state === "applied")
         for (const targetId of step.target_ids) appliedTargets.add(targetId);
-      if (
-        receipt.state === "failed" &&
-        step.target_ids.some(
-          (targetId) =>
-            plan.targets.find((target) => target.target_id === targetId)?.target.required,
-        )
-      )
-        corrupt("lock publication follows a required apply failure");
+      if (receipt.state === "failed")
+        for (const targetId of step.target_ids)
+          if (requiredTargetIds.has(targetId))
+            corrupt("lock publication follows a required apply failure");
     }
     for (const probe of adapterPlan.health_plan) {
       for (const targetId of probe.target_ids) {

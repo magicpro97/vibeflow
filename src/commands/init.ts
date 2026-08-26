@@ -36,8 +36,10 @@ import {
   join,
   out,
   panel,
+  readFileSync,
   type spawnSync,
   updateLastConsult,
+  writeFileSafe,
   writeToolConfigs,
 } from "./_shared.js";
 import type {
@@ -55,6 +57,20 @@ import type {
 
 import { activateProjectCapabilityAuthorityForVfInit } from "../capabilities/source/authority-activation.js";
 import { writeInitArtifacts } from "./init-artifacts.js";
+
+const PROJECT_ID_ALLOW_RULE = "!PROJECT_ID.json";
+
+/** Keep the portable project authority identity visible to Git without replacing repo policy. */
+export function ensurePortableProjectIdentityTracked(base: string): void {
+  const ignorePath = join(base, CTX_DIR, ".gitignore");
+  const existing = existsSync(ignorePath) ? readFileSync(ignorePath, "utf8") : "";
+  if (existing.split(/\r?\n/u).includes(PROJECT_ID_ALLOW_RULE)) return;
+  const separator = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+  writeFileSafe(
+    ignorePath,
+    `${existing}${separator}# Portable Capability Fabric authority identity.\n${PROJECT_ID_ALLOW_RULE}\n`,
+  );
+}
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
 // Test seam: exported so unit tests can verify the readiness listing
@@ -198,9 +214,9 @@ export async function init(
   // the AI enrichment phase (Phase 2) is the only AI path.
   const initSpinner = new Spinner();
   initSpinner.start(dry ? "Preparing init dry run" : "Generating VibeFlow context");
-  let result: ReturnType<typeof applyIntake>;
+  let result: Awaited<ReturnType<typeof applyIntake>>;
   try {
-    result = applyIntake(answers, {
+    result = await applyIntake(answers, {
       dry,
       skipPreflight: dry,
       preflight: inject.preflight,
@@ -220,7 +236,10 @@ export async function init(
   else initSpinner.succeed(dry ? "Init dry run prepared" : "VibeFlow context generated");
 
   if (result.refused) return reportPreflightRefusal(result.readiness);
-  if (!dry) activateProjectCapabilityAuthorityForVfInit(cwd());
+  if (!dry) {
+    ensurePortableProjectIdentityTracked(cwd());
+    activateProjectCapabilityAuthorityForVfInit(cwd());
+  }
   const label = dry ? "dry run" : "init";
   out("vf", panel("VibeFlow", c.bold(label)));
   const dropped = (result.readiness ?? []).filter((r) => r.level !== "ready");

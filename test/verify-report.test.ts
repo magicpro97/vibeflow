@@ -308,9 +308,11 @@ test("defaultGoalEvalFn: injected spawner throws → diff catch → covered=true
   // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
   delete process.env.VIBEFLOW_AI;
   let calls = 0;
-  const result = await defaultGoalEvalFn("any goal", () => {
-    calls++;
-    throw new Error("ENOENT: git not found");
+  const result = await defaultGoalEvalFn("any goal", {
+    gitSpawn: (() => {
+      calls++;
+      throw new Error("ENOENT: git not found");
+    }) as never,
   });
   if (origEnv !== undefined) process.env.VIBEFLOW_AI = origEnv;
   expect(calls).toBe(1); // diff spawner attempted, bridge skipped
@@ -321,9 +323,15 @@ test("defaultGoalEvalFn: injected spawner throws with bridge set → bridge catc
   const origEnv = process.env.VIBEFLOW_AI;
   process.env.VIBEFLOW_AI = "echo COVERED";
   let calls = 0;
-  const result = await defaultGoalEvalFn("any goal", () => {
-    calls++;
-    throw new Error("ENOENT: bridge binary not found");
+  const result = await defaultGoalEvalFn("any goal", {
+    gitSpawn: (() => {
+      calls++;
+      throw new Error("ENOENT: git not found");
+    }) as never,
+    ownedRoute: async () => {
+      calls++;
+      throw new Error("ENOENT: bridge binary not found");
+    },
   });
   // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
   if (origEnv === undefined) delete process.env.VIBEFLOW_AI;
@@ -344,9 +352,23 @@ test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI not set", async (
 test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI set to echo COVERED", async () => {
   const orig = process.env.VIBEFLOW_AI;
   process.env.VIBEFLOW_AI = "echo COVERED";
-  const result = await defaultGoalEvalFn("add X feature");
+  const calls: string[] = [];
+  const result = await defaultGoalEvalFn("add X feature", {
+    engine: "codex",
+    ownedRoute: async (request) => {
+      calls.push(`${request.engine}:${request.command}`);
+      return {
+        attemptId: "goal-covered",
+        status: 0,
+        stdout: "COVERED\n",
+        stderr: "",
+        timedOut: false,
+      };
+    },
+  });
   expect(result.covered).toBe(true);
   expect(result.uncovered).toHaveLength(0);
+  expect(calls).toEqual(["codex:echo COVERED"]);
   if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
   else process.env.VIBEFLOW_AI = orig;
 });
@@ -354,7 +376,15 @@ test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI set to echo COVER
 test("defaultGoalEvalFn: returns covered=false when VIBEFLOW_AI returns non-COVERED", async () => {
   const orig = process.env.VIBEFLOW_AI;
   process.env.VIBEFLOW_AI = "echo Missing edge case: empty input";
-  const result = await defaultGoalEvalFn("add X feature");
+  const result = await defaultGoalEvalFn("add X feature", {
+    ownedRoute: async () => ({
+      attemptId: "goal-uncovered",
+      status: 0,
+      stdout: "Missing edge case: empty input\n",
+      stderr: "",
+      timedOut: false,
+    }),
+  });
   expect(result.covered).toBe(false);
   expect(result.uncovered.length).toBeGreaterThan(0);
   if (orig === undefined) process.env.VIBEFLOW_AI = undefined;

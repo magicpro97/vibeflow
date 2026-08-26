@@ -106,17 +106,17 @@ function timedOutProcessSpawner(): EngineProcessSpawner {
   };
 }
 
-function freshRepo(): string {
+async function freshRepo(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "vf-int-"));
-  applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+  await applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
   return dir;
 }
 
 describe("orchestrate source-protection gate", () => {
   let dir: string;
   let cap: ReturnType<typeof captureConsole>;
-  beforeEach(() => {
-    dir = freshRepo();
+  beforeEach(async () => {
+    dir = await freshRepo();
     cap = captureConsole();
   });
   afterEach(() => {
@@ -235,8 +235,8 @@ describe("orchestrate source-protection gate", () => {
 describe("orchestrate dry mode is read-only", () => {
   let dir: string;
   let cap: ReturnType<typeof captureConsole>;
-  beforeEach(() => {
-    dir = freshRepo();
+  beforeEach(async () => {
+    dir = await freshRepo();
     mutateUnits(dir, "add", { name: "auth" });
     cap = captureConsole();
   });
@@ -289,8 +289,8 @@ describe("orchestrate dry mode is read-only", () => {
 describe("orchestrate failure + rollback", () => {
   let dir: string;
   let cap: ReturnType<typeof captureConsole>;
-  beforeEach(() => {
-    dir = freshRepo();
+  beforeEach(async () => {
+    dir = await freshRepo();
     cap = captureConsole();
   });
   afterEach(() => {
@@ -355,8 +355,8 @@ describe("orchestrate failure + rollback", () => {
 describe("orchestrate quota stop", () => {
   let dir: string;
   let cap: ReturnType<typeof captureConsole>;
-  beforeEach(() => {
-    dir = freshRepo();
+  beforeEach(async () => {
+    dir = await freshRepo();
     // two disjoint-scope units so they run in parallel lanes
     mutateUnits(dir, "add", { name: "a", scope: ["src/a/"] });
     mutateUnits(dir, "add", { name: "b", scope: ["src/b/"] });
@@ -399,8 +399,8 @@ describe("orchestrate quota stop", () => {
 describe("run() source-protection + prompt delivery", () => {
   let dir: string;
   let cap: ReturnType<typeof captureConsole>;
-  beforeEach(() => {
-    dir = freshRepo();
+  beforeEach(async () => {
+    dir = await freshRepo();
     cap = captureConsole();
   });
   afterEach(() => {
@@ -487,8 +487,8 @@ describe("workflow command", () => {
   });
   afterEach(() => cap.restore());
 
-  test("delete is dry by default — prints the plan and removes nothing", () => {
-    const dir = freshRepo();
+  test("delete is dry by default — prints the plan and removes nothing", async () => {
+    const dir = await freshRepo();
     try {
       const code = workflow("delete", [], { repo: dir });
       expect(code).toBe(0);
@@ -501,8 +501,8 @@ describe("workflow command", () => {
     }
   });
 
-  test("delete --yes removes the .vibeflow dir but preserves engine files", () => {
-    const dir = freshRepo();
+  test("delete --yes removes the .vibeflow dir but preserves engine files", async () => {
+    const dir = await freshRepo();
     try {
       expect(existsSync(join(dir, "CLAUDE.md"))).toBe(true);
       const code = workflow("delete", [], { repo: dir, yes: true });
@@ -514,8 +514,8 @@ describe("workflow command", () => {
     }
   });
 
-  test("delete-unit removes a named unit and lists names when missing", () => {
-    const dir = freshRepo();
+  test("delete-unit removes a named unit and lists names when missing", async () => {
+    const dir = await freshRepo();
     try {
       mutateUnits(dir, "add", { name: "auth" });
       expect(workflow("delete-unit", ["auth"], { repo: dir })).toBe(0);
@@ -528,9 +528,9 @@ describe("workflow command", () => {
     }
   });
 
-  test("import is dry by default and persists only with --yes", () => {
-    const dest = freshRepo();
-    const src = freshRepo();
+  test("import is dry by default and persists only with --yes", async () => {
+    const dest = await freshRepo();
+    const src = await freshRepo();
     try {
       mutateUnits(src, "add", { name: "imported" });
       // dry: prints plan, dest unchanged
@@ -547,8 +547,8 @@ describe("workflow command", () => {
     }
   });
 
-  test("import returns 1 with a clear message when the source has no workflow", () => {
-    const dest = freshRepo();
+  test("import returns 1 with a clear message when the source has no workflow", async () => {
+    const dest = await freshRepo();
     const emptySrc = mkdtempSync(join(tmpdir(), "vf-empty-"));
     try {
       expect(workflow("import", [emptySrc], { repo: dest })).toBe(1);
@@ -564,7 +564,7 @@ describe("workflow command", () => {
   });
 
   test("toggling failureProtection settings is honored by the gate (requireGit refuses non-git)", async () => {
-    const dir = freshRepo();
+    const dir = await freshRepo();
     const cap2 = captureConsole();
     try {
       writeSettings(dir, {
@@ -591,8 +591,8 @@ describe("workflow command", () => {
 
 describe("normalizeUnit round-trips skills-first fields (anti-regression)", () => {
   let dir: string;
-  beforeEach(() => {
-    dir = freshRepo();
+  beforeEach(async () => {
+    dir = await freshRepo();
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });

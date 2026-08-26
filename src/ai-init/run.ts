@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { ENGINES, type Engine } from "../core.js";
 import {
   type EngineCommandResult,
@@ -6,7 +8,7 @@ import {
   makeAsyncSpawner,
   materializePrompt,
 } from "../dispatch.js";
-import { preflightAll } from "../preflight.js";
+import { preflightAllAsync } from "../preflight.js";
 import type { ProjectProfile } from "../scanner.js";
 import { scanRepo } from "../scanner.js";
 import { listContextFiles, renderSlimPrompt, selectBestEngine } from "./prompt.js";
@@ -150,8 +152,8 @@ async function runAiInitOnce(
     preflight,
   } = opts;
 
-  const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
-  const readiness = probe(ENGINES, { probe: true });
+  const probe = preflight ?? ((engines, pg) => preflightAllAsync(engines, pg));
+  const readiness = await probe(ENGINES, { probe: true });
   let engine: Engine | null = null;
   if (forceEngine) {
     const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
@@ -223,9 +225,14 @@ async function runAiInitOnce(
   const args = materialized.args;
   const input = materialized.input;
 
-  const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
+  const evidenceRoot = join(base, ".vibeflow", "attempts");
+  const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs, evidenceRoot });
 
-  const result = await asyncSpawn(materialized.cmd, args, input);
+  const result = await asyncSpawn(materialized.cmd, args, input, {
+    attemptId: randomUUID(),
+    engine,
+    evidenceRoot,
+  });
 
   if (result.timedOut) {
     return {

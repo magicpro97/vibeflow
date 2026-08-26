@@ -339,6 +339,7 @@ export interface RuntimeBinding {
   participantId: string;
   input: AgentBinding;
   materialized: MaterializedAgentBinding;
+  hostTools?: import("./types.js").ConversationHostToolV1[];
 }
 export interface RuntimeCreateRequest {
   topic: string;
@@ -357,6 +358,7 @@ export interface RuntimePreviewRequest extends Omit<RuntimeCreateRequest, "bindi
     participantId: string;
     input: AgentBinding;
     preview: PreviewAgentBinding;
+    hostTools?: import("./types.js").ConversationHostToolV1[];
   }>;
 }
 export class ConversationPolicyRegistry {

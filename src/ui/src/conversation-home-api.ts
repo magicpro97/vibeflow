@@ -1,97 +1,41 @@
+import { conversationHomeRequest as request } from "./conversation-home-http.js";
+import type {
+  HomeEditQueuedMessageRequest,
+  HomeEnqueueMessageRequest,
+  HomeMessageQueueSnapshot,
+  HomeQueuedMessage,
+} from "./conversation-home-message-queue-types.js";
+export { ConversationHomeApiError } from "./conversation-home-http.js";
+import type {
+  HomeConversationCreateRequest,
+  HomeDiscardDraftPrivateContextRequest,
+  HomeDiscardMessagePrivateContextRequest,
+  HomePrivateContextPresence,
+  HomeStageDraftPrivateContextRequest,
+  HomeStageMessagePrivateContextRequest,
+} from "./conversation-home-private-context-types.js";
 import type {
   HomeActionApproval,
   HomeActionView,
-  HomeApiErrorBody,
   HomeAuthoritativeHeadResponse,
   HomeCanonicalMessageReference,
-  HomeCanonicalQuoteReference,
   HomeCapabilityResponse,
   HomeCatalogResponse,
   HomePendingActionsResponse,
-  HomePrivateFileRangeBinding,
   HomeReactionEmoji,
   HomeReactionSummary,
   HomeTimelineResponse,
 } from "./conversation-home-types.js";
-import type { ConversationCreateResponse, MessageResponse } from "./conversation-types.js";
-
-interface BrowserDocumentGlobal {
-  document: { querySelector(selector: string): { content?: string } | null };
-}
-
-function hasBrowserDocument(value: unknown): value is BrowserDocumentGlobal {
-  if (typeof value !== "object" || value === null || !("document" in value)) return false;
-  const document = value.document;
-  return (
-    typeof document === "object" &&
-    document !== null &&
-    "querySelector" in document &&
-    typeof document.querySelector === "function"
-  );
-}
-
-const browserGlobal: unknown = globalThis;
-const CSRF = hasBrowserDocument(browserGlobal)
-  ? (browserGlobal.document.querySelector('meta[name="vf-token"]')?.content ?? "")
-  : "";
-
-export class ConversationHomeApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly publicError: HomeApiErrorBody,
-  ) {
-    super(publicError.message);
-    this.name = "ConversationHomeApiError";
-  }
-}
-
-function headers(write: boolean): Record<string, string> {
-  return {
-    "content-type": "application/json",
-    ...(write && CSRF ? { "x-vibeflow-token": CSRF } : {}),
-  };
-}
-
-async function decode<T>(response: Response): Promise<T> {
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new ConversationHomeApiError(response.status, {
-      code: "invalid_response",
-      message: "VibeFlow returned an unreadable response.",
-      retryable: response.status >= 500,
-    });
-  }
-  if (response.ok) return body as T;
-  const row = body as { error?: HomeApiErrorBody; code?: string; message?: string };
-  throw new ConversationHomeApiError(response.status, {
-    code: row.error?.code ?? row.code ?? "request_failed",
-    message: row.error?.message ?? row.message ?? `Request failed (${response.status}).`,
-    correlation_id: row.error?.correlation_id,
-    retryable: row.error?.retryable ?? response.status >= 500,
-    recovery_action: row.error?.recovery_action ?? null,
-    details: row.error?.details,
-  });
-}
-
-async function request<T>(
-  method: "GET" | "POST",
-  path: string,
-  body?: unknown,
-  signal?: AbortSignal,
-): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    headers: headers(method === "POST"),
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal,
-  });
-  return decode<T>(response);
-}
+import type { ConversationCreateResponse } from "./conversation-types.js";
 
 const conversationPath = (conversationId: string, suffix = "") =>
   `/api/conversations/${encodeURIComponent(conversationId)}${suffix}`;
+const messageQueuePath = (rootSessionId: string, queueItemId?: string) => {
+  const base = `/api/conversation-sessions/${encodeURIComponent(rootSessionId)}/messages/queue`;
+  return queueItemId ? `${base}/${encodeURIComponent(queueItemId)}` : base;
+};
+const messagePrivateContextPath = (rootSessionId: string, discard = false) =>
+  `/api/conversation-sessions/${encodeURIComponent(rootSessionId)}/messages/private-context${discard ? "/discard" : ""}`;
 
 export type BrowserActionCandidate =
   | {
@@ -129,13 +73,6 @@ export interface WritableRevisionExpectation {
   revision_id: string;
   last_seq: number;
   conversation_lock_digest: string;
-}
-
-export interface HomeMessageRequest {
-  content: string;
-  target_participants?: string[] | "all";
-  quote_refs?: HomeCanonicalQuoteReference[];
-  private_file_range?: HomePrivateFileRangeBinding;
 }
 
 export interface HomeReactionMutation {
@@ -203,28 +140,77 @@ export const conversationHomeApi = {
     );
   },
 
-  create(topic: string, privateFileRange?: HomePrivateFileRangeBinding, signal?: AbortSignal) {
-    return request<ConversationCreateResponse>(
+  create(input: HomeConversationCreateRequest, signal?: AbortSignal) {
+    return request<ConversationCreateResponse>("POST", "/api/conversations", input, signal);
+  },
+
+  stageMessagePrivateContext(
+    rootSessionId: string,
+    input: HomeStageMessagePrivateContextRequest,
+    signal?: AbortSignal,
+  ) {
+    return request<HomePrivateContextPresence>(
       "POST",
-      "/api/conversations",
-      {
-        topic,
-        ...(privateFileRange ? { private_file_range: privateFileRange } : {}),
-      },
+      messagePrivateContextPath(rootSessionId),
+      input,
       signal,
     );
   },
 
-  message(conversationId: string, input: HomeMessageRequest, signal?: AbortSignal) {
-    return request<MessageResponse>(
+  discardMessagePrivateContext(
+    rootSessionId: string,
+    input: HomeDiscardMessagePrivateContextRequest,
+    signal?: AbortSignal,
+  ) {
+    return request<HomePrivateContextPresence>(
       "POST",
-      conversationPath(conversationId, "/messages"),
-      {
-        content: input.content,
-        target_participants: input.target_participants,
-        ...(input.quote_refs?.length ? { quote_refs: input.quote_refs } : {}),
-        ...(input.private_file_range ? { private_file_range: input.private_file_range } : {}),
-      },
+      messagePrivateContextPath(rootSessionId, true),
+      input,
+      signal,
+    );
+  },
+
+  stageDraftPrivateContext(input: HomeStageDraftPrivateContextRequest, signal?: AbortSignal) {
+    return request<HomePrivateContextPresence>(
+      "POST",
+      "/api/conversation-drafts/private-context",
+      input,
+      signal,
+    );
+  },
+
+  discardDraftPrivateContext(input: HomeDiscardDraftPrivateContextRequest, signal?: AbortSignal) {
+    return request<HomePrivateContextPresence>(
+      "POST",
+      "/api/conversation-drafts/private-context/discard",
+      input,
+      signal,
+    );
+  },
+
+  messageQueue(rootSessionId: string, signal?: AbortSignal) {
+    return request<HomeMessageQueueSnapshot>(
+      "GET",
+      messageQueuePath(rootSessionId),
+      undefined,
+      signal,
+    );
+  },
+
+  enqueueMessage(rootSessionId: string, input: HomeEnqueueMessageRequest, signal?: AbortSignal) {
+    return request<HomeQueuedMessage>("POST", messageQueuePath(rootSessionId), input, signal);
+  },
+
+  editQueuedMessage(
+    rootSessionId: string,
+    queueItemId: string,
+    input: HomeEditQueuedMessageRequest,
+    signal?: AbortSignal,
+  ) {
+    return request<HomeQueuedMessage>(
+      "PATCH",
+      messageQueuePath(rootSessionId, queueItemId),
+      input,
       signal,
     );
   },

@@ -1,4 +1,9 @@
-import type { materializeAgentBinding, previewAgentBinding } from "../../agents/binding.js";
+import type {
+  AgentBinding,
+  MaterializeAgentBindingOptions,
+  MaterializedAgentBinding,
+  PreviewAgentBinding,
+} from "../../agents/binding.js";
 import { conversationRoleSpecs } from "../../agents/role.js";
 import { ENGINES } from "../../core.js";
 import { preflightAll } from "../../preflight.js";
@@ -8,6 +13,7 @@ import {
   explicitConversationParticipants,
   requestedConversationMaxRounds,
 } from "./bootstrap-request.js";
+import { materializeConversationHostTools } from "./conversation-host-tool-policy.js";
 import type { RuntimeCreateRequest, RuntimePreviewRequest } from "./policy-registry.js";
 import {
   type ConversationDomainRole,
@@ -16,7 +22,7 @@ import {
   type ConversationRoutingInput,
   routeConversation,
 } from "./router.js";
-import type { ConversationCreateRequest } from "./types.js";
+import type { ConversationCreateRequest, ConversationHostToolV1 } from "./types.js";
 
 export interface ConversationRoutingContext {
   workflowReady?: boolean;
@@ -34,8 +40,11 @@ export interface ConversationRequestResolutionOptions {
 }
 
 export interface ConversationBindingFactory {
-  materialize: typeof materializeAgentBinding;
-  preview: typeof previewAgentBinding;
+  materialize(
+    binding: AgentBinding,
+    options: MaterializeAgentBindingOptions,
+  ): MaterializedAgentBinding | Promise<MaterializedAgentBinding>;
+  preview(binding: AgentBinding, options: MaterializeAgentBindingOptions): PreviewAgentBinding;
 }
 
 interface ConversationRequestResolutionDependencies {
@@ -49,6 +58,16 @@ interface ConversationRequestResolutionDependencies {
 const fail = (message: string): never => {
   throw new Error(`conversation bootstrap: ${message}`);
 };
+
+function resolvedHostTools(participant: {
+  roleRef: string;
+  hostTools?: readonly ConversationHostToolV1[];
+}): ConversationHostToolV1[] {
+  return materializeConversationHostTools({
+    roleRef: participant.roleRef,
+    ...(participant.hostTools !== undefined ? { explicit: participant.hostTools } : {}),
+  });
+}
 
 /** Testable projection for the production no-probe readiness default. */
 export function defaultConversationReadiness(
@@ -96,7 +115,13 @@ async function selectedRoute(
   };
   const authority = routingAuthority(options, repoRoot, phase);
   const route = routeConversation(input, authority);
-  const participants = [...route.participants];
+  const participants = route.participants.map((participant, index) => {
+    const requested = request.participants?.[index];
+    return {
+      ...participant,
+      ...(requested?.host_tools !== undefined ? { hostTools: [...requested.host_tools] } : {}),
+    };
+  });
   let evaluatorAutoAdded = false;
   if (
     route.policy === "debate" &&
@@ -145,6 +170,7 @@ export function createConversationRequestResolvers({
           return {
             participantId: `participant-${index + 1}`,
             input,
+            hostTools: resolvedHostTools(participant),
             materialized: await bindWithIsolation(
               isolationAuthority,
               repoRoot,
@@ -178,6 +204,7 @@ export function createConversationRequestResolvers({
           return {
             participantId: `participant-${index + 1}`,
             input,
+            hostTools: resolvedHostTools(participant),
             preview: await bindWithIsolation(
               isolationAuthority,
               repoRoot,

@@ -2,7 +2,7 @@
 title: Security Model
 description: Security model — default safety posture, permission classes, protected paths, secrets handling, and audit log.
 category: explanation
-last_updated: 2026-06-24
+last_updated: 2026-08-26
 ---
 
 # Security Model
@@ -16,11 +16,14 @@ last_updated: 2026-06-24
 - [Protected Paths](#protected-paths)
 - [External Skill Trust Model](#external-skill-trust-model)
 - [Shared Catalog Trust Boundary](#shared-catalog-trust-boundary)
+- [Capability Fabric Trust Boundary](#capability-fabric-trust-boundary)
 - [External Skill Security Scan](#external-skill-security-scan-optional)
 - [npm Package Risk Model](#npm-package-risk-model)
 - [Hook Enforcement](#hook-enforcement)
 - [Secrets Handling](#secrets-handling)
 - [Local Web Server](#local-web-server)
+- [Private One-Shot File Context](#private-one-shot-file-context)
+- [Owned Process Identity and Containment](#owned-process-identity-and-containment)
 - [Audit Log](#audit-log)
 
 ## Core principle
@@ -172,6 +175,14 @@ unauthenticated fallback, find-skills HTTP, community import) cannot silently be
 trusted machine-wide. The gate is optional (degrades gracefully when the scanner is
 absent), so when it is not installed, only manually-reviewed skills should be
 promoted to `verified`.
+
+## Capability fabric trust boundary
+
+Capabilities are typed manifests and adapters, not arbitrary browser plugins. The
+AI-first Home can propose capability actions and draw from the typed registry, but
+it never loads untrusted plugin JavaScript into the browser. Approved capability
+execution stays inside VibeFlow's local service and owned dispatch runtime, where
+it can be audited before launch and rejected if the typed authority does not match.
 
 ## Curator shared synchronization
 
@@ -373,8 +384,10 @@ web verify API, orchestrate per-unit gates, or arbitrary acceptance commands.
 
 ## Local web server
 
-The `vf ui` server is the interactive console (intake → generate → dispatch). Because it now
-exposes write actions, it is hardened as follows (implemented in `src/server.ts`):
+The `vf` / `vf ui` server is the interactive console. Its default surface is AI-first
+Home (session rail + central conversation pane), with the intake wizard reserved for
+`vf init --interactive`. Because it exposes write actions, it is hardened as follows
+(implemented in `src/server.ts`):
 
 ```text
 - binds 127.0.0.1 only — never 0.0.0.0, never a public interface
@@ -394,8 +407,43 @@ exposes write actions, it is hardened as follows (implemented in `src/server.ts`
 - user input is never used as a filesystem path; canonical writes target fixed .vibeflow/*
   paths and engine names validated against the ENGINES allowlist. The repo path the user
   picks is resolved to an existing directory; writes to it require the per-process token
-- web-initiated init never shells out to $VIBEFLOW_AI (useAi:false); only the CLI may
+- web-initiated init never shells out to $VIBEFLOW_AI (useAi:false); the CLI keeps the AI bridge enabled
 ```
+
+## Private One-Shot File Context
+
+The home composer can stage a private file range for a draft or message. That private
+context is captured once per scope, attached to the next turn, and then cleared or
+discarded after use or replacement. The browser keeps only the selection authority;
+the runtime owns the actual turn attachment so the private range does not silently
+carry over into an unrelated conversation. Its transport is canonical JSON prefixed by
+`VF-PRIVATE-FILE-RANGES/1`, separate from the public `VF-TURN/1` envelope. It never becomes
+public trace/browser persistence.
+
+On exact native resume, the selected CLI keeps its own private session history. VibeFlow
+delivers only new applicable user messages and peer-agent responses/reactions; it does not
+replay the recipient's own prior output. Missing or stale cursor proof falls back to the full
+applicable public handoff. A large Copilot `.vibeflow/dispatch/<unit>.md` prompt file is only
+a transport fallback addressed by a short argv pointer, not session memory.
+
+## Owned Process Identity and Containment
+
+Every canonical async CLI launch records the supervisor PID, CLI PID, host,
+attempt/operation, and exact process-start identity. PID alone is never ownership proof.
+Terminal release requires process exit/quiescence plus `streams-drained` for stdout and
+stderr. Recovery follows the same fail-closed identity contract:
+
+| Platform | Owned scope | Proof strength | Boundary |
+|----------|-------------|----------------|----------|
+| Windows | `windows-job` | `kernel-contained` | Kill-on-close Job Object established before receipt/spawn; creation ticks are queried through PowerShell/CIM without `/bin/ps`. |
+| Linux | `posix-process-group` | `cooperative-lineage` | Isolated process group plus boot id and `/proc` start ticks. |
+| macOS | `posix-process-group` | `cooperative-lineage` | Isolated process group plus exact Darwin `libproc` seconds/microseconds. |
+
+The POSIX boundary is cooperative because a descendant can deliberately leave its process
+group. `vf doctor --fix` may recover only an exact proved dead or identity-mismatched owner;
+live and identity-unprovable owners remain quarantined for manual inspection. The Windows
+contract has injected platform regression coverage, but the current evidence does not include
+or claim a live Windows canary.
 
 ## Audit log
 

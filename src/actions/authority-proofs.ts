@@ -80,6 +80,25 @@ export interface ActionAuthorityResolverV1 {
     decision: "approved" | "denied";
     now: string;
   }): ReviewAuthorityProofV1;
+  prevalidateDispatch?(input: {
+    proposal: ActionProposalV1;
+    approval: ActionApprovalV1;
+    now: string;
+  }): void;
+  /** Acquires any external source reservation without holding the Action writer lock. */
+  reserveDispatch?(input: {
+    proposal: ActionProposalV1;
+    approval: ActionApprovalV1;
+    dispatch: ActionDispatchRecordV1;
+    now: string;
+    producer_authority_digest?: string | null;
+  }): void;
+  /** Read-only assertion used immediately before Action enters committing. */
+  assertDispatchReserved?(input: {
+    proposal: ActionProposalV1;
+    approval: ActionApprovalV1;
+    dispatch: ActionDispatchRecordV1;
+  }): void;
   prepareDispatch(input: {
     proposal: ActionProposalV1;
     approval: ActionApprovalV1;

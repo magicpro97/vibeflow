@@ -28,6 +28,7 @@ import type {
   CapabilityExecutionObjectSchemaIdV1,
   CapabilityPlanningJsonObjectV1,
 } from "./execution-types.js";
+import { ownedProjectionRecord } from "./resource-planner.js";
 import type { CapabilityAdapterPlanV1, CapabilityDurablePlanningGraphV1 } from "./types.js";
 
 function fail(message: string): never {
@@ -335,6 +336,8 @@ function descriptorMatchesStep(
     step.target_ids.includes(value.target_id) &&
     step.owned_resources.length === 1 &&
     canonicalJson(value.resource) === canonicalJson(step.owned_resources[0]) &&
+    value.projection_digest ===
+      ownedProjectionRecord(value.resource, value.target_id).projection_digest &&
     value.private_payload.ownership_key === value.resource.ownership_key &&
     value.private_payload.expected_preimage_sha256 === value.resource.expected_preimage_sha256 &&
     value.private_payload.expected_postimage_sha256 === value.resource.expected_postimage_sha256

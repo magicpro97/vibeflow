@@ -15,6 +15,10 @@ import type {
   PublicHandoffSourceV1,
 } from "./handoff-types.js";
 import type { OversizedHandoffRejectedProjectionV1 } from "./oversized-handoff-store.js";
+import {
+  REVISION_INTERACTION_CURSOR_MEDIA_TYPE,
+  REVISION_QUOTE_GRAPH_MEDIA_TYPE,
+} from "./revision-handoff-context.js";
 
 type PublicEvent = PublicHandoffEventV1;
 
@@ -53,6 +57,13 @@ function eventOrder(left: PublicEvent, right: PublicEvent): number {
     left.revision_ordinal - right.revision_ordinal ||
     left.public_seq - right.public_seq ||
     compare(left.event_id, right.event_id)
+  );
+}
+
+function revisionContextArtifact(mediaType: string): boolean {
+  return (
+    mediaType === REVISION_QUOTE_GRAPH_MEDIA_TYPE ||
+    mediaType === REVISION_INTERACTION_CURSOR_MEDIA_TYPE
   );
 }
 
@@ -99,6 +110,12 @@ export function constructContextCompaction(input: {
   );
   if (input.compaction_input.retained_artifact_ids.some((id) => !availableArtifacts.has(id)))
     throw new Error("compaction retained artifact is outside the oversized candidate");
+  if (
+    sourceProjection.artifacts.filter(({ artifact }) =>
+      revisionContextArtifact(artifact.media_type),
+    ).length > 1
+  )
+    throw new Error("oversized projection has ambiguous revision context authority");
   const omitted = buildOmittedPublicEventRanges(events, retainedEvents);
   if (
     sourceProjection.transcript.omitted_public_ranges.length > 0 &&
@@ -146,8 +163,10 @@ export function constructContextCompaction(input: {
     },
     compaction: structuredClone(artifact),
     artifacts: [
-      ...sourceProjection.artifacts.filter(({ artifact: reference }) =>
-        input.compaction_input.retained_artifact_ids.includes(reference.artifact_id),
+      ...sourceProjection.artifacts.filter(
+        ({ artifact: reference }) =>
+          input.compaction_input.retained_artifact_ids.includes(reference.artifact_id) ||
+          revisionContextArtifact(reference.media_type),
       ),
       ...omitted.map(({ range }) => ({
         artifact: structuredClone(range.artifact),

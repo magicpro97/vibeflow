@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -34,6 +35,11 @@ import {
   readDispatchResumeBinding,
   sanitizePublicText,
 } from "../src/dispatch/public-redaction.js";
+import {
+  MAX_SESSION_PROMPT_FILE_BYTES,
+  MAX_SESSION_PROMPT_POINTER_BYTES,
+  materializeCopilotSessionPrompt,
+} from "../src/dispatch/session-prompt-file.js";
 import type { AttemptHandle } from "../src/dispatch/session-types.js";
 import type {
   EngineProcess,
@@ -404,16 +410,16 @@ describe("engine session execution projection", () => {
     },
   );
 
-  test("legacy argv and capture seams reject unsafe engine-specific native ids", () => {
+  test("legacy argv and capture seams reject unsafe engine-specific native ids", async () => {
     expect(() => engineCommand("claude", {}, false, "--dangerously-skip-permissions")).toThrow(
       /invalid claude native session id/,
     );
-    const result = runDispatch({
+    const result = await runDispatch({
       engine: "claude",
       mode: "cli",
       prompt: "prompt",
       has: () => true,
-      spawner: () => ({
+      spawner: async () => ({
         status: 0,
         stdout: '{"type":"result","session_id":"--dangerously-skip-permissions"}',
       }),
@@ -500,6 +506,220 @@ describe("engine session execution projection", () => {
     expect(input).toBe(onlyPrompt);
     expect(Object.keys(request("codex"))).not.toContain("prompt");
     expect(Object.keys(request("codex"))).not.toContain("envPolicy");
+  });
+
+  test("large Copilot handoff uses a bounded private file and cleans it after process drain", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-prompt-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    const prompt = `COPILOT-LARGE-HANDOFF\n${"x".repeat(1024 * 1024)}`;
+    let observedArgv: string[] = [];
+    let pointerPrompt = "";
+    const adapter = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: (argv, options) => {
+        observedArgv = [...argv];
+        const path = join(realpathSync(promptRoot), "attempt-copilot.prompt.md");
+        expect(options.stdinText).toBe("");
+        pointerPrompt = `Read ${path.replace(/\\/g, "/")} and follow it`;
+        expect(argv).toContain(pointerPrompt);
+        expect(argv.join("\n")).not.toContain("COPILOT-LARGE-HANDOFF");
+        expect(readFileSync(path, "utf8")).toBe(prompt);
+        if (process.platform !== "win32") {
+          expect(statSync(promptRoot).mode & 0o777).toBe(0o700);
+          expect(statSync(path).mode & 0o777).toBe(0o600);
+        }
+        return completedProcess([`${pointerPrompt}\n`]);
+      },
+      writeEvidence: async () => "evidence/copilot-large.json",
+    });
+    const result = await adapter.start(
+      request("copilot", {
+        spawn: spawnProjection("copilot", { rendered_prompt: prompt }),
+      }),
+    ).completion;
+    expect(result.ok).toBe(true);
+    expect(result.output).not.toContain(pointerPrompt);
+    expect(result.output).not.toContain(realpathSync(promptRoot));
+    expect(Buffer.byteLength(observedArgv.join("\0"), "utf8")).toBeLessThan(
+      MAX_SESSION_PROMPT_POINTER_BYTES,
+    );
+    expect(readdirSync(promptRoot)).toEqual([]);
+  });
+
+  test("large Copilot prompt file remains until stdout and stderr have drained", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-drain-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    let finishStdout!: () => void;
+    const stdout = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("copilot acknowledged\n"));
+        finishStdout = () => controller.close();
+      },
+    });
+    const adapter = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: () => ({
+        pid: 4343,
+        stdin: { write: () => {}, end: () => {} },
+        stdout,
+        stderr: stream(),
+        exited: Promise.resolve(0),
+        kill: () => {},
+      }),
+      writeEvidence: async () => "evidence/copilot-drain.json",
+    });
+    const handle = adapter.start(
+      request("copilot", {
+        spawn: spawnProjection("copilot", { rendered_prompt: "x".repeat(64 * 1024) }),
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const path = join(realpathSync(promptRoot), "attempt-copilot.prompt.md");
+    expect(existsSync(path)).toBe(true);
+    finishStdout();
+    await handle.completion;
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test("large Copilot prompt file is cleaned when process spawn fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-spawn-failure-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    const adapter = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: () => {
+        throw new Error("synthetic spawn failure");
+      },
+      writeEvidence: async () => "evidence/copilot-spawn-failure.json",
+    });
+    expect(() =>
+      adapter.start(
+        request("copilot", {
+          spawn: spawnProjection("copilot", { rendered_prompt: "x".repeat(64 * 1024) }),
+        }),
+      ),
+    ).toThrow(/synthetic spawn failure/);
+    expect(readdirSync(promptRoot)).toEqual([]);
+  });
+
+  test.each(["claude", "codex", "opencode"] as const)(
+    "%s keeps a large native prompt on stdin when Copilot file transport is configured",
+    async (engine) => {
+      const root = mkdtempSync(join(tmpdir(), `vf-${engine}-session-prompt-`));
+      temporaryPaths.push(root);
+      const promptRoot = join(root, "conversation-prompts");
+      const prompt = `${engine}-stdin\n${"x".repeat(64 * 1024)}`;
+      let observedInput = "";
+      const adapter = createEngineSessionAdapter({
+        privatePromptFileRoot: promptRoot,
+        spawn: (_argv, options) => {
+          observedInput = options.stdinText;
+          return completedProcess([
+            engine === "claude"
+              ? `${JSON.stringify({ type: "result", session_id: CLAUDE_UUID })}\n`
+              : engine === "codex"
+                ? `${JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID })}\n`
+                : '{"type":"step_start","sessionID":"opencode-session-safe"}\n',
+          ]);
+        },
+        writeEvidence: async () => `evidence/${engine}-large-stdin.json`,
+      });
+      await adapter.start(
+        request(engine, {
+          spawn: spawnProjection(engine, {
+            rendered_prompt: prompt,
+            ...(engine === "opencode" ? { rendered_tools: [], sandbox: null } : {}),
+          }),
+        }),
+      ).completion;
+      expect(observedInput).toBe(prompt);
+      expect(existsSync(promptRoot)).toBe(false);
+    },
+  );
+
+  test("bridge and Antigravity keep their established large-prompt semantics", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-noncopilot-session-prompt-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    const prompt = "x".repeat(64 * 1024);
+    let bridgeInput = "";
+    const bridge = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      protocol: "bridge",
+      spawn: (_argv, options) => {
+        bridgeInput = options.stdinText;
+        return completedProcess(["bridge acknowledged\n"]);
+      },
+      writeEvidence: async () => "evidence/bridge-copilot.json",
+    });
+    await bridge.start(
+      request("copilot", { spawn: spawnProjection("copilot", { rendered_prompt: prompt }) }),
+    ).completion;
+    expect(bridgeInput).toBe(prompt);
+    expect(existsSync(promptRoot)).toBe(false);
+
+    const antigravity = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: () => completedProcess(),
+      writeEvidence: async () => "evidence/antigravity-large.json",
+    });
+    expect(() =>
+      antigravity.start(
+        request("antigravity", {
+          spawn: spawnProjection("antigravity", {
+            rendered_prompt: prompt,
+            rendered_tools: [],
+            sandbox: null,
+          }),
+        }),
+      ),
+    ).toThrow(/Antigravity prompt too large/);
+  });
+
+  test("Copilot prompt files reuse byte-identical restart state and reject changed content", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-restart-"));
+    temporaryPaths.push(root);
+    const prompt = "r".repeat(64 * 1024);
+    const first = materializeCopilotSessionPrompt({
+      attemptId: "restart-attempt",
+      engine: "copilot",
+      prompt,
+      root,
+    });
+    const resumed = materializeCopilotSessionPrompt({
+      attemptId: "restart-attempt",
+      engine: "copilot",
+      prompt,
+      root,
+    });
+    expect(resumed?.pointerPrompt).toBe(first?.pointerPrompt);
+    expect(() =>
+      materializeCopilotSessionPrompt({
+        attemptId: "restart-attempt",
+        engine: "copilot",
+        prompt: `changed-${prompt}`,
+        root,
+      }),
+    ).toThrow(/prompt-file authority/);
+    first?.cleanup();
+    resumed?.cleanup();
+    expect(readdirSync(root)).toEqual([]);
+  });
+
+  test("Copilot prompt-file transport rejects content above its explicit bound", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-bound-"));
+    temporaryPaths.push(root);
+    expect(() =>
+      materializeCopilotSessionPrompt({
+        attemptId: "oversized-attempt",
+        engine: "copilot",
+        prompt: "x".repeat(MAX_SESSION_PROMPT_FILE_BYTES + 1),
+        root,
+      }),
+    ).toThrow(/byte bound/);
+    expect(readdirSync(root)).toEqual([]);
   });
 
   test.each([
@@ -1037,8 +1257,8 @@ describe("attempt lifecycle and cleanup", () => {
       writeEvidence: async () => "evidence/acknowledged.json",
     });
     const result = await adapter.start(request("codex")).completion;
-    expect(result.state).toBe("completed");
-    expect(result.lifecycle).toEqual(["requested", "dispatched", "acknowledged", "completed"]);
+    expect(result.state).toBe("ambiguous");
+    expect(result.lifecycle).toEqual(["requested", "dispatched", "acknowledged", "ambiguous"]);
   });
 
   test("exit zero without protocol acknowledgement remains ambiguous", async () => {

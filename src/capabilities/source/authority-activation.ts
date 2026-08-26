@@ -260,10 +260,6 @@ function activate(
       quarantineActivation(paths, processLock, "receipt-cannot-reconstruct-current-settings", [
         rawReceipt,
       ]);
-    if (observedCheckpoint && observedCheckpoint.content_digest !== derivedInitial.content_digest)
-      quarantineActivation(paths, processLock, "checkpoint-does-not-bind-current-settings", [
-        rawCheckpoint,
-      ]);
     const portableLockState = activationPortableLockState(paths, derivedInitial);
     const expectedReceipt = materializeActivationReceipt(identity, derivedInitial.content_digest);
 

@@ -3,7 +3,7 @@ import type { MaterializedAgentBinding, PreviewAgentBinding } from "../../agents
 import { TraceLifecycleConflictError, type TraceStore } from "../trace/store.js";
 import type { PublicStoredTraceEvent, TraceCorrelation } from "../trace/types.js";
 import type { PersistedResumeBinding } from "./artifact-store.js";
-import type { InternalApprovalResolution } from "./control-runtime.js";
+import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-runtime.js";
 import {
   assertCoordinatorEmission,
   policyContextView,
@@ -15,8 +15,9 @@ import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js"
 import { OperationTransitionReservedError } from "./operation-registry.js";
 // biome-ignore format: production file ceiling
 import {
-  bindingAuthorities, configurationEmissions, conversationMessages, projectConversationEvents, rehydrateConversation, terminalJournalState,
+  configurationEmissions, conversationMessages, type rehydrateConversation, terminalJournalState,
 } from "./policy-registry.js";
+import { preparedStartCorrelation } from "./prepared-start-correlation.js";
 import { configurationEnvelope } from "./restart-authority.js";
 import { ConversationRestoreOperationMismatchError } from "./restart-runtime.js";
 import { ConversationAppendNotifier } from "./runtime-append-notifier.js";
@@ -25,11 +26,12 @@ import {
   createConversationRuntimeAuthorities,
 } from "./runtime-authorities.js";
 import { runtimeCorrelation } from "./runtime-correlation.js";
+import { createConversationRuntimeDelegates } from "./runtime-delegates.js";
 import { bindSharedHandoffToAttempt } from "./runtime-handoff.js";
 import { createRuntimeLiveConversation } from "./runtime-live-conversation.js";
 import type { ConversationRuntimeOptions } from "./runtime-options.js";
 import { publishRuntimeUserMessage } from "./runtime-private-file-message.js";
-import { readConversationSnapshot } from "./runtime-snapshot.js";
+import { createConversationRuntimeReaders } from "./runtime-readers.js";
 import { prepareRuntimeConversationTurn } from "./runtime-turn-delivery.js";
 import type { ConversationTurnPreparationRequestV1 } from "./turn-delivery-types.js";
 // biome-ignore format: production file ceiling
@@ -38,6 +40,7 @@ import type {
 } from "./types.js";
 export type { ConversationRuntimeOptions } from "./runtime-options.js";
 export { ConversationRestoreOperationMismatchError };
+type RuntimeDelegates = ReturnType<typeof createConversationRuntimeDelegates>;
 export class ConversationRuntime {
   private readonly id: (kind: string) => string;
   private readonly operations: ConversationRuntimeAuthorities["operations"];
@@ -47,6 +50,24 @@ export class ConversationRuntime {
   private readonly attempts: ConversationRuntimeAuthorities["attempts"];
   private readonly controls: ConversationRuntimeAuthorities["controls"];
   private readonly emissions: ConversationRuntimeAuthorities["emissions"];
+  readonly controlState: ConversationRuntimeAuthorities["restarts"]["controlState"];
+  readonly events: (id: string, afterSeq: number) => Promise<PublicStoredTraceEvent[] | null>;
+  readonly operationOwnerState: ConversationRuntimeAuthorities["operations"]["ownerState"];
+  readonly rehydrate: (id: string) => ReturnType<typeof rehydrateConversation>;
+  readonly snapshot: (id: string) => Promise<ConversationSnapshot | null>;
+  readonly exists!: RuntimeDelegates["exists"];
+  readonly manifest!: RuntimeDelegates["manifest"];
+  readonly operationId!: RuntimeDelegates["operationId"];
+  readonly restore!: RuntimeDelegates["restore"];
+  readonly restoreControl!: RuntimeDelegates["restoreControl"];
+  readonly prepareCancellation!: RuntimeDelegates["prepareCancellation"];
+  readonly resolveApproval!: RuntimeDelegates["resolveApproval"];
+  readonly cancelOperation!: RuntimeDelegates["cancelOperation"];
+  readonly operationCancelled!: RuntimeDelegates["operationCancelled"];
+  readonly retain!: RuntimeDelegates["retain"];
+  readonly persist!: RuntimeDelegates["persist"];
+  readonly persistPrepared!: RuntimeDelegates["persistPrepared"];
+  readonly ids!: RuntimeDelegates["ids"];
   private readonly live = new Map<string, LiveConversation>();
   private readonly terminalRuns = new Map<string, Promise<TerminalLifecycle>>();
   private readonly notifier = new ConversationAppendNotifier();
@@ -68,6 +89,21 @@ export class ConversationRuntime {
     this.attempts = authorities.attempts;
     this.controls = authorities.controls;
     this.emissions = authorities.emissions;
+    this.controlState = authorities.restarts.controlState.bind(authorities.restarts);
+    const readers = createConversationRuntimeReaders(options);
+    this.events = readers.events;
+    this.operationOwnerState = authorities.operations.ownerState.bind(authorities.operations);
+    this.rehydrate = readers.rehydrate;
+    this.snapshot = readers.snapshot;
+    Object.assign(
+      this,
+      createConversationRuntimeDelegates({
+        options,
+        authorities,
+        operationId: (id) => this.live.get(id)?.operationId ?? null,
+        id: (kind) => this.id(kind),
+      }),
+    );
   }
   onAppend(listener: (event: PublicStoredTraceEvent) => void): () => void {
     return this.notifier.subscribe(listener);
@@ -99,6 +135,8 @@ export class ConversationRuntime {
           actor_participant_id: input.participant_id,
           request: input.request,
         }) ?? { accepted: false, diagnostic_code: "interaction_authority_unavailable" },
+      // biome-ignore format: production file ceiling
+      stageActionCandidate: (input: Parameters<ConversationContext["stageActionCandidate"]>[0]) => this.options.agentActionCandidates?.stage({ manifest: live.manifest, participant_id: input.participant_id, response_idempotency_key: input.response_idempotency_key, candidate: input.candidate }) ?? { accepted: false, diagnostic_code: "host_tool_not_granted" },
       emit: (emission: CoordinatorEmission) => {
         const captured = snapshotRuntimeValue(emission);
         assertCoordinatorEmission(captured, live.operationId);
@@ -162,12 +200,21 @@ export class ConversationRuntime {
     if (!live) throw new Error("conversation runtime is not live");
     return Promise.resolve(this.policyContext(live));
   }
-  startRevisionBarrier(id: string, plan: RevisionPreparationPlanV1): Promise<boolean> {
+  startRevisionBarrier(
+    id: string,
+    plan: RevisionPreparationPlanV1,
+    authorityOperationId?: string,
+  ): Promise<boolean> {
     const live = this.live.get(id);
     if (!live) throw new Error("revision start conversation is not live");
     const operation = this.operations.get(id, live.operationId);
     if (!operation) throw new Error("revision start operation authority is absent");
-    return this.attempts.startRevisionBarrier(live, operation, plan);
+    return this.attempts.startRevisionBarrier(
+      live,
+      operation,
+      plan,
+      authorityOperationId ?? operation.operationId,
+    );
   }
   finish(id: string): void {
     const live = this.live.get(id);
@@ -181,7 +228,7 @@ export class ConversationRuntime {
     await this.operations.release(id, live.operationId, reason);
     if (this.live.get(id) === live) this.live.delete(id);
   }
-  async configure(id: string, activate = true): Promise<void> {
+  async configure(id: string, activate = true, prepared = false): Promise<void> {
     const live = this.live.get(id);
     if (!live) throw new Error("conversation runtime is not live");
     const record = activate ? null : this.options.artifactStore.readRecord(id);
@@ -203,7 +250,9 @@ export class ConversationRuntime {
         ];
     for (const item of emissions) {
       await this.effects.writePolicy(
-        { ...this.correlation(live.manifest, live.operationId, "control"), ...item.patch },
+        prepared
+          ? preparedStartCorrelation(live.manifest, live.operationId, item)
+          : { ...this.correlation(live.manifest, live.operationId, "control"), ...item.patch },
         item.emission,
       );
     }
@@ -327,72 +376,21 @@ export class ConversationRuntime {
     await this.operations.settleAndTerminate(id, live.operationId, operationReason, effective);
     return effective;
   }
-  async userMessage(id: string, request: MessageRequest, key: string): Promise<void> {
+  async userMessage(
+    id: string,
+    request: MessageRequest,
+    key: string,
+    queueDelivery?: ConversationQueuedMessageDeliveryAuthorityV1,
+  ): Promise<void> {
+    const live = this.live.get(id);
     return publishRuntimeUserMessage({
       options: this.options,
-      live: this.live.get(id),
+      live,
       conversationId: id,
       request,
       messageKey: key,
-      append: () => this.controls.userMessage(id, request, key),
+      ...(queueDelivery ? { queueDelivery } : {}),
+      append: () => this.controls.userMessage(id, request, key, queueDelivery?.publicEventId),
     });
-  }
-  exists(id: string): boolean {
-    return this.options.artifactStore.has(id);
-  }
-  manifest(id: string): ConversationManifest | null {
-    return this.options.artifactStore.read(id);
-  }
-  operationId(id: string): string | null {
-    return this.live.get(id)?.operationId ?? null;
-  }
-  operationOwnerState(id: string, operationId: string) {
-    return this.operations.ownerState(id, operationId);
-  }
-  async events(id: string, afterSeq: number): Promise<PublicStoredTraceEvent[] | null> {
-    if (!this.exists(id)) return null;
-    const records = this.options.traceStore.recoverConversation
-      ? await this.options.traceStore.recoverConversation(id)
-      : await this.options.traceStore.readConversation(id);
-    return projectConversationEvents(records, id, this.options.artifactRegistry, afterSeq);
-  }
-  async snapshot(id: string): Promise<ConversationSnapshot | null> {
-    return readConversationSnapshot(id, this.options);
-  }
-  async controlState(id: string) {
-    return this.restarts.controlState(id);
-  }
-  // biome-ignore format: production file ceiling
-  async rehydrate(id: string) { return rehydrateConversation(id, this.options.artifactStore, this.options.rehydrateBinding); }
-  async restore(id: string, requestedOperationId?: string): Promise<string> {
-    return this.restarts.restore(id, requestedOperationId);
-  }
-  restoreControl(id: string, requestedOperationId?: string): Promise<string> {
-    return this.restarts.restore(id, requestedOperationId, true);
-  }
-  prepareCancellation(command: OperationCancelCommand) {
-    return this.restarts.prepareCancellation(command);
-  }
-  resolveApproval(
-    id: string,
-    decision: ApprovalDecision,
-    allowFresh: boolean,
-  ): Promise<InternalApprovalResolution> {
-    return this.controls.resolveApproval(id, decision, allowFresh);
-  }
-  async cancelOperation(command: OperationCancelCommand): Promise<OperationCancelResult> {
-    return this.controls.cancel(command);
-  }
-  operationCancelled(id: string, operationId: string): boolean {
-    return this.operations.isCancelled(id, operationId);
-  }
-  retain(id: string, operationId: string): Promise<boolean> {
-    return this.emissions.retain(id, operationId, () => this.operationCancelled(id, operationId));
-  }
-  persist(manifest: ConversationManifest, bindings: MaterializedAgentBinding[]): void {
-    this.options.artifactStore.create(manifest, bindingAuthorities(manifest, bindings));
-  }
-  ids(kind: string): string {
-    return this.id(kind);
   }
 }

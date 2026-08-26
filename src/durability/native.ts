@@ -171,8 +171,18 @@ export function openPinnedDescendant(
   }
 }
 
-export function pinnedDirectoryPath(fd: number): string {
-  if (process.platform === "linux") {
+export interface PinnedDirectoryRuntimeV1 {
+  platform: NodeJS.Platform;
+  isBun: boolean;
+  realpath: typeof fs.realpathSync;
+  fcntl: ReturnType<typeof native>["fcntl"];
+}
+
+export function pinnedDirectoryPathForRuntime(
+  fd: number,
+  runtime: PinnedDirectoryRuntimeV1,
+): string {
+  if (runtime.platform === "linux") {
     let observed: string;
     try {
       observed = fs.readlinkSync(`/proc/self/fd/${fd}`);
@@ -187,18 +197,27 @@ export function pinnedDirectoryPath(fd: number): string {
       durabilityError("unsafe_path", "pinned directory was removed");
     return observed;
   }
-  if (IS_BUN) {
+  if (runtime.isBun) {
     try {
-      return fs.realpathSync(`/dev/fd/${fd}`);
+      return runtime.realpath(`/dev/fd/${fd}`);
     } catch (error) {
       return durabilityError("unsupported", "Bun cannot resolve pinned directory handles", error);
     }
   }
   const output = Buffer.alloc(1024);
-  const fcntl = native().fcntl;
+  const { fcntl } = runtime;
   if (!fcntl || fcntl(fd, F_GETPATH, "void *", output) !== 0) syscallFailure("fcntl F_GETPATH");
   const end = output.indexOf(0);
   return output.subarray(0, end < 0 ? output.length : end).toString("utf8");
+}
+
+export function pinnedDirectoryPath(fd: number): string {
+  return pinnedDirectoryPathForRuntime(fd, {
+    platform: process.platform,
+    isBun: IS_BUN,
+    realpath: fs.realpathSync,
+    fcntl: native().fcntl,
+  });
 }
 
 export function assertPinnedDirectory(directory: PinnedDirectory): void {

@@ -10,6 +10,12 @@ import { CapabilityCliUsageError, type ParsedCapabilityCliArgvV1 } from "./parse
 import type { Scope } from "./parser-types.js";
 import { ephemeralIdempotencyKey } from "./runtime.js";
 
+type CapabilityAction = Extract<HostActionRequestV1, { type: `capability.${string}` }>;
+
+function isCapabilityAction(action: HostActionRequestV1): action is CapabilityAction {
+  return action.type.startsWith("capability.");
+}
+
 export function decodeMutationRequest(
   path: string,
   command: ParsedCapabilityCliArgvV1 extends { command: infer T } ? T : never,
@@ -26,11 +32,8 @@ export function decodeMutationRequest(
   const planning = exactObject(row.planning_options, ["network_read"], [], "$.planning_options");
   if (planning.network_read !== "forbid" && planning.network_read !== "allow-if-granted")
     throw new CapabilityCliUsageError("invalid request-file planning_options.network_read");
-  const action = validateHostActionRequest(row.action) as Exclude<
-    HostActionRequestV1,
-    { type: "authority.repair" }
-  >;
-  if (!String(action.type).startsWith("capability."))
+  const action = validateHostActionRequest(row.action);
+  if (!isCapabilityAction(action))
     throw new CapabilityCliUsageError("request-file action must target the capability domain");
   if (command === "capability.update") {
     if (!["capability.update", "capability.restore_package"].includes(action.type))
@@ -265,21 +268,6 @@ export function durableCapabilityRequest(
   };
 }
 
-function scopeForCapabilityAction(
-  action: Exclude<HostActionRequestV1, { type: "authority.repair" }>,
-): Scope {
-  switch (action.type) {
-    case "capability.install":
-    case "capability.update":
-    case "capability.configure":
-    case "capability.retarget":
-    case "capability.remove":
-    case "capability.rollback_scope":
-    case "capability.restore_package":
-    case "capability.repair":
-    case "capability.adopt":
-      return action.scope;
-    default:
-      throw new CapabilityCliUsageError("request-file action must target the capability domain");
-  }
+function scopeForCapabilityAction(action: CapabilityAction): Scope {
+  return action.scope;
 }

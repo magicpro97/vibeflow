@@ -2,7 +2,7 @@
 title: Engine CLI Compatibility
 description: Which engine CLI versions the current code was verified against, and the invocation/output contract each integration assumes.
 category: reference
-last_updated: 2026-07-19
+last_updated: 2026-08-26
 ---
 
 # Engine CLI Compatibility
@@ -27,7 +27,7 @@ CLI is bumped you know exactly what to re-check.
 | copilot  | 1.0.69           | 2026-07-12 | brew `copilot` (GitHub Copilot CLI) |
 | opencode | 1.17.18          | 2026-07-12 | brew `anomalyco/tap/opencode`     |
 | agy      | 1.1.4            | 2026-07-19 | `%LOCALAPPDATA%\\agy\\bin\\agy.exe` |
-| bun      | 1.3.9            | 2026-07-12 | (runtime)                         |
+| bun      | 1.4.0            | 2026-08-26 | (runtime)                         |
 
 ## Per-engine integration contract
 
@@ -57,7 +57,7 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
 
 ### copilot
 
-- **Fresh invocation:** `copilot -p <prompt> --allow-all` (prompt is an argv value, not stdin; argv is ~32K-capped so large prompts are written to `.vibeflow/dispatch/<unit>.md` and a short pointer is passed instead)
+- **Fresh invocation:** `copilot -p <prompt> --allow-all` (prompt is an argv value, not stdin; argv is ~32K-capped so large prompts are written to `.vibeflow/dispatch/<unit>.md` and a short pointer `Read <abs path> and follow it` is passed instead)
 - **Resume:** NOT SUPPORTED by id. The CLI only offers `--continue` (most-recent session), so VibeFlow never captures a copilot session id and a `--resume` run of a copilot unit always re-runs fresh.
 - **Version guard:** the CLI has a history of silent breaking auto-updates (github/copilot-cli#1606 removed `--headless --stdio`); when `copilot --version` can't be read, dispatch proceeds with a warning.
 
@@ -81,6 +81,48 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
   - `{"type":"step_finish","part":{"tokens":{...}}}` — last line, carries token usage.
 - **Session id:** `sessionID` on the first `step_start` event (forward scan).
 - **Fixture:** N/A (opencode output format is stable, no known traps).
+
+## Conversation turn delivery
+
+The conversation runtime prefixes every delivered turn with `VF-TURN/1` and materializes a
+canonical JSON envelope for the selected participant. When exact resume authority is proven for
+the same participant and interaction cursor, the runtime uses `delivery_mode: "exact-delta"` and
+only re-sends newly applicable public user messages plus concise peer deltas. When that proof is
+missing or stale, it falls back to `delivery_mode: "full-history"` and re-sends the full public
+context. Native session histories remain inside the selected CLI; VibeFlow only changes which
+public material is re-delivered.
+
+Private file-range context is staged separately from the public turn envelope and is cleared after
+use so the next turn does not inherit it accidentally. Its wire form is canonical JSON prefixed by
+`VF-PRIVATE-FILE-RANGES/1`; it is never folded into public trace or browser persistence.
+
+For an exact native resume, the recipient's own prior response is not repeated: it already
+exists in that CLI's session. The envelope contains only newly applicable user messages and
+peer-agent responses/reactions. A fresh or unproved turn uses the full applicable public
+context and may include the content-addressed `VF-HANDOFF/1` shared handoff.
+
+Prompt transport is not conversation memory. Claude, Codex, and OpenCode read stdin;
+Copilot and Antigravity use native prompt argv. Copilot's large work-unit fallback writes
+`.vibeflow/dispatch/<unit>.md` and passes a short absolute read pointer. Antigravity instead
+rejects UTF-8 prompts at or above 30 KiB because its print mode has no supported file/stdin
+replacement.
+
+## Owned process portability
+
+Every canonical owned launch persists supervisor and CLI PIDs, host, operation/attempt, and
+exact process-start identity. Terminal release waits for exit/quiescence plus the
+`streams-drained` stdout/stderr barrier.
+
+| Platform | Scope | Proof strength | Process identity / containment |
+|----------|-------|----------------|--------------------------------|
+| Windows | `windows-job` | `kernel-contained` | Kill-on-close Job Object established before receipt/spawn; PowerShell/CIM creation ticks; no `/bin/ps`. |
+| Linux | `posix-process-group` | `cooperative-lineage` | Isolated process group, boot id, and `/proc` start ticks. |
+| macOS | `posix-process-group` | `cooperative-lineage` | Isolated process group and exact Darwin `libproc` seconds/microseconds. |
+
+The POSIX proof is intentionally weaker because descendants can leave the process group.
+`vf doctor --fix` repairs only exact proved orphans; live or identity-unprovable owners fail
+closed. Injected platform tests cover the Windows Job Object and identity contracts, but the
+current evidence set does not include or claim a live Windows canary.
 
 ## Crash-resume (`vf orchestrate --resume`)
 

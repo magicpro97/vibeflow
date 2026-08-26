@@ -359,7 +359,7 @@ export async function retryPublishedRevisionStart(
     });
     if (destination !== "started") return destination === "needs_recovery";
     options.owner.assertHeld();
-    await options.executeConfigured(prepared.manifest, prepared.operation.operation_id);
+    await options.executeConfigured(prepared.manifest, prepared.runtimeOperationId);
     return true;
   } catch {
     return false;

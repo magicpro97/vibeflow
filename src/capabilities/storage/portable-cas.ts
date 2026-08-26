@@ -21,6 +21,8 @@ import {
 const MAX_LOCK_BYTES = 8 * 1024 * 1024;
 const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefined;
 
+export type CapabilityPortableCasFaultPointV1 = "after-staging-fsync" | "after-publication-fsync";
+
 function exact(left: Buffer | null, right: Uint8Array | null): boolean {
   if (left === null || right === null) return left === null && right === null;
   return left.length === right.length && timingSafeEqual(left, right);
@@ -103,6 +105,7 @@ export function compareAndSwapPortableBytes(
   expected: Uint8Array | null,
   replacement: Uint8Array,
   lock: CapabilityScopeLockV1 | CapabilityPortableCasLockV1,
+  options: { fault?: (point: CapabilityPortableCasFaultPointV1) => void } = {},
 ): void {
   if (replacement.byteLength > MAX_LOCK_BYTES)
     throw new CapabilityValidationError("portable lock exceeds byte limit", path, "bounds");
@@ -139,6 +142,7 @@ export function compareAndSwapPortableBytes(
     } finally {
       fs.closeSync(fd);
     }
+    options.fault?.("after-staging-fsync");
     lock.assertHeld();
     assertPinnedDirectory(directory);
     if (!exact(readAt(directory, name, MAX_LOCK_BYTES), expected))
@@ -150,6 +154,7 @@ export function compareAndSwapPortableBytes(
     renameAt(directory, temporary, name);
     staged = false;
     fs.fsyncSync(directory.fd);
+    options.fault?.("after-publication-fsync");
     assertPinnedDirectory(directory);
     lock.assertHeld();
     if (!exact(readAt(directory, name, MAX_LOCK_BYTES), replacement))

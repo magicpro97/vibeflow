@@ -2,6 +2,7 @@ import type { Engine } from "../core.js";
 import { TRACE_LIMITS } from "../orchestrator/trace/limits.js";
 import { projectPublicEngineFrames, sanitizePublicEngineText } from "./public-redaction.js";
 import { observeSessionStdout } from "./session-protocol.js";
+import { observeSessionTerminal } from "./session-terminal.js";
 import type { EngineSessionAdapterOptions } from "./session-types.js";
 
 const OUTPUT_TRUNCATION = "[redacted-oversize]\n";
@@ -42,7 +43,11 @@ export class SessionStdoutState {
     privateValues: readonly string[],
   ): {
     frames: PublicFrame[];
-    observation?: { acknowledged: boolean; nativeSessionId?: string };
+    observation?: {
+      acknowledged: boolean;
+      nativeSessionId?: string;
+      terminal?: ReturnType<typeof observeSessionTerminal>;
+    };
   } {
     const buffered = this.#publicBuffers[stream] + content;
     const observation = stream === "stdout" ? this.#observe(content, flush) : undefined;
@@ -139,6 +144,7 @@ export class SessionStdoutState {
   ): {
     acknowledged: boolean;
     nativeSessionId?: string;
+    terminal?: ReturnType<typeof observeSessionTerminal>;
   } {
     const incremental =
       this.#protocol === "bridge" || this.#engine === "copilot" || this.#engine === "antigravity";
@@ -158,9 +164,11 @@ export class SessionStdoutState {
 
     let acknowledged = false;
     let nativeSessionId: string | undefined;
+    let terminal = undefined as ReturnType<typeof observeSessionTerminal>;
     const observeRecord = (record: string) => {
       if (Buffer.byteLength(record) > TRACE_LIMITS.maxRecordBytes) return;
       const observed = observeSessionStdout(this.#protocol, this.#engine, record);
+      terminal ??= observeSessionTerminal(this.#protocol, this.#engine, record);
       acknowledged ||= observed.acknowledged;
       if (
         observed.nativeSessionId &&
@@ -187,6 +195,7 @@ export class SessionStdoutState {
     return {
       acknowledged,
       ...(nativeSessionId ? { nativeSessionId } : {}),
+      ...(terminal ? { terminal } : {}),
     };
   }
 

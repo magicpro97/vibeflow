@@ -20,10 +20,12 @@ import { ConversationArtifactStore } from "../../src/orchestrator/conversation/a
 import { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
 import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
 import { DirectConversationPolicy } from "../../src/orchestrator/conversation/direct-policy.js";
+import { validatePublishedRevisionTransition } from "../../src/orchestrator/conversation/lineage-published-transition.js";
 import {
   ConversationPolicyRegistry,
   type RuntimeCreateRequest,
 } from "../../src/orchestrator/conversation/policy-registry.js";
+import { latestRevisionLaneReceipts } from "../../src/orchestrator/conversation/revision-lane-observation.js";
 import { ConversationOrchestrator } from "../../src/orchestrator/conversation/service.js";
 import type { ConversationPolicy } from "../../src/orchestrator/conversation/types.js";
 import { DurableArtifactRegistry } from "../../src/orchestrator/trace/artifacts.js";
@@ -38,6 +40,24 @@ const evaluator = JSON.stringify({
   evidence_quality: { value: true, evidence: "yes" },
   convergence: { value: true, evidence: "yes" },
 });
+
+function turnEnvelope(prompt: string): {
+  conversation_id: string;
+  revision_id: string;
+  recipient_participant_id: string;
+  instruction: { kind: string; round?: number };
+} | null {
+  const marker = "VF-TURN/1\n";
+  const offset = prompt.indexOf(marker);
+  if (offset < 0) return null;
+  const line = prompt.slice(offset + marker.length).split("\n", 1)[0];
+  if (!line) return null;
+  try {
+    return JSON.parse(line) as ReturnType<typeof turnEnvelope>;
+  } catch {
+    return null;
+  }
+}
 
 function binding(roleName: string): MaterializedAgentBinding {
   const envPolicy = conversationEnvPolicy("codex");
@@ -198,6 +218,31 @@ const waitFor = async (predicate: () => boolean | Promise<boolean>): Promise<voi
   }
 };
 
+async function settleStartedConversation(
+  adapter: ControlledAdapter,
+  started: Awaited<ReturnType<ConversationOrchestrator["start"]>>,
+): Promise<void> {
+  let settled = false;
+  let failure: unknown;
+  const completion = started.completion.then(
+    () => {
+      settled = true;
+    },
+    (error) => {
+      failure = error;
+      settled = true;
+    },
+  );
+  await waitFor(() => {
+    for (const [index, session] of adapter.sessions.entries()) {
+      if (!session.settled) adapter.complete(index, "fixture cleanup");
+    }
+    return settled;
+  });
+  await completion;
+  if (failure) throw failure;
+}
+
 async function setup(policy: ConversationPolicy, roles: string[]) {
   const root = await mkdtemp(join(tmpdir(), "vf-message-delivery-"));
   const opaque = new DurableArtifactRegistry({ dir: join(root, "opaque") });
@@ -329,8 +374,8 @@ test("private file range handoff reaches the target CLI without leaking into pub
 
 test("failed private file range delivery releases the one-shot reservation", async () => {
   const run = await setup(new DirectConversationPolicy(), ["direct"]);
+  const started = await run.service.start(run.request);
   try {
-    const started = await run.service.start(run.request);
     const binding = run.homeAuthorities.privateFileRanges.stage({
       handoff_id: "vf-file-range-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       repo_relative_path: "src/private.ts",
@@ -367,14 +412,25 @@ test("failed private file range delivery releases the one-shot reservation", asy
       consumed_by: null,
     });
   } finally {
+    await settleStartedConversation(run.adapter, started);
     await rm(run.root, { recursive: true, force: true });
   }
 });
 
 test("ambiguous private file range append stays reserved when trace recovery is unavailable", async () => {
   const run = await setup(new DirectConversationPolicy(), ["direct"]);
+  const started = await run.service.start(run.request);
+  const serviceInternals = run.service as unknown as {
+    options: { traceStore: { recoverConversation: (id: string) => Promise<unknown> } };
+    runtime: {
+      controls: { userMessage: (id: string, request: unknown, key: string) => Promise<void> };
+    };
+  };
+  const recover = serviceInternals.options.traceStore.recoverConversation.bind(
+    serviceInternals.options.traceStore,
+  );
+  const userMessage = serviceInternals.runtime.controls.userMessage;
   try {
-    const started = await run.service.start(run.request);
     const binding = run.homeAuthorities.privateFileRanges.stage({
       handoff_id: "vf-file-range-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       repo_relative_path: "src/private.ts",
@@ -383,16 +439,7 @@ test("ambiguous private file range append stays reserved when trace recovery is 
       content: "fail closed",
       staged_at: "2026-08-23T00:00:00.000Z",
     });
-    const serviceInternals = run.service as unknown as {
-      options: { traceStore: { recoverConversation: (id: string) => Promise<unknown> } };
-      runtime: {
-        controls: { userMessage: (id: string, request: unknown, key: string) => Promise<void> };
-      };
-    };
     let appendAttempted = false;
-    const recover = serviceInternals.options.traceStore.recoverConversation.bind(
-      serviceInternals.options.traceStore,
-    );
     serviceInternals.runtime.controls.userMessage = async () => {
       appendAttempted = true;
       throw new Error("append outcome unknown");
@@ -423,14 +470,17 @@ test("ambiguous private file range append stays reserved when trace recovery is 
       ),
     ).toThrow("available");
   } finally {
+    serviceInternals.runtime.controls.userMessage = userMessage;
+    serviceInternals.options.traceStore.recoverConversation = recover;
+    await settleStartedConversation(run.adapter, started);
     await rm(run.root, { recursive: true, force: true });
   }
 });
 
 test("durable user-message append failure is reconciled without releasing its file range", async () => {
   const run = await setup(new DirectConversationPolicy(), ["direct"]);
+  const started = await run.service.start(run.request);
   try {
-    const started = await run.service.start(run.request);
     const binding = run.homeAuthorities.privateFileRanges.stage({
       handoff_id: "vf-file-range-7777777777777777777777777777777777777777777777777777777777777777",
       repo_relative_path: "src/private.ts",
@@ -470,14 +520,17 @@ test("durable user-message append failure is reconciled without releasing its fi
       ),
     ).toThrow("available");
   } finally {
+    await settleStartedConversation(run.adapter, started);
     await rm(run.root, { recursive: true, force: true });
   }
 });
 
 test("post-append private file consume failure never makes a delivered handoff reusable", async () => {
   const run = await setup(new DirectConversationPolicy(), ["direct"]);
+  const started = await run.service.start(run.request);
+  const staging = run.homeAuthorities.privateFileRanges;
+  const consume = staging.consume.bind(staging);
   try {
-    const started = await run.service.start(run.request);
     const binding = run.homeAuthorities.privateFileRanges.stage({
       handoff_id: "vf-file-range-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       repo_relative_path: "src/private.ts",
@@ -486,8 +539,6 @@ test("post-append private file consume failure never makes a delivered handoff r
       content: "one shot",
       staged_at: "2026-08-23T00:00:00.000Z",
     });
-    const staging = run.homeAuthorities.privateFileRanges;
-    const consume = staging.consume.bind(staging);
     staging.consume = () => {
       throw new Error("consume failed after append");
     };
@@ -508,6 +559,8 @@ test("post-append private file consume failure never makes a delivered handoff r
       "available",
     );
   } finally {
+    staging.consume = consume;
+    await settleStartedConversation(run.adapter, started);
     await rm(run.root, { recursive: true, force: true });
   }
 });
@@ -745,18 +798,20 @@ test("debate routes ACTIVE and child-revision messages only to applicable partic
       "Apply to every responder",
     );
 
+    const sessionsBeforeRevision = run.adapter.sessions.length;
     const revised = await run.service.message(started.conversation_id, {
       content: "Child revision for the skeptic",
       target_participants: ["p2"],
     });
-    expect(typeof revised.child_conversation_id).toBe("string");
-    await waitFor(() => run.adapter.sessions.length === 8);
-    run.adapter.complete(5, "barrier-ready");
-    run.adapter.complete(6, "barrier-ready");
-    run.adapter.complete(7, "barrier-ready");
-    await waitFor(() => run.adapter.sessions.length === 9);
-    const barrierHandoffs = [5, 6, 7].map((index) => {
-      const prompt = run.adapter.sessions[index]?.request.spawn.rendered_prompt ?? "";
+    const childConversationId = revised.child_conversation_id;
+    if (!childConversationId) throw new Error("child revision was not created");
+    await waitFor(() => run.adapter.sessions.length >= sessionsBeforeRevision + roles.length);
+    const barrierSessions = run.adapter.sessions.slice(
+      sessionsBeforeRevision,
+      sessionsBeforeRevision + roles.length,
+    );
+    const barrierHandoffs = barrierSessions.map(({ request }) => {
+      const prompt = request.spawn.rendered_prompt;
       const offset = prompt.indexOf("VF-HANDOFF/1\n");
       if (offset < 0) throw new Error("child handoff is absent");
       return prompt.slice(offset).trimEnd();
@@ -764,23 +819,48 @@ test("debate routes ACTIVE and child-revision messages only to applicable partic
     expect(new Set(barrierHandoffs).size).toBe(1);
     expect(barrierHandoffs[0]).toContain("first");
     expect(barrierHandoffs[0]).toContain("second");
-    await completeDebate(run.adapter, 8);
+    for (const session of barrierSessions)
+      run.adapter.complete(run.adapter.sessions.indexOf(session), "barrier-ready");
+    const childPolicyOffset = run.adapter.sessions.length;
+    await waitFor(() => run.adapter.sessions.length > childPolicyOffset);
+    await completeDebate(run.adapter, childPolicyOffset);
     await waitFor(async () => {
-      const snapshot = await run.service.snapshot(revised.child_conversation_id as string);
+      const snapshot = await run.service.snapshot(childConversationId);
       return snapshot?.lifecycle === "COMPLETED";
     });
-    expect(run.adapter.sessions[9]?.request.spawn.rendered_prompt).not.toContain(
-      "Child revision for the skeptic",
+    const transition = run.homeAuthorities
+      .publishedRevisionTransitions()
+      .map(validatePublishedRevisionTransition)
+      .find(({ child }) => child.conversation_id === childConversationId);
+    if (!transition) throw new Error("published child transition is absent");
+    const laneReceipts = latestRevisionLaneReceipts(
+      run.homeAuthorities.revisions.readEvents(transition.operation_id),
     );
-    expect(run.adapter.sessions[10]?.request.spawn.rendered_prompt).toContain(
-      "Child revision for the skeptic",
+    expect([...laneReceipts.keys()].sort()).toEqual(["p1", "p2", "p3"]);
+    expect(new Set(barrierSessions.map(({ request }) => request.attemptId))).toEqual(
+      new Set([...laneReceipts.values()].map(({ attempt_key }) => attempt_key)),
     );
-    const childPrompts = [9, 10].map(
-      (index) => run.adapter.sessions[index]?.request.spawn.rendered_prompt ?? "",
-    );
-    for (const prompt of childPrompts) {
-      expect(prompt).toContain("VF-HANDOFF/1");
-      expect(prompt.match(/VF-HANDOFF\/1/g)).toHaveLength(1);
+
+    const participantPrompts = new Map<string, string>();
+    for (const { request } of run.adapter.sessions) {
+      const envelope = turnEnvelope(request.spawn.rendered_prompt);
+      if (
+        envelope?.conversation_id !== childConversationId ||
+        envelope.revision_id !== transition.child.revision_id ||
+        envelope.instruction.kind !== "debate-participant" ||
+        envelope.instruction.round !== 1
+      )
+        continue;
+      if (participantPrompts.has(envelope.recipient_participant_id))
+        throw new Error("duplicate child participant turn fixture");
+      participantPrompts.set(envelope.recipient_participant_id, request.spawn.rendered_prompt);
+    }
+    expect([...participantPrompts.keys()].sort()).toEqual(["p1", "p2"]);
+    expect(participantPrompts.get("p1")).not.toContain("Child revision for the skeptic");
+    expect(participantPrompts.get("p2")).toContain("Child revision for the skeptic");
+    for (const prompt of participantPrompts.values()) {
+      expect(prompt).not.toContain("VF-HANDOFF/1");
+      expect(prompt.match(/VF-TURN\/1/g)).toHaveLength(1);
     }
   } finally {
     await rm(run.root, { recursive: true, force: true });

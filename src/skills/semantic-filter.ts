@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { c } from "../core.js";
+import { ENGINES, type Engine, c } from "../core.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import { discoverSkills } from "./registry.js";
@@ -13,7 +14,7 @@ export interface CandidatePair {
 
 export interface CheapReviewer {
   id: string;
-  review(candidate: CandidatePair): CheapReviewResult;
+  review(candidate: CandidatePair): CheapReviewResult | Promise<CheapReviewResult>;
 }
 
 export interface CheapReviewResult {
@@ -192,20 +193,22 @@ export function parseReviewerArgs(
   return { ok: true, maxReviews, reviewerId };
 }
 
-export function reviewCandidates(
+export async function reviewCandidates(
   candidates: CandidatePair[],
   reviewer: CheapReviewer | undefined,
   maxReviews: number,
-): CheapReviewResult[] {
+): Promise<CheapReviewResult[]> {
   if (!reviewer || maxReviews <= 0 || candidates.length === 0) return [];
   const capped = candidates.slice(0, Math.min(maxReviews, candidates.length));
-  return capped.map((c) => {
-    try {
-      return reviewer.review(c);
-    } catch (e) {
-      return { candidate: c, verdict: "error", error: (e as Error).message };
-    }
-  });
+  return Promise.all(
+    capped.map(async (c) => {
+      try {
+        return await reviewer.review(c);
+      } catch (e) {
+        return { candidate: c, verdict: "error", error: (e as Error).message };
+      }
+    }),
+  );
 }
 
 export function buildSkillReviewPrompt(candidate: CandidatePair): string {
@@ -227,34 +230,48 @@ export function buildSkillReviewPrompt(candidate: CandidatePair): string {
     .join("\n");
 }
 
-export function makeCheapReviewerFromBridge(reviewerId: string): CheapReviewer | undefined {
+export function makeCheapReviewerFromBridge(
+  reviewerId: string,
+  repo = process.cwd(),
+  ownedRoute: OwnedAiRouteRunner = runOwnedAiRoute,
+): CheapReviewer | undefined {
   const cmd = process.env.VIBEFLOW_AI;
   if (!cmd) return undefined;
+  const configured = process.env.VF_REVIEW_ENGINE;
+  const engine = (
+    (ENGINES as readonly string[]).includes(reviewerId)
+      ? reviewerId
+      : configured && (ENGINES as readonly string[]).includes(configured)
+        ? configured
+        : ENGINES[0]
+  ) as Engine;
   return {
     id: reviewerId,
-    review(candidate: CandidatePair): CheapReviewResult {
+    async review(candidate: CandidatePair): Promise<CheapReviewResult> {
       const prompt = buildSkillReviewPrompt(candidate);
-      const shell = process.platform === "win32" ? ["cmd.exe", "/c", cmd] : ["/bin/sh", "-c", cmd];
-      const r = Bun.spawnSync(shell as [string, ...string[]], {
-        stdin: Buffer.from(prompt, "utf8"),
-        stdout: "pipe",
-        stderr: "pipe",
+      const result = await ownedRoute({
+        engine,
+        command: cmd,
+        input: prompt,
+        cwd: repo,
+        shell: true,
+        timeoutMs: 30_000,
       });
-      if (r.exitCode !== 0) {
+      if (result.status !== 0) {
         return {
           candidate,
           verdict: "error",
-          error: `bridge exited ${r.exitCode}: ${r.stderr.toString().slice(0, 200)}`,
+          error: `bridge exited ${result.status}: ${result.stderr.slice(0, 200)}`,
         };
       }
-      const raw = r.stdout.toString().trim();
+      const raw = result.stdout.trim();
       const verdict = /^RELATED$/i.test(raw) ? "related" : "unrelated";
       return { candidate, verdict };
     },
   };
 }
 
-export function handleSemanticFilterSubcommand(
+export async function handleSemanticFilterSubcommand(
   repo: string,
   rest: string[],
   inject?: {
@@ -262,8 +279,9 @@ export function handleSemanticFilterSubcommand(
     readFileSync?: (path: string, encoding: string) => string;
     existsSync?: (path: string) => boolean;
     cheapReviewer?: CheapReviewer;
+    ownedRoute?: OwnedAiRouteRunner;
   },
-): number {
+): Promise<number> {
   const parsed = parseReviewerArgs(rest);
   if (!parsed.ok) {
     out("vf", c.red(`✗ ${parsed.error}`));
@@ -298,7 +316,8 @@ export function handleSemanticFilterSubcommand(
 
   out("vf", c.dim(`Reviewer "${reviewerId}" selected, max-reviews=${maxReviews}`));
 
-  const reviewer = inject?.cheapReviewer ?? makeCheapReviewerFromBridge(reviewerId);
+  const reviewer =
+    inject?.cheapReviewer ?? makeCheapReviewerFromBridge(reviewerId, repo, inject?.ownedRoute);
 
   if (!reviewer) {
     out("vf", c.yellow("⚠ No cheap reviewer available — VIBEFLOW_AI bridge not configured."));
@@ -312,7 +331,7 @@ export function handleSemanticFilterSubcommand(
     return 0;
   }
 
-  const results = reviewCandidates(candidates, reviewer, maxReviews);
+  const results = await reviewCandidates(candidates, reviewer, maxReviews);
 
   const related = results.filter((r) => r.verdict === "related");
   const unrelated = results.filter((r) => r.verdict === "unrelated");

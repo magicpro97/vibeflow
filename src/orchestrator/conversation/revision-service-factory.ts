@@ -39,9 +39,10 @@ export function createConversationRevisionAuthority(
     manifest: ConversationManifest,
     operationId: string,
   ) => Promise<ConversationCreateResult>,
+  revisionSettled: (conversationId: string) => void,
 ): ConversationRevisionAuthority {
   return new ConversationRevisionAuthority(
-    revisionOptions(options, runtime, now, schedule, executeConfigured),
+    revisionOptions(options, runtime, now, schedule, executeConfigured, revisionSettled),
   );
 }
 
@@ -54,9 +55,10 @@ export function createConversationDeferredRevisionAuthority(
     manifest: ConversationManifest,
     operationId: string,
   ) => Promise<ConversationCreateResult>,
+  revisionSettled: (conversationId: string) => void,
 ): ConversationDeferredRevisionAuthority {
   return new ConversationDeferredRevisionAuthority(
-    revisionOptions(options, runtime, now, schedule, executeConfigured),
+    revisionOptions(options, runtime, now, schedule, executeConfigured, revisionSettled),
   );
 }
 
@@ -69,6 +71,7 @@ function revisionOptions(
     manifest: ConversationManifest,
     operationId: string,
   ) => Promise<ConversationCreateResult>,
+  revisionSettled: (conversationId: string) => void,
 ) {
   const artifactRoot = options.artifactRoot ?? options.artifactStore.rootPath();
   const traceRoot = options.traceRoot ?? join(dirname(artifactRoot), "trace");
@@ -83,6 +86,7 @@ function revisionOptions(
     schedule,
     rehydrateBinding: options.rehydrateBinding,
     executeConfigured,
+    revisionSettled,
     ...(options.revisionFault ? { revisionFault: options.revisionFault } : {}),
   };
 }

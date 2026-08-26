@@ -1,7 +1,9 @@
+import type { ActionAuthorityStoreOptions } from "../../actions/index.js";
 import { ConversationActionReceiptStore } from "./conversation-action-receipt-store.js";
 import { ConversationActionService } from "./conversation-action-service.js";
 import { ConversationControlEffectStore } from "./conversation-control-effect-store.js";
 import { ConversationInteractionStore } from "./conversation-interaction-store.js";
+import { ConversationLineageMutationReservationStoreV1 } from "./conversation-lineage-mutation-reservation.js";
 import {
   type ConversationReviewedActionAuthorityV1,
   createConversationReviewedActionAuthorityV1,
@@ -31,10 +33,17 @@ export class ConversationHomeAuthorities {
   readonly oversizedHandoffs: OversizedHandoffStoreV1;
   readonly revisionLanes: InitialRevisionLaneAuthority;
   readonly interactions: ConversationInteractionStore;
+  readonly lineageMutations: ConversationLineageMutationReservationStoreV1;
 
-  constructor(options: { artifactRoot: string; now: () => string; challengeKey?: Uint8Array }) {
+  constructor(options: {
+    artifactRoot: string;
+    now: () => string;
+    challengeKey?: Uint8Array;
+    actionFault?: ActionAuthorityStoreOptions["fault"];
+  }) {
     this.now = options.now;
     this.lineage = new LineageAuthorityStore({ artifactRoot: options.artifactRoot });
+    this.lineageMutations = new ConversationLineageMutationReservationStoreV1(options.artifactRoot);
     this.handoffs = new ContextHandoffStore({ artifactRoot: options.artifactRoot });
     this.revisions = new ConversationRevisionStore({ artifactRoot: options.artifactRoot });
     this.revisionLanes = new InitialRevisionLaneAuthority(
@@ -56,6 +65,8 @@ export class ConversationHomeAuthorities {
       this.revisions,
       this.actionReceipts,
       options.challengeKey,
+      undefined,
+      options.actionFault,
     );
     this.revisions.bindActionAuthority(this.actions.authority.reader);
   }

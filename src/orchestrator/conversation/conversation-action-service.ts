@@ -1,11 +1,10 @@
 import {
   type ActionAuthorityResolverV1,
   ActionAuthorityStore,
+  type ActionAuthorityStoreOptions,
   type ActionDispatchRecordV1,
-  type ActionOperationEventV1,
   type ActionProposalResponseV1,
   type ActionRequestAuthorityV1,
-  type DurableActionAuthorityReaderV1,
   type ExpectedActionSourceV1,
   createDurableActionAuthorityReaderV1,
 } from "../../actions/index.js";
@@ -17,16 +16,21 @@ import type {
   ContinueMessageActionPlanV1,
   ContinueMessageProposalPlanV1,
 } from "./conversation-action-planner.js";
-import {
-  projectConversationActionSnapshot,
-  projectConversationReceiptEvents,
-  projectRevisionActionEvents,
-} from "./conversation-action-projection.js";
 import type {
   ConversationActionReceiptStore,
   ConversationReceiptProposalPlanV1,
 } from "./conversation-action-receipt-store.js";
+import { ConversationActionServiceProjectionV1 } from "./conversation-action-service-projection.js";
+import type {
+  CapabilityConversationProposalBaseV1,
+  SharedActionAuthorityFacadeV1,
+} from "./conversation-action-service-types.js";
+import { ConversationCapabilityDispatchReservationStoreV1 } from "./conversation-capability-dispatch-reservation.js";
 import type { ConversationRevisionStore } from "./revision-store.js";
+export type {
+  CapabilityConversationProposalBaseV1,
+  SharedActionAuthorityFacadeV1,
+} from "./conversation-action-service-types.js";
 
 interface DomainPreparedAuthorityV1 {
   digest: string;
@@ -36,38 +40,6 @@ interface DomainPreparedAuthorityV1 {
 interface DomainTerminalAuthorityV1 extends DomainPreparedAuthorityV1 {
   outcome: "succeeded" | "failed" | "needs_recovery";
 }
-
-export interface SharedActionAuthorityFacadeV1 {
-  readonly reader: DurableActionAuthorityReaderV1;
-  createProposal: ActionAuthorityStore["createProposal"];
-  get: ActionAuthorityStore["get"];
-  list: ActionAuthorityStore["list"];
-  listPending: ActionAuthorityStore["listPending"];
-  issueChallenge: ActionAuthorityStore["issueChallenge"];
-  decide: ActionAuthorityStore["decide"];
-  cancel: ActionAuthorityStore["cancel"];
-  prepareDispatch: ActionAuthorityStore["prepareDispatch"];
-  getDispatch: ActionAuthorityStore["getDispatch"];
-  beginDispatch: ActionAuthorityStore["beginDispatch"];
-  beginPreparedDispatch(
-    proposalId: string,
-    approvalId: string,
-    preparedAt: string,
-  ): ActionDispatchRecordV1;
-  recordTerminal: ActionAuthorityStore["recordTerminal"];
-  subscribe(proposalId: string, listener: () => void): (() => void) | null;
-}
-
-export interface CapabilityConversationProposalBaseV1 {
-  root_session_id: string;
-  conversation_id: string;
-  revision_id: string;
-  last_seq: number;
-  conversation_lock_digest: string;
-  lineage_head_digest: string;
-  lineage_head_epoch: number;
-}
-
 export class ConversationActionService {
   private readonly store: ActionAuthorityStore;
   private readonly conversationResolver: ConversationActionAuthorityResolverV1;
@@ -79,9 +51,17 @@ export class ConversationActionService {
       }) => CapabilityConversationProposalBaseV1)
     | undefined;
   private capabilityActionRootResolver?: (conversationId: string) => { root_session_id: string };
+  private agentProposalReviewValidator?: (input: {
+    proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
+    now: string;
+    phase: "review" | "dispatch";
+    approval_id: string | null;
+  }) => string;
   private readonly listeners = new Map<string, Set<() => void>>();
+  private readonly projection: ConversationActionServiceProjectionV1;
   private clockOverride: string | null = null;
   readonly authority: SharedActionAuthorityFacadeV1;
+  readonly capabilityDispatches: ConversationCapabilityDispatchReservationStoreV1;
 
   constructor(
     actionRoot: string,
@@ -90,17 +70,22 @@ export class ConversationActionService {
     private readonly receipts: ConversationActionReceiptStore,
     challengeKey?: Uint8Array,
     capabilityResolver?: ActionAuthorityResolverV1,
+    fault?: ActionAuthorityStoreOptions["fault"],
   ) {
     this.conversationResolver = new ConversationActionAuthorityResolverV1(revisions, receipts);
+    this.capabilityDispatches = new ConversationCapabilityDispatchReservationStoreV1(actionRoot);
     this.capabilityResolver = capabilityResolver;
     this.store = new ActionAuthorityStore(actionRoot, {
       ...(challengeKey ? { hmac_key: challengeKey } : {}),
+      ...(fault ? { fault } : {}),
       now: () => Date.parse(this.clockOverride ?? this.now()),
       authority_resolver: multiplexActionAuthorityResolvers(
         this.conversationResolver,
         () => this.capabilityResolver,
+        () => this.agentProposalReviewValidator,
       ),
     });
+    this.projection = new ConversationActionServiceProjectionV1(this.store, revisions, receipts);
     const authority: SharedActionAuthorityFacadeV1 = {
       reader: createDurableActionAuthorityReaderV1(this.store),
       createProposal: (input) => {
@@ -108,9 +93,12 @@ export class ConversationActionService {
         this.notify(result.proposal.proposal_id);
         return result;
       },
+      preparedProposal: (input) => this.store.preparedProposal(input),
       get: (proposalId) => this.store.get(proposalId),
       list: () => this.store.list(),
+      listRecorded: () => this.store.listRecorded(),
       listPending: () => this.store.listPending(),
+      assertMutationController: (input) => this.store.assertMutationController(input),
       issueChallenge: (input) => this.store.issueChallenge(input),
       decide: (input) => {
         const result = this.store.decide(input);
@@ -122,8 +110,12 @@ export class ConversationActionService {
         this.notify(input.proposal_id);
         return result;
       },
+      prevalidateDispatch: (proposalId, approvalId) =>
+        this.store.prevalidateDispatch(proposalId, approvalId),
       prepareDispatch: (proposalId, approvalId) =>
         this.store.prepareDispatch(proposalId, approvalId),
+      reserveDispatch: (proposalId, approvalId) =>
+        this.store.reserveDispatch(proposalId, approvalId),
       getDispatch: (operationId) => this.store.getDispatch(operationId),
       beginDispatch: (proposalId, approvalId) => {
         const result = this.store.beginDispatch(proposalId, approvalId);
@@ -137,6 +129,14 @@ export class ConversationActionService {
           this.store.beginDispatch(proposalId, approvalId);
           this.notify(proposalId);
           return dispatch;
+        } finally {
+          this.clockOverride = null;
+        }
+      },
+      prepareDomainDispatch: (proposalId, approvalId, preparedAt) => {
+        this.clockOverride = preparedAt;
+        try {
+          return this.store.prepareDispatch(proposalId, approvalId);
         } finally {
           this.clockOverride = null;
         }
@@ -159,6 +159,19 @@ export class ConversationActionService {
     if (this.capabilityResolver && this.capabilityResolver !== resolver)
       throw new Error("capability action authority resolver conflict");
     this.capabilityResolver = resolver;
+  }
+
+  registerAgentProposalReviewValidator(
+    validator: (input: {
+      proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
+      now: string;
+      phase: "review" | "dispatch";
+      approval_id: string | null;
+    }) => string,
+  ): void {
+    if (this.agentProposalReviewValidator && this.agentProposalReviewValidator !== validator)
+      throw new Error("agent proposal review validator conflict");
+    this.agentProposalReviewValidator = validator;
   }
 
   registerCapabilityProposalBaseResolver(
@@ -290,76 +303,23 @@ export class ConversationActionService {
     return this.authority.get(proposalId);
   }
 
-  private revisionEventsFor(proposalId: string, operationId: string | null) {
-    const action = this.receipts.readPlan(proposalId)?.native_plan.action;
-    const target =
-      action &&
-      [
-        "conversation.abandon_revision_operation",
-        "conversation.retry_revision_operation",
-        "conversation.reconcile_revision_operation",
-      ].includes(action.type) &&
-      "revision_operation_id" in action
-        ? action.revision_operation_id
-        : operationId;
-    return target ? this.revisions.readEvents(target) : [];
-  }
-
   view(proposalId: string): ActionProposalResponseV1 | null {
-    const snapshot = this.store.get(proposalId);
-    if (!snapshot) return null;
-    const events = this.revisionEventsFor(proposalId, snapshot.operation_id);
-    return projectConversationActionSnapshot(snapshot, events, this.receipts.read(proposalId));
+    return this.projection.view(proposalId);
   }
 
-  events(proposalId: string): ActionOperationEventV1[] | null {
-    const snapshot = this.store.get(proposalId);
-    if (!snapshot) return null;
-    const events = this.revisionEventsFor(proposalId, snapshot.operation_id);
-    const receipt = this.receipts.read(proposalId);
-    return receipt
-      ? projectConversationReceiptEvents(snapshot, receipt)
-      : projectRevisionActionEvents(snapshot, events);
+  events(proposalId: string) {
+    return this.projection.events(proposalId);
   }
 
   pending(conversationId: string): ActionProposalResponseV1[] {
-    return this.store
-      .list()
-      .filter(
-        (snapshot) =>
-          (snapshot.state === "pending_review" || snapshot.state === "approved") &&
-          snapshot.proposal.domain === "conversation" &&
-          snapshot.proposal.base.conversation_id === conversationId,
-      )
-      .map((snapshot) =>
-        projectConversationActionSnapshot(
-          snapshot,
-          this.revisionEventsFor(snapshot.proposal.proposal_id, snapshot.operation_id),
-          this.receipts.read(snapshot.proposal.proposal_id),
-        ),
-      );
+    return this.projection.pending(conversationId);
   }
   anchored(input: {
     conversation_id: string;
     revision_id: string;
     origin_event_id: string | null;
   }): ActionProposalResponseV1[] {
-    return this.store
-      .list()
-      .filter(
-        ({ proposal }) =>
-          proposal.domain === "conversation" &&
-          proposal.base.conversation_id === input.conversation_id &&
-          proposal.base.revision_id === input.revision_id &&
-          proposal.origin_event_id === input.origin_event_id,
-      )
-      .map((snapshot) =>
-        projectConversationActionSnapshot(
-          snapshot,
-          this.revisionEventsFor(snapshot.proposal.proposal_id, snapshot.operation_id),
-          this.receipts.read(snapshot.proposal.proposal_id),
-        ),
-      );
+    return this.projection.anchored(input);
   }
 
   challenge(input: {
@@ -370,7 +330,6 @@ export class ConversationActionService {
   }) {
     return this.authority.issueChallenge(input);
   }
-
   decide(input: {
     proposal_id: string;
     proposal_digest: string;

@@ -1,5 +1,5 @@
-import { computed, reactive, ref, shallowRef } from "vue";
 import { expect, test } from "bun:test";
+import { computed, reactive, ref, shallowRef } from "vue";
 import { createHomeActivePaginationRuntime } from "../src/ui/src/conversation-home-active-pagination.js";
 import { conversationHomeApi } from "../src/ui/src/conversation-home-api.js";
 import { ActivationEpoch } from "../src/ui/src/conversation-home-state.js";

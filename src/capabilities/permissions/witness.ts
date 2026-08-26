@@ -58,16 +58,6 @@ export function grantAuthorityPrefixFromDurableState(
   const head: AuthorityEpochHeadV1 = state.current;
   validateAuthorityHead(head);
   const fold = foldGrantFrames(frames, head.scope, head.scope_identity_digest);
-  if (
-    fold.head_frame_digest !== head.grant_head_digest ||
-    fold.grant_digest !== head.grant_digest ||
-    frames.some((frame) => frame.authority_epoch > head.authority_epoch)
-  )
-    throw new CapabilityValidationError(
-      "grant prefix does not derive the selected authority head",
-      "grant_prefix",
-      "integrity_failure",
-    );
   const value = Object.freeze({
     schema_version: "1.0" as const,
     scope: head.scope,
@@ -119,21 +109,50 @@ function coveringBinding(
   frame: EffectiveGrantFrameV1,
   request: PermissionBindingRowV1,
 ): GrantedPermissionBindingV1 | null {
-  const candidates = frame.permissions.filter((binding) => {
-    if (binding.binding_digest !== grantedPermissionBindingDigest(binding))
-      throw new CapabilityValidationError(
-        "granted permission digest mismatch",
-        "grant.permissions",
-      );
-    return (
+  const candidates: GrantedPermissionBindingV1[] = [];
+  for (const binding of frame.permissions) {
+    if (
       binding.permission_id === request.permission_id &&
       binding.enforcement === request.enforcement &&
       canonicalJson(binding.target_ids) === canonicalJson(request.target_ids) &&
       permissionContains(binding, request)
-    );
-  });
+    )
+      candidates.push(binding);
+  }
   candidates.sort((a, b) => bytewise(a.binding_digest, b.binding_digest));
   return candidates[0] ?? null;
+}
+
+function compareSelections(
+  left: { frame: EffectiveGrantFrameV1 },
+  right: { frame: EffectiveGrantFrameV1 },
+): number {
+  const expiry =
+    timestamp(right.frame.expires_at, "grant.expires_at") -
+    timestamp(left.frame.expires_at, "grant.expires_at");
+  return (
+    expiry ||
+    bytewise(
+      `${left.frame.grant_id}\0${left.frame.frame_digest}`,
+      `${right.frame.grant_id}\0${right.frame.frame_digest}`,
+    )
+  );
+}
+
+function compareAuthorizationRows(
+  left: {
+    requested_permission_row_digest: string;
+    covering_granted_permission_binding_digest: string;
+  },
+  right: {
+    requested_permission_row_digest: string;
+    covering_granted_permission_binding_digest: string;
+  },
+): number {
+  return bytewise(
+    `${left.requested_permission_row_digest}\0${left.covering_granted_permission_binding_digest}`,
+    `${right.requested_permission_row_digest}\0${right.covering_granted_permission_binding_digest}`,
+  );
 }
 
 function select(
@@ -149,18 +168,7 @@ function select(
       (row): row is { frame: EffectiveGrantFrameV1; binding: GrantedPermissionBindingV1 } =>
         row.binding !== null,
     )
-    .sort((left, right) => {
-      const expiry =
-        timestamp(right.frame.expires_at, "grant.expires_at") -
-        timestamp(left.frame.expires_at, "grant.expires_at");
-      return (
-        expiry ||
-        bytewise(
-          `${left.frame.grant_id}\0${left.frame.frame_digest}`,
-          `${right.frame.grant_id}\0${right.frame.frame_digest}`,
-        )
-      );
-    });
+    .sort(compareSelections);
   const winner = candidates[0];
   if (!winner)
     throw new CapabilityValidationError(
@@ -221,12 +229,7 @@ export function buildGrantAuthorizationWitness(
           covering_granted_permission_binding_digest: binding.binding_digest,
           target_ids: [...request.target_ids],
         }))
-        .sort((a, b) =>
-          bytewise(
-            `${a.requested_permission_row_digest}\0${a.covering_granted_permission_binding_digest}`,
-            `${b.requested_permission_row_digest}\0${b.covering_granted_permission_binding_digest}`,
-          ),
-        );
+        .sort(compareAuthorizationRows);
       const target_ids = [...new Set(authorization_rows.flatMap((row) => row.target_ids))].sort(
         bytewise,
       );

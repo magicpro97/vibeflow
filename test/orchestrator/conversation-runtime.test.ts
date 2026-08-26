@@ -5,9 +5,10 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  ActionProposalRequestV1,
-  BrowserHostActionRequestV1,
+import {
+  ActionConflictError,
+  type ActionProposalRequestV1,
+  type BrowserHostActionRequestV1,
 } from "../../src/actions/index.js";
 import type { AgentBinding, MaterializedAgentBinding } from "../../src/agents/binding.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
@@ -717,7 +718,7 @@ async function approvedDeferredRevision(input: {
   };
 }
 
-test("a deferred revision rejects a changed requested actor without writing any byte", async () => {
+test("the mutation controller rejects a changed actor without writing any byte", async () => {
   const fixture = await harness(new DirectConversationPolicy(), new DurableRevisionFakeAdapter());
   try {
     const created = await fixture.runtime.create(createInput("direct"));
@@ -736,7 +737,11 @@ test("a deferred revision rejects a changed requested actor without writing any 
           actor: { ...commitInput.authority.actor, public_actor_id: "different-cli-actor" },
         },
       }),
-    ).rejects.toThrow("deferred revision approval authority mismatch");
+    ).rejects.toMatchObject({
+      name: ActionConflictError.name,
+      message: "Action mutation controller does not match the reviewed proposal.",
+      public_error: { error: { code: "stale_proposal" } },
+    });
     expect(treeBytes(fixture.root)).toEqual(before);
     expect(fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state).toBe("approved");
     expect(fixture.homeAuthorities.publishedRevisionTransitions()).toHaveLength(0);
@@ -780,10 +785,57 @@ test("a deferred revision resumes an exact prepared publication before the head 
       () => fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state === "succeeded",
     );
     expect(fixture.homeAuthorities.publishedRevisionTransitions()).toHaveLength(1);
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions()[0];
+    const operation = (
+      transition?.authority as {
+        operation?: { operation_id?: string; child?: { conversation_id?: string } };
+      }
+    )?.operation;
+    if (!operation?.operation_id || !operation.child?.conversation_id)
+      throw new Error("published revision operation is absent");
+    const operationId = operation.operation_id;
+    const childId = operation.child.conversation_id;
+    await waitFor(() => fixture.runtime.revisionOperationQuiescent(childId, operationId));
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
 });
+
+function publishedRevisionOperationForChild(
+  home: ConversationHomeAuthorities,
+  childId: string,
+): { operation_id: string; child: { conversation_id: string } } {
+  const matches = home
+    .publishedRevisionTransitions()
+    .map(
+      ({ authority }) =>
+        (
+          authority as {
+            operation?: { operation_id?: string; child?: { conversation_id?: string } };
+          }
+        ).operation,
+    )
+    .filter(
+      (operation): operation is { operation_id: string; child: { conversation_id: string } } =>
+        typeof operation?.operation_id === "string" && operation.child?.conversation_id === childId,
+    );
+  if (matches.length !== 1)
+    throw new Error(`expected one published revision operation for ${childId}`);
+  const operation = matches[0];
+  if (!operation) throw new Error(`published revision operation for ${childId} is absent`);
+  return operation;
+}
+
+async function waitForPublishedRevisionQuiescence(input: {
+  runtime: ConversationOrchestrator;
+  home: ConversationHomeAuthorities;
+  childId: string;
+}) {
+  const operation = publishedRevisionOperationForChild(input.home, input.childId);
+  await waitFor(() =>
+    input.runtime.revisionOperationQuiescent(input.childId, operation.operation_id),
+  );
+}
 
 async function approveAndCommitRevision(input: {
   root: string;
@@ -849,10 +901,15 @@ async function approveAndCommitRevision(input: {
         (row as { proposal?: { proposal_id?: string } }).proposal?.proposal_id ===
         proposed.response.proposal.proposal_id,
     );
-  const childId = (
-    transition?.authority as { operation?: { child?: { conversation_id?: string } } }
-  )?.operation?.child?.conversation_id;
-  if (!childId) throw new Error("deferred revision child was not published");
+  const operation = (
+    transition?.authority as {
+      operation?: { operation_id?: string; child?: { conversation_id?: string } };
+    }
+  )?.operation;
+  const childId = operation?.child?.conversation_id;
+  if (!operation?.operation_id || !childId)
+    throw new Error("deferred revision child was not published");
+  const operationId = operation.operation_id;
   try {
     await waitFor(
       async () =>
@@ -892,6 +949,7 @@ async function approveAndCommitRevision(input: {
       { cause: error },
     );
   }
+  await waitFor(() => input.runtime.revisionOperationQuiescent(childId, operationId));
   return childId;
 }
 
@@ -1057,6 +1115,21 @@ test("a deferred commit resumes the same active reservation after a process cras
     );
     expect((await restartedDomain.commit(commit)).operation.state).toBe("succeeded");
     expect(restartedHome.publishedRevisionTransitions()).toHaveLength(1);
+    const transition = restartedHome.publishedRevisionTransitions()[0];
+    const childId = (
+      transition?.authority as { operation?: { child?: { conversation_id?: string } } }
+    )?.operation?.child?.conversation_id;
+    if (!childId) throw new Error("restarted action did not publish its child revision");
+    await waitFor(async () =>
+      ["COMPLETED", "FAILED", "ABORTED", "STOPPED"].includes(
+        (await restarted.snapshot(childId))?.lifecycle ?? "",
+      ),
+    );
+    await waitForPublishedRevisionQuiescence({
+      runtime: restarted,
+      home: restartedHome,
+      childId,
+    });
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -1171,6 +1244,11 @@ test("an approved conversation action remains actionable after process restart",
         (await restarted.snapshot(childId))?.lifecycle ?? "",
       ),
     );
+    await waitForPublishedRevisionQuiescence({
+      runtime: restarted,
+      home: restartedHome,
+      childId,
+    });
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -1514,6 +1592,7 @@ test("a fresh service reconciles a published revision terminal without replaying
     )?.operation;
     if (!operation?.operation_id || !operation.child?.conversation_id)
       throw new Error("published revision operation is absent");
+    const operationId = operation.operation_id;
     const childId = operation.child.conversation_id;
     await waitFor(() => {
       const events = fixture.homeAuthorities.revisions.readEvents(operation.operation_id as string);
@@ -1588,6 +1667,11 @@ test("a fresh service reconciles a published revision terminal without replaying
     );
     expect(restartedAdapter.starts).toHaveLength(0);
     expect(restartedTasks).toHaveLength(0);
+    await waitForPublishedRevisionQuiescence({
+      runtime: fixture.runtime,
+      home: fixture.homeAuthorities,
+      childId,
+    });
   } finally {
     terminalSpy?.mockRestore();
     await rm(fixture.root, { recursive: true, force: true });
@@ -1668,6 +1752,7 @@ test("a fresh service leaves a live published revision start owner untouched", a
     const operation = authority?.operation;
     if (!operation?.operation_id || !operation.child?.conversation_id)
       throw new Error("published revision operation is absent");
+    const operationId = operation.operation_id;
     const childId = operation.child.conversation_id;
     const durableOperation = fixture.homeAuthorities.revisions.readOperation(
       operation.operation_id,
@@ -1733,6 +1818,7 @@ test("a fresh service leaves a live published revision start owner untouched", a
     await waitFor(async () =>
       ["COMPLETED", "FAILED"].includes((await fixture.runtime.snapshot(childId))?.lifecycle ?? ""),
     );
+    await waitFor(() => fixture.runtime.revisionOperationQuiescent(childId, operationId));
     expect(fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state).toBe("succeeded");
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
@@ -2338,6 +2424,11 @@ test("a real generation-zero start failure is retried with fresh durable adapter
         reader: fixture.homeAuthorities.actions.authority.reader,
       }),
     ).toThrow(/terminal mirror/i);
+    await waitForPublishedRevisionQuiescence({
+      runtime: fixture.runtime,
+      home: fixture.homeAuthorities,
+      childId: target.child.conversation_id,
+    });
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
     await rm(adapterRoot, { recursive: true, force: true });
@@ -7578,6 +7669,7 @@ test("health mutation cannot steal or reopen an in-flight PAUSE authority", asyn
     });
     await runtime.resume(accepted.conversation_id);
     await runtime.stop(accepted.conversation_id);
+    await accepted.completion;
   } finally {
     releasePause();
     await rm(root, { recursive: true, force: true });
@@ -8191,6 +8283,20 @@ test("ACTIVE message injects; COMPLETED message creates one idempotent child rev
       targetedEvents?.find((event) => event.event.type === "user_message")?.event
         .payload as unknown,
     ).toEqual({ content: "targeted revision", target_participants: ["participant-1"] });
+    await waitFor(
+      async () =>
+        (await activeHarness.runtime.snapshot(targetedChildId))?.lifecycle === "COMPLETED",
+    );
+    await waitForPublishedRevisionQuiescence({
+      runtime: activeHarness.runtime,
+      home: activeHarness.homeAuthorities,
+      childId,
+    });
+    await waitForPublishedRevisionQuiescence({
+      runtime: activeHarness.runtime,
+      home: activeHarness.homeAuthorities,
+      childId: targetedChildId,
+    });
   } finally {
     await rm(activeHarness.root, { recursive: true, force: true });
   }
@@ -8201,7 +8307,7 @@ test("a failed child configuration is never linked and a retry completes the sam
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => unhandled.push(reason);
   process.on("unhandledRejection", onUnhandled);
-  const { root, runtime } = await harness(
+  const { root, runtime, homeAuthorities } = await harness(
     new DirectConversationPolicy(),
     new DurableRevisionFakeAdapter(),
     (store) => ({
@@ -8237,6 +8343,11 @@ test("a failed child configuration is never linked and a retry completes the sam
     expect(events?.some((event) => event.event.type === "state_change")).toBe(true);
     expect(events?.some((event) => event.event.type === "user_message")).toBe(true);
     await waitFor(async () => (await runtime.snapshot(childId))?.lifecycle === "COMPLETED");
+    await waitForPublishedRevisionQuiescence({
+      runtime,
+      home: homeAuthorities,
+      childId,
+    });
   } finally {
     EventEmitter.prototype.off.call(process, "unhandledRejection", onUnhandled);
     await rm(root, { recursive: true, force: true });

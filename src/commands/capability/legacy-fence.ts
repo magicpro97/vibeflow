@@ -13,9 +13,12 @@ function fenceMessage(error: CapabilityRuntimeError): string {
   return error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
 }
 
-export function legacyWriterFence(base: string): LegacyWriterFenceStatus {
+export function legacyWriterFence(
+  base: string,
+  assertAllowed: (currentLockPath: string) => void = assertLegacyWriterAllowed,
+): LegacyWriterFenceStatus {
   try {
-    assertLegacyWriterAllowed(projectCapabilityPaths(base).currentLock);
+    assertAllowed(projectCapabilityPaths(base).currentLock);
     return { blocked: false, details: null };
   } catch (error) {
     if (error instanceof CapabilityRuntimeError && error.runtime_code === "scope-needs-recovery") {

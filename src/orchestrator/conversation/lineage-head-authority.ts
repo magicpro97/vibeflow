@@ -316,22 +316,20 @@ function validateTransition(
     ]);
     return validateSelection(value, current, lineage);
   }
-  if (value.kind === "child-commit") {
-    assertExactAuthorityWrapper(value, [
-      "approval",
-      "action_plan",
-      "dispatch",
-      "kind",
-      "operation",
-      "operation_events",
-      "prior_head",
-      "proposal",
-      "reservation",
-      "revision_plan",
-    ]);
-    return validateChildCommit(value, current, lineage);
-  }
-  throw new Error("invalid lineage head transition kind");
+  if (value.kind !== "child-commit") throw new Error("invalid lineage head transition kind");
+  assertExactAuthorityWrapper(value, [
+    "approval",
+    "action_plan",
+    "dispatch",
+    "kind",
+    "operation",
+    "operation_events",
+    "prior_head",
+    "proposal",
+    "reservation",
+    "revision_plan",
+  ]);
+  return validateChildCommit(value, current, lineage);
 }
 
 export function validateLineageHeadAuthorityChain(

@@ -31,6 +31,7 @@ export class AttemptRuntime {
     live: AttemptConversationAuthority,
     operation: RegisteredOperation,
     plan: RevisionPreparationPlanV1,
+    authorityOperationId: string,
   ): Promise<boolean> {
     if (!this.options.revisionLanes) throw new Error("revision lane authority is absent");
     return startInitialRevisionLaneBarrier({
@@ -39,6 +40,7 @@ export class AttemptRuntime {
       live,
       operation,
       plan,
+      authorityOperationId,
     });
   }
   launch(
@@ -141,6 +143,14 @@ export class AttemptRuntime {
       materialized.spawn.rendered_prompt,
       live.manifest.task_text,
       deliveredPrompt,
+      {
+        purpose: request.purpose,
+        proposeAction:
+          request.purpose !== "baseline" &&
+          request.purpose !== "evaluator" &&
+          manifestBinding.input.roleRef !== "brainstorm-evaluator" &&
+          manifestBinding.host_tools?.includes("propose_action") === true,
+      },
     );
     const spawn = createSpawnOptionsProjection({
       ...materialized.spawn,

@@ -251,4 +251,36 @@ describe("vf chat", () => {
       process.stdout.write = write;
     }
   });
+
+  test("fresh production create routes through durable Home create compatibility", async () => {
+    let seen: Record<string, unknown> | undefined;
+    const code = await chat(["--policy", "plan", "draft", "a", "plan"], {
+      durable: {
+        create: async (input) => {
+          seen = input as unknown as Record<string, unknown>;
+          return {
+            conversation_id: "conversation-1",
+            conversationId: "conversation-1",
+            revision_id: "revision-1",
+            revisionId: "revision-1",
+            artifact_refs: ["artifact-plan"],
+            artifactRefs: ["artifact-plan"],
+            status: "awaiting_approval",
+            output: "",
+            events: [],
+          };
+        },
+        message: async () => {
+          throw new Error("unexpected durable message call");
+        },
+      },
+    });
+    expect(code).toBe(0);
+    expect(seen).toMatchObject({
+      request: {
+        topic: "draft a plan",
+        policy: "plan",
+      },
+    });
+  });
 });

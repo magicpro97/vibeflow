@@ -1,3 +1,4 @@
+import type { BrowserHostActionRequestV1 } from "../../actions/index.js";
 import type { AgentBinding, ResolvedAgentBinding } from "../../agents/binding.js";
 import type { Engine } from "../../core/types.js";
 import type { EngineChunk, EngineSessionResult } from "../../dispatch/session-types.js";
@@ -19,6 +20,7 @@ import type {
   AgentSocialIntentRequestV1,
   PublicQuoteReferenceV1,
 } from "./conversation-interaction-types.js";
+import type { PublicConversationMessageQueueInvalidationV1 } from "./conversation-message-queue-records.js";
 import type { PrivateFileRangeHandoffBindingV1 } from "./private-file-range-staging-store.js";
 import type {
   ConversationTurnPreparationRequestV1,
@@ -32,7 +34,6 @@ export type {
   ConversationLifecycle,
   TerminalLifecycle,
 };
-
 declare const attemptRefBrand: unique symbol;
 export type AttemptRef = string & { readonly [attemptRefBrand]: "AttemptRef" };
 declare const conversationArtifactRefBrand: unique symbol;
@@ -135,6 +136,11 @@ export interface ConversationContext {
     response_event_id: string;
     request: AgentSocialIntentRequestV1;
   }): { accepted: boolean; diagnostic_code: string | null };
+  stageActionCandidate(input: {
+    participant_id: string;
+    response_idempotency_key: string;
+    candidate: unknown;
+  }): { accepted: boolean; diagnostic_code: string | null };
   emit(emission: CoordinatorEmission): Promise<StoredTraceEvent>;
   launchAttempt(request: PolicyAttemptRequest): PolicyAttempt;
   createArtifact(request: ArtifactCreateRequest): Promise<ArtifactCreateResult>;
@@ -155,6 +161,15 @@ export interface ConversationPolicy {
 export interface ConversationBinding {
   participant_id: string;
   input: AgentBinding;
+  /** Host-owned tools are independent of native CLI tools and are denied when omitted. */
+  host_tools?: ConversationHostToolV1[];
+}
+
+export type ConversationHostToolV1 = "propose_action";
+
+export interface BrowserHostActionCandidateV1 {
+  schema_version: "1.0";
+  candidate: BrowserHostActionRequestV1;
 }
 
 /** Private conversation index record; it deliberately stores no materialized spawn projection. */
@@ -244,6 +259,7 @@ export interface ConversationCreateParticipant {
   role_ref: string;
   engine: string;
   model?: string;
+  host_tools?: ConversationHostToolV1[];
 }
 
 export interface ConversationCreateRequest {
@@ -379,5 +395,6 @@ export interface ConversationService {
 export type ConversationSseFrame =
   | { id: string; event: "trace"; data: PublicStoredTraceEvent }
   | { id: string; event: "snapshot"; data: ConversationSnapshot }
+  | { event: "message-queue-invalidated"; data: PublicConversationMessageQueueInvalidationV1 }
   | { event: "error"; data: { code: string; message: string } }
   | { event: "heartbeat"; data: "" };

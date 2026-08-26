@@ -24,8 +24,12 @@ export class ConversationContinuationRuntime {
 
   constructor(
     private readonly runtime: ConversationRuntime,
-    private readonly options: Pick<ConversationRuntimeOptions, "artifactStore" | "policies">,
+    private readonly options: Pick<
+      ConversationRuntimeOptions,
+      "artifactStore" | "policies" | "agentActionCandidates"
+    >,
     private readonly finalize: FinalizeResult,
+    private readonly onSettled: (conversationId: string) => void = () => undefined,
   ) {}
 
   start(id: string, decision: ApprovalDecision): void {
@@ -87,6 +91,8 @@ export class ConversationContinuationRuntime {
         artifact_refs: [],
       });
       this.runtime.finish(id);
+      await this.options.agentActionCandidates?.flush(id).catch(() => undefined);
+      this.onSettled(id);
     } catch {
       // Keep live authority when failure evidence cannot be appended durably.
     }
@@ -108,6 +114,8 @@ export class ConversationContinuationRuntime {
     result = await this.finalize(manifest, operationId, result);
     if (result.status === "awaiting_approval") return true;
     this.runtime.finish(id);
+    await this.options.agentActionCandidates?.flush(id).catch(() => undefined);
+    this.onSettled(id);
     return false;
   }
 }

@@ -1,5 +1,27 @@
 export class ConversationRevisionConflictError extends Error {
-  override readonly name = "ConversationRevisionConflictError";
+  override readonly name: string = "ConversationRevisionConflictError";
+}
+
+export class ConversationRevisionInactiveHeadError extends ConversationRevisionConflictError {
+  override readonly name = "ConversationRevisionInactiveHeadError";
+  readonly code = "inactive_lineage_head" as const;
+
+  constructor() {
+    super("conversation is not the active lineage head");
+  }
+}
+
+export class ConversationRevisionNotStableTerminalError extends ConversationRevisionConflictError {
+  override readonly name = "ConversationRevisionNotStableTerminalError";
+  readonly code = "not_stable_terminal" as const;
+
+  constructor() {
+    super("conversation is not stable terminal");
+  }
+}
+
+export class ConversationRevisionCandidateInvalidError extends Error {
+  override readonly name = "ConversationRevisionCandidateInvalidError";
 }
 
 export class ConversationRevisionCorruptError extends Error {

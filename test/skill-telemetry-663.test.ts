@@ -266,21 +266,21 @@ describe("bounded retention", () => {
 });
 
 describe("skills telemetry command", () => {
-  function run(rest: string[]): number {
+  async function run(rest: string[]): Promise<number> {
     const orig = process.cwd();
     process.chdir(base);
     try {
-      return skills("telemetry", rest);
+      return await skills("telemetry", rest);
     } finally {
       process.chdir(orig);
     }
   }
 
-  test("empty log prints friendly message, exit 0", () => {
-    expect(run([])).toBe(0);
+  test("empty log prints friendly message, exit 0", async () => {
+    expect(await run([])).toBe(0);
   });
 
-  test("with data prints summary including available-unverified, exit 0", () => {
+  test("with data prints summary including available-unverified, exit 0", async () => {
     append({
       command: "cmd1",
       skillsUsed: ["s1", "s2"],
@@ -288,23 +288,23 @@ describe("skills telemetry command", () => {
       skillsAvailableUnverified: ["u1"],
     });
     append({ command: "cmd2", skillsUsed: ["s1"], skillsMissing: ["m2"] });
-    expect(run([])).toBe(0);
+    expect(await run([])).toBe(0);
   });
 });
 
 describe("skills resolve emits telemetry", () => {
-  function resolve(): number {
+  async function resolve(): Promise<number> {
     const orig = process.cwd();
     process.chdir(base);
     try {
-      return skills("resolve", []);
+      return await skills("resolve", []);
     } finally {
       process.chdir(orig);
     }
   }
 
-  test("resolve appends a telemetry record", () => {
-    resolve();
+  test("resolve appends a telemetry record", async () => {
+    await resolve();
     const events = read();
     expect(events.length).toBeGreaterThanOrEqual(1);
     const last = events[events.length - 1];

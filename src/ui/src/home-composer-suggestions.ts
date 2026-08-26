@@ -59,6 +59,15 @@ export function matchHomeComposerSuggestions(
         value: `@${participant.participant_id} `,
       }))
       .filter((row) => row.value.toLowerCase().includes(value.toLowerCase()));
+  if ((value === "-" || value.startsWith("-@")) && !value.includes(" "))
+    return participants
+      .map((participant) => ({
+        glyph: "−",
+        label: `Remove ${participant.role_ref}`,
+        description: `${participant.engine}${participant.model ? ` · ${participant.model}` : ""}`,
+        value: `-@${participant.participant_id}`,
+      }))
+      .filter((row) => row.value.toLowerCase().includes(value.toLowerCase()));
   if (value.startsWith("/") && !value.includes(" "))
     return COMMAND_SUGGESTIONS.filter((row) => row.value.startsWith(value.toLowerCase()));
   return [];

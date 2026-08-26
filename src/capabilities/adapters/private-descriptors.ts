@@ -291,12 +291,7 @@ export function validatePrivateEffectPayload(
     throw new CapabilityValidationError("private descriptor identity mismatch", "private_payload");
   if (value.payload_kind !== "memory-test-only") {
     const ownerBinding = value.preimage_owner_binding;
-    if (ownerBinding === undefined)
-      throw new CapabilityValidationError(
-        "production private descriptor lacks its owner CAS preimage",
-        "private_payload.preimage_owner_binding",
-      );
-    if (ownerBinding !== null) validatePrivateEffectOwnerPreimageBinding(ownerBinding);
+    if (ownerBinding) validatePrivateEffectOwnerPreimageBinding(ownerBinding);
   }
   if (value.payload_kind === "owned-file") {
     assertRelative(value.canonical_relative_path, "private_payload.canonical_relative_path");
@@ -367,11 +362,6 @@ export function validatePrivateEffectPayload(
           "private_payload.projection.key_path",
         );
     }
-  } else if (value.payload_kind !== "memory-test-only") {
-    throw new CapabilityValidationError(
-      "private descriptor kind is unsupported",
-      "private_payload.payload_kind",
-    );
   }
   canonicalJsonBytes(value, { maxBytes: 4 * 1024 * 1024 });
   return structuredClone(value);

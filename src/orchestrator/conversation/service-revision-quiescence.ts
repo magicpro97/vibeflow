@@ -7,8 +7,8 @@ export function revisionQuiescenceReader(
   retries: Pick<RevisionLaneRetryRuntime, "isQuiescent"> | null,
   initial: Pick<InitialRevisionLaneAuthority, "isQuiescent"> | null,
 ) {
-  return (conversationId: string, operationId: string): boolean =>
+  return (conversationId: string, revisionOperationId: string | null): boolean =>
     runtime.operationId(conversationId) === null &&
-    (retries?.isQuiescent(operationId) ?? true) &&
-    (initial?.isQuiescent(operationId) ?? true);
+    (revisionOperationId === null || (retries?.isQuiescent(revisionOperationId) ?? true)) &&
+    (revisionOperationId === null || (initial?.isQuiescent(revisionOperationId) ?? true));
 }

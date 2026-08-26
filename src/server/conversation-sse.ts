@@ -4,6 +4,7 @@ import {
   publicActionError,
 } from "../actions/errors.js";
 import { canonicalJsonBytes, digestV1 } from "../durability/index.js";
+import type { PublicConversationMessageQueueInvalidationV1 } from "../orchestrator/conversation/conversation-message-queue-records.js";
 import type {
   ConversationListener,
   ConversationService,
@@ -13,6 +14,9 @@ import type {
 } from "../orchestrator/conversation/types.js";
 import type { PublicStoredTraceEvent } from "../orchestrator/trace/types.js";
 
+const QUEUE_ITEM_ID = /^vf-queued-message-[0-9a-f]{64}$/;
+const SHA256 = /^sha256:[0-9a-f]{64}$/;
+
 export interface ConversationStreamAuthorizer {
   authorize(conversationId: string, token: string): boolean;
 }
@@ -21,6 +25,13 @@ export interface ConversationSseAuthority {
   service: ConversationService;
   tokens: ConversationStreamAuthorizer;
   heartbeatMs?: number;
+  messageQueue?: {
+    rootSessionId(conversationId: string): string | null;
+    subscribe(
+      rootSessionId: string,
+      listener: (event: PublicConversationMessageQueueInvalidationV1) => void,
+    ): Unsubscribe | null;
+  };
 }
 
 export type ConversationCursorResult =
@@ -89,6 +100,23 @@ function httpError(
 
 function validEvent(event: PublicStoredTraceEvent, id: string): boolean {
   return event.conversation_id === id && Number.isSafeInteger(event.seq) && event.seq > 0;
+}
+
+function validQueueInvalidation(
+  event: PublicConversationMessageQueueInvalidationV1,
+  rootSessionId: string,
+): boolean {
+  return (
+    Object.keys(event).sort().join("\0") ===
+      ["item_digest", "queue_item_id", "root_session_id", "schema_version", "state"]
+        .sort()
+        .join("\0") &&
+    event.schema_version === "1.0" &&
+    event.root_session_id === rootSessionId &&
+    QUEUE_ITEM_ID.test(event.queue_item_id) &&
+    ["queued", "claimed", "delivered", "stale"].includes(event.state) &&
+    SHA256.test(event.item_digest)
+  );
 }
 
 function snapshotFrame(value: ConversationSnapshot): ConversationSseFrame {
@@ -164,16 +192,24 @@ export async function handleConversationSse(
       let active = true;
       let lastSeq = parsed.cursor;
       let unsubscribe: Unsubscribe | null = null;
+      let unsubscribeQueue: Unsubscribe | null = null;
       let timer: ReturnType<typeof setInterval> | null = null;
       const pending = new Map<number, PublicStoredTraceEvent>();
       const onAbort = () => cleanup();
       const release = () => {
         const current = unsubscribe;
+        const currentQueue = unsubscribeQueue;
         unsubscribe = null;
+        unsubscribeQueue = null;
         try {
           current?.();
         } catch {
           // Cleanup remains exact and closes the stream even for a faulty adapter.
+        }
+        try {
+          currentQueue?.();
+        } catch {
+          // Queue invalidations are hints; cleanup still closes the stream exactly once.
         }
       };
       cleanup = () => {
@@ -219,6 +255,14 @@ export async function handleConversationSse(
       }
       try {
         unsubscribe = authority.service.subscribe(conversationId, listener, parsed.cursor);
+        const rootSessionId = authority.messageQueue?.rootSessionId(conversationId) ?? null;
+        if (rootSessionId) {
+          unsubscribeQueue =
+            authority.messageQueue?.subscribe(rootSessionId, (event) => {
+              if (!active || !validQueueInvalidation(event, rootSessionId)) return;
+              enqueue({ event: "message-queue-invalidated", data: structuredClone(event) });
+            }) ?? null;
+        }
       } catch {
         enqueue({
           event: "error",

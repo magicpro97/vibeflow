@@ -1,6 +1,8 @@
 // `vf verify` + `detectToolchain` — engine/toolchain detection. Pure detection: no MCP, no installs.
 
 import { spawnSync as _spawnSync } from "node:child_process";
+import { ENGINES, type Engine } from "../core.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { checkReviewEvidence, defaultGit } from "../hooks/review-evidence.js";
 import {
   verifyLockMirrorCompleteness,
@@ -98,13 +100,20 @@ export function parseGoalScore(raw: string): number | undefined {
 /** ADR-003 phase 2: real LLM eval via VIBEFLOW_AI bridge. Fail-open when bridge not set. */
 export async function defaultGoalEvalFn(
   goal: string,
-  _spawn = _spawnSync,
+  inject: {
+    gitSpawn?: typeof _spawnSync;
+    ownedRoute?: OwnedAiRouteRunner;
+    engine?: Engine;
+    cwd?: string;
+  } = {},
 ): Promise<{ covered: boolean; uncovered: string[]; score?: number }> {
+  const gitSpawn = inject.gitSpawn ?? _spawnSync;
+  const cwd = inject.cwd ?? process.cwd();
   const diff = (() => {
     try {
-      const r = _spawn("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
+      const r = gitSpawn("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
         encoding: "utf8",
-        cwd: process.cwd(),
+        cwd,
       });
       return (r.stdout ?? "").slice(0, 3000);
     } catch {
@@ -115,12 +124,22 @@ export async function defaultGoalEvalFn(
   const bridge = process.env.VIBEFLOW_AI;
   if (!bridge) return { covered: true, uncovered: [] };
   try {
-    const parts = bridge.split(" ");
-    const r = _spawn(parts[0] ?? "", [...parts.slice(1), prompt], {
-      encoding: "utf8",
-      timeout: 30000,
+    const configured = process.env.VF_REVIEW_ENGINE;
+    const engine =
+      inject.engine ??
+      ((configured && (ENGINES as readonly string[]).includes(configured)
+        ? configured
+        : ENGINES[0]) as Engine);
+    const r = await (inject.ownedRoute ?? runOwnedAiRoute)({
+      engine,
+      command: bridge,
+      input: prompt,
+      cwd,
+      shell: true,
+      timeoutMs: 30_000,
     });
-    const raw = (r.stdout ?? "").trim();
+    if (r.status !== 0) return { covered: true, uncovered: [] };
+    const raw = r.stdout.trim();
     const covered = /^COVERED/i.test(raw);
     return { covered, uncovered: covered ? [] : [raw.slice(0, 500)], score: parseGoalScore(raw) };
   } catch {

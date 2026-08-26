@@ -230,7 +230,7 @@ function capabilityCommand(positionals: string[]):
     kind: "mutation",
     command,
     packageId,
-    directFlagNames: capabilityDirectFlagNames(first),
+    directFlagNames: capabilityDirectFlagNames(command),
     consumedCommandWords: 1,
   };
 }
@@ -253,35 +253,35 @@ function directCapabilityMutation(
   return command;
 }
 
-function capabilityDirectFlagNames(first: string | undefined): readonly string[] {
-  switch (first) {
-    case "install":
-      return ["package-pin-digest", "for", "scope", "set", "private", "idempotency-key"];
-    case "update":
-      return [
-        "package-pin-digest",
-        "scope",
-        "for",
-        "from-generation-id",
-        "set",
-        "private",
-        "idempotency-key",
-      ];
-    case "configure":
-      return ["scope", "set", "private", "idempotency-key"];
-    case "retarget":
-      return ["for", "scope", "idempotency-key"];
-    case "remove":
-      return ["scope", "cascade", "idempotency-key"];
-    case "rollback":
-      return ["generation-id", "scope", "idempotency-key"];
-    case "repair":
-      return ["scope", "idempotency-key"];
-    case "adopt":
-      return ["scope", "candidate-id", "candidate-digest", "idempotency-key"];
-    default:
-      return ["idempotency-key"];
-  }
+function capabilityDirectFlagNames(
+  command: ParsedCapabilityDirectMutationV1["command"],
+): readonly string[] {
+  const names = {
+    "capability.install": [
+      "package-pin-digest",
+      "for",
+      "scope",
+      "set",
+      "private",
+      "idempotency-key",
+    ],
+    "capability.update": [
+      "package-pin-digest",
+      "scope",
+      "for",
+      "from-generation-id",
+      "set",
+      "private",
+      "idempotency-key",
+    ],
+    "capability.configure": ["scope", "set", "private", "idempotency-key"],
+    "capability.retarget": ["for", "scope", "idempotency-key"],
+    "capability.remove": ["scope", "cascade", "idempotency-key"],
+    "capability.rollback": ["generation-id", "scope", "idempotency-key"],
+    "capability.repair": ["scope", "idempotency-key"],
+    "capability.adopt": ["scope", "candidate-id", "candidate-digest", "idempotency-key"],
+  } satisfies Record<ParsedCapabilityDirectMutationV1["command"], readonly string[]>;
+  return names[command];
 }
 
 function ensureNoMutationFlags(raw: ReturnType<typeof scanRawFlags>): void {

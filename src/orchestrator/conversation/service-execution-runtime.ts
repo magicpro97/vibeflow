@@ -46,7 +46,12 @@ export class ConversationExecutionRuntime {
         result,
       };
     } finally {
-      if (!keepLive) this.runtime.finish(manifest.conversation_id);
+      if (!keepLive) {
+        this.runtime.finish(manifest.conversation_id);
+        await this.options.agentActionCandidates
+          ?.flush(manifest.conversation_id)
+          .catch(() => undefined);
+      }
     }
   }
 

