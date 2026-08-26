@@ -102,18 +102,17 @@ VF-REGISTRY-PACKAGE-SIGNATURE VF-HANDOFF/1
     ).toBeGreaterThan(1);
   });
 
-  test("captures the previously missed live design clauses at lines 612, 3067, and 3073", () => {
+  test("captures without and SHA256 candidates from their exact live design clauses", () => {
     const design = readFileSync(CAPABILITY_DESIGN_PATH, "utf8");
     const atoms = extractNormativeAtoms(design);
-    const line612 = atoms.find((atom) => atom.source_line_start === 612);
-    expect(line612?.source_quote).toContain("without clearing the draft");
-    expect(line612?.candidates.some((candidate) => candidate.quote === "without")).toBe(true);
-    for (const line of [3067, 3073]) {
-      expect(
-        atoms
-          .find((atom) => atom.source_line_start === line)
-          ?.candidates.some((candidate) => candidate.quote === "SHA256"),
-      ).toBe(true);
+    for (const [quote, candidate] of [
+      ["without clearing the draft", "without"],
+      ["SHA256(fileBytes)", "SHA256"],
+      ["SHA256(treePreimage)", "SHA256"],
+    ] as const) {
+      const atom = atoms.find(({ source_quote }) => source_quote.includes(quote));
+      expect(atom?.source_quote).toContain(quote);
+      expect(atom?.candidates.some(({ quote }) => quote === candidate)).toBe(true);
     }
   });
 });

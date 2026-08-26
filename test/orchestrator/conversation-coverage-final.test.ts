@@ -44,6 +44,7 @@ import { registeredOperation } from "../../src/orchestrator/conversation/registe
 import { configurationEnvelope } from "../../src/orchestrator/conversation/restart-authority.js";
 import { ReviewConversationPolicy } from "../../src/orchestrator/conversation/review-policy.js";
 import { policyDryRun } from "../../src/orchestrator/conversation/services.js";
+import { prepareConversationTurn } from "../../src/orchestrator/conversation/turn-delivery.js";
 import type {
   AttemptRef,
   ConversationArtifactRef,
@@ -289,6 +290,19 @@ function policyContext(overrides: Record<string, unknown> = {}): ConversationCon
     ],
     signal: new AbortController().signal,
     messages: async () => [],
+    prepareTurn: (request: Parameters<ConversationContext["prepareTurn"]>[0]) =>
+      Promise.resolve(
+        prepareConversationTurn({
+          conversation_id: correlation.conversation_id,
+          revision_id: correlation.revision_id,
+          request,
+          events: [],
+          resume: null,
+          prior_delivery: undefined,
+          observed_after_public_seq: 0,
+          shared_handoff: null,
+        }),
+      ),
     emit: async (emission: PolicyEmission) => stored(1, emission.event),
     launchAttempt: () => {
       throw new Error("not used");

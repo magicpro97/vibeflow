@@ -1,13 +1,24 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MaterializedAgentBinding, PreviewAgentBinding } from "../../src/agents/binding.js";
+import type {
+  MaterializeAgentBindingOptions,
+  MaterializedAgentBinding,
+} from "../../src/agents/binding.js";
 import type { WorkUnit } from "../../src/core.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
-import { createSpawnOptionsProjection } from "../../src/dispatch/session-types.js";
-import { createConversationBootstrap } from "../../src/orchestrator/conversation/bootstrap.js";
+import {
+  type EngineProcess,
+  createSpawnOptionsProjection,
+} from "../../src/dispatch/session-types.js";
+import { defaultConversationIsolationAuthority } from "../../src/orchestrator/conversation/bootstrap-isolation.js";
+import {
+  type ConversationBootstrapOptions,
+  createConversationBootstrap,
+} from "../../src/orchestrator/conversation/bootstrap.js";
 import { OrchestrateConversationPolicy } from "../../src/orchestrator/conversation/orchestrate-policy.js";
 import { PlanConversationPolicy } from "../../src/orchestrator/conversation/plan-policy.js";
 import {
@@ -33,10 +44,42 @@ const artifact = (ref = "vf-artifact-plan") => ({
   ref,
 });
 
-function materializedBinding(): MaterializedAgentBinding {
+function completedCodexProcess(): EngineProcess {
+  const output = new TextEncoder().encode(
+    `${JSON.stringify({
+      type: "thread.started",
+      thread_id: "019f278f-d7ff-77d3-9c44-7459bbf08d19",
+    })}\n`,
+  );
+  return {
+    stdin: null,
+    stdout: new ReadableStream({
+      start(controller) {
+        controller.enqueue(output);
+        controller.close();
+      },
+    }),
+    stderr: null,
+    exited: Promise.resolve(0),
+    kill: () => undefined,
+  };
+}
+
+function initializedTestRepo(root: string): string {
+  const repo = join(root, "repo");
+  execFileSync("git", ["init", "--quiet", repo]);
+  execFileSync("git", ["-C", repo, "config", "user.email", "test@example.com"]);
+  execFileSync("git", ["-C", repo, "config", "user.name", "VibeFlow Test"]);
+  execFileSync("git", ["-C", repo, "commit", "--quiet", "--allow-empty", "-m", "fixture"]);
+  return repo;
+}
+
+function materializedBinding(options: MaterializeAgentBindingOptions): MaterializedAgentBinding {
+  if (!options.isolation) throw new Error("test binder requires canonical isolation");
   const roleHash = "a".repeat(64);
-  const provenance = { roleSource: "builtin" as const, roleHash, skillHashes: [] };
-  const traceMetadata = { role_resolved_hash: roleHash, skill_resolved_hashes: [] };
+  const skillHash = "b".repeat(64);
+  const provenance = { roleSource: "builtin" as const, roleHash, skillHashes: [skillHash] };
+  const traceMetadata = { role_resolved_hash: roleHash, skill_resolved_hashes: [skillHash] };
   const envPolicy = conversationEnvPolicy("codex");
   const resolved = {
     role: {
@@ -52,14 +95,14 @@ function materializedBinding(): MaterializedAgentBinding {
       resolved_hash: roleHash,
       metadata: {},
     },
-    skills: [],
+    skills: [{ ref: "repo-law", source: "repo" as const, version: null, resolved_hash: skillHash }],
     engine: "codex" as const,
     model: "gpt-5.4",
     sessionMode: "fresh" as const,
     tool_intents: ["read" as const],
     sandbox: "read-only" as const,
     env_policy: envPolicy,
-    isolation: null,
+    isolation: options.isolation,
     provenance,
     trace_metadata: traceMetadata,
   };
@@ -70,10 +113,10 @@ function materializedBinding(): MaterializedAgentBinding {
       model: "gpt-5.4",
       sessionMode: "fresh",
       rendered_prompt: "answer directly",
-      rendered_tools: ["read"],
+      rendered_tools: [],
       sandbox: "read-only",
       env_policy: envPolicy,
-      isolation: null,
+      isolation: options.isolation,
       provenance,
       trace_metadata: traceMetadata,
     }),
@@ -1289,27 +1332,36 @@ test("orchestrate policy delegates approval continuation without a second author
 test("bootstrap creates one shared authority set and registers every built-in policy", async () => {
   const root = await mkdtemp(join(tmpdir(), "vf-conversation-bootstrap-"));
   try {
+    const repo = initializedTestRepo(root);
     const counters = new Map<string, number>();
     const revisions: string[] = [];
-    const bootstrap = createConversationBootstrap({
-      repoRoot: process.cwd(),
-      stateDir: join(root, "state"),
-      readiness: () => [{ engine: "codex", ready: true, admitted: true }],
-      bindingFactory: {
-        materialize: () => materializedBinding(),
-        preview: () => {
-          throw new Error("preview is not used by this execution test");
-        },
-      } as unknown as {
-        materialize: () => MaterializedAgentBinding;
-        preview: () => PreviewAgentBinding;
+    let spawnCount = 0;
+    const bindingFactory = {
+      materialize: (_binding, options) => materializedBinding(options),
+      preview: () => {
+        throw new Error("preview is not used by this execution test");
       },
+    } as ConversationBootstrapOptions["bindingFactory"];
+    const bootstrap = createConversationBootstrap({
+      repoRoot: repo,
+      stateDir: join(root, "state"),
+      phase: 3,
+      readiness: () => [{ engine: "codex", ready: true, admitted: true }],
+      bindingFactory,
+      isolationAuthority: defaultConversationIsolationAuthority,
       id: (kind) => {
         const next = (counters.get(kind) ?? 0) + 1;
         counters.set(kind, next);
         return `${kind}-${next}`;
       },
       schedule: (task) => task(),
+      session: {
+        sourceEnv: { PATH: process.env.PATH ?? "/usr/bin" },
+        spawn: () => {
+          spawnCount += 1;
+          return completedCodexProcess();
+        },
+      },
       reviewEvidenceAuthority: {
         currentHead: async () => "a".repeat(40),
         checkWorktree: cleanWorktree,
@@ -1396,6 +1448,7 @@ test("bootstrap creates one shared authority set and registers every built-in po
       childEvents = await bootstrap.service.events(revised.child_conversation_id, 0);
     }
     expect(revisions).toEqual(["Revise the rollout section"]);
+    expect(spawnCount).toBe(1);
     expect(childEvents?.some(({ event }) => event.type === "artifact_updated")).toBe(true);
     expect(childEvents?.some(({ event }) => event.type === "approval_requested")).toBe(true);
   } finally {

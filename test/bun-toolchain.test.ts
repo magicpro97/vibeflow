@@ -35,10 +35,10 @@ describe("Bun toolchain policy", () => {
 
   test("exposes Bun 1.4 isolated worker-process test parallelism without dropping the stable gate", () => {
     expect(packageJson.scripts?.test).toBe(
-      "bun test --timeout 30000 test/coverage-anti-patterns.test.ts && bun test --timeout 30000",
+      "bun test --timeout 30000 test/coverage-anti-patterns.test.ts && bun test --timeout 30000 --path-ignore-patterns='e2e/**'",
     );
     expect(packageJson.scripts?.["test:parallel"]).toBe(
-      "bun test --timeout 30000 test/coverage-anti-patterns.test.ts && bun test --timeout 30000 --parallel=4",
+      "bun test --timeout 30000 test/coverage-anti-patterns.test.ts && bun test --timeout 30000 --parallel=4 --path-ignore-patterns='e2e/**'",
     );
   });
 });

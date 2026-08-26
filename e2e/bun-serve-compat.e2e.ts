@@ -227,7 +227,7 @@ test.describe("Node Bun.serve compatibility", () => {
 
   test("survives a late text response after disconnect on exact Node 18.0.0", async () => {
     const node18 = process.env.VF_NODE18_BIN;
-    test.skip(!node18, "set VF_NODE18_BIN to the exact Node 18.0.0 binary");
+    if (!node18) throw new Error("VF_NODE18_BIN must name the exact Node 18.0.0 binary");
     const probe = spawnSync(node18, ["--experimental-fetch", "--input-type=module"], {
       cwd: process.cwd(),
       encoding: "utf8",

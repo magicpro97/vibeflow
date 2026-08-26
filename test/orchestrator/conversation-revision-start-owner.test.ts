@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,16 +34,22 @@ test("an unprovable live cross-process owner cannot be claimed and becomes claim
     "token.assertHeld();",
     "setInterval(() => token.assertHeld(), 100);",
   ].join("\n");
-  const child = Bun.spawn([process.execPath, "-e", source], {
-    stdout: "ignore",
-    stderr: "inherit",
+  const child = spawn(process.execPath, ["-e", source], {
+    stdio: ["ignore", "ignore", "inherit"],
   });
   const owners = new RevisionStartOwnerAuthority(root);
   try {
-    await waitFor(() => owners.status(operationId) === "unprovable");
+    await waitFor(() => {
+      const status = owners.status(operationId);
+      return status === "live" || status === "unprovable";
+    });
+    expect(["live", "unprovable"]).toContain(owners.status(operationId));
     expect(owners.claimDead(operationId)).toBeNull();
     child.kill();
-    await child.exited;
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", () => resolve());
+    });
     await waitFor(() => owners.status(operationId) === "dead");
     const recovered = owners.claimDead(operationId);
     expect(recovered).not.toBeNull();

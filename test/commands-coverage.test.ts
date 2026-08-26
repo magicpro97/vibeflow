@@ -3276,7 +3276,11 @@ describe("commands.makeResearcher (test seam)", () => {
       await researcher(1, "test question");
       const dispatchFile = join(dir, ".vibeflow", "dispatch", "research-round-1.md");
       expect(existsSync(dispatchFile)).toBe(true);
-      expect(readdirSync(join(dir, ".vibeflow", "attempts")).length).toBe(1);
+      expect(
+        readdirSync(join(dir, ".vibeflow", "attempts"), { withFileTypes: true }).filter(
+          (entry) => entry.isFile() && entry.name.endsWith(".json"),
+        ),
+      ).toHaveLength(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

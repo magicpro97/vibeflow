@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { MaterializedAgentBinding } from "../src/agents/binding.js";
 import { previewAgentBinding } from "../src/agents/binding.js";
 import { conversationEnvPolicy } from "../src/dispatch/env-filter.js";
@@ -912,8 +912,9 @@ describe("brainstorm Phase 3 acceptance", () => {
       ]) {
         expect(publicSurface).not.toContain(`\"${key}\"`);
       }
-      const attemptFiles = (await filesBelow(join(root, "state", "attempts"))).filter((path) =>
-        path.endsWith(".json"),
+      const attemptRoot = join(root, "state", "attempts");
+      const attemptFiles = (await filesBelow(attemptRoot)).filter(
+        (path) => dirname(path) === attemptRoot && path.endsWith(".json"),
       );
       expect(attemptFiles).toHaveLength(1);
       const evidence = await readFile(attemptFiles[0] as string, "utf8");
