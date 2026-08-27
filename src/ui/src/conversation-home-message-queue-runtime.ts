@@ -284,16 +284,20 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
     const rootSessionId = input.activeRootId.value;
     if (!rootSessionId) return;
     const retainedForRetry = admissions.goOffline(rootSessionId);
-    if (input.editSaving.value) {
-      input.edit.value = null;
+    const interruptedEdit = input.editSaving.value;
+    if (interruptedEdit) {
+      editController?.controller.abort();
       input.editSaving.value = false;
       editToken = null;
       editController = null;
+      input.sendAsNew.value = false;
     }
     announce(
-      retainedForRetry
-        ? "Connection lost. Unacknowledged text remains in Message queue and will reconcile after refresh."
-        : "Connection lost. Unacknowledged text remains an inert draft.",
+      interruptedEdit
+        ? "Connection lost. The queued edit remains bound and will reconcile before it can be sent as new."
+        : retainedForRetry
+          ? "Connection lost. Unacknowledged text remains in Message queue and will reconcile after refresh."
+          : "Connection lost. Unacknowledged text remains an inert draft.",
     );
   }
 

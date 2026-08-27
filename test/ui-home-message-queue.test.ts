@@ -817,6 +817,84 @@ describe("Home durable message queue", () => {
     }
   });
 
+  test("offline aborts an ambiguous edit and preserves its CAS binding through reconnect", async () => {
+    const originalEdit = conversationHomeApi.editQueuedMessage;
+    const originalEnqueue = conversationHomeApi.enqueueMessage;
+    const firstResponse = deferred<HomeQueuedMessage>();
+    const queued = item(1, "before");
+    const committed = item(1, "after", {
+      content_digest: digest("e"),
+      item_digest: digest("d"),
+      updated_at: "2026-08-26T00:00:01.000Z",
+    });
+    const requests: HomeEditQueuedMessageRequest[] = [];
+    const signals: Array<AbortSignal | undefined> = [];
+    let enqueueCalls = 0;
+    conversationHomeApi.editQueuedMessage = ((_root, _itemId, request, signal) => {
+      requests.push(structuredClone(request));
+      signals.push(signal);
+      if (requests.length === 1) return firstResponse.promise;
+      return Promise.reject(
+        new ConversationHomeApiError(409, {
+          code: "queued_message_not_editable",
+          message: "That queued message changed before the edit could commit.",
+          retryable: false,
+          recovery_action: "send-as-new",
+          details: {
+            root_session_id: "root-a",
+            queue_item_id: queued.queue_item_id,
+            state: "queued",
+            item_digest: committed.item_digest,
+          },
+        }),
+      );
+    }) as typeof conversationHomeApi.editQueuedMessage;
+    conversationHomeApi.enqueueMessage = (async () => {
+      enqueueCalls += 1;
+      throw new Error("an unresolved edit must not become an ordinary admission");
+    }) as typeof conversationHomeApi.enqueueMessage;
+    const fx = harness();
+    try {
+      fx.runtime.adoptSnapshot(snapshot("root-a", [queued]), "root-a");
+      expect(fx.runtime.beginEdit()).toBeTrue();
+      fx.draft.value = "after";
+      const saving = fx.runtime.saveEdit();
+      expect(fx.editSaving.value).toBeTrue();
+      expect(signals[0]?.aborted).toBeFalse();
+
+      fx.runtime.goOffline();
+      expect(signals[0]?.aborted).toBeTrue();
+      expect(fx.editSaving.value).toBeFalse();
+      expect(fx.edit.value).toMatchObject({
+        queue_item_id: queued.queue_item_id,
+        item_digest: queued.item_digest,
+      });
+      expect(fx.sendAsNew.value).toBeFalse();
+      expect(fx.draft.value).toBe("after");
+      expect(fx.announcement.value).toContain("remains bound");
+
+      firstResponse.resolve(committed);
+      expect(await saving).toBeFalse();
+      expect(fx.edit.value?.item_digest).toBe(queued.item_digest);
+
+      expect(await fx.runtime.saveEdit()).toBeFalse();
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toMatchObject({
+        expected_item_digest: queued.item_digest,
+        content: "after",
+      });
+      expect(enqueueCalls).toBe(0);
+      expect(fx.edit.value).toBeNull();
+      expect(fx.sendAsNew.value).toBeTrue();
+      expect(fx.refreshes()).toBe(1);
+    } finally {
+      fx.runtime.dispose();
+      fx.activation.close();
+      conversationHomeApi.editQueuedMessage = originalEdit;
+      conversationHomeApi.enqueueMessage = originalEnqueue;
+    }
+  });
+
   test("dequeue 409 exits edit, preserves replacement, focuses and refreshes", async () => {
     const original = conversationHomeApi.editQueuedMessage;
     const fx = harness();

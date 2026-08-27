@@ -15,6 +15,7 @@ import {
   CONVERSATION_TURN_HISTORY_SUMMARY_KIND,
   CONVERSATION_TURN_RECIPIENT_HISTORY_LIMIT,
 } from "../../src/orchestrator/conversation/turn-delivery-contract.js";
+import { publicTurnResponses } from "../../src/orchestrator/conversation/turn-delivery-source.js";
 import { ConversationTurnDeliveryStore } from "../../src/orchestrator/conversation/turn-delivery-store.js";
 import {
   TURN_PROMPT_PREFIX,
@@ -204,6 +205,52 @@ const emptyInteractionProjection = () => ({
 });
 
 describe("canonical conversation turn delivery", () => {
+  test("a completed reused round starts a fresh peer delta after the native-session cursor", () => {
+    const coordinationEvents = [
+      event(
+        1,
+        {
+          type: "agent_response_delta",
+          payload: {
+            round_id: "coordination:task-1",
+            participant_id: "coordinator-1",
+            content_delta: "delegate",
+            final_claim: "delegate",
+            final_evidence: [],
+            completes_response: true,
+          },
+        },
+        { participant_id: "coordinator-1", role_ref: "coordination-coordinator" },
+      ),
+      event(
+        3,
+        {
+          type: "agent_response_delta",
+          payload: {
+            round_id: "coordination:task-1",
+            participant_id: "coordinator-1",
+            content_delta: "resolve",
+            final_claim: "resolve",
+            final_evidence: [],
+            completes_response: true,
+          },
+        },
+        { participant_id: "coordinator-1", role_ref: "coordination-coordinator" },
+      ),
+    ];
+
+    expect(publicTurnResponses(coordinationEvents, "executor-1", 1, false)).toMatchObject([
+      {
+        message_id: "event-3",
+        public_seq: 3,
+        author_public_id: "coordinator-1",
+        round_id: "coordination:task-1",
+        answer: "resolve",
+        claim: "resolve",
+      },
+    ]);
+  });
+
   test("uses a receipt-bound exact delta and excludes self and untargeted content", () => {
     const prior = {
       participant_id: "p1",

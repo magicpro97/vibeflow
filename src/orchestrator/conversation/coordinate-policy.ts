@@ -28,6 +28,12 @@ import {
   planConversationCoordinationTurn,
   validateCoordinationDirectiveForTurn,
 } from "./conversation-coordination-policy-helpers.js";
+import {
+  coordinationPolicyResult,
+  failCoordinationPolicy,
+  recoverCoordinationPolicyFailure,
+  settleCoordinationWorkspace,
+} from "./conversation-coordination-policy-result.js";
 import type {
   ConversationCoordinationDirectiveV1,
   HostCoordinationDirectiveV1,
@@ -56,93 +62,6 @@ type TurnOutcome =
   | { ok: false; state: ConversationCoordinationStateV1; aborted: boolean; code: string };
 interface CoordinationAttemptBudget {
   used: number;
-}
-const refs = (context: ConversationContext, state: ConversationCoordinationStateV1): string[] => [
-  ...new Set([
-    ...state.committed_records
-      .filter(({ record }) => record.revision_id === context.correlation.revision_id)
-      .map(({ artifact_ref: artifactRef }) => artifactRef),
-  ]),
-];
-const result = (
-  context: ConversationContext,
-  status: ConversationOrchestrationResult["status"],
-  state: ConversationCoordinationStateV1,
-): ConversationOrchestrationResult => ({
-  operation_id: context.correlation.operation_id,
-  status,
-  artifact_refs: refs(context, state),
-});
-async function settle(
-  context: ConversationContext,
-  state: ConversationCoordinationStateV1,
-  outcome: Parameters<ConversationContext["settleWorkspace"]>[1],
-): Promise<void> {
-  try {
-    await context.settleWorkspace(coordinationWorkspaceKey(context, state), outcome);
-  } catch {
-    if (outcome === CONVERSATION_COORDINATION_SETTLEMENT.COMPLETED)
-      throw new Error("workspace settlement failed");
-  }
-}
-async function coordinatorError(
-  context: ConversationContext,
-  state: ConversationCoordinationStateV1,
-  code: string,
-): Promise<void> {
-  try {
-    await context.emit({
-      idempotency_key: `coordination:${context.correlation.operation_id}:step:${state.committed_records.length}:${code}`,
-      event: {
-        type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
-        payload: { agent_id: null, code, message: "coordination could not continue safely" },
-      },
-    });
-  } catch {
-    // The result still fails closed when diagnostic publication is unavailable.
-  }
-}
-async function fail(
-  context: ConversationContext,
-  state: ConversationCoordinationStateV1,
-  code: string,
-  aborted = context.signal.aborted,
-): Promise<ConversationOrchestrationResult> {
-  await coordinatorError(context, state, code);
-  let closed = state;
-  if (
-    state.phase !== CONVERSATION_COORDINATION_PHASE.COMPLETED &&
-    state.phase !== CONVERSATION_COORDINATION_PHASE.TERMINATED
-  ) {
-    try {
-      closed = await appendConversationCoordinationRecord({
-        context,
-        state,
-        actor_participant_id: context.participantIds[0] ?? "host",
-        actor_lane: CONVERSATION_COORDINATION_LANE.HOST,
-        directive: {
-          schema_version: CONVERSATION_COORDINATION_SCHEMA_VERSION,
-          kind: CONVERSATION_COORDINATION_DIRECTIVE_KIND.TERMINATE_EPOCH,
-          termination: {
-            outcome: aborted
-              ? CONVERSATION_COORDINATION_TERMINAL_OUTCOME.ABORTED
-              : CONVERSATION_COORDINATION_TERMINAL_OUTCOME.FAILED,
-            reason_code: code,
-          },
-        },
-      });
-    } catch {
-      // The original failure remains authoritative when terminal journaling is unavailable.
-    }
-  }
-  await settle(context, closed, CONVERSATION_COORDINATION_SETTLEMENT.FAILED);
-  return result(
-    context,
-    aborted
-      ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
-      : CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
-    closed,
-  );
 }
 function workspaceCompletionEvidence(
   context: ConversationContext,
@@ -334,7 +253,7 @@ export class CoordinateConversationPolicy implements ConversationPolicy {
       state = await context.coordinationState();
       state = await reconcilePendingConversationCoordinationRecord(context, state);
       if (state.phase === CONVERSATION_COORDINATION_PHASE.TERMINATED)
-        return result(
+        return coordinationPolicyResult(
           context,
           state.terminal_outcome === CONVERSATION_COORDINATION_TERMINAL_OUTCOME.ABORTED
             ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
@@ -346,31 +265,51 @@ export class CoordinateConversationPolicy implements ConversationPolicy {
         state.coordinator_participant_id !== null &&
         state.coordinator_participant_id !== context.participantIds[0]
       )
-        return fail(context, state, "coordination_coordinator_changed");
+        return failCoordinationPolicy(context, state, "coordination_coordinator_changed");
       for (
         let transition = 0;
         transition < CONVERSATION_COORDINATION_LIMIT.MAX_TOTAL_RECORDS;
         transition += 1
       ) {
-        if (context.signal.aborted) return fail(context, state, "coordination_aborted", true);
+        if (context.signal.aborted)
+          return failCoordinationPolicy(context, state, "coordination_aborted", true);
         if (state.phase === CONVERSATION_COORDINATION_PHASE.COMPLETED) {
           const evidence = workspaceCompletionEvidence(context, state);
-          if (!evidence) return fail(context, state, "coordination_workspace_not_quiescent");
-          await settle(context, state, CONVERSATION_COORDINATION_SETTLEMENT.COMPLETED);
-          return result(context, CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED, state);
+          if (!evidence)
+            return failCoordinationPolicy(context, state, "coordination_workspace_not_quiescent");
+          await settleCoordinationWorkspace(
+            context,
+            state,
+            CONVERSATION_COORDINATION_SETTLEMENT.COMPLETED,
+          );
+          return coordinationPolicyResult(
+            context,
+            CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
+            state,
+          );
         }
         if (coordinationAwaitsUserInCurrentRevision(context, state)) {
-          await settle(context, state, CONVERSATION_COORDINATION_SETTLEMENT.NEEDS_INPUT);
-          return result(context, CONVERSATION_COMMAND_RESULT_STATUS.NEEDS_INPUT, state);
+          await settleCoordinationWorkspace(
+            context,
+            state,
+            CONVERSATION_COORDINATION_SETTLEMENT.NEEDS_INPUT,
+          );
+          return coordinationPolicyResult(
+            context,
+            CONVERSATION_COMMAND_RESULT_STATUS.NEEDS_INPUT,
+            state,
+          );
         }
         const plan = planConversationCoordinationTurn(context, state);
-        if (!plan) return fail(context, state, "coordination_state_has_no_next_turn");
+        if (!plan)
+          return failCoordinationPolicy(context, state, "coordination_state_has_no_next_turn");
         const turn = await this.runTurn(context, state, plan, attemptBudget);
         state = turn.state;
-        if (!turn.ok) return fail(context, state, turn.code, turn.aborted);
+        if (!turn.ok) return failCoordinationPolicy(context, state, turn.code, turn.aborted);
         if (turn.directive.kind === CONVERSATION_COORDINATION_DIRECTIVE_KIND.FINALIZE) {
           const evidence = workspaceCompletionEvidence(context, state);
-          if (!evidence) return fail(context, state, "coordination_workspace_not_quiescent");
+          if (!evidence)
+            return failCoordinationPolicy(context, state, "coordination_workspace_not_quiescent");
         }
         state = await appendConversationCoordinationRecord({
           context,
@@ -381,20 +320,21 @@ export class CoordinateConversationPolicy implements ConversationPolicy {
           attempt: turn.attempt,
         });
         if (turn.directive.kind === CONVERSATION_COORDINATION_DIRECTIVE_KIND.REQUEST_USER_INPUT) {
-          await settle(context, state, CONVERSATION_COORDINATION_SETTLEMENT.NEEDS_INPUT);
-          return result(context, CONVERSATION_COMMAND_RESULT_STATUS.NEEDS_INPUT, state);
+          await settleCoordinationWorkspace(
+            context,
+            state,
+            CONVERSATION_COORDINATION_SETTLEMENT.NEEDS_INPUT,
+          );
+          return coordinationPolicyResult(
+            context,
+            CONVERSATION_COMMAND_RESULT_STATUS.NEEDS_INPUT,
+            state,
+          );
         }
       }
-      return fail(context, state, "coordination_transition_limit");
+      return failCoordinationPolicy(context, state, "coordination_transition_limit");
     } catch {
-      const fallback = state ?? (await context.coordinationState().catch(() => null));
-      if (!fallback)
-        return {
-          operation_id: context.correlation.operation_id,
-          status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
-          artifact_refs: [],
-        };
-      return fail(context, fallback, "coordination_runtime_failure");
+      return recoverCoordinationPolicyFailure(context);
     }
   }
 }

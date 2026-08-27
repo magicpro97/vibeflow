@@ -97,7 +97,9 @@ export function publicTurnResponses(
     current.content += payload.content_delta;
     for (const reference of stored.evidence_refs ?? []) current.evidence_refs.add(reference);
     partial.set(key, current);
-    if (!payload.completes_response || stored.seq <= afterSeq) continue;
+    if (!payload.completes_response) continue;
+    partial.delete(key);
+    if (stored.seq <= afterSeq) continue;
     if (!includeRecipientResponse && payload.participant_id === recipientId) continue;
     const preimage = {
       message_id: stored.event_id,

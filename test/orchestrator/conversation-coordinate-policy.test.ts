@@ -14,6 +14,7 @@ import {
   CONVERSATION_COORDINATION_RESOLUTION_SOURCE,
   CONVERSATION_COORDINATION_RESOLUTION_SOURCES,
   CONVERSATION_COORDINATION_SETTLEMENT,
+  CONVERSATION_COORDINATION_TOOL,
   conversationCoordinationEpochId,
   conversationCoordinationWorkspaceKey,
 } from "../../src/orchestrator/conversation/conversation-coordination-contract.js";
@@ -23,6 +24,10 @@ import {
   foldConversationCoordinationRecords,
 } from "../../src/orchestrator/conversation/conversation-coordination-fold.js";
 import { CONVERSATION_COORDINATION_OUTPUT_DIAGNOSTIC } from "../../src/orchestrator/conversation/conversation-coordination-output.js";
+import {
+  recoverCoordinationPolicyFailure,
+  settleCoordinationWorkspace,
+} from "../../src/orchestrator/conversation/conversation-coordination-policy-result.js";
 import type {
   ConversationCoordinationDirectiveV1,
   ConversationCoordinationRecordV1,
@@ -33,6 +38,10 @@ import {
   CONVERSATION_DELEGATION_VERIFY_ORACLE,
 } from "../../src/orchestrator/conversation/conversation-delegation-workspace-contract.js";
 import { CONVERSATION_POLICY } from "../../src/orchestrator/conversation/conversation-policy-contract.js";
+import {
+  CONVERSATION_TOOL_ACTION_STATUS,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
 import { CoordinateConversationPolicy } from "../../src/orchestrator/conversation/coordinate-policy.js";
 import { DirectConversationPolicy } from "../../src/orchestrator/conversation/direct-policy.js";
 import { CONVERSATION_TURN_INSTRUCTION_KIND } from "../../src/orchestrator/conversation/turn-delivery-contract.js";
@@ -73,6 +82,26 @@ const delegate = (delegatedTask = task): ConversationCoordinationDirectiveV1 => 
   schema_version: "1.0",
   kind: CONVERSATION_COORDINATION_DIRECTIVE_KIND.DELEGATE_TASK,
   task: delegatedTask,
+});
+const pendingDelegateRecord = (): StoredConversationCoordinationRecordV1 => ({
+  artifact_ref: "artifact-1",
+  record: {
+    schema_version: "1.0",
+    epoch_id: conversationCoordinationEpochId({
+      workflow_id: "workflow-1",
+      operation_id: "operation-revision-1",
+      revision_id: "revision-1",
+    }),
+    record_id: "record-pending",
+    operation_id: "operation-revision-1",
+    revision_id: "revision-1",
+    step: 1,
+    coordinator_participant_id: "coordinator-1",
+    actor_participant_id: "coordinator-1",
+    actor_lane: "coordinator",
+    previous_ref: null,
+    directive: delegate(),
+  },
 });
 const clarification = () => ({
   schema_version: "1.0",
@@ -244,6 +273,8 @@ function harness(input: {
   participantIds?: readonly string[];
   userMessageIds?: readonly string[];
   applicableUserMessageIds?: readonly string[];
+  durableStateRecovery?: boolean;
+  coordinationCommitFailures?: number;
 }): Harness {
   const requests: PolicyAttemptRequest[] = [];
   const coordinatorEmissions: CoordinatorEmission[] = [];
@@ -260,6 +291,7 @@ function harness(input: {
   let attestedHead: string | null = null;
   let artifactOrdinal = initial.committed_records.length + initial.pending_records.length;
   let coordinationStateReads = 0;
+  let remainingCoordinationCommitFailures = input.coordinationCommitFailures ?? 0;
   const authorityBindings = [...(input.bindings ?? canonicalPolicyBindings())];
   const userMessageIds = [...(input.userMessageIds ?? ["message-1"])];
   const applicableUserMessageIds = [...(input.applicableUserMessageIds ?? userMessageIds)];
@@ -271,6 +303,31 @@ function harness(input: {
     turn_id: "turn-1",
     operation_id: `operation-${input.revision_id ?? "revision-1"}`,
     attempt_id: "coordinator",
+  };
+  const recoveredCoordinationState = (): ConversationCoordinationStateV1 => {
+    const committedRefs = new Set([
+      ...initial.committed_records.map(({ artifact_ref: artifactRef }) => artifactRef),
+      ...coordinatorEmissions.flatMap(({ event }) =>
+        event.type === CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION &&
+        event.payload.tool === CONVERSATION_COORDINATION_TOOL &&
+        event.payload.status === CONVERSATION_TOOL_ACTION_STATUS.COMPLETED &&
+        event.payload.output_ref !== null
+          ? [event.payload.output_ref]
+          : [],
+      ),
+    ]);
+    const candidates = [
+      ...new Map(
+        [...initial.committed_records, ...initial.pending_records, ...artifacts].map((stored) => [
+          stored.artifact_ref,
+          stored,
+        ]),
+      ).values(),
+    ].sort((left, right) => left.record.step - right.record.step);
+    return foldConversationCoordinationRecords(
+      candidates.filter(({ artifact_ref: artifactRef }) => committedRefs.has(artifactRef)),
+      candidates.filter(({ artifact_ref: artifactRef }) => !committedRefs.has(artifactRef)),
+    );
   };
   const context = {
     correlation,
@@ -290,7 +347,7 @@ function harness(input: {
     validateCoordinationRepoEvidence: () => true,
     coordinationState: async () => {
       coordinationStateReads += 1;
-      return initial;
+      return input.durableStateRecovery ? recoveredCoordinationState() : initial;
     },
     observeWorkspace: (workspaceKey: string) => ({
       workspace_key: workspaceKey,
@@ -340,6 +397,14 @@ function harness(input: {
     publishSocialIntent: () => ({ accepted: false, diagnostic_code: "not_used" }),
     stageActionCandidate: () => ({ accepted: false, diagnostic_code: "not_used" }),
     emit: async (emission: CoordinatorEmission) => {
+      if (
+        remainingCoordinationCommitFailures > 0 &&
+        emission.event.type === CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION &&
+        emission.event.payload.tool === CONVERSATION_COORDINATION_TOOL
+      ) {
+        remainingCoordinationCommitFailures -= 1;
+        throw new Error("injected coordination commit failure");
+      }
       coordinatorEmissions.push(emission);
       return { event_id: `event-${coordinatorEmissions.length}`, event: emission.event } as never;
     },
@@ -528,6 +593,99 @@ describe("coordinate conversation policy", () => {
       "artifact-4",
       "artifact-5",
     ]);
+  });
+
+  test("cold-reconciles a created directive after its first commit fails before terminalizing", async () => {
+    const run = harness({
+      outputs: [delegate()],
+      durableStateRecovery: true,
+      coordinationCommitFailures: 1,
+    });
+
+    await expect(new CoordinateConversationPolicy().execute(run.context)).resolves.toMatchObject({
+      status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
+      artifact_refs: ["artifact-1", "artifact-2"],
+    });
+    const durable = await run.context.coordinationState();
+    expect(durable.pending_records).toEqual([]);
+    expect(durable.phase).toBe(CONVERSATION_COORDINATION_PHASE.TERMINATED);
+    expect(
+      durable.committed_records.map(({ artifact_ref: artifactRef, record }) => ({
+        artifact_ref: artifactRef,
+        step: record.step,
+        previous_ref: record.previous_ref,
+        kind: record.directive.kind,
+      })),
+    ).toEqual([
+      {
+        artifact_ref: "artifact-1",
+        step: 1,
+        previous_ref: null,
+        kind: CONVERSATION_COORDINATION_DIRECTIVE_KIND.DELEGATE_TASK,
+      },
+      {
+        artifact_ref: "artifact-2",
+        step: 2,
+        previous_ref: "artifact-1",
+        kind: CONVERSATION_COORDINATION_DIRECTIVE_KIND.TERMINATE_EPOCH,
+      },
+    ]);
+  });
+
+  test("runtime recovery fails closed when durable state cannot be read", async () => {
+    const run = harness({ outputs: [] });
+    const context = {
+      ...run.context,
+      coordinationState: async () => {
+        throw new Error("durable coordination state unavailable");
+      },
+    } as ConversationContext;
+
+    await expect(recoverCoordinationPolicyFailure(context)).resolves.toEqual({
+      operation_id: "operation-revision-1",
+      status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
+      artifact_refs: [],
+    });
+  });
+
+  test("runtime recovery settles a still-uncommittable record without creating a second step", async () => {
+    for (const aborted of [false, true]) {
+      const controller = new AbortController();
+      if (aborted) controller.abort();
+      const run = harness({
+        state: foldConversationCoordinationRecords([], [pendingDelegateRecord()]),
+        outputs: [],
+        coordinationCommitFailures: 1,
+      });
+      const context = { ...run.context, signal: controller.signal } as ConversationContext;
+
+      await expect(recoverCoordinationPolicyFailure(context)).resolves.toMatchObject({
+        status: aborted
+          ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+          : CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
+        artifact_refs: [],
+      });
+      expect(run.artifacts).toEqual([]);
+      expect(run.settlements).toEqual([CONVERSATION_COORDINATION_SETTLEMENT.FAILED]);
+    }
+  });
+
+  test("workspace settlement preserves completion failures but contains failed-settlement errors", async () => {
+    const run = harness({ outputs: [] });
+    const state = emptyConversationCoordinationState();
+    const context = {
+      ...run.context,
+      settleWorkspace: async () => {
+        throw new Error("injected settlement failure");
+      },
+    } as ConversationContext;
+
+    await expect(
+      settleCoordinationWorkspace(context, state, CONVERSATION_COORDINATION_SETTLEMENT.COMPLETED),
+    ).rejects.toThrow("workspace settlement failed");
+    await expect(
+      settleCoordinationWorkspace(context, state, CONVERSATION_COORDINATION_SETTLEMENT.FAILED),
+    ).resolves.toBeUndefined();
   });
 
   test("parses only model-authored directives from Claude and Codex transport envelopes", async () => {
@@ -911,26 +1069,7 @@ describe("coordinate conversation policy", () => {
   });
 
   test("commits an orphan artifact before resuming the next missing transition", async () => {
-    const pending: StoredConversationCoordinationRecordV1 = {
-      artifact_ref: "artifact-1",
-      record: {
-        schema_version: "1.0",
-        epoch_id: conversationCoordinationEpochId({
-          workflow_id: "workflow-1",
-          operation_id: "operation-revision-1",
-          revision_id: "revision-1",
-        }),
-        record_id: "record-pending",
-        operation_id: "operation-revision-1",
-        revision_id: "revision-1",
-        step: 1,
-        coordinator_participant_id: "coordinator-1",
-        actor_participant_id: "coordinator-1",
-        actor_lane: "coordinator",
-        previous_ref: null,
-        directive: delegate(),
-      },
-    };
+    const pending = pendingDelegateRecord();
     const run = harness({
       state: foldConversationCoordinationRecords([], [pending]),
       outputs: [completion(), finalization()],
